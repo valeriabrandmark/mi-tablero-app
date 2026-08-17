@@ -42,6 +42,21 @@ y no sirve datos.
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase Auth (login) |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase Auth (login) |
 
+### ⚠️ Si la contraseña tiene un `$`
+
+En `.env.local` hay que escaparlo como `\$` — Next pasa los archivos `.env` por
+dotenv-expand, que interpreta `$algo` como una variable y lo reemplaza por
+vacío. Si no lo escapás, el error que ves es
+`password authentication failed for user "postgres"`, aunque la contraseña esté
+bien.
+
+```
+contraseña real  ab$cd12   ->   DB_PASS=ab\$cd12
+```
+
+**En Vercel es al revés**: ahí no hay parseo de `.env`, así que la contraseña se
+pega tal cual, sin escapar.
+
 ### ⚠️ Importante para Vercel: usá el *pooler*, no la conexión directa
 
 En Supabase → Project Settings → Database → Connection string, elegí
