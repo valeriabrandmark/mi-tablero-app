@@ -8,29 +8,38 @@ import { CajaTooltip, FilaTooltip } from "./TooltipOscuro";
 
 type ItemTooltip = { payload?: PuntoProveedor & { fill?: string } };
 
+/** `total` llega por prop; recharts le inyecta `active` y `payload` al clonar. */
+function Contenido({
+  active,
+  payload,
+  total = 0,
+}: {
+  active?: boolean;
+  payload?: ItemTooltip[];
+  total?: number;
+}) {
+  const item = payload?.[0]?.payload;
+  if (!active || !item) return null;
+  return (
+    <CajaTooltip>
+      <FilaTooltip
+        color={item.fill ?? TEMA.muted}
+        label={item.label}
+        valor={fmtMoneda(item.total)}
+      />
+      <p className="text-muted text-right">
+        {total > 0 ? fmtPct(item.total / total) : "—"} del total
+      </p>
+    </CajaTooltip>
+  );
+}
+
 export default function TortaProveedores({ datos }: { datos: PuntoProveedor[] }) {
   if (datos.length === 0) {
     return <p className="text-muted py-16 text-center text-sm">Sin datos para el filtro elegido.</p>;
   }
 
   const total = datos.reduce((acc, d) => acc + d.total, 0);
-
-  function Contenido({ active, payload }: { active?: boolean; payload?: ItemTooltip[] }) {
-    const item = payload?.[0]?.payload;
-    if (!active || !item) return null;
-    return (
-      <CajaTooltip>
-        <FilaTooltip
-          color={item.fill ?? TEMA.muted}
-          label={item.label}
-          valor={fmtMoneda(item.total)}
-        />
-        <p className="text-muted text-right">
-          {total > 0 ? fmtPct(item.total / total) : "—"} del total
-        </p>
-      </CajaTooltip>
-    );
-  }
 
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
@@ -52,7 +61,7 @@ export default function TortaProveedores({ datos }: { datos: PuntoProveedor[] })
                 <Cell key={d.label} fill={colorSerie(i)} />
               ))}
             </Pie>
-            <Tooltip content={<Contenido />} />
+            <Tooltip content={<Contenido total={total} />} />
           </PieChart>
         </ResponsiveContainer>
       </div>

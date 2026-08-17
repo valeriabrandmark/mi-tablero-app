@@ -57,11 +57,22 @@ export default function Dashboard() {
     return () => ac.abort();
   }, [manejarError]);
 
-  useEffect(() => {
-    const ac = new AbortController();
+  // `cargando` / `error` se resetean en los handlers, no acá: hacerlo dentro
+  // del efecto dispara un render en cascada.
+  const cambiarFiltros = useCallback((f: Filtros) => {
     setCargando(true);
     setError(null);
+    setFiltros(f);
+  }, []);
 
+  const recargar = useCallback(() => {
+    setCargando(true);
+    setError(null);
+    setRecargas((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    const ac = new AbortController();
     const qs = queryString(filtros);
     traer<DashboardVentasMayoristas>(
       `/api/ventas-mayoristas${qs ? `?${qs}` : ""}`,
@@ -96,7 +107,7 @@ export default function Dashboard() {
           </p>
         </div>
         <button
-          onClick={() => setRecargas((n) => n + 1)}
+          onClick={recargar}
           disabled={cargando}
           className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40"
         >
@@ -104,7 +115,7 @@ export default function Dashboard() {
         </button>
       </div>
 
-      <BarraFiltros filtros={filtros} opciones={opciones} onChange={setFiltros} />
+      <BarraFiltros filtros={filtros} opciones={opciones} onChange={cambiarFiltros} />
 
       {error && (
         <Aviso>
