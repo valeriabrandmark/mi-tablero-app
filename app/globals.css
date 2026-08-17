@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+/* Tablero Brandmark / NOA — modo oscuro por default.
+   Fondo casi negro, texto casi blanco, acentos moderados. */
+@theme {
+  --color-bg: #0b0d10;
+  --color-panel: #14171c;
+  --color-panel-2: #1a1e25;
+  --color-line: #242a33;
+  --color-ink: #e7e9ee;
+  --color-muted: #8b93a1;
+
+  /* Paleta de gráficos (6 colores, definida en el brief) */
+  --color-c1: #3b82f6;
+  --color-c2: #22c55e;
+  --color-c3: #f59e0b;
+  --color-c4: #a78bfa;
+  --color-c5: #22d3ee;
+  --color-c6: #f472b6;
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+}
+
+/* Selects nativos legibles en fondo oscuro */
+select option {
+  background: #14171c;
+  color: #e7e9ee;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0d10;
+}
+::-webkit-scrollbar-thumb {
+  background: #2b323c;
+  border-radius: 6px;
+}

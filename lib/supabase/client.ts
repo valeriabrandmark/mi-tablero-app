@@ -1,0 +1,7 @@
+import { createBrowserClient } from "@supabase/ssr";
+import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/supabase/env";
+
+/** Cliente de Supabase para componentes del browser (login / logout). */
+export function createClient() {
+  return createBrowserClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}
