@@ -9,7 +9,7 @@ function esPublica(pathname: string) {
   return RUTAS_PUBLICAS.some((r) => pathname === r || pathname.startsWith(`${r}/`));
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (!authConfigurada) {
