@@ -34,12 +34,21 @@ function Contenido({
   );
 }
 
-export default function TortaProveedores({ datos }: { datos: PuntoProveedor[] }) {
+export default function TortaProveedores({
+  datos,
+  totalGeneral,
+}: {
+  datos: PuntoProveedor[];
+  /** Facturación neta de TODOS los proveedores, no solo los del top 12:
+   *  los porcentajes tienen que ser sobre el total real. */
+  totalGeneral: number;
+}) {
   if (datos.length === 0) {
     return <p className="text-muted py-16 text-center text-sm">Sin datos para el filtro elegido.</p>;
   }
 
-  const total = datos.reduce((acc, d) => acc + d.total, 0);
+  const total = totalGeneral;
+  const cubierto = datos.reduce((acc, d) => acc + d.total, 0);
 
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
@@ -82,6 +91,13 @@ export default function TortaProveedores({ datos }: { datos: PuntoProveedor[] })
             </span>
           </li>
         ))}
+        {total > cubierto && (
+          <li className="text-muted border-line mt-1 flex items-center gap-2 border-t pt-1.5">
+            <span className="size-2.5 shrink-0" />
+            <span>Resto de proveedores</span>
+            <span className="ml-auto shrink-0 tabular-nums">{fmtPct((total - cubierto) / total)}</span>
+          </li>
+        )}
       </ul>
     </div>
   );

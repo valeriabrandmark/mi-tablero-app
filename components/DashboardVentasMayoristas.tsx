@@ -201,7 +201,10 @@ export default function Dashboard() {
 
           <div className="grid gap-4 xl:grid-cols-2">
             <Panel titulo="Facturación Neta por proveedor" nota="Top 12">
-              <TortaProveedores datos={data.facturacionPorProveedor} />
+              <TortaProveedores
+                datos={data.facturacionPorProveedor}
+                totalGeneral={data.kpis.facturacionNeta}
+              />
             </Panel>
 
             <Panel
