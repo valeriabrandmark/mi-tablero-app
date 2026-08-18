@@ -1,23 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { desdeSearchParams } from "@/lib/filtros";
 import { getDashboardVentasMayoristas } from "@/lib/queries";
-import type { Filtros } from "@/lib/types";
 
 // `pg` necesita el runtime de Node (no Edge) y los datos son siempre en vivo.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const sp = request.nextUrl.searchParams;
-  const filtros: Filtros = {
-    vendedor: sp.get("vendedor") || undefined,
-    empresa: sp.get("empresa") || undefined,
-    mes: sp.get("mes") || undefined,
-    proveedor: sp.get("proveedor") || undefined,
-    provincia: sp.get("provincia") || undefined,
-    cliente: sp.get("cliente") || undefined,
-    sku: sp.get("sku") || undefined,
-    comprobante: sp.get("comprobante") || undefined,
-  };
+  const filtros = desdeSearchParams(request.nextUrl.searchParams);
 
   try {
     const data = await getDashboardVentasMayoristas(filtros);

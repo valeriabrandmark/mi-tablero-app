@@ -20,6 +20,7 @@ const ETIQUETA_CRUZADO: Record<(typeof CRUZADOS)[number], string> = {
   comprobante: "Comprobante",
 };
 import { MIN_UNIDADES_MARGEN } from "@/lib/constantes";
+import { aQueryString } from "@/lib/filtros";
 import { PALETA } from "@/lib/paleta";
 import type { DashboardVentasMayoristas, Filtros, OpcionesFiltro } from "@/lib/types";
 
@@ -48,15 +49,6 @@ const COL_COMPROBANTES: Columna<FilaComprobanteVenta>[] = [
   { titulo: "Facturación", celda: (c) => fmtMoneda(c.facturacion), numerica: true },
 ];
 
-function queryString(f: Filtros) {
-  const sp = new URLSearchParams();
-  if (f.vendedor) sp.set("vendedor", f.vendedor);
-  if (f.empresa) sp.set("empresa", f.empresa);
-  if (f.mes) sp.set("mes", f.mes);
-  if (f.proveedor) sp.set("proveedor", f.proveedor);
-  if (f.provincia) sp.set("provincia", f.provincia);
-  return sp.toString();
-}
 
 async function traer<T>(url: string, signal: AbortSignal): Promise<T> {
   const res = await fetch(url, { signal, cache: "no-store" });
@@ -124,7 +116,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const ac = new AbortController();
-    const qs = queryString(filtros);
+    const qs = aQueryString(filtros);
     traer<DashboardVentasMayoristas>(
       `/api/ventas-mayoristas${qs ? `?${qs}` : ""}`,
       ac.signal,
