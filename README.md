@@ -5,7 +5,8 @@ Supabase Postgres (schemas `bronze` y `gold`). Proyecto independiente: no
 depende de `frontend-unibrandco`, `backend-unibrandco` ni de AWS.
 
 Páginas: **Ventas Mayoristas**, **Logística** y **Cuentas Corrientes**, portadas
-desde el tablero de Power BI (`Tablero_AnaV1.2.pbit`).
+desde el tablero de Power BI (`Tablero_AnaV1.2.pbit`), más **Objetivos**, que
+no viene de Power BI sino de la planilla de objetivos por vendedor.
 
 **Producción:** https://brandmark-business.vercel.app/
 
@@ -108,20 +109,24 @@ app/
     ventas-mayoristas/page.tsx
     logistica/page.tsx
     cuentas-corrientes/page.tsx
+    objetivos/page.tsx
   api/
     ventas-mayoristas/route.ts     KPIs + datos de los 3 gráficos
     filtros/route.ts               opciones de los selectores
     logistica/route.ts
     cuentas-corrientes/route.ts
+    objetivos/route.ts
   login/page.tsx
   auth-no-configurada/page.tsx
 components/
   DashboardVentasMayoristas.tsx    orquesta filtros + fetch + render
   Filtros.tsx, ui.tsx, FormularioLogin.tsx, BotonSalir.tsx
+  BarraAvance.tsx                  barra de avance contra objetivo
   charts/                          recharts: líneas, torta, barras
 lib/
   db.ts                            pool de `pg` (credenciales por env)
   queries.ts                       las 6 consultas SQL
+  queries-objetivos.ts             avance contra objetivo
   constantes.ts                    reglas de negocio (exclusiones, mínimos)
   types.ts, format.ts, paleta.ts
   supabase/                        clientes de auth (browser / server)
@@ -150,6 +155,37 @@ El "margen ajustado" descuenta el flete de entrada por proveedor
 (`gold.fletes_proveedores_pct_mensual`, con el corrimiento de un mes ya
 aplicado). El join es siempre `LEFT JOIN` con `coalesce(pct_flete, 0)`: hoy la
 vista está vacía para la mayoría de los proveedores y no se puede asumir dato.
+
+---
+
+## Definición de la página "Objetivos"
+
+Los objetivos son de la fuerza de venta mayorista, así que la página filtra
+`canal = 'Mayorista'`. Se miden en **unidades**, no en pesos.
+
+La pieza no obvia es que **el objetivo no cuelga del SKU sino de un GRUPO**,
+porque así lo pensó la comercial. Un grupo puede ser:
+
+| Caso | `criterio` | Cómo se mide |
+|---|---|---|
+| SKU suelto | `sku` | Un grupo con un solo item |
+| MIX de varios SKUs | `sku` | Sobre la **suma** del grupo, no SKU por SKU |
+| Marca entera | `marca` | Todo lo que tenga esa marca (caso AVENO, que en la planilla no tiene SKU) |
+
+Vive en tres tablas (migración `objetivos_vendedor`):
+
+```
+gold.objetivos_grupo        grupo -> criterio ('sku' | 'marca'), orden
+gold.objetivos_grupo_item   los SKUs (o la marca) que componen el grupo
+gold.objetivos              (mes_comercial, vendedor, grupo) -> cantidad
+```
+
+`mes_comercial` usa el mismo formato `YYYY-MM` que `gold.fact_ventas`, así que
+cruza directo. Los filtros se aplican **sobre la tabla de objetivos**, no sobre
+las ventas: si no, un vendedor sin ninguna venta del mes desaparecería de la
+tabla en vez de aparecer con 0 de avance, que es justo la fila a mirar.
+
+Para cambiar un objetivo o sumar un grupo se toca solo la base, no el código.
 
 ---
 

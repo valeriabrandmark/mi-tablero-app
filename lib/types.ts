@@ -201,3 +201,55 @@ export type DashboardVentasMayoristas = {
   serieDiaria: SerieDiaria;
   generadoEn: string;
 };
+
+// --- Página "Objetivos" ------------------------------------------------------
+
+export type FiltrosObjetivos = {
+  mes?: string;
+  vendedor?: string;
+  /** Filtro cruzado: sale de hacer click en una barra o en una fila. */
+  grupo?: string;
+};
+
+export type KpisObjetivos = {
+  objetivo: number;
+  vendido: number;
+  /** Fracción (0.13 = 13 %). Null si el objetivo del recorte es 0. */
+  avancePct: number | null;
+  /** Cuántos pares vendedor×grupo llegaron al objetivo, sobre el total. */
+  cumplidos: number;
+  pares: number;
+};
+
+/** Una línea de avance. `vendedor` es null cuando la fila agrega varios. */
+export type FilaObjetivo = {
+  grupo: string;
+  vendedor: string | null;
+  objetivo: number;
+  vendido: number;
+  avancePct: number | null;
+  faltan: number;
+};
+
+/** Composición de un MIX: cuánto aportó cada SKU al total del grupo. */
+export type FilaAporteSku = {
+  grupo: string;
+  sku: string | null;
+  producto: string | null;
+  vendido: number;
+};
+
+export type OpcionesObjetivos = {
+  meses: string[];
+  vendedores: string[];
+  grupos: string[];
+};
+
+export type DashboardObjetivos = {
+  kpis: KpisObjetivos;
+  porGrupo: FilaObjetivo[];
+  porVendedor: FilaObjetivo[];
+  detalle: FilaObjetivo[];
+  aportesSku: FilaAporteSku[];
+  generadoEn: string;
+};

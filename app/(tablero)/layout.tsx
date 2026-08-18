@@ -7,6 +7,7 @@ const NAV = [
   { href: "/ventas-mayoristas", label: "Ventas Mayoristas" },
   { href: "/logistica", label: "Logística" },
   { href: "/cuentas-corrientes", label: "Cuentas Corrientes" },
+  { href: "/objetivos", label: "Objetivos" },
 ] as const;
 
 export default async function TableroLayout({ children }: LayoutProps<"/">) {
