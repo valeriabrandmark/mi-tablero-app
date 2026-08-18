@@ -185,6 +185,12 @@ porque así lo pensó la comercial. Cada grupo declara dos cosas:
 | Marca entera | `marca` | Todo lo que tenga esa marca (caso AVENO, que en la planilla no tiene SKU) |
 | Empresa | `empresa` | Todas las ventas de esas empresas |
 
+Los grupos de producto (`sku` y `marca`) **no filtran por empresa**: cuentan
+tanto lo de Quo como lo de NOA. Es una decisión tomada, no un descuido — si
+mañana entra una venta de esos SKUs por NOA, suma al objetivo. En la práctica
+hoy no cambia nada, porque esos SKUs son de Quo: en los cuatro meses cargados
+no hay ni una línea de ellos por NOA.
+
 `metrica` — cómo se mide el avance:
 
 | `metrica` | Cálculo |
