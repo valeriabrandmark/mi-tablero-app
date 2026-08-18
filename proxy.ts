@@ -1,8 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { SUPABASE_ANON_KEY, SUPABASE_URL, authConfigurada } from "@/lib/supabase/env";
-import { slugVendedor } from "@/lib/constantes";
-import { tieneClaimInvalido, vendedorDelUsuario } from "@/lib/permisos";
+import { paginaInicial, permisoDelUsuario, puedeVer } from "@/lib/permisos";
 
 /** Rutas accesibles sin sesión. */
 const RUTAS_PUBLICAS = ["/login", "/auth-no-configurada"];
@@ -71,38 +70,33 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Permisos por vendedor. Un usuario sin claim es administrador y ve todo; uno
-  // con vendedor asignado ve ÚNICAMENTE su página de objetivos.
+  // Permisos por rol. La regla vive entera en lib/permisos.ts y la comparten
+  // esta barrera, la ruta de API y la página, para que no puedan discrepar.
   //
-  // Esto corta el acceso a las páginas, pero no alcanza solo con esto: la ruta
-  // /api/objetivos vuelve a chequear que el vendedor pedido sea el suyo, porque
-  // si no un vendedor con sesión pediría los datos de otro por query string.
+  // Esto corta el acceso a las PÁGINAS, y no alcanza solo con esto: la ruta
+  // /api/objetivos vuelve a chequear que el `?vendedor=` pedido sea el suyo,
+  // porque desde acá no se ve la query string.
   if (user) {
-    if (tieneClaimInvalido(user)) {
-      // Un claim que no reconocemos no abre nada: es más seguro que abrir de más.
+    const permiso = permisoDelUsuario(user);
+    const destino = paginaInicial(permiso);
+
+    if (pathname === "/login") {
+      // Ya tiene sesión: a su página, la que sea según su rol.
+      const url = request.nextUrl.clone();
+      url.pathname = permiso ? destino : "/login";
+      url.search = "";
+      if (permiso) return NextResponse.redirect(url);
       return sinPermiso(pathname);
     }
 
-    const vendedor = vendedorDelUsuario(user);
-    if (vendedor) {
-      const suya = `/objetivos/${slugVendedor(vendedor)}`;
-
-      if (pathname.startsWith("/api/")) {
-        if (pathname !== "/api/objetivos") return sinPermiso(pathname);
-      } else if (pathname !== suya) {
-        const url = request.nextUrl.clone();
-        url.pathname = suya;
-        url.search = "";
-        return NextResponse.redirect(url);
-      }
+    if (!puedeVer(permiso, pathname)) {
+      // Sin permiso válido no hay adónde mandarlo: se le dice y listo.
+      if (!permiso || pathname.startsWith("/api/")) return sinPermiso(pathname);
+      const url = request.nextUrl.clone();
+      url.pathname = destino;
+      url.search = "";
+      return NextResponse.redirect(url);
     }
-  }
-
-  if (user && pathname === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/ventas-mayoristas";
-    url.search = "";
-    return NextResponse.redirect(url);
   }
 
   return response;

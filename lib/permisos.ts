@@ -1,38 +1,122 @@
-import { VENDEDORES_OBJETIVOS, type VendedorObjetivos } from "@/lib/constantes";
+import { slugVendedor, VENDEDORES_OBJETIVOS, type VendedorObjetivos } from "@/lib/constantes";
 
 /**
- * Permisos por vendedor.
+ * Permisos del tablero.
  *
- * Un usuario de Supabase Auth puede tener un vendedor asignado en su
- * `app_metadata`:
+ * Un usuario de Supabase Auth lleva su rol en `app_metadata`:
  *
- *     { "vendedor": "SILVIO" }
+ *     { "rol": "supervisor" }
+ *     { "rol": "vendedor", "vendedor": "SILVIO" }
  *
- * Se carga a mano desde Supabase → Authentication → el usuario → App Metadata.
  * Va en `app_metadata` y NO en `user_metadata` porque esta última la puede
- * editar el propio usuario desde el cliente: si el permiso viviera ahí, un
- * vendedor podría cambiarse el nombre y ver el tablero de otro.
+ * editar el propio usuario desde el navegador: si el permiso viviera ahí, un
+ * vendedor podría cambiarse el rol y ver el tablero entero.
  *
- * Un usuario SIN el claim es administrador y ve todo el tablero. Es el caso de
- * los usuarios que ya existen, así que sumar esto no le saca acceso a nadie:
- * solo se lo limita a quien se le asigne un vendedor explícitamente.
+ * `app_metadata` no se puede editar desde el dashboard de Supabase; se carga
+ * con un `update` sobre `auth.users` (ver README).
+ *
+ * | Rol          | Qué ve                                          |
+ * |--------------|-------------------------------------------------|
+ * | `superadmin` | Todo                                            |
+ * | `admin`      | Todo, sin editar                                |
+ * | `supervisor` | Las páginas de objetivos de los cuatro vendedores |
+ * | `vendedor`   | Únicamente su propia página de objetivos        |
+ *
+ * OJO con `admin`: hoy el tablero **no tiene nada editable**, así que en la
+ * práctica ve lo mismo que `superadmin`. El rol existe para que la diferencia
+ * esté modelada desde ahora, pero no promete una restricción que todavía no
+ * hace falta: el día que se pueda cargar un objetivo desde la pantalla, ahí sí
+ * hay que distinguirlos.
+ *
+ * UN USUARIO SIN CLAIM NO VE NADA. Es a propósito: si alguien crea un usuario
+ * y se olvida de asignarle el rol, que se quede afuera y llame, en vez de
+ * entrar y ver la facturación de la empresa entera. Por eso hay que cargar el
+ * claim ANTES de desplegar esto, si no el usuario que ya existe se queda sin
+ * acceso a su propio tablero.
  */
+
+export const ROLES = ["superadmin", "admin", "supervisor", "vendedor"] as const;
+export type Rol = (typeof ROLES)[number];
+
+// Un miembro por rol y no `{ rol: "superadmin" | "admin" | "supervisor" }`:
+// con el discriminante múltiple, TypeScript no termina de descartar el miembro
+// y no reconoce `permiso.vendedor` en la rama del vendedor.
+export type Permiso =
+  | { rol: "superadmin" }
+  | { rol: "admin" }
+  | { rol: "supervisor" }
+  | { rol: "vendedor"; vendedor: VendedorObjetivos };
 
 /** Forma mínima del usuario de Supabase que hace falta acá. */
 type UsuarioConClaim = { app_metadata?: Record<string, unknown> | null } | null | undefined;
 
-/** Vendedor asignado al usuario, o `null` si es administrador. */
-export function vendedorDelUsuario(usuario: UsuarioConClaim): VendedorObjetivos | null {
-  const valor = usuario?.app_metadata?.vendedor;
-  if (typeof valor !== "string") return null;
-  const normalizado = valor.trim().toUpperCase();
-  // Un claim que no está en la lista NO da acceso de admin por descuido: se
-  // trata como vendedor desconocido y no matchea con ninguna página.
-  return VENDEDORES_OBJETIVOS.find((v) => v === normalizado) ?? null;
+function texto(valor: unknown): string | null {
+  return typeof valor === "string" && valor.trim() !== "" ? valor.trim() : null;
 }
 
-/** `true` si el claim del usuario es un valor que no reconocemos. */
-export function tieneClaimInvalido(usuario: UsuarioConClaim): boolean {
-  const valor = usuario?.app_metadata?.vendedor;
-  return typeof valor === "string" && vendedorDelUsuario(usuario) === null;
+/**
+ * Permiso del usuario, o `null` si no tiene uno válido — sea porque no tiene
+ * claim, porque el rol no existe, o porque es `vendedor` sin un vendedor que
+ * reconozcamos. Los tres casos se tratan igual: sin acceso.
+ */
+export function permisoDelUsuario(usuario: UsuarioConClaim): Permiso | null {
+  const meta = usuario?.app_metadata ?? null;
+  if (!meta) return null;
+
+  const vendedorCrudo = texto(meta.vendedor);
+  const vendedor = vendedorCrudo
+    ? (VENDEDORES_OBJETIVOS.find((v) => v === vendedorCrudo.toUpperCase()) ?? null)
+    : null;
+
+  // Sin `rol` pero con `vendedor` se asume vendedor: es la forma vieja del
+  // claim y sigue funcionando sin tener que reescribir los que ya estén puestos.
+  const rolCrudo = texto(meta.rol) ?? (vendedorCrudo ? "vendedor" : null);
+  if (!rolCrudo) return null;
+
+  const rol = ROLES.find((r) => r === rolCrudo.toLowerCase());
+  if (!rol) return null;
+
+  if (rol === "vendedor") {
+    return vendedor ? { rol, vendedor } : null;
+  }
+  return { rol };   // superadmin | admin | supervisor
+}
+
+const PAGINAS_OBJETIVOS = VENDEDORES_OBJETIVOS.map((v) => `/objetivos/${slugVendedor(v)}`);
+
+/**
+ * Única regla de acceso del tablero. La usan las TRES barreras —el proxy, la
+ * ruta de API y la página— para que no puedan discrepar entre sí.
+ *
+ * `/api/objetivos` deja pasar a un vendedor porque la ruta vuelve a chequear
+ * que el `?vendedor=` pedido sea el suyo: acá no se ve la query string.
+ */
+export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
+  if (!permiso) return false;
+  if (permiso.rol === "superadmin" || permiso.rol === "admin") return true;
+
+  const esDeObjetivos = pathname === "/objetivos" || PAGINAS_OBJETIVOS.includes(pathname);
+
+  if (permiso.rol === "supervisor") {
+    return esDeObjetivos || pathname === "/api/objetivos";
+  }
+
+  // Vendedor: solo lo suyo.
+  const suya = `/objetivos/${slugVendedor(permiso.vendedor)}`;
+  return pathname === suya || pathname === "/objetivos" || pathname === "/api/objetivos";
+}
+
+/** Adónde mandar al usuario cuando entra, o cuando pide algo que no puede ver. */
+export function paginaInicial(permiso: Permiso | null): string {
+  if (!permiso) return "/login";
+  if (permiso.rol === "vendedor") return `/objetivos/${slugVendedor(permiso.vendedor)}`;
+  if (permiso.rol === "supervisor") return PAGINAS_OBJETIVOS[0];
+  return "/ventas-mayoristas";
+}
+
+/** `true` si el usuario puede ver la página de objetivos de ese vendedor. */
+export function puedeVerVendedor(permiso: Permiso | null, vendedor: string): boolean {
+  if (!permiso) return false;
+  if (permiso.rol === "vendedor") return permiso.vendedor === vendedor;
+  return true; // superadmin, admin y supervisor ven los cuatro
 }

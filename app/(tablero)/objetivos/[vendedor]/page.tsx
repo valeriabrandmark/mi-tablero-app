@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import DashboardObjetivos from "@/components/DashboardObjetivos";
 import { vendedorDesdeSlug } from "@/lib/constantes";
-import { vendedorDelUsuario } from "@/lib/permisos";
+import { permisoDelUsuario, puedeVerVendedor } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
 import { getMesInicialObjetivos } from "@/lib/queries-objetivos";
@@ -30,12 +30,11 @@ export default async function ObjetivosVendedorPage(props: PageProps<"/objetivos
   // que va a estar detrás de los permisos por vendedor.
   if (!nombre) notFound();
 
-  // Defensa en profundidad: el proxy ya redirige a cada vendedor a su página,
-  // pero si esa regla se rompiera, acá la página de otro es un 404 y no una
-  // filtración.
+  // Defensa en profundidad: el proxy ya manda a cada uno a lo suyo, pero si esa
+  // regla se rompiera, acá la página de otro es un 404 y no una filtración.
   if (authConfigurada) {
-    const propio = vendedorDelUsuario(await getUsuario());
-    if (propio && propio !== nombre) notFound();
+    const permiso = permisoDelUsuario(await getUsuario());
+    if (!puedeVerVendedor(permiso, nombre)) notFound();
   }
 
   return <DashboardObjetivos vendedor={nombre} mesInicial={await getMesInicialObjetivos(nombre)} />;

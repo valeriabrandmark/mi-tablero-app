@@ -243,38 +243,70 @@ hay que agregarlo a `CODIGO_SIGMA` o su deuda no va a aparecer nunca.
 
 ---
 
-## Permisos por vendedor
+## Permisos y roles
 
-Un usuario de Supabase Auth puede tener un vendedor asignado en su
-`app_metadata`:
+Cada usuario de Supabase Auth lleva su rol en `app_metadata`:
 
 ```json
-{ "vendedor": "SILVIO" }
+{ "rol": "supervisor" }
+{ "rol": "vendedor", "vendedor": "SILVIO" }
 ```
 
-Se carga a mano en **Supabase → Authentication → el usuario → App Metadata**.
-Va en `app_metadata` y **no** en `user_metadata`: esta última la puede editar el
-propio usuario desde el navegador, así que si el permiso viviera ahí un vendedor
-podría cambiarse el nombre y ver el tablero de otro.
-
-| Usuario | Qué ve |
+| Rol | Qué ve |
 |---|---|
-| Sin el claim | Todo el tablero (es el caso de los usuarios que ya existían) |
-| Con `vendedor` válido | Únicamente `/objetivos/<el suyo>` |
-| Con `vendedor` que no está en la lista | Nada: 403 |
+| `superadmin` | Todo |
+| `admin` | Todo, sin editar |
+| `supervisor` | Las páginas de objetivos de los cuatro vendedores |
+| `vendedor` | Únicamente su propia página de objetivos |
+| *(sin claim)* | **Nada** |
 
-El permiso se aplica en **tres lugares**, y los tres hacen falta:
+Dos advertencias que importan:
 
-1. [proxy.ts](proxy.ts) redirige a cada vendedor a su página y le corta las
-   demás rutas de API.
-2. [app/api/objetivos/route.ts](app/api/objetivos/route.ts) revalida que el
-   `?vendedor=` pedido sea el suyo. **Sin esto el resto no sirve**: el proxy
-   protege la página, no el dato, y un vendedor con sesión podría pedir
-   `?vendedor=RAMON`.
-3. La página vuelve a chequearlo y devuelve 404 si no coincide.
+- **`admin` hoy ve lo mismo que `superadmin`**, porque el tablero no tiene nada
+  editable. El rol existe para que la distinción esté modelada, pero no promete
+  una restricción que todavía no hace falta. El día que se pueda cargar un
+  objetivo desde la pantalla, ahí sí hay que separarlos.
+- **Un usuario sin claim no ve nada.** Es a propósito: si alguien crea un
+  usuario y se olvida del rol, que se quede afuera y llame, en vez de entrar y
+  ver la facturación de la empresa entera. Por eso hay que **cargar el claim
+  antes de desplegar**, o el usuario que ya existía se queda sin acceso.
 
-Sumar esto no le saca acceso a nadie: solo se limita a quien se le asigne un
-vendedor explícitamente.
+### Cómo se asigna
+
+`app_metadata` **no se puede editar desde el dashboard de Supabase** (solo
+muestra el `user_metadata`). Se carga con un `update` en el SQL Editor:
+
+```sql
+update auth.users
+set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
+                        || '{"rol":"supervisor"}'::jsonb
+where email = 'persona@ejemplo.com';
+
+-- Un vendedor lleva las dos claves:
+update auth.users
+set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
+                        || '{"rol":"vendedor","vendedor":"SILVIO"}'::jsonb
+where email = 'silvio@ejemplo.com';
+```
+
+El `||` fusiona en vez de reemplazar, así no se pisan las claves que Supabase
+guarda ahí (`provider`, `providers`). El nombre del vendedor va **en mayúsculas
+y exacto**; cualquier otro valor deja al usuario sin acceso, que es la falla
+segura y no la peligrosa.
+
+### Dónde se aplica
+
+La regla vive entera en [lib/permisos.ts](lib/permisos.ts) y la comparten las
+**tres** barreras, para que no puedan discrepar entre sí:
+
+1. [proxy.ts](proxy.ts) — corta el acceso a las páginas y a las rutas de API.
+2. [app/api/objetivos/route.ts](app/api/objetivos/route.ts) — revalida que el
+   `?vendedor=` pedido sea uno que el usuario puede ver. **Sin esto el resto no
+   sirve**: el middleware protege la página, no el dato, y desde ahí no se ve la
+   query string.
+3. La página de objetivos — devuelve 404 si el vendedor no le corresponde.
+
+El nav además esconde los links que el proxy le va a rebotar igual.
 
 ---
 

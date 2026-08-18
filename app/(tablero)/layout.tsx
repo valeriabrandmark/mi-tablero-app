@@ -1,7 +1,7 @@
 import Link from "next/link";
 import BotonSalir from "@/components/BotonSalir";
 import { slugVendedor, VENDEDORES_OBJETIVOS } from "@/lib/constantes";
-import { vendedorDelUsuario } from "@/lib/permisos";
+import { permisoDelUsuario, puedeVer } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
 
@@ -19,12 +19,10 @@ const NAV = [
 export default async function TableroLayout({ children }: LayoutProps<"/">) {
   const usuario = authConfigurada ? await getUsuario() : null;
 
-  // Un vendedor solo ve su propia página, así que el nav no le muestra links
-  // que el proxy le va a rebotar igual.
-  const vendedor = vendedorDelUsuario(usuario);
-  const nav = vendedor
-    ? NAV.filter((item) => item.href === `/objetivos/${slugVendedor(vendedor)}`)
-    : NAV;
+  // El nav no muestra links que el proxy le va a rebotar igual. Usa la misma
+  // regla que las otras barreras, así no se desincronizan.
+  const permiso = permisoDelUsuario(usuario);
+  const nav = authConfigurada ? NAV.filter((item) => puedeVer(permiso, item.href)) : NAV;
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
