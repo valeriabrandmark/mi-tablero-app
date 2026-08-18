@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getDashboardObjetivos, getOpcionesObjetivos } from "@/lib/queries-objetivos";
 import { VENDEDORES_OBJETIVOS } from "@/lib/constantes";
+import { vendedorDelUsuario } from "@/lib/permisos";
+import { authConfigurada } from "@/lib/supabase/env";
+import { getUsuario } from "@/lib/supabase/server";
 import type { FiltrosObjetivos } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -15,6 +18,16 @@ export async function GET(request: NextRequest) {
   // permiso sobre su propia página.
   if (!vendedor || !VENDEDORES_OBJETIVOS.some((v) => v === vendedor)) {
     return NextResponse.json({ error: "Vendedor inválido" }, { status: 400 });
+  }
+
+  // El proxy ya dejó pasar solo a esta ruta, pero el vendedor viene por query
+  // string: sin este chequeo, un vendedor con sesión pediría ?vendedor=RAMON y
+  // vería los datos del otro. El middleware protege la página, no el dato.
+  if (authConfigurada) {
+    const propio = vendedorDelUsuario(await getUsuario());
+    if (propio && propio !== vendedor) {
+      return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
+    }
   }
 
   const filtros: FiltrosObjetivos = {

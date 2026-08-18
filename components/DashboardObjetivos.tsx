@@ -7,7 +7,7 @@ import { BotonLimpiar, SelectorFiltro } from "@/components/SelectorFiltro";
 import { Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtMes, fmtMetrica, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
-import { PALETA } from "@/lib/paleta";
+import { PALETA, TEMA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
   DashboardObjetivos,
@@ -65,6 +65,7 @@ export default function DashboardObjetivosPage({
     cambiar({ ...filtros, grupo: filtros.grupo === valor ? undefined : valor });
 
   const resumen = data?.resumen ?? [];
+  const vencido = data?.vencido ?? null;
   const sinCambios = filtros.mes === mesInicial && !filtros.grupo;
 
   const porProducto = data?.porGrupo.filter((g) => g.metrica === "unidades") ?? [];
@@ -130,15 +131,15 @@ export default function DashboardObjetivosPage({
       )}
 
       {resumen.length === 0 && !error ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 3 }, (_, i) => (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />
           ))}
         </div>
       ) : (
         // Una tarjeta por métrica: sumar pesos con unidades no significaría nada.
         <div
-          className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-3 ${cargando ? "opacity-50" : ""}`}
+          className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
         >
           {resumen.map((r) => {
             const fmt = fmtMetrica(r.metrica);
@@ -152,6 +153,20 @@ export default function DashboardObjetivosPage({
               />
             );
           })}
+
+          {/* No es un objetivo sino una alerta, y sobre todo NO es del mes: es
+              una foto de la cartera al momento de la última carga. Por eso dice
+              la fecha y no se mueve al cambiar el filtro de mes. */}
+          <TarjetaKpi
+            titulo="% facturación vencida"
+            valor={vencido ? fmtPct(vencido.pctVencida) : "—"}
+            detalle={
+              vencido && vencido.deudaTotal !== 0
+                ? `${fmtMoneda(vencido.deudaVencida)} de ${fmtMoneda(vencido.deudaTotal)} · foto al ${vencido.fechaCarga ?? "—"}`
+                : "Sin cuenta corriente cargada"
+            }
+            acento={vencido?.pctVencida != null ? TEMA.negativo : undefined}
+          />
         </div>
       )}
 

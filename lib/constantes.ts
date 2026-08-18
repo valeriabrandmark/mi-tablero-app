@@ -90,3 +90,32 @@ export function mesComercialActual(ahora: Date = new Date()): string {
 
   return `${anioFinal}-${String(mesFinal).padStart(2, "0")}`;
 }
+
+/**
+ * Código de vendedor en SIGMA para cada vendedor del tablero.
+ *
+ * Hace falta porque las tablas de cuentas corrientes (`cuentas_corrientes_scoring`
+ * y `..._aging`) guardan el vendedor como CÓDIGO, mientras que `gold.fact_ventas`
+ * lo guarda como NOMBRE. Sin este mapeo la deuda se le atribuiría al vendedor
+ * equivocado, o a ninguno.
+ *
+ * Sale de cruzar `bronze.sigma_ventas` con `gold.fact_ventas` por comprobante y
+ * SKU; el cruce es 1 a 1 y sin ambigüedad. El mapeo completo es 001 CASA CENTRAL,
+ * 002 AGENCIA, 004 IGNACIO, 005 IVANA, 006 SILVIO, 007 RAMON, 008 PABLO,
+ * 009 MELI, 011 TRADE, 012 BTL, 013 PROYECTOS ESPECIALES, WEB VENDEDOR WEB.
+ *
+ * RICARDO todavía no tiene código porque nunca facturó: cuando lo haga, hay que
+ * agregarlo acá o su deuda no va a aparecer.
+ */
+export const CODIGO_SIGMA: Record<VendedorObjetivos, string | null> = {
+  SILVIO: "006",
+  RAMON: "007",
+  PABLO: "008",
+  RICARDO: null,
+};
+
+/** Código de SIGMA de un vendedor, o null si todavía no tiene. */
+export function codigoSigmaDe(vendedor: string): string | null {
+  const clave = VENDEDORES_OBJETIVOS.find((v) => v === vendedor);
+  return clave ? CODIGO_SIGMA[clave] : null;
+}

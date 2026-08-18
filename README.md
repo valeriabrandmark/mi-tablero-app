@@ -218,6 +218,66 @@ tabla en vez de aparecer con 0 de avance, que es justo la fila a mirar.
 
 Para cambiar un objetivo o sumar un grupo se toca solo la base, no el código.
 
+### % de facturación vencida
+
+La cuarta tarjeta no es un objetivo sino una alerta, y tiene dos diferencias
+importantes con el resto de la página:
+
+- **Es una foto, no un acumulado del mes.** Sale de
+  `bronze.cuentas_corrientes_scoring`, que es el estado de la cartera al momento
+  de la última carga. **No se mueve al cambiar el filtro de mes comercial**, por
+  eso la tarjeta muestra la fecha de la foto.
+- **El vendedor va por CÓDIGO de SIGMA** (`006`, `007`…) y no por nombre, porque
+  así lo guardan las tablas de cuentas corrientes. El mapeo está en
+  `CODIGO_SIGMA` de [lib/constantes.ts](lib/constantes.ts) y salió de cruzar
+  `bronze.sigma_ventas` con `gold.fact_ventas` por comprobante y SKU.
+
+Usa la misma fórmula que la página de Cuentas Corrientes
+(`saldo_vencido / saldo_total`) para que el mismo número no dé distinto en dos
+pantallas.
+
+Hoy solo SILVIO (43 %) y RAMON (52 %) tienen cartera cargada; PABLO y RICARDO no
+tienen ninguna cuenta corriente y la tarjeta muestra "Sin cuenta corriente".
+**RICARDO además no tiene código de SIGMA** porque nunca facturó: cuando lo haga
+hay que agregarlo a `CODIGO_SIGMA` o su deuda no va a aparecer nunca.
+
+---
+
+## Permisos por vendedor
+
+Un usuario de Supabase Auth puede tener un vendedor asignado en su
+`app_metadata`:
+
+```json
+{ "vendedor": "SILVIO" }
+```
+
+Se carga a mano en **Supabase → Authentication → el usuario → App Metadata**.
+Va en `app_metadata` y **no** en `user_metadata`: esta última la puede editar el
+propio usuario desde el navegador, así que si el permiso viviera ahí un vendedor
+podría cambiarse el nombre y ver el tablero de otro.
+
+| Usuario | Qué ve |
+|---|---|
+| Sin el claim | Todo el tablero (es el caso de los usuarios que ya existían) |
+| Con `vendedor` válido | Únicamente `/objetivos/<el suyo>` |
+| Con `vendedor` que no está en la lista | Nada: 403 |
+
+El permiso se aplica en **tres lugares**, y los tres hacen falta:
+
+1. [proxy.ts](proxy.ts) redirige a cada vendedor a su página y le corta las
+   demás rutas de API.
+2. [app/api/objetivos/route.ts](app/api/objetivos/route.ts) revalida que el
+   `?vendedor=` pedido sea el suyo. **Sin esto el resto no sirve**: el proxy
+   protege la página, no el dato, y un vendedor con sesión podría pedir
+   `?vendedor=RAMON`.
+3. La página vuelve a chequearlo y devuelve 404 si no coincide.
+
+Sumar esto no le saca acceso a nadie: solo se limita a quien se le asigne un
+vendedor explícitamente.
+
+---
+
 ### Con qué mes abre
 
 Abre en el **mes comercial vigente**. Si ese mes todavía no tiene objetivos

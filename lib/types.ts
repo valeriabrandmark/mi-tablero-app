@@ -262,8 +262,24 @@ export type OpcionesObjetivos = {
   grupos: string[];
 };
 
+/**
+ * Deuda del vendedor, de `cuentas_corrientes_scoring`. Es una FOTO al momento
+ * de la última carga, no un acumulado del mes: no cambia al mover el filtro de
+ * mes comercial. Por eso viaja con su `fechaCarga`.
+ */
+export type VencidoVendedor = {
+  deudaTotal: number;
+  deudaVencida: number;
+  /** Fracción (0.43 = 43 %). Null si el vendedor no tiene deuda cargada. */
+  pctVencida: number | null;
+  clientes: number;
+  fechaCarga: string | null;
+};
+
 export type DashboardObjetivos = {
   resumen: ResumenMetrica[];
+  /** Null si el vendedor todavía no tiene código de SIGMA. */
+  vencido: VencidoVendedor | null;
   porGrupo: FilaObjetivo[];
   serieFacturacion: PuntoFacturacion[];
   comprobantes: FilaComprobanteObjetivo[];
