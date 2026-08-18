@@ -43,6 +43,112 @@ export type OpcionesFiltro = {
   meses: string[];
 };
 
+// --- Logística --------------------------------------------------------------
+
+/** Espeja el parámetro `ParamFlete[Modo]` del modelo de Power BI. */
+export type ModoFlete = "sin" | "real" | "real-estimado";
+
+export type FiltrosLogistica = {
+  vendedor?: string;
+  empresa?: string;
+  mes?: string;
+  transporte?: string;
+  provincia?: string;
+  /** 'real' | 'estimado' — espeja el slicer "Estado flete". */
+  estadoFlete?: string;
+  modoFlete?: ModoFlete;
+};
+
+export type KpisLogistica = {
+  cantidadEnvios: number;
+  kgTotales: number;
+  fleteTotal: number;
+  fleteRealFiltrado: number;
+  fleteEstimadoFiltrado: number;
+  pctLineasFleteReal: number | null;
+  pctFleteSobreFacturacion: number | null;
+  facturacionNeta: number;
+  costoPorKg: number | null;
+  margenAjustado: number;
+  rentabilidadAjustadaPct: number | null;
+};
+
+export type PuntoEtiqueta = { label: string; valor: number };
+
+export type FilaComprobante = {
+  comprobante: string | null;
+  nroOrden: string | null;
+  cliente: string | null;
+  provincia: string | null;
+  fecha: string | null;
+  facturacion: number;
+  flete: number;
+  pctFlete: number | null;
+};
+
+export type OpcionesLogistica = {
+  vendedores: string[];
+  empresas: string[];
+  meses: string[];
+  transportes: string[];
+  provincias: string[];
+};
+
+export type DashboardLogistica = {
+  kpis: KpisLogistica;
+  unidadesPorProveedor: PuntoEtiqueta[];
+  margenPorProveedor: PuntoEtiqueta[];
+  fletePorProveedor: PuntoEtiqueta[];
+  pctFletePorProvincia: PuntoEtiqueta[];
+  comprobantes: FilaComprobante[];
+  generadoEn: string;
+};
+
+// --- Cuentas Corrientes -----------------------------------------------------
+
+export type FiltrosCuentas = {
+  vendedor?: string;
+  empresa?: string;
+  categoria?: string;
+};
+
+export type KpisCuentas = {
+  deudaTotal: number;
+  deudaVencida: number;
+  pctCarteraVencida: number | null;
+  clientesEnRiesgo: number;
+  clientesTotales: number;
+  clientesActivos60d: number;
+  clientesInactivos60d: number;
+  clientesVencidosQueCompran: number;
+};
+
+export type FilaCliente = {
+  razonSocial: string;
+  categoria: string | null;
+  vendedor: string | null;
+  saldoTotal: number;
+  saldoVencido: number;
+  atrasoMax: number | null;
+};
+
+export type OpcionesCuentas = {
+  vendedores: string[];
+  empresas: string[];
+  categorias: string[];
+};
+
+export type DashboardCuentas = {
+  kpis: KpisCuentas;
+  clientes: FilaCliente[];
+  deudaPorCategoria: PuntoEtiqueta[];
+  clientesPorCategoria: PuntoEtiqueta[];
+  aging: PuntoEtiqueta[];
+  historial: PuntoEtiqueta[];
+  cancelacionesPorVendedor: PuntoEtiqueta[];
+  generadoEn: string;
+};
+
 export type DashboardVentasMayoristas = {
   kpis: Kpis;
   facturacionPorProveedor: PuntoProveedor[];

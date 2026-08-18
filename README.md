@@ -4,7 +4,8 @@ Tablero de negocio en Next.js (App Router, TypeScript) que lee en vivo de
 Supabase Postgres (schemas `bronze` y `gold`). Proyecto independiente: no
 depende de `frontend-unibrandco`, `backend-unibrandco` ni de AWS.
 
-Primera entrega: página **Ventas Mayoristas** con 10 KPIs y 3 gráficos.
+Páginas: **Ventas Mayoristas**, **Logística** y **Cuentas Corrientes**, portadas
+desde el tablero de Power BI (`Tablero_AnaV1.2.pbit`).
 
 ---
 
@@ -100,10 +101,14 @@ propósito: los usuarios se dan de alta a mano desde Supabase.
 app/
   (tablero)/
     layout.tsx                     header, nav y botón de salir
-    ventas-mayoristas/page.tsx     página 1
+    ventas-mayoristas/page.tsx
+    logistica/page.tsx
+    cuentas-corrientes/page.tsx
   api/
     ventas-mayoristas/route.ts     KPIs + datos de los 3 gráficos
     filtros/route.ts               opciones de los selectores
+    logistica/route.ts
+    cuentas-corrientes/route.ts
   login/page.tsx
   auth-no-configurada/page.tsx
 components/
@@ -156,5 +161,28 @@ vista está vacía para la mayoría de los proveedores y no se puede asumir dato
   real antes de intentarlo.
 - **Cobertura de flete a clientes** — el join con `gold.fact_ventas_flete` cubre
   ~89% de las líneas; los pedidos recientes todavía no tienen flete calculado.
-- **Fase 2: Cuentas Corrientes** — no arrancada (aging, scoring y cancelaciones
-  desde `bronze`).
+## Diferencias con el tablero de Power BI
+
+Al portar las páginas de Logística y Cuentas Corrientes aparecieron cosas que
+en Power BI están mal o no significan nada con los datos reales. Están resueltas
+acá, pero conviene arreglarlas también allá:
+
+- **La relación `fact_ventas[comprobante] → aging[comprobante]` no matchea nada.**
+  `fact_ventas` guarda el comprobante con un prefijo de tipo (`F-B93-00001281`
+  contra `B93-00001281`). Sacando el prefijo cruzan 209 de 252 (83%).
+- **Los clientes SÍ se pueden cruzar.** `scoring.razon_social` contra
+  `fact_ventas.cliente` normalizado da 118 de 129 clientes, el 96% de la deuda.
+  (Lo que no cruza es `clientes_clasificados`, que es otra tabla.)
+- **`Clientes Activos (60d)` cuenta sobre toda la tabla de ventas**, incluidos
+  los minoristas de Mercado Libre y Tienda Nube: da más de 30.000. Acá se cuenta
+  solo sobre los clientes con cuenta corriente.
+- **`% Rentabilidad` mezcla bases**: numerador con facturación neta, denominador
+  con `total_linea`. Acá se usa la neta en ambos lados.
+- **`Ticket Promedio`** usa `DISTINCTCOUNT(comprobante)` en Power BI y
+  `count(distinct nro_orden)` acá, según decía el brief.
+- **`Margen Ajustado`** significa dos cosas distintas: en Ventas descuenta el
+  flete de PROVEEDOR (entrada); en Power BI descuenta el flete a CLIENTES
+  (salida), con el parámetro `ParamFlete`. La página de Logística replica el
+  parámetro con el selector "Flete a descontar del margen".
+- El bucket **"Sin dato"** del aging da negativo: son notas de crédito o pagos
+  sin aplicar, con `atraso` nulo.

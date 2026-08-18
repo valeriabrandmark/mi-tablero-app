@@ -3,7 +3,11 @@ import BotonSalir from "@/components/BotonSalir";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
 
-const NAV = [{ href: "/ventas-mayoristas", label: "Ventas Mayoristas" }] as const;
+const NAV = [
+  { href: "/ventas-mayoristas", label: "Ventas Mayoristas" },
+  { href: "/logistica", label: "Logística" },
+  { href: "/cuentas-corrientes", label: "Cuentas Corrientes" },
+] as const;
 
 export default async function TableroLayout({ children }: LayoutProps<"/">) {
   const usuario = authConfigurada ? await getUsuario() : null;

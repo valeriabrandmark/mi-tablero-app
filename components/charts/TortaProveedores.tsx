@@ -45,7 +45,8 @@ export default function TortaProveedores({
    *  los porcentajes tienen que ser sobre el total real. */
   totalGeneral: number;
   seleccionado?: string;
-  onSeleccionar: (proveedor: string) => void;
+  /** Si se omite, la torta es solo de lectura (sin filtro cruzado). */
+  onSeleccionar?: (proveedor: string) => void;
 }) {
   if (datos.length === 0) {
     return <p className="text-muted py-16 text-center text-sm">Sin datos para el filtro elegido.</p>;
@@ -71,9 +72,9 @@ export default function TortaProveedores({
               isAnimationActive={false}
               onClick={(d: unknown) => {
                 const label = (d as { payload?: PuntoProveedor })?.payload?.label;
-                if (label) onSeleccionar(label);
+                if (label) onSeleccionar?.(label);
               }}
-              className="cursor-pointer"
+              className={onSeleccionar ? "cursor-pointer" : undefined}
             >
               {datos.map((d, i) => (
                 <Cell
@@ -96,7 +97,8 @@ export default function TortaProveedores({
           return (
             <li key={d.label}>
               <button
-                onClick={() => onSeleccionar(d.label)}
+                onClick={() => onSeleccionar?.(d.label)}
+                disabled={!onSeleccionar}
                 className={`hover:bg-panel-2 flex w-full items-center gap-2 rounded px-1 py-0.5 text-left ${
                   seleccionado && !activo ? "opacity-40" : ""
                 }`}
