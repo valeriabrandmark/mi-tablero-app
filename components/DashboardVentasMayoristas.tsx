@@ -11,7 +11,14 @@ import TortaProveedores from "@/components/charts/TortaProveedores";
 import { Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
-import type { FilaArticulo, FilaComprobanteVenta } from "@/lib/types";
+import { CRUZADOS, type FilaArticulo, type FilaComprobanteVenta } from "@/lib/types";
+
+const ETIQUETA_CRUZADO: Record<(typeof CRUZADOS)[number], string> = {
+  proveedor: "Proveedor",
+  cliente: "Cliente",
+  sku: "SKU",
+  comprobante: "Comprobante",
+};
 import { MIN_UNIDADES_MARGEN } from "@/lib/constantes";
 import { PALETA } from "@/lib/paleta";
 import type { DashboardVentasMayoristas, Filtros, OpcionesFiltro } from "@/lib/types";
@@ -96,13 +103,18 @@ export default function Dashboard() {
     setFiltros(f);
   }, []);
 
-  /** Click en un proveedor de cualquier gráfico: filtra el resto del tablero.
-   *  Volver a clickearlo (o el chip) limpia la selección. */
-  const alternarProveedor = useCallback((proveedor: string) => {
+  /** Click en un gráfico o en una tabla: filtra el resto del tablero.
+   *  Volver a clickear lo mismo (o el chip) limpia la selección. */
+  const alternar = useCallback((campo: keyof Filtros, valor: string) => {
     setCargando(true);
     setError(null);
-    setFiltros((f) => ({ ...f, proveedor: f.proveedor === proveedor ? undefined : proveedor }));
+    setFiltros((f) => ({ ...f, [campo]: f[campo] === valor ? undefined : valor }));
   }, []);
+
+  const alternarProveedor = useCallback(
+    (proveedor: string) => alternar("proveedor", proveedor),
+    [alternar],
+  );
 
   const recargar = useCallback(() => {
     setCargando(true);
@@ -155,21 +167,25 @@ export default function Dashboard() {
 
       <BarraFiltros filtros={filtros} opciones={opciones} onChange={cambiarFiltros} />
 
-      {filtros.proveedor && (
+      {CRUZADOS.some((c) => filtros[c]) && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-muted">Filtrado por proveedor:</span>
-          <button
-            onClick={() => alternarProveedor(filtros.proveedor!)}
-            className="border-c1/40 bg-c1/15 text-c1 hover:bg-c1/25 flex items-center gap-1.5 rounded-full border px-3 py-1 font-medium"
-          >
-            {filtros.proveedor}
-            <span aria-hidden className="text-sm leading-none">
-              ×
-            </span>
-          </button>
-          <span className="text-muted">
-            Los KPIs y el gráfico diario muestran solo este proveedor; los dos gráficos por
-            proveedor siguen mostrando el ranking completo, con el resto atenuado.
+          <span className="text-muted">Filtrado por:</span>
+          {CRUZADOS.filter((c) => filtros[c]).map((campo) => (
+            <button
+              key={campo}
+              onClick={() => alternar(campo, filtros[campo]!)}
+              className="border-c1/40 bg-c1/15 text-c1 hover:bg-c1/25 flex items-center gap-1.5 rounded-full border px-3 py-1 font-medium"
+            >
+              <span className="opacity-70">{ETIQUETA_CRUZADO[campo]}</span>
+              {filtros[campo]}
+              <span aria-hidden className="text-sm leading-none">
+                ×
+              </span>
+            </button>
+          ))}
+          <span className="text-muted max-w-md">
+            Todo se filtra por lo elegido, salvo el propio gráfico o tabla de donde salió,
+            que mantiene su lista completa con el resto atenuado.
           </span>
         </div>
       )}
@@ -253,7 +269,10 @@ export default function Dashboard() {
             titulo="Facturación Neta por Día y Vendedor"
             nota={`${data.serieDiaria.vendedores.length} vendedores`}
           >
-            <LineasPorVendedor serie={data.serieDiaria} />
+            <LineasPorVendedor
+              serie={data.serieDiaria}
+              onSeleccionar={(v) => cambiarFiltros({ ...filtros, vendedor: filtros.vendedor === v ? undefined : v })}
+            />
           </Panel>
 
           <div className="grid gap-4 xl:grid-cols-2">
@@ -286,6 +305,8 @@ export default function Dashboard() {
               datos={data.rentabilidadPorCliente}
               formato={(n) => fmtPct(n)}
               colorUnico={PALETA[3]}
+              seleccionado={filtros.cliente}
+              onSeleccionar={(c) => alternar("cliente", c)}
             />
           </Panel>
 
@@ -295,6 +316,8 @@ export default function Dashboard() {
                 filas={data.articulos}
                 columnas={COL_ARTICULOS}
                 clave={(a, i) => `${a.sku}-${i}`}
+                onClickFila={(a) => a.sku && alternar("sku", a.sku)}
+                activa={(a) => a.sku === filtros.sku}
               />
             </Panel>
             <Panel titulo="Comprobantes" nota={`${data.comprobantes.length} por facturación`}>
@@ -302,6 +325,8 @@ export default function Dashboard() {
                 filas={data.comprobantes}
                 columnas={COL_COMPROBANTES}
                 clave={(c, i) => `${c.comprobante}-${i}`}
+                onClickFila={(c) => c.comprobante && alternar("comprobante", c.comprobante)}
+                activa={(c) => c.comprobante === filtros.comprobante}
               />
             </Panel>
           </div>

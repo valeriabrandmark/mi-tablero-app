@@ -2,11 +2,19 @@ export type Filtros = {
   vendedor?: string;
   empresa?: string;
   mes?: string;
-  /** Filtro cruzado: sale de hacer click en un proveedor de un gráfico. */
-  proveedor?: string;
   /** Vía `fact_ventas_flete` -> `reporte_logistica`, igual que el slicer del .pbit. */
   provincia?: string;
+  // Filtros cruzados: salen de hacer click en un gráfico o en una tabla.
+  // No tienen selector propio; se limpian con su chip o con "Limpiar".
+  proveedor?: string;
+  cliente?: string;
+  sku?: string;
+  comprobante?: string;
 };
+
+/** Dimensiones que solo existen como filtro cruzado (sin selector arriba). */
+export const CRUZADOS = ["proveedor", "cliente", "sku", "comprobante"] as const;
+export type Cruzado = (typeof CRUZADOS)[number];
 
 export type FilaArticulo = {
   sku: string | null;

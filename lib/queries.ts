@@ -24,6 +24,9 @@ const OPCIONALES: [keyof Filtros, string][] = [
   ["empresa", "empresa"],
   ["mes", "mes_comercial"],
   ["proveedor", "proveedor"],
+  ["cliente", "cliente"],
+  ["sku", "sku"],
+  ["comprobante", "comprobante"],
 ];
 
 /**
@@ -203,7 +206,7 @@ async function getMargenPorProveedor(f: Filtros): Promise<MargenProveedor[]> {
  * unidades en el ranking de proveedores.
  */
 async function getRentabilidadPorCliente(f: Filtros): Promise<RentabilidadCliente[]> {
-  const w = whereBase(f, ["fv.cliente is not null"]);
+  const w = whereBase(f, ["fv.cliente is not null"], "fv", ["cliente"]);
   return query<RentabilidadCliente>(
     `with por_cliente as (
        select fv.cliente as label,
@@ -229,7 +232,7 @@ async function getRentabilidadPorCliente(f: Filtros): Promise<RentabilidadClient
 // --- Tabla "Articulos incluídos" ---------------------------------------------
 
 async function getArticulos(f: Filtros): Promise<FilaArticulo[]> {
-  const w = whereBase(f);
+  const w = whereBase(f, [], "fv", ["sku"]);
   return query<FilaArticulo>(
     `select fv.sku,
             max(fv.producto) as producto,
@@ -263,7 +266,7 @@ async function getArticulos(f: Filtros): Promise<FilaArticulo[]> {
 // --- Tabla "Comprobantes" ----------------------------------------------------
 
 async function getComprobantesVenta(f: Filtros): Promise<FilaComprobanteVenta[]> {
-  const w = whereBase(f, ["fv.comprobante is not null"]);
+  const w = whereBase(f, ["fv.comprobante is not null"], "fv", ["comprobante"]);
   return query<FilaComprobanteVenta>(
     `select fv.comprobante,
             to_char(max(fv.fecha), 'YYYY-MM-DD') as fecha,

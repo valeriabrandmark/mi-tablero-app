@@ -14,6 +14,9 @@ export async function GET(request: NextRequest) {
     mes: sp.get("mes") || undefined,
     proveedor: sp.get("proveedor") || undefined,
     provincia: sp.get("provincia") || undefined,
+    cliente: sp.get("cliente") || undefined,
+    sku: sp.get("sku") || undefined,
+    comprobante: sp.get("comprobante") || undefined,
   };
 
   try {

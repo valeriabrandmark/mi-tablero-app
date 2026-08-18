@@ -55,7 +55,14 @@ function Contenido({
   );
 }
 
-export default function LineasPorVendedor({ serie }: { serie: SerieDiaria }) {
+export default function LineasPorVendedor({
+  serie,
+  onSeleccionar,
+}: {
+  serie: SerieDiaria;
+  /** Click en la leyenda: filtra el tablero por ese vendedor. */
+  onSeleccionar?: (vendedor: string) => void;
+}) {
   if (serie.data.length === 0) {
     return <p className="text-muted py-16 text-center text-sm">Sin datos para el filtro elegido.</p>;
   }
@@ -79,8 +86,18 @@ export default function LineasPorVendedor({ serie }: { serie: SerieDiaria }) {
         />
         <Tooltip content={<Contenido />} cursor={{ stroke: TEMA.muted, strokeDasharray: "3 3" }} />
         <Legend
-          wrapperStyle={{ fontSize: 12, color: TEMA.muted, paddingTop: 8 }}
+          wrapperStyle={{
+            fontSize: 12,
+            color: TEMA.muted,
+            paddingTop: 8,
+            cursor: onSeleccionar ? "pointer" : undefined,
+          }}
           iconType="plainline"
+          onClick={(e) => {
+            // recharts tipa el payload de forma amplia; solo se usa `dataKey`.
+            const dataKey = (e as { dataKey?: string | number }).dataKey;
+            if (dataKey != null) onSeleccionar?.(String(dataKey));
+          }}
         />
         {serie.vendedores.map((vendedor, i) => (
           <Line
