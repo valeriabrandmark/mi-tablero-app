@@ -11,6 +11,7 @@ import TortaProveedores from "@/components/charts/TortaProveedores";
 import { Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
+import { alternar as alternarValor } from "@/lib/filtros";
 import { CRUZADOS, type FilaArticulo, type FilaComprobanteVenta } from "@/lib/types";
 
 const ETIQUETA_CRUZADO: Record<(typeof CRUZADOS)[number], string> = {
@@ -100,7 +101,7 @@ export default function Dashboard() {
   const alternar = useCallback((campo: keyof Filtros, valor: string) => {
     setCargando(true);
     setError(null);
-    setFiltros((f) => ({ ...f, [campo]: f[campo] === valor ? undefined : valor }));
+    setFiltros((f) => ({ ...f, [campo]: alternarValor(f[campo], valor) }));
   }, []);
 
   const alternarProveedor = useCallback(
@@ -159,22 +160,26 @@ export default function Dashboard() {
 
       <BarraFiltros filtros={filtros} opciones={opciones} onChange={cambiarFiltros} />
 
-      {CRUZADOS.some((c) => filtros[c]) && (
+      {CRUZADOS.some((c) => filtros[c]?.length) && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-muted">Filtrado por:</span>
-          {CRUZADOS.filter((c) => filtros[c]).map((campo) => (
+          {/* Un chip por VALOR elegido, no por campo: con selección múltiple un
+              solo chip por campo escondería cuántos valores hay puestos. */}
+          {CRUZADOS.flatMap((campo) =>
+            (filtros[campo] ?? []).map((valor) => (
             <button
-              key={campo}
-              onClick={() => alternar(campo, filtros[campo]!)}
+              key={`${campo}-${valor}`}
+              onClick={() => alternar(campo, valor)}
               className="border-c1/40 bg-c1/15 text-c1 hover:bg-c1/25 flex items-center gap-1.5 rounded-full border px-3 py-1 font-medium"
             >
               <span className="opacity-70">{ETIQUETA_CRUZADO[campo]}</span>
-              {filtros[campo]}
+              {valor}
               <span aria-hidden className="text-sm leading-none">
                 ×
               </span>
             </button>
-          ))}
+            )),
+          )}
           <span className="text-muted max-w-md">
             Todo se filtra por lo elegido, salvo el propio gráfico o tabla de donde salió,
             que mantiene su lista completa con el resto atenuado.
@@ -263,7 +268,7 @@ export default function Dashboard() {
           >
             <LineasPorVendedor
               serie={data.serieDiaria}
-              onSeleccionar={(v) => cambiarFiltros({ ...filtros, vendedor: filtros.vendedor === v ? undefined : v })}
+              onSeleccionar={(v) => cambiarFiltros({ ...filtros, vendedor: alternarValor(filtros.vendedor, v) })}
             />
           </Panel>
 
@@ -272,7 +277,7 @@ export default function Dashboard() {
               <TortaProveedores
                 datos={data.facturacionPorProveedor}
                 totalGeneral={data.facturacionTotalProveedores}
-                seleccionado={filtros.proveedor}
+                seleccionados={filtros.proveedor}
                 onSeleccionar={alternarProveedor}
               />
             </Panel>
@@ -283,7 +288,7 @@ export default function Dashboard() {
             >
               <BarrasMargen
                 datos={data.margenPorProveedor}
-                seleccionado={filtros.proveedor}
+                seleccionados={filtros.proveedor}
                 onSeleccionar={alternarProveedor}
               />
             </Panel>
@@ -297,7 +302,7 @@ export default function Dashboard() {
               datos={data.rentabilidadPorCliente}
               formato={(n) => fmtPct(n)}
               colorUnico={PALETA[3]}
-              seleccionado={filtros.cliente}
+              seleccionados={filtros.cliente}
               onSeleccionar={(c) => alternar("cliente", c)}
             />
           </Panel>
@@ -309,7 +314,7 @@ export default function Dashboard() {
                 columnas={COL_ARTICULOS}
                 clave={(a, i) => `${a.sku}-${i}`}
                 onClickFila={(a) => a.sku && alternar("sku", a.sku)}
-                activa={(a) => a.sku === filtros.sku}
+                activa={(a) => !!a.sku && !!filtros.sku?.includes(a.sku)}
               />
             </Panel>
             <Panel titulo="Comprobantes" nota={`${data.comprobantes.length} por facturación`}>
@@ -318,7 +323,7 @@ export default function Dashboard() {
                 columnas={COL_COMPROBANTES}
                 clave={(c, i) => `${c.comprobante}-${i}`}
                 onClickFila={(c) => c.comprobante && alternar("comprobante", c.comprobante)}
-                activa={(c) => c.comprobante === filtros.comprobante}
+                activa={(c) => !!c.comprobante && !!filtros.comprobante?.includes(c.comprobante)}
               />
             </Panel>
           </div>

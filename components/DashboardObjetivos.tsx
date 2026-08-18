@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { ListaAvance } from "@/components/BarraAvance";
 import LineaFacturacion from "@/components/charts/LineaFacturacion";
-import { BotonLimpiar, SelectorFiltro } from "@/components/SelectorFiltro";
+import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
+import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtMes, fmtMetrica, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
@@ -45,7 +46,7 @@ export default function DashboardObjetivosPage({
   /** Mes con el que abre, resuelto en el servidor (ver getMesInicialObjetivos). */
   mesInicial: string;
 }) {
-  const [filtros, setFiltros] = useState<FiltrosObjetivos>({ vendedor, mes: mesInicial });
+  const [filtros, setFiltros] = useState<FiltrosObjetivos>({ vendedor, mes: [mesInicial] });
 
   const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
     "/api/objetivos",
@@ -60,20 +61,21 @@ export default function DashboardObjetivosPage({
     setFiltros(f);
   };
 
-  /** Click en una barra: aplica el grupo, o lo saca si ya estaba puesto. */
+  /** Click en una barra: suma ese grupo a la selección, o lo saca. */
   const alternarGrupo = (valor: string) =>
-    cambiar({ ...filtros, grupo: filtros.grupo === valor ? undefined : valor });
+    cambiar({ ...filtros, grupo: alternarValor(filtros.grupo, valor) });
 
   const resumen = data?.resumen ?? [];
   const vencido = data?.vencido ?? null;
-  const sinCambios = filtros.mes === mesInicial && !filtros.grupo;
+  const sinCambios =
+    filtros.mes?.length === 1 && filtros.mes[0] === mesInicial && sinValores(filtros.grupo);
 
   const porProducto = data?.porGrupo.filter((g) => g.metrica === "unidades") ?? [];
   const porEmpresa = data?.porGrupo.filter((g) => g.metrica !== "unidades") ?? [];
 
-  const notaRecorte = filtros.grupo
-    ? `Solo las líneas de ${filtros.grupo}`
-    : "Todas las ventas mayoristas del mes";
+  const notaRecorte = sinValores(filtros.grupo)
+    ? "Todas las ventas mayoristas del mes"
+    : `Solo las líneas de ${filtros.grupo!.join(", ")}`;
 
   return (
     <div className="space-y-4">
@@ -98,22 +100,22 @@ export default function DashboardObjetivosPage({
       </div>
 
       <div className="border-line bg-panel flex flex-wrap items-end gap-3 rounded-xl border p-3">
-        <SelectorFiltro
+        <SelectorMultiple
           etiqueta="Mes comercial"
-          valor={filtros.mes}
+          valores={filtros.mes}
           opciones={opciones?.meses ?? []}
           onChange={(v) => cambiar({ ...filtros, mes: v })}
           formato={fmtMes}
           todos="Todos los meses"
         />
-        <SelectorFiltro
+        <SelectorMultiple
           etiqueta="Grupo"
-          valor={filtros.grupo}
+          valores={filtros.grupo}
           opciones={opciones?.grupos ?? []}
           onChange={(v) => cambiar({ ...filtros, grupo: v })}
         />
         <BotonLimpiar
-          onClick={() => cambiar({ vendedor, mes: mesInicial })}
+          onClick={() => cambiar({ vendedor, mes: [mesInicial] })}
           deshabilitado={sinCambios}
         />
 
@@ -180,7 +182,7 @@ export default function DashboardObjetivosPage({
               <ListaAvance
                 filas={porEmpresa}
                 etiqueta={(f) => f.grupo ?? "—"}
-                seleccionado={filtros.grupo}
+                seleccionados={filtros.grupo}
                 onSeleccionar={alternarGrupo}
               />
             </Panel>
@@ -188,7 +190,7 @@ export default function DashboardObjetivosPage({
               <ListaAvance
                 filas={porProducto}
                 etiqueta={(f) => f.grupo ?? "—"}
-                seleccionado={filtros.grupo}
+                seleccionados={filtros.grupo}
                 onSeleccionar={alternarGrupo}
               />
             </Panel>

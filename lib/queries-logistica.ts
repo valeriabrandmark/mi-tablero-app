@@ -6,6 +6,7 @@ import type {
   OpcionesLogistica,
   PuntoEtiqueta,
 } from "@/lib/types";
+import { agregarFiltro, vacio } from "@/lib/filtros";
 
 /**
  * Página "Logística" — equivalente de la página homónima del tablero de Power BI.
@@ -28,7 +29,10 @@ import type {
 
 type Where = { sql: string; params: unknown[] };
 
-const OPCIONALES: [keyof FiltrosLogistica, string][] = [
+// `modoFlete` queda afuera: es un modo de cálculo, no una lista de valores.
+type ClaveLista = Exclude<keyof FiltrosLogistica, "modoFlete" | "estadoFlete">;
+
+const OPCIONALES: [ClaveLista, string][] = [
   ["vendedor", "fv.vendedor"],
   ["empresa", "fv.empresa"],
   ["mes", "fv.mes_comercial"],
@@ -47,15 +51,19 @@ function whereBase(f: FiltrosLogistica, omitir: (keyof FiltrosLogistica)[] = [])
   const clauses = ["coalesce(rl.provincia, '') <> ''"];
 
   for (const [key, columna] of OPCIONALES) {
-    const valor = f[key];
-    if (valor && !omitir.includes(key)) {
-      params.push(valor);
-      clauses.push(`${columna} = $${params.length}`);
-    }
+    if (!omitir.includes(key)) agregarFiltro(clauses, params, columna, f[key]);
   }
 
-  if (f.estadoFlete === "real") clauses.push("fvf.tiene_flete_real = true");
-  if (f.estadoFlete === "estimado") clauses.push("coalesce(fvf.tiene_flete_real, false) = false");
+  // Estado de flete: con los dos tildados no hay nada que filtrar, igual que
+  // con ninguno. Solo recorta cuando se eligió uno de los dos.
+  const estados = f.estadoFlete ?? [];
+  if (!vacio(estados) && estados.length < 2) {
+    clauses.push(
+      estados.includes("real")
+        ? "fvf.tiene_flete_real = true"
+        : "coalesce(fvf.tiene_flete_real, false) = false",
+    );
+  }
 
   return { sql: clauses.join("\n      and "), params };
 }

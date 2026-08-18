@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getDashboardCuentas, getOpcionesCuentas } from "@/lib/queries-cuentas";
+import { lista } from "@/lib/filtros";
 import type { FiltrosCuentas } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -8,9 +9,9 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
   const filtros: FiltrosCuentas = {
-    vendedor: sp.get("vendedor") || undefined,
-    empresa: sp.get("empresa") || undefined,
-    categoria: sp.get("categoria") || undefined,
+    vendedor: lista(sp, "vendedor"),
+    empresa: lista(sp, "empresa"),
+    categoria: lista(sp, "categoria"),
   };
 
   try {

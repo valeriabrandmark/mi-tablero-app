@@ -34,11 +34,12 @@ function Contenido({ active, payload }: { active?: boolean; payload?: ItemToolti
 
 export default function BarrasMargen({
   datos,
-  seleccionado,
+  seleccionados,
   onSeleccionar,
 }: {
   datos: MargenProveedor[];
-  seleccionado?: string;
+  /** Valores resaltados; el resto se atenúa. Vacío = todos iguales. */
+  seleccionados?: string[];
   onSeleccionar: (proveedor: string) => void;
 }) {
   if (datos.length === 0) {
@@ -90,7 +91,7 @@ export default function BarrasMargen({
             <Cell
               key={d.label}
               fill={d.margenPct >= 0 ? PALETA[1] : TEMA.negativo}
-              fillOpacity={!seleccionado || seleccionado === d.label ? 1 : 0.25}
+              fillOpacity={!seleccionados?.length || seleccionados.includes(d.label) ? 1 : 0.25}
             />
           ))}
         </Bar>

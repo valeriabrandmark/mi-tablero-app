@@ -52,7 +52,7 @@ export default function BarrasCategoria({
   colorUnico,
   alturaMinima = 240,
   vacio = "Sin datos para el filtro elegido.",
-  seleccionado,
+  seleccionados,
   onSeleccionar,
 }: {
   datos: PuntoEtiqueta[];
@@ -62,7 +62,8 @@ export default function BarrasCategoria({
   colorUnico?: string;
   alturaMinima?: number;
   vacio?: string;
-  seleccionado?: string;
+  /** Valores resaltados; el resto se atenúa. Vacío = todos iguales. */
+  seleccionados?: string[];
   /** Si se omite, las barras son solo de lectura (sin filtro cruzado). */
   onSeleccionar?: (label: string) => void;
 }) {
@@ -121,7 +122,7 @@ export default function BarrasCategoria({
               key={d.label}
               fill={colorUnico ?? colorSerie(i)}
               // Con algo seleccionado, el resto se atenúa en vez de desaparecer.
-              fillOpacity={!seleccionado || seleccionado === d.label ? 1 : 0.25}
+              fillOpacity={!seleccionados?.length || seleccionados.includes(d.label) ? 1 : 0.25}
             />
           ))}
         </Bar>

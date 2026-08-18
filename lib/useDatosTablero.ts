@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
  */
 export function useDatosTablero<T>(
   base: string,
-  filtros: Record<string, string | undefined>,
+  filtros: Record<string, string | string[] | undefined>,
   extras: Record<string, string> = {},
 ) {
   const router = useRouter();
@@ -26,12 +26,19 @@ export function useDatosTablero<T>(
 
   const qs = useMemo(() => {
     const sp = new URLSearchParams();
-    const todo: Record<string, string | undefined> = {
+    const todo: Record<string, string | string[] | undefined> = {
       ...JSON.parse(filtrosKey),
       ...JSON.parse(extrasKey),
     };
+    // Los filtros múltiples viajan como parámetros repetidos (?sku=A&sku=B):
+    // los nombres de cliente y de producto traen comas, así que cualquier
+    // separador partiría un valor al medio.
     for (const [k, v] of Object.entries(todo)) {
-      if (v) sp.set(k, v);
+      if (Array.isArray(v)) {
+        for (const uno of v) if (uno) sp.append(k, uno);
+      } else if (v) {
+        sp.set(k, v);
+      }
     }
     return sp.toString();
   }, [filtrosKey, extrasKey]);

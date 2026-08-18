@@ -1,15 +1,19 @@
+/**
+ * Todos los filtros del tablero son de selección múltiple: el valor es una
+ * LISTA. Lista vacía (o ausente) significa "sin filtrar", no "ninguno".
+ */
 export type Filtros = {
-  vendedor?: string;
-  empresa?: string;
-  mes?: string;
+  vendedor?: string[];
+  empresa?: string[];
+  mes?: string[];
   /** Vía `fact_ventas_flete` -> `reporte_logistica`, igual que el slicer del .pbit. */
-  provincia?: string;
+  provincia?: string[];
   // Filtros cruzados: salen de hacer click en un gráfico o en una tabla.
   // No tienen selector propio; se limpian con su chip o con "Limpiar".
-  proveedor?: string;
-  cliente?: string;
-  sku?: string;
-  comprobante?: string;
+  proveedor?: string[];
+  cliente?: string[];
+  sku?: string[];
+  comprobante?: string[];
 };
 
 /** Dimensiones que solo existen como filtro cruzado (sin selector arriba). */
@@ -85,15 +89,19 @@ export type OpcionesFiltro = {
 export type ModoFlete = "sin" | "real" | "real-estimado";
 
 export type FiltrosLogistica = {
-  vendedor?: string;
-  empresa?: string;
-  mes?: string;
-  transporte?: string;
-  provincia?: string;
+  vendedor?: string[];
+  empresa?: string[];
+  mes?: string[];
+  transporte?: string[];
+  provincia?: string[];
   /** Filtro cruzado: sale de hacer click en un proveedor de un gráfico. */
-  proveedor?: string;
+  proveedor?: string[];
   /** 'real' | 'estimado' — espeja el slicer "Estado flete". */
-  estadoFlete?: string;
+  estadoFlete?: string[];
+  /**
+   * NO es un filtro sino un modo de cálculo: elige qué flete se descuenta del
+   * margen. Por eso sigue siendo de opción única.
+   */
   modoFlete?: ModoFlete;
 };
 
@@ -147,9 +155,9 @@ export type DashboardLogistica = {
 // --- Cuentas Corrientes -----------------------------------------------------
 
 export type FiltrosCuentas = {
-  vendedor?: string;
-  empresa?: string;
-  categoria?: string;
+  vendedor?: string[];
+  empresa?: string[];
+  categoria?: string[];
 };
 
 export type KpisCuentas = {
@@ -216,9 +224,9 @@ export const METRICAS = ["unidades", "facturacion", "clientes"] as const;
 export type FiltrosObjetivos = {
   /** Lo fija la ruta (`/objetivos/[vendedor]`), no un selector. */
   vendedor: string;
-  mes?: string;
+  mes?: string[];
   /** Filtro cruzado: sale de hacer click en una barra. */
-  grupo?: string;
+  grupo?: string[];
 };
 
 /** Totales de una métrica. Nunca se mezclan dos métricas en un mismo total. */
