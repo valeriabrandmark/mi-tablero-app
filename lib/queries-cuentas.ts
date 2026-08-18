@@ -28,20 +28,30 @@ import type {
 
 type Where = { sql: string; params: unknown[] };
 
-/** Filtros sobre cualquier tabla que tenga `vendedor` y `empresa` propios. */
-function whereCuentas(f: FiltrosCuentas, alias: string, conCategoria = true): Where {
+/**
+ * Filtros sobre cualquier tabla que tenga `vendedor` y `empresa` propios.
+ * `omitir` desactiva uno para una consulta puntual: los gráficos que desglosan
+ * por categoría (o por vendedor) siguen mostrando el panorama completo aunque
+ * haya uno seleccionado, si no quedan con una sola barra.
+ */
+function whereCuentas(
+  f: FiltrosCuentas,
+  alias: string,
+  conCategoria = true,
+  omitir: (keyof FiltrosCuentas)[] = [],
+): Where {
   const params: unknown[] = [];
   const clauses: string[] = ["true"];
 
-  if (f.vendedor) {
+  if (f.vendedor && !omitir.includes("vendedor")) {
     params.push(f.vendedor);
     clauses.push(`${alias}.vendedor = $${params.length}`);
   }
-  if (f.empresa) {
+  if (f.empresa && !omitir.includes("empresa")) {
     params.push(f.empresa);
     clauses.push(`${alias}.empresa = $${params.length}`);
   }
-  if (f.categoria) {
+  if (f.categoria && !omitir.includes("categoria")) {
     params.push(f.categoria);
     clauses.push(
       conCategoria
@@ -176,7 +186,7 @@ async function getClientes(f: FiltrosCuentas): Promise<FilaCliente[]> {
 }
 
 async function getPorCategoria(f: FiltrosCuentas) {
-  const w = whereCuentas(f, "s");
+  const w = whereCuentas(f, "s", true, ["categoria"]);
   const [deuda, clientes] = await Promise.all([
     query<PuntoEtiqueta>(
       `select coalesce(s.categoria, '—') as label,
@@ -232,7 +242,7 @@ async function getHistorial(f: FiltrosCuentas): Promise<PuntoEtiqueta[]> {
 }
 
 async function getCancelaciones(f: FiltrosCuentas): Promise<PuntoEtiqueta[]> {
-  const w = whereCuentas(f, "c", false);
+  const w = whereCuentas(f, "c", false, ["vendedor"]);
   return query<PuntoEtiqueta>(
     `select coalesce(c.vendedor, '—') as label,
             coalesce(sum(c.saldo_vencido_cancelado), 0)::float8 as valor

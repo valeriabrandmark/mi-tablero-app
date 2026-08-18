@@ -34,15 +34,21 @@ const OPCIONALES: [keyof FiltrosLogistica, string][] = [
   ["mes", "fv.mes_comercial"],
   ["transporte", "rl.transporte"],
   ["provincia", "rl.provincia"],
+  ["proveedor", "fv.proveedor"],
 ];
 
-function whereBase(f: FiltrosLogistica): Where {
+/**
+ * `omitir` desactiva un filtro para una consulta puntual: los gráficos que
+ * desglosan por proveedor (o por provincia) tienen que seguir mostrando el
+ * ranking completo aunque haya uno seleccionado, si no quedan con una sola barra.
+ */
+function whereBase(f: FiltrosLogistica, omitir: (keyof FiltrosLogistica)[] = []): Where {
   const params: unknown[] = [];
   const clauses = ["coalesce(rl.provincia, '') <> ''"];
 
   for (const [key, columna] of OPCIONALES) {
     const valor = f[key];
-    if (valor) {
+    if (valor && !omitir.includes(key)) {
       params.push(valor);
       clauses.push(`${columna} = $${params.length}`);
     }
@@ -129,33 +135,50 @@ function porProveedor(expr: string, orden = "valor desc nulls last", limite = 12
 }
 
 async function getGraficos(f: FiltrosLogistica) {
-  const w = whereBase(f);
+  // Los desgloses por proveedor ignoran el filtro de proveedor, y el de
+  // provincia ignora el de provincia: así el ranking no se queda con una barra.
+  const wp = whereBase(f, ["proveedor"]);
+  const wpr = whereBase(f, ["provincia"]);
 
-  const [unidades, flete, margen, provincias] = await Promise.all([
+  const [unidades, flete, margen, provincias, totales] = await Promise.all([
     query<PuntoEtiqueta>(
-      `${cteLineas(w)} ${porProveedor("coalesce(sum(cantidad), 0)::float8")}`,
-      w.params,
+      `${cteLineas(wp)} ${porProveedor("coalesce(sum(cantidad), 0)::float8")}`,
+      wp.params,
     ),
     query<PuntoEtiqueta>(
-      `${cteLineas(w)} ${porProveedor("coalesce(sum(flete_prorrateado), 0)::float8")}`,
-      w.params,
+      `${cteLineas(wp)} ${porProveedor("coalesce(sum(flete_prorrateado), 0)::float8")}`,
+      wp.params,
     ),
     query<PuntoEtiqueta>(
-      `${cteLineas(w)} ${porProveedor("coalesce(sum(margen_total), 0)::float8")}`,
-      w.params,
+      `${cteLineas(wp)} ${porProveedor("coalesce(sum(margen_total), 0)::float8")}`,
+      wp.params,
     ),
     query<PuntoEtiqueta>(
-      `${cteLineas(w)}
+      `${cteLineas(wpr)}
        select coalesce(provincia, '—') as label,
               case when sum(precio_neto * cantidad) = 0 then 0
                    else sum(flete_prorrateado) / sum(precio_neto * cantidad)
               end::float8 as valor
        from lineas group by provincia order by valor desc nulls last limit 15`,
-      w.params,
+      wpr.params,
+    ),
+    // Denominadores de las tortas: sobre TODOS los proveedores, no solo el top 12.
+    queryOne<{ unidades: number; flete: number }>(
+      `${cteLineas(wp)}
+       select coalesce(sum(cantidad), 0)::float8 as unidades,
+              coalesce(sum(flete_prorrateado), 0)::float8 as flete
+       from lineas`,
+      wp.params,
     ),
   ]);
 
-  return { unidades, flete, margen, provincias };
+  return {
+    unidades,
+    flete,
+    margen,
+    provincias,
+    totales: { unidades: totales?.unidades ?? 0, flete: totales?.flete ?? 0 },
+  };
 }
 
 /** Tabla "Comprobantes Asociados". */
@@ -262,6 +285,7 @@ export async function getDashboardLogistica(f: FiltrosLogistica): Promise<Dashbo
     unidadesPorProveedor: graficos.unidades,
     margenPorProveedor: graficos.margen,
     fletePorProveedor: graficos.flete,
+    totalesProveedor: graficos.totales,
     pctFletePorProvincia: graficos.provincias,
     comprobantes,
     generadoEn: new Date().toISOString(),

@@ -54,6 +54,8 @@ export type FiltrosLogistica = {
   mes?: string;
   transporte?: string;
   provincia?: string;
+  /** Filtro cruzado: sale de hacer click en un proveedor de un gráfico. */
+  proveedor?: string;
   /** 'real' | 'estimado' — espeja el slicer "Estado flete". */
   estadoFlete?: string;
   modoFlete?: ModoFlete;
@@ -99,6 +101,8 @@ export type DashboardLogistica = {
   unidadesPorProveedor: PuntoEtiqueta[];
   margenPorProveedor: PuntoEtiqueta[];
   fletePorProveedor: PuntoEtiqueta[];
+  /** Denominadores de las tortas: totales SIN el filtro cruzado de proveedor. */
+  totalesProveedor: { unidades: number; flete: number };
   pctFletePorProvincia: PuntoEtiqueta[];
   comprobantes: FilaComprobante[];
   generadoEn: string;

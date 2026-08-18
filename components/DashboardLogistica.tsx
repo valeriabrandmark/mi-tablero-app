@@ -54,10 +54,15 @@ export default function DashboardLogisticaPage() {
     setFiltros(f);
   };
 
+  /** Click en un gráfico: aplica el valor, o lo saca si ya estaba puesto. */
+  const alternar = (campo: "proveedor" | "provincia") => (valor: string) =>
+    cambiar({ ...filtros, [campo]: filtros[campo] === valor ? undefined : valor });
+
   const k = data?.kpis;
   const vacio =
     !filtros.vendedor && !filtros.empresa && !filtros.mes && !filtros.transporte &&
-    !filtros.provincia && !filtros.estadoFlete && (filtros.modoFlete ?? "sin") === "sin";
+    !filtros.provincia && !filtros.estadoFlete && !filtros.proveedor &&
+    (filtros.modoFlete ?? "sin") === "sin";
 
   return (
     <div className="space-y-4">
@@ -164,20 +169,36 @@ export default function DashboardLogisticaPage() {
             <Panel titulo="Unidades por proveedor" nota="Top 12">
               <TortaProveedores
                 datos={data.unidadesPorProveedor.map((d) => ({ label: d.label, total: d.valor }))}
-                totalGeneral={data.unidadesPorProveedor.reduce((a, d) => a + d.valor, 0)}
+                totalGeneral={data.totalesProveedor.unidades}
+                seleccionado={filtros.proveedor}
+                onSeleccionar={alternar("proveedor")}
               />
             </Panel>
             <Panel titulo="Flete por proveedor" nota="Top 12">
               <TortaProveedores
                 datos={data.fletePorProveedor.map((d) => ({ label: d.label, total: d.valor }))}
-                totalGeneral={data.kpis.fleteTotal}
+                totalGeneral={data.totalesProveedor.flete}
+                seleccionado={filtros.proveedor}
+                onSeleccionar={alternar("proveedor")}
               />
             </Panel>
             <Panel titulo="Margen por proveedor" nota="Ajustado según el flete elegido arriba">
-              <BarrasCategoria datos={data.margenPorProveedor} formato={fmtMonedaCorta} colorUnico={PALETA[1]} />
+              <BarrasCategoria
+                datos={data.margenPorProveedor}
+                formato={fmtMonedaCorta}
+                colorUnico={PALETA[1]}
+                seleccionado={filtros.proveedor}
+                onSeleccionar={alternar("proveedor")}
+              />
             </Panel>
             <Panel titulo="% Flete sobre facturación por provincia" nota="Top 15">
-              <BarrasCategoria datos={data.pctFletePorProvincia} formato={(n) => fmtPct(n)} colorUnico={PALETA[2]} />
+              <BarrasCategoria
+                datos={data.pctFletePorProvincia}
+                formato={(n) => fmtPct(n)}
+                colorUnico={PALETA[2]}
+                seleccionado={filtros.provincia}
+                onSeleccionar={alternar("provincia")}
+              />
             </Panel>
           </div>
 

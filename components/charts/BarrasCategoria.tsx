@@ -52,6 +52,8 @@ export default function BarrasCategoria({
   colorUnico,
   alturaMinima = 240,
   vacio = "Sin datos para el filtro elegido.",
+  seleccionado,
+  onSeleccionar,
 }: {
   datos: PuntoEtiqueta[];
   formato: (n: number) => string;
@@ -60,6 +62,9 @@ export default function BarrasCategoria({
   colorUnico?: string;
   alturaMinima?: number;
   vacio?: string;
+  seleccionado?: string;
+  /** Si se omite, las barras son solo de lectura (sin filtro cruzado). */
+  onSeleccionar?: (label: string) => void;
 }) {
   if (datos.length === 0) {
     return <p className="text-muted py-16 text-center text-sm">{vacio}</p>;
@@ -105,9 +110,19 @@ export default function BarrasCategoria({
           dataKey="valor"
           radius={horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
           isAnimationActive={false}
+          onClick={(d: unknown) => {
+            const label = (d as { payload?: PuntoEtiqueta })?.payload?.label;
+            if (label) onSeleccionar?.(label);
+          }}
+          className={onSeleccionar ? "cursor-pointer" : undefined}
         >
           {datos.map((d, i) => (
-            <Cell key={d.label} fill={colorUnico ?? colorSerie(i)} />
+            <Cell
+              key={d.label}
+              fill={colorUnico ?? colorSerie(i)}
+              // Con algo seleccionado, el resto se atenúa en vez de desaparecer.
+              fillOpacity={!seleccionado || seleccionado === d.label ? 1 : 0.25}
+            />
           ))}
         </Bar>
       </BarChart>

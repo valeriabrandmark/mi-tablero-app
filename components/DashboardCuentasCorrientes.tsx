@@ -61,6 +61,10 @@ export default function DashboardCuentasPage() {
     setFiltros(f);
   };
 
+  /** Click en un gráfico: aplica el valor, o lo saca si ya estaba puesto. */
+  const alternar = (campo: "categoria" | "vendedor") => (valor: string) =>
+    cambiar({ ...filtros, [campo]: filtros[campo] === valor ? undefined : valor });
+
   const k = data?.kpis;
   const vacio = !filtros.vendedor && !filtros.empresa && !filtros.categoria;
 
@@ -144,10 +148,17 @@ export default function DashboardCuentasPage() {
               <TortaProveedores
                 datos={data.clientesPorCategoria.map((d) => ({ label: d.label, total: d.valor }))}
                 totalGeneral={data.clientesPorCategoria.reduce((a, d) => a + d.valor, 0)}
+                seleccionado={filtros.categoria}
+                onSeleccionar={alternar("categoria")}
               />
             </Panel>
             <Panel titulo="Deuda total por categoría">
-              <BarrasCategoria datos={data.deudaPorCategoria} formato={fmtMonedaCorta} />
+              <BarrasCategoria
+                datos={data.deudaPorCategoria}
+                formato={fmtMonedaCorta}
+                seleccionado={filtros.categoria}
+                onSeleccionar={alternar("categoria")}
+              />
             </Panel>
             <Panel titulo="Antigüedad de la deuda" nota="Saldo pendiente por bucket de atraso">
               <BarrasCategoria
@@ -159,7 +170,13 @@ export default function DashboardCuentasPage() {
               />
             </Panel>
             <Panel titulo="Saldo vencido cancelado por vendedor" nota="Clientes que salieron de mora">
-              <BarrasCategoria datos={data.cancelacionesPorVendedor} formato={fmtMonedaCorta} colorUnico={PALETA[1]} />
+              <BarrasCategoria
+                datos={data.cancelacionesPorVendedor}
+                formato={fmtMonedaCorta}
+                colorUnico={PALETA[1]}
+                seleccionado={filtros.vendedor}
+                onSeleccionar={alternar("vendedor")}
+              />
             </Panel>
           </div>
 

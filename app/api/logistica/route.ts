@@ -18,6 +18,7 @@ export async function GET(request: NextRequest) {
     transporte: sp.get("transporte") || undefined,
     provincia: sp.get("provincia") || undefined,
     estadoFlete: sp.get("estadoFlete") || undefined,
+    proveedor: sp.get("proveedor") || undefined,
     modoFlete: modo && MODOS.includes(modo) ? modo : "sin",
   };
 
