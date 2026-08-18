@@ -130,7 +130,10 @@ export default function DashboardObjetivosPage({
         </Aviso>
       )}
 
-      {resumen.length === 0 && !error ? (
+      {/* Con error no se dibuja ninguna tarjeta: si no, quedaba la de "%
+          facturación vencida" sola con un guión, que se lee como un dato real
+          y no como lo que es (no se pudo consultar nada). */}
+      {error ? null : resumen.length === 0 ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />

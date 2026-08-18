@@ -1,20 +1,28 @@
-import Link from "next/link";
-import BotonSalir from "@/components/BotonSalir";
+import BarraLateral, { type ClaveIcono, type ItemNav } from "@/components/BarraLateral";
 import { slugVendedor, VENDEDORES_OBJETIVOS } from "@/lib/constantes";
-import { permisoDelUsuario, puedeVer } from "@/lib/permisos";
+import { permisoDelUsuario, puedeVer, type Rol } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
 
-const NAV = [
-  { href: "/ventas-mayoristas", label: "Ventas Mayoristas" },
-  { href: "/logistica", label: "Logística" },
-  { href: "/cuentas-corrientes", label: "Cuentas Corrientes" },
+const NAV: ItemNav[] = [
+  { href: "/ventas-mayoristas", label: "Ventas Mayoristas", icono: "ventas" as ClaveIcono },
+  { href: "/logistica", label: "Logística", icono: "logistica" as ClaveIcono },
+  { href: "/cuentas-corrientes", label: "Cuentas Corrientes", icono: "cuentas" as ClaveIcono },
   // Una entrada por vendedor: cada uno entra directo a su tablero.
   ...VENDEDORES_OBJETIVOS.map((v) => ({
     href: `/objetivos/${slugVendedor(v)}`,
     label: `Objetivos ${v.charAt(0)}${v.slice(1).toLowerCase()}`,
+    icono: "objetivos" as ClaveIcono,
   })),
-] as const;
+];
+
+/** Cómo se muestra cada rol abajo del email. */
+const NOMBRE_ROL: Record<Rol, string> = {
+  superadmin: "Superadministrador",
+  admin: "Administrador",
+  supervisor: "Supervisor",
+  vendedor: "Vendedor",
+};
 
 export default async function TableroLayout({ children }: LayoutProps<"/">) {
   const usuario = authConfigurada ? await getUsuario() : null;
@@ -25,41 +33,28 @@ export default async function TableroLayout({ children }: LayoutProps<"/">) {
   const nav = authConfigurada ? NAV.filter((item) => puedeVer(permiso, item.href)) : NAV;
 
   return (
-    <div className="flex min-h-full flex-1 flex-col">
-      <header className="border-line bg-panel/80 sticky top-0 z-20 border-b backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
-          <span className="text-sm font-semibold tracking-tight">Brandmark negocio</span>
+    <div className="flex min-h-full flex-1">
+      <BarraLateral
+        nav={nav}
+        email={usuario?.email ?? null}
+        rol={permiso ? NOMBRE_ROL[permiso.rol] : null}
+        authConfigurada={authConfigurada}
+      />
 
-          <nav className="flex flex-wrap gap-1 text-sm">
-            {nav.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="hover:bg-panel-2 text-muted hover:text-ink rounded-lg px-3 py-1.5"
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-
-          <div className="ml-auto flex items-center gap-3">
-            {usuario?.email && (
-              <span className="text-muted hidden text-xs sm:inline">{usuario.email}</span>
-            )}
-            {authConfigurada && <BotonSalir />}
-          </div>
-        </div>
-
+      {/* `min-w-0` para que las tablas anchas scrolleen dentro de su panel en
+          vez de estirar la página entera. `pt-16` deja lugar a la barra de
+          móvil, que es fija; en escritorio no hace falta. */}
+      <div className="flex min-w-0 flex-1 flex-col pt-16 lg:pt-0">
         {!authConfigurada && (
-          <p className="bg-c3/15 text-c3 border-c3/30 border-t px-4 py-1.5 text-xs sm:px-6">
+          <p className="bg-c3/15 text-c3 border-c3/30 border-b px-4 py-1.5 text-xs sm:px-6">
             Login deshabilitado: faltan <code>NEXT_PUBLIC_SUPABASE_URL</code> y{" "}
             <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>. En producción el tablero no se sirve
             sin ellas.
           </p>
         )}
-      </header>
 
-      <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-6 sm:px-6">{children}</main>
+        <main className="w-full max-w-[1600px] flex-1 px-4 py-6 sm:px-6">{children}</main>
+      </div>
     </div>
   );
 }
