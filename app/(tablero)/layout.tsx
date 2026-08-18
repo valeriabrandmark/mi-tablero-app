@@ -8,6 +8,15 @@ const NAV: ItemNav[] = [
   { href: "/ventas-mayoristas", label: "Ventas Mayoristas", icono: "ventas" as ClaveIcono },
   { href: "/logistica", label: "Logística", icono: "logistica" as ClaveIcono },
   { href: "/cuentas-corrientes", label: "Cuentas Corrientes", icono: "cuentas" as ClaveIcono },
+  {
+    href: "/venta-minorista",
+    label: "Venta minorista",
+    icono: "minorista" as ClaveIcono,
+    hijos: [
+      { href: "/venta-minorista/mercado-libre", label: "Mercado Libre" },
+      { href: "/venta-minorista/tienda-nube", label: "Tienda Nube" },
+    ],
+  },
   // Una entrada por vendedor: cada uno entra directo a su tablero.
   ...VENDEDORES_OBJETIVOS.map((v) => ({
     href: `/objetivos/${slugVendedor(v)}`,
@@ -22,15 +31,30 @@ const NOMBRE_ROL: Record<Rol, string> = {
   admin: "Administrador",
   supervisor: "Supervisor",
   vendedor: "Vendedor",
+  responsable_meli: "Responsable Mercado Libre",
 };
+
+/**
+ * Saca del nav lo que el proxy le va a rebotar igual, usando la MISMA regla que
+ * las otras barreras para que no se desincronicen.
+ *
+ * Los hijos se filtran uno por uno y el grupo desaparece si se queda sin
+ * ninguno: si solo se mirara el href del grupo, alcanzaría con tener permiso
+ * sobre la sección para ver listadas subpáginas que después no se pueden abrir.
+ */
+function navPermitido(nav: ItemNav[], permiso: Parameters<typeof puedeVer>[0]): ItemNav[] {
+  return nav.flatMap((item) => {
+    if (!item.hijos) return puedeVer(permiso, item.href) ? [item] : [];
+    const hijos = item.hijos.filter((h) => puedeVer(permiso, h.href));
+    return hijos.length > 0 ? [{ ...item, hijos }] : [];
+  });
+}
 
 export default async function TableroLayout({ children }: LayoutProps<"/">) {
   const usuario = authConfigurada ? await getUsuario() : null;
 
-  // El nav no muestra links que el proxy le va a rebotar igual. Usa la misma
-  // regla que las otras barreras, así no se desincronizan.
   const permiso = permisoDelUsuario(usuario);
-  const nav = authConfigurada ? NAV.filter((item) => puedeVer(permiso, item.href)) : NAV;
+  const nav = authConfigurada ? navPermitido(NAV, permiso) : NAV;
 
   return (
     <div className="flex min-h-full flex-1">

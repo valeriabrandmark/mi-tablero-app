@@ -243,6 +243,67 @@ hay que agregarlo a `CODIGO_SIGMA` o su deuda no va a aparecer nunca.
 
 ---
 
+## Definición de la sección "Venta minorista"
+
+Dos negocios de Unibrandco: **Mercado Libre** (armado) y **Tienda Nube** (todavía
+no, porque sus ventas no llegan a Supabase).
+
+Mercado Libre tiene tres pestañas arriba, iguales a las del reporte de Data
+Studio: **Tablero**, **Alertas** y **Stock Full / días sin venta**. La tercera
+está marcada como pendiente a propósito — ver más abajo.
+
+La fuente es `gold.fact_ventas` filtrada por `canal = 'Mercado Libre'`. **No se
+lee la planilla de Google**: de ahí se copió la fórmula, no el dato.
+
+### La fórmula
+
+```
+Venta c/IVA      = total_linea                     (= precio_unitario * cantidad)
+Venta s/IVA      = precio_neto     * cantidad
+Costo s/IVA      = costo_unitario  * cantidad      (ya con descuento de proveedor)
+Comisión         = comision        * cantidad
+Envío            = envio                           (ya viene por línea)
+
+Rentabilidad bruta = Venta s/IVA - Costo - Comisión - Envío
+Rentabilidad neta  = bruta - 7,4 % de la Venta s/IVA
+                     (IIBB 5 % + Imp. Cheque 1,2 % + Imp. Municipal 1,2 %)
+```
+
+Los dos márgenes usan denominadores distintos, igual que la planilla: el
+**Tablero** divide por venta **c/IVA** y **Alertas** por venta **s/IVA**. No es un
+descuido; es lo que hace que los números coincidan con el reporte de origen.
+
+Verificado contra filas concretas de la planilla, al centavo:
+
+| SKU | Cant. | Rent. bruta | IIBB | Rent. neta |
+|---|---|---|---|---|
+| BA01015 | 1 | 113,93 (planilla 114) | 324,84 (325) | -366,84 (-367) |
+| GL55005 | 3 | 1.112,56 (1.113) | 723,27 (723) | 42,11 (42) |
+
+### Tres cosas del dato que hay que saber
+
+1. **`comision` está guardada POR UNIDAD, y `margen_total` la resta una sola
+   vez.** El mismo SKU con cantidad 2, 3, 6 y 10 tiene siempre el mismo
+   `comision`, así que no puede ser un total de línea. Por eso esta sección
+   **recalcula** la rentabilidad en vez de usar `margen_total`: la columna
+   guardada infla la ganancia de Mercado Libre en unos 6,5 M por mes.
+
+2. **El costo de envío está incompleto.** `bronze.ml_envios` tiene 17.170
+   órdenes pero solo 2.542 con costo, y en `fact_ventas` el envío es **0 en todo
+   2026-07 y 2026-08**. Donde falta, la rentabilidad queda sobreestimada: el
+   caso SU01106 da 11.305 en el tablero contra 5.851 en la planilla, y la
+   diferencia es exactamente el envío que no se cargó.
+
+3. **Los impuestos son alícuotas, no un dato de la venta.** Están en
+   `lib/meli.ts` y se cambian ahí, en un solo lugar.
+
+### Por qué falta la pestaña de stock
+
+`bronze.ml_stock_full` (3.826 filas) y `bronze.ml_publicaciones` (8.504) se
+cargaron una sola vez y hoy están viejas. "Días sin venta" y "días de stock"
+calculados sobre un stock que ya no es se leen como un dato y no lo son. La
+pestaña queda visible pero apagada hasta que el orquestador los refresque.
+
 ## Permisos y roles
 
 Cada usuario de Supabase Auth lleva su rol en `app_metadata`:
@@ -258,6 +319,7 @@ Cada usuario de Supabase Auth lleva su rol en `app_metadata`:
 | `admin` | Todo, sin editar |
 | `supervisor` | Las páginas de objetivos de los cuatro vendedores |
 | `vendedor` | Únicamente su propia página de objetivos |
+| `responsable_meli` | Únicamente la sección Venta minorista |
 | *(sin claim)* | **Nada** |
 
 Dos advertencias que importan:
@@ -287,7 +349,16 @@ update auth.users
 set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
                         || '{"rol":"vendedor","vendedor":"SILVIO"}'::jsonb
 where email = 'silvio@ejemplo.com';
+
+-- Responsable de Mercado Libre: ve Venta minorista y nada más.
+update auth.users
+set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
+                        || '{"rol":"responsable_meli"}'::jsonb
+where email = 'persona@ejemplo.com';
 ```
+
+El rol se normaliza antes de compararlo, así que `"responsable meli"` con
+espacio también funciona.
 
 El `||` fusiona en vez de reemplazar, así no se pisan las claves que Supabase
 guarda ahí (`provider`, `providers`). El nombre del vendedor va **en mayúsculas

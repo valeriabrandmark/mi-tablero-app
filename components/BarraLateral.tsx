@@ -5,12 +5,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import BotonSalir from "@/components/BotonSalir";
 
-export type ItemNav = { href: string; label: string; icono: ClaveIcono };
+export type ItemNav = {
+  href: string;
+  label: string;
+  icono: ClaveIcono;
+  /** Subpáginas. Si están, la entrada es un grupo desplegable en vez de un link. */
+  hijos?: { href: string; label: string }[];
+};
 
-export type ClaveIcono = "ventas" | "logistica" | "cuentas" | "objetivos";
+export type ClaveIcono = "ventas" | "logistica" | "cuentas" | "objetivos" | "minorista";
 
 /**
- * Íconos como SVG inline y no una librería: son cuatro, no cambian, y sumar una
+ * Íconos como SVG inline y no una librería: son cinco, no cambian, y sumar una
  * dependencia entera para esto haría más pesado el bundle que el tablero.
  */
 const ICONOS: Record<ClaveIcono, ReactNode> = {
@@ -40,6 +46,15 @@ const ICONOS: Record<ClaveIcono, ReactNode> = {
       <circle cx="12" cy="12" r="1" />
     </>
   ),
+  // Local a la calle: la venta minorista es la que le vende al consumidor final.
+  minorista: (
+    <>
+      <path d="M3.5 9.5 5 4h14l1.5 5.5" />
+      <path d="M3.5 9.5a2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 2 0" />
+      <path d="M5 11v9h14v-9" />
+      <path d="M10 20v-5h4v5" />
+    </>
+  ),
 };
 
 function Icono({ clave }: { clave: ClaveIcono }) {
@@ -56,6 +71,85 @@ function Icono({ clave }: { clave: ClaveIcono }) {
     >
       {ICONOS[clave]}
     </svg>
+  );
+}
+
+/** Clases del link de nav, para que el item suelto y el hijo de un grupo coincidan. */
+function clasesLink(activo: boolean, sangria = false) {
+  return `flex items-center gap-3 rounded-lg py-2 text-sm transition-colors ${
+    sangria ? "pr-3 pl-11" : "px-3"
+  } ${activo ? "bg-panel-2 text-ink font-medium" : "text-muted hover:bg-panel-2/60 hover:text-ink"}`;
+}
+
+/**
+ * Entrada con subpáginas ("Venta minorista" -> Mercado Libre, Tienda Nube).
+ *
+ * Arranca abierta cuando estás parado en cualquiera de sus hijos: si no, entrar
+ * por un link directo dejaría la barra mostrando el grupo cerrado y la página
+ * actual sin marcar en ningún lado.
+ *
+ * El encabezado es un botón y no un link a propósito: la sección no tiene
+ * portada, así que un click ahí no tiene adónde llevarte que no sea ya visible.
+ */
+function Grupo({
+  item,
+  pathname,
+  alNavegar,
+}: {
+  item: ItemNav;
+  pathname: string;
+  alNavegar?: () => void;
+}) {
+  const hijos = item.hijos ?? [];
+  const dentro = hijos.some((h) => pathname === h.href || pathname.startsWith(`${h.href}/`));
+  const [abierto, setAbierto] = useState(dentro);
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => setAbierto((a) => !a)}
+        aria-expanded={abierto}
+        className={`${clasesLink(dentro && !abierto)} w-full text-left`}
+      >
+        <Icono clave={item.icono} />
+        <span className="flex-1 truncate">{item.label}</span>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          className={`size-4 shrink-0 transition-transform ${abierto ? "rotate-180" : ""}`}
+          aria-hidden="true"
+        >
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+
+      {abierto && (
+        <ul className="mt-0.5 space-y-0.5">
+          {hijos.map((h) => {
+            // `startsWith` acá sí: las pestañas de Mercado Libre cuelgan de su
+            // propia URL, y estando en Alertas el grupo tiene que seguir
+            // marcando Mercado Libre.
+            const activo = pathname === h.href || pathname.startsWith(`${h.href}/`);
+            return (
+              <li key={h.href}>
+                <Link
+                  href={h.href}
+                  onClick={alNavegar}
+                  aria-current={activo ? "page" : undefined}
+                  className={clasesLink(activo, true)}
+                >
+                  <span className="truncate">{h.label}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </li>
   );
 }
 
@@ -84,6 +178,17 @@ function Contenido({
       <nav className="flex-1 overflow-y-auto px-3 pb-4">
         <ul className="space-y-0.5">
           {nav.map((item) => {
+            if (item.hijos?.length) {
+              return (
+                <Grupo
+                  key={item.href}
+                  item={item}
+                  pathname={pathname}
+                  alNavegar={alNavegar}
+                />
+              );
+            }
+
             // `startsWith` no sirve acá: /objetivos marcaría activas las cuatro
             // páginas de vendedor a la vez.
             const activo = pathname === item.href;
@@ -93,11 +198,7 @@ function Contenido({
                   href={item.href}
                   onClick={alNavegar}
                   aria-current={activo ? "page" : undefined}
-                  className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
-                    activo
-                      ? "bg-panel-2 text-ink font-medium"
-                      : "text-muted hover:bg-panel-2/60 hover:text-ink"
-                  }`}
+                  className={clasesLink(activo)}
                 >
                   <Icono clave={item.icono} />
                   <span className="truncate">{item.label}</span>
