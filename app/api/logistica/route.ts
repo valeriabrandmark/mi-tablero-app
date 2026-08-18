@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getDashboardLogistica, getOpcionesLogistica } from "@/lib/queries-logistica";
+import { lista } from "@/lib/filtros";
 import type { FiltrosLogistica, ModoFlete } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -12,13 +13,14 @@ export async function GET(request: NextRequest) {
   const modo = sp.get("modoFlete") as ModoFlete | null;
 
   const filtros: FiltrosLogistica = {
-    vendedor: sp.get("vendedor") || undefined,
-    empresa: sp.get("empresa") || undefined,
-    mes: sp.get("mes") || undefined,
-    transporte: sp.get("transporte") || undefined,
-    provincia: sp.get("provincia") || undefined,
-    estadoFlete: sp.get("estadoFlete") || undefined,
-    proveedor: sp.get("proveedor") || undefined,
+    vendedor: lista(sp, "vendedor"),
+    empresa: lista(sp, "empresa"),
+    mes: lista(sp, "mes"),
+    transporte: lista(sp, "transporte"),
+    provincia: lista(sp, "provincia"),
+    estadoFlete: lista(sp, "estadoFlete"),
+    proveedor: lista(sp, "proveedor"),
+    // El modo de flete NO es un filtro sino un cálculo: sigue siendo único.
     modoFlete: modo && MODOS.includes(modo) ? modo : "sin",
   };
 

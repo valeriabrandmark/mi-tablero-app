@@ -4,7 +4,8 @@ import { useState } from "react";
 import EncabezadoPagina from "@/components/EncabezadoPagina";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import TortaProveedores from "@/components/charts/TortaProveedores";
-import { BotonLimpiar, SelectorFiltro } from "@/components/SelectorFiltro";
+import { BotonLimpiar, SelectorFiltro, SelectorMultiple } from "@/components/SelectorFiltro";
+import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtMes, fmtMoneda, fmtMonedaCorta, fmtNumero, fmtPct } from "@/lib/format";
@@ -55,14 +56,15 @@ export default function DashboardLogisticaPage() {
     setFiltros(f);
   };
 
-  /** Click en un gráfico: aplica el valor, o lo saca si ya estaba puesto. */
+  /** Click en un gráfico: suma ese valor a la selección, o lo saca. */
   const alternar = (campo: "proveedor" | "provincia") => (valor: string) =>
-    cambiar({ ...filtros, [campo]: filtros[campo] === valor ? undefined : valor });
+    cambiar({ ...filtros, [campo]: alternarValor(filtros[campo], valor) });
 
   const k = data?.kpis;
   const vacio =
-    !filtros.vendedor && !filtros.empresa && !filtros.mes && !filtros.transporte &&
-    !filtros.provincia && !filtros.estadoFlete && !filtros.proveedor &&
+    sinValores(filtros.vendedor) && sinValores(filtros.empresa) && sinValores(filtros.mes) &&
+    sinValores(filtros.transporte) && sinValores(filtros.provincia) &&
+    sinValores(filtros.estadoFlete) && sinValores(filtros.proveedor) &&
     (filtros.modoFlete ?? "sin") === "sin";
 
   return (
@@ -85,40 +87,40 @@ export default function DashboardLogisticaPage() {
       </div>
 
       <div className="border-line bg-panel flex flex-wrap items-end gap-3 rounded-xl border p-3">
-        <SelectorFiltro
+        <SelectorMultiple
           etiqueta="Vendedor"
-          valor={filtros.vendedor}
+          valores={filtros.vendedor}
           opciones={opciones?.vendedores ?? []}
           onChange={(v) => cambiar({ ...filtros, vendedor: v })}
         />
-        <SelectorFiltro
+        <SelectorMultiple
           etiqueta="Empresa"
-          valor={filtros.empresa}
+          valores={filtros.empresa}
           opciones={opciones?.empresas ?? []}
           onChange={(v) => cambiar({ ...filtros, empresa: v })}
         />
-        <SelectorFiltro
+        <SelectorMultiple
           etiqueta="Mes comercial"
-          valor={filtros.mes}
+          valores={filtros.mes}
           opciones={opciones?.meses ?? []}
           onChange={(v) => cambiar({ ...filtros, mes: v })}
           formato={fmtMes}
         />
-        <SelectorFiltro
+        <SelectorMultiple
           etiqueta="Transporte"
-          valor={filtros.transporte}
+          valores={filtros.transporte}
           opciones={opciones?.transportes ?? []}
           onChange={(v) => cambiar({ ...filtros, transporte: v })}
         />
-        <SelectorFiltro
+        <SelectorMultiple
           etiqueta="Provincia"
-          valor={filtros.provincia}
+          valores={filtros.provincia}
           opciones={opciones?.provincias ?? []}
           onChange={(v) => cambiar({ ...filtros, provincia: v })}
         />
-        <SelectorFiltro
+        <SelectorMultiple
           etiqueta="Estado flete"
-          valor={filtros.estadoFlete}
+          valores={filtros.estadoFlete}
           opciones={[["real", "Real"], ["estimado", "Estimado"]]}
           onChange={(v) => cambiar({ ...filtros, estadoFlete: v })}
         />
@@ -170,7 +172,7 @@ export default function DashboardLogisticaPage() {
               <TortaProveedores
                 datos={data.unidadesPorProveedor.map((d) => ({ label: d.label, total: d.valor }))}
                 totalGeneral={data.totalesProveedor.unidades}
-                seleccionado={filtros.proveedor}
+                seleccionados={filtros.proveedor}
                 onSeleccionar={alternar("proveedor")}
               />
             </Panel>
@@ -178,7 +180,7 @@ export default function DashboardLogisticaPage() {
               <TortaProveedores
                 datos={data.fletePorProveedor.map((d) => ({ label: d.label, total: d.valor }))}
                 totalGeneral={data.totalesProveedor.flete}
-                seleccionado={filtros.proveedor}
+                seleccionados={filtros.proveedor}
                 onSeleccionar={alternar("proveedor")}
               />
             </Panel>
@@ -187,7 +189,7 @@ export default function DashboardLogisticaPage() {
                 datos={data.margenPorProveedor}
                 formato={fmtMonedaCorta}
                 colorUnico={PALETA[1]}
-                seleccionado={filtros.proveedor}
+                seleccionados={filtros.proveedor}
                 onSeleccionar={alternar("proveedor")}
               />
             </Panel>
@@ -196,7 +198,7 @@ export default function DashboardLogisticaPage() {
                 datos={data.pctFletePorProvincia}
                 formato={(n) => fmtPct(n)}
                 colorUnico={PALETA[2]}
-                seleccionado={filtros.provincia}
+                seleccionados={filtros.provincia}
                 onSeleccionar={alternar("provincia")}
               />
             </Panel>

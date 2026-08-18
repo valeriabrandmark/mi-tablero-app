@@ -37,14 +37,15 @@ function Contenido({
 export default function TortaProveedores({
   datos,
   totalGeneral,
-  seleccionado,
+  seleccionados,
   onSeleccionar,
 }: {
   datos: PuntoProveedor[];
   /** Facturación neta de TODOS los proveedores, no solo los del top 12:
    *  los porcentajes tienen que ser sobre el total real. */
   totalGeneral: number;
-  seleccionado?: string;
+  /** Valores resaltados; el resto se atenúa. Vacío = todos iguales. */
+  seleccionados?: string[];
   /** Si se omite, la torta es solo de lectura (sin filtro cruzado). */
   onSeleccionar?: (proveedor: string) => void;
 }) {
@@ -81,7 +82,7 @@ export default function TortaProveedores({
                   key={d.label}
                   fill={colorSerie(i)}
                   // Al seleccionar uno, los demás se atenúan en vez de desaparecer.
-                  fillOpacity={!seleccionado || seleccionado === d.label ? 1 : 0.25}
+                  fillOpacity={!seleccionados?.length || seleccionados.includes(d.label) ? 1 : 0.25}
                 />
               ))}
             </Pie>
@@ -93,14 +94,14 @@ export default function TortaProveedores({
       {/* Leyenda propia: 12 proveedores no entran en la de recharts. */}
       <ul className="grid shrink-0 grid-cols-1 gap-x-6 gap-y-1.5 text-xs sm:grid-cols-2 lg:w-[42%] lg:grid-cols-1">
         {datos.map((d, i) => {
-          const activo = seleccionado === d.label;
+          const activo = !!seleccionados?.includes(d.label);
           return (
             <li key={d.label}>
               <button
                 onClick={() => onSeleccionar?.(d.label)}
                 disabled={!onSeleccionar}
                 className={`hover:bg-panel-2 flex w-full items-center gap-2 rounded px-1 py-0.5 text-left ${
-                  seleccionado && !activo ? "opacity-40" : ""
+                  seleccionados?.length && !activo ? "opacity-40" : ""
                 }`}
               >
                 <span

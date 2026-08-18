@@ -363,6 +363,45 @@ lado.
 
 ---
 
+## Filtros
+
+**Todos los filtros son de selección múltiple.** El valor de un filtro es una
+lista; lista vacía significa "sin filtrar", no "ninguno" — que es lo que espera
+cualquiera que use un tablero.
+
+Se ven como un desplegable con checkboxes y no como un `<select multiple>`
+nativo: el nativo obliga a hacer ctrl+click para sumar valores, no muestra
+cuántos hay elegidos sin desplegarlo, y en móvil es inusable.
+
+El click en un gráfico o en una fila **suma** esa categoría a la selección, o la
+saca si ya estaba. En Ventas cada valor elegido tiene su chip: con selección
+múltiple, un chip por campo escondería cuántos valores hay puestos.
+
+### Cómo viaja
+
+Cada valor va como un **parámetro repetido** (`?sku=A&sku=B`) y no separado por
+comas: los nombres de cliente y de producto traen comas adentro, así que
+cualquier separador partiría un valor al medio.
+
+En SQL se arma con `columna = any($n::text[])`, un solo parámetro por filtro.
+Así la consulta preparada es siempre la misma sin importar cuántos valores se
+elijan, y no hay forma de armar la lista concatenando texto. El `::text[]` es
+explícito porque sin él Postgres no siempre infiere el tipo dentro de
+subconsultas y joins.
+
+Todo pasa por [lib/filtros.ts](lib/filtros.ts): `agregarFiltro` para el where,
+`lista` para leer la query string en las rutas de API, y `alternar` para el
+click en los gráficos.
+
+### Las dos excepciones
+
+- **"Flete a descontar del margen"** (Logística) sigue siendo de opción única:
+  no es un filtro sino un modo de cálculo, y elegir dos no significaría nada.
+- **"Estado flete"** es múltiple, pero con los dos tildados no filtra nada —
+  igual que con ninguno.
+
+---
+
 ## Contraseñas
 
 | Pantalla | Para qué |

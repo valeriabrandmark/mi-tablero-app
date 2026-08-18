@@ -4,7 +4,8 @@ import { useState } from "react";
 import EncabezadoPagina from "@/components/EncabezadoPagina";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import TortaProveedores from "@/components/charts/TortaProveedores";
-import { BotonLimpiar, SelectorFiltro } from "@/components/SelectorFiltro";
+import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
+import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtMes, fmtMoneda, fmtMonedaCorta, fmtNumero, fmtPct } from "@/lib/format";
@@ -62,12 +63,12 @@ export default function DashboardCuentasPage() {
     setFiltros(f);
   };
 
-  /** Click en un gráfico: aplica el valor, o lo saca si ya estaba puesto. */
+  /** Click en un gráfico: suma ese valor a la selección, o lo saca. */
   const alternar = (campo: "categoria" | "vendedor") => (valor: string) =>
-    cambiar({ ...filtros, [campo]: filtros[campo] === valor ? undefined : valor });
+    cambiar({ ...filtros, [campo]: alternarValor(filtros[campo], valor) });
 
   const k = data?.kpis;
-  const vacio = !filtros.vendedor && !filtros.empresa && !filtros.categoria;
+  const vacio = sinValores(filtros.vendedor) && sinValores(filtros.empresa) && sinValores(filtros.categoria);
 
   return (
     <div className="space-y-4">
@@ -89,21 +90,21 @@ export default function DashboardCuentasPage() {
       </div>
 
       <div className="border-line bg-panel flex flex-wrap items-end gap-3 rounded-xl border p-3">
-        <SelectorFiltro
+        <SelectorMultiple
           etiqueta="Vendedor"
-          valor={filtros.vendedor}
+          valores={filtros.vendedor}
           opciones={opciones?.vendedores ?? []}
           onChange={(v) => cambiar({ ...filtros, vendedor: v })}
         />
-        <SelectorFiltro
+        <SelectorMultiple
           etiqueta="Empresa"
-          valor={filtros.empresa}
+          valores={filtros.empresa}
           opciones={opciones?.empresas ?? []}
           onChange={(v) => cambiar({ ...filtros, empresa: v })}
         />
-        <SelectorFiltro
+        <SelectorMultiple
           etiqueta="Categoría"
-          valor={filtros.categoria}
+          valores={filtros.categoria}
           opciones={opciones?.categorias ?? []}
           onChange={(v) => cambiar({ ...filtros, categoria: v })}
         />
@@ -148,7 +149,7 @@ export default function DashboardCuentasPage() {
               <TortaProveedores
                 datos={data.clientesPorCategoria.map((d) => ({ label: d.label, total: d.valor }))}
                 totalGeneral={data.clientesPorCategoria.reduce((a, d) => a + d.valor, 0)}
-                seleccionado={filtros.categoria}
+                seleccionados={filtros.categoria}
                 onSeleccionar={alternar("categoria")}
               />
             </Panel>
@@ -156,7 +157,7 @@ export default function DashboardCuentasPage() {
               <BarrasCategoria
                 datos={data.deudaPorCategoria}
                 formato={fmtMonedaCorta}
-                seleccionado={filtros.categoria}
+                seleccionados={filtros.categoria}
                 onSeleccionar={alternar("categoria")}
               />
             </Panel>
@@ -174,7 +175,7 @@ export default function DashboardCuentasPage() {
                 datos={data.cancelacionesPorVendedor}
                 formato={fmtMonedaCorta}
                 colorUnico={PALETA[1]}
-                seleccionado={filtros.vendedor}
+                seleccionados={filtros.vendedor}
                 onSeleccionar={alternar("vendedor")}
               />
             </Panel>

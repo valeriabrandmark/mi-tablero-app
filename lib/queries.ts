@@ -16,6 +16,7 @@ import type {
   PuntoProveedor,
   SerieDiaria,
 } from "@/lib/types";
+import { agregarFiltro, vacio } from "@/lib/filtros";
 
 type Where = { sql: string; params: unknown[] };
 
@@ -51,24 +52,20 @@ function whereBase(
   ];
 
   for (const [key, columna] of OPCIONALES) {
-    const valor = f[key];
-    if (valor && !omitir.includes(key)) {
-      params.push(valor);
-      clauses.push(`${alias}.${columna} = $${params.length}`);
-    }
+    if (!omitir.includes(key)) agregarFiltro(clauses, params, `${alias}.${columna}`, f[key]);
   }
 
   // La provincia no está en fact_ventas: se llega por el envío. Va como EXISTS
   // para no duplicar filas, y solo cuando el filtro está puesto, así las
   // consultas sin provincia no quedan atadas a la cobertura de logística.
-  if (f.provincia && !omitir.includes("provincia")) {
+  if (!vacio(f.provincia) && !omitir.includes("provincia")) {
     params.push(f.provincia);
     clauses.push(`exists (
       select 1 from gold.fact_ventas_flete fvf
       join gold.reporte_logistica rl on rl.clave_fila = fvf.clave_fila
       where fvf.nro_orden = ${alias}.nro_orden::text
         and fvf.sku = ${alias}.sku
-        and rl.provincia = $${params.length}
+        and rl.provincia = any($${params.length}::text[])
     )`);
   }
 

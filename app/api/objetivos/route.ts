@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getDashboardObjetivos, getOpcionesObjetivos } from "@/lib/queries-objetivos";
 import { VENDEDORES_OBJETIVOS } from "@/lib/constantes";
+import { lista } from "@/lib/filtros";
 import { permisoDelUsuario, puedeVerVendedor } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
@@ -33,8 +34,8 @@ export async function GET(request: NextRequest) {
 
   const filtros: FiltrosObjetivos = {
     vendedor,
-    mes: sp.get("mes") || undefined,
-    grupo: sp.get("grupo") || undefined,
+    mes: lista(sp, "mes"),
+    grupo: lista(sp, "grupo"),
   };
 
   try {

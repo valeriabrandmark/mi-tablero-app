@@ -73,7 +73,7 @@ export function ListaAvance({
   filas,
   etiqueta,
   clave,
-  seleccionado,
+  seleccionados,
   onSeleccionar,
   vacio = "Sin objetivos cargados para el filtro elegido.",
 }: {
@@ -81,7 +81,8 @@ export function ListaAvance({
   etiqueta: (f: FilaObjetivo) => string;
   /** Valor con el que filtra el click; si se omite, usa la etiqueta. */
   clave?: (f: FilaObjetivo) => string;
-  seleccionado?: string;
+  /** Valores resaltados; el resto se atenúa. Vacío = todos iguales. */
+  seleccionados?: string[];
   onSeleccionar?: (valor: string) => void;
   vacio?: string;
 }) {
@@ -99,7 +100,7 @@ export function ListaAvance({
             key={`${valor}-${f.metrica}`}
             fila={f}
             etiqueta={texto}
-            seleccionada={seleccionado ? seleccionado === valor : undefined}
+            seleccionada={seleccionados?.length ? seleccionados.includes(valor) : undefined}
             onClick={onSeleccionar ? () => onSeleccionar(valor) : undefined}
           />
         );

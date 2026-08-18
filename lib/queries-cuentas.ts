@@ -6,6 +6,7 @@ import type {
   OpcionesCuentas,
   PuntoEtiqueta,
 } from "@/lib/types";
+import { agregarFiltro, vacio } from "@/lib/filtros";
 
 /**
  * Página "Cuentas Corrientes" — equivalente de la página homónima de Power BI.
@@ -43,22 +44,17 @@ function whereCuentas(
   const params: unknown[] = [];
   const clauses: string[] = ["true"];
 
-  if (f.vendedor && !omitir.includes("vendedor")) {
-    params.push(f.vendedor);
-    clauses.push(`${alias}.vendedor = $${params.length}`);
-  }
-  if (f.empresa && !omitir.includes("empresa")) {
-    params.push(f.empresa);
-    clauses.push(`${alias}.empresa = $${params.length}`);
-  }
-  if (f.categoria && !omitir.includes("categoria")) {
+  if (!omitir.includes("vendedor")) agregarFiltro(clauses, params, `${alias}.vendedor`, f.vendedor);
+  if (!omitir.includes("empresa")) agregarFiltro(clauses, params, `${alias}.empresa`, f.empresa);
+
+  if (!vacio(f.categoria) && !omitir.includes("categoria")) {
     params.push(f.categoria);
     clauses.push(
       conCategoria
-        ? `${alias}.categoria = $${params.length}`
+        ? `${alias}.categoria = any($${params.length}::text[])`
         : // aging y cancelaciones no tienen categoría: se resuelve por cuit.
           `${alias}.cuit in (select s.cuit from bronze.cuentas_corrientes_scoring s
-                             where s.categoria = $${params.length})`,
+                             where s.categoria = any($${params.length}::text[]))`,
     );
   }
 

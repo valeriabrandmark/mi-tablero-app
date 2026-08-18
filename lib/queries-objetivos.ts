@@ -10,6 +10,7 @@ import type {
   VencidoVendedor,
 } from "@/lib/types";
 import { CANAL_MAYORISTA, codigoSigmaDe, mesComercialActual } from "@/lib/constantes";
+import { agregarFiltro, vacio } from "@/lib/filtros";
 
 /**
  * Página "Objetivos" — avance de UN vendedor contra su objetivo.
@@ -53,17 +54,15 @@ function whereObjetivos(f: FiltrosObjetivos, omitir: (keyof FiltrosObjetivos)[] 
   const params: unknown[] = [f.vendedor];
   const clauses = ["o.vendedor = $1"];
 
-  const opcionales: [keyof FiltrosObjetivos, string][] = [
+  // El vendedor va aparte (lo fija la ruta y es uno solo), así que acá solo
+  // entran los filtros que son listas.
+  const opcionales: [Extract<keyof FiltrosObjetivos, "mes" | "grupo">, string][] = [
     ["mes", "o.mes_comercial"],
     ["grupo", "o.grupo"],
   ];
 
   for (const [key, columna] of opcionales) {
-    const valor = f[key];
-    if (valor && !omitir.includes(key)) {
-      params.push(valor);
-      clauses.push(`${columna} = $${params.length}`);
-    }
+    if (!omitir.includes(key)) agregarFiltro(clauses, params, columna, f[key]);
   }
 
   return { sql: clauses.join("\n     and "), params };
@@ -179,18 +178,15 @@ function cteLineas(f: FiltrosObjetivos): Where {
   const params: unknown[] = [f.vendedor];
   const clauses = [`fv.canal = '${CANAL_MAYORISTA}'`, "fv.vendedor = $1"];
 
-  if (f.mes) {
-    params.push(f.mes);
-    clauses.push(`fv.mes_comercial = $${params.length}`);
-  }
+  agregarFiltro(clauses, params, "fv.mes_comercial", f.mes);
 
   let join = "";
-  if (f.grupo) {
+  if (!vacio(f.grupo)) {
     params.push(f.grupo);
-    join = `join (select g.criterio, i.valor
+    join = `join (select distinct g.criterio, i.valor
                   from gold.objetivos_grupo g
                   join gold.objetivos_grupo_item i on i.grupo = g.grupo
-                  where g.grupo = $${params.length}) m
+                  where g.grupo = any($${params.length}::text[])) m
               on (m.criterio = 'sku'     and m.valor = fv.sku)
               or (m.criterio = 'marca'   and m.valor = fv.marca)
               or (m.criterio = 'empresa' and m.valor = fv.empresa)`;
