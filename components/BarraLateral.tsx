@@ -115,6 +115,37 @@ function Contenido({
             {rol && <p className="text-muted text-xs">{rol}</p>}
           </div>
         )}
+
+        {/* La cuenta va acá abajo y no en el nav de arriba: no es una página del
+            negocio, y la ve cualquiera sin importar el rol. */}
+        {authConfigurada && (
+          <Link
+            href="/cuenta"
+            onClick={alNavegar}
+            aria-current={pathname === "/cuenta" ? "page" : undefined}
+            className={`mb-2 flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs transition-colors ${
+              pathname === "/cuenta"
+                ? "bg-panel-2 text-ink"
+                : "text-muted hover:bg-panel-2/60 hover:text-ink"
+            }`}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="size-4 shrink-0"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="8" r="3.5" />
+              <path d="M4.5 20a7.5 7.5 0 0 1 15 0" />
+            </svg>
+            Mi cuenta
+          </Link>
+        )}
+
         {authConfigurada && <BotonSalir className="w-full justify-start" />}
       </div>
     </div>
