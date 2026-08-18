@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
     vendedor: sp.get("vendedor") || undefined,
     empresa: sp.get("empresa") || undefined,
     mes: sp.get("mes") || undefined,
+    proveedor: sp.get("proveedor") || undefined,
   };
 
   try {

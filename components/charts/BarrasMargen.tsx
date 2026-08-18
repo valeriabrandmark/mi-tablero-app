@@ -32,7 +32,15 @@ function Contenido({ active, payload }: { active?: boolean; payload?: ItemToolti
   );
 }
 
-export default function BarrasMargen({ datos }: { datos: MargenProveedor[] }) {
+export default function BarrasMargen({
+  datos,
+  seleccionado,
+  onSeleccionar,
+}: {
+  datos: MargenProveedor[];
+  seleccionado?: string;
+  onSeleccionar: (proveedor: string) => void;
+}) {
   if (datos.length === 0) {
     return (
       <p className="text-muted py-16 text-center text-sm">
@@ -68,9 +76,22 @@ export default function BarrasMargen({ datos }: { datos: MargenProveedor[] }) {
           interval={0}
         />
         <Tooltip content={<Contenido />} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
-        <Bar dataKey="margenPct" radius={[0, 4, 4, 0]} isAnimationActive={false}>
+        <Bar
+          dataKey="margenPct"
+          radius={[0, 4, 4, 0]}
+          isAnimationActive={false}
+          onClick={(d: unknown) => {
+            const label = (d as { payload?: MargenProveedor })?.payload?.label;
+            if (label) onSeleccionar(label);
+          }}
+          className="cursor-pointer"
+        >
           {datos.map((d) => (
-            <Cell key={d.label} fill={d.margenPct >= 0 ? PALETA[1] : TEMA.negativo} />
+            <Cell
+              key={d.label}
+              fill={d.margenPct >= 0 ? PALETA[1] : TEMA.negativo}
+              fillOpacity={!seleccionado || seleccionado === d.label ? 1 : 0.25}
+            />
           ))}
         </Bar>
       </BarChart>

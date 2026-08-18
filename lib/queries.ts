@@ -16,12 +16,27 @@ import type {
 
 type Where = { sql: string; params: unknown[] };
 
+const OPCIONALES: [keyof Filtros, string][] = [
+  ["vendedor", "vendedor"],
+  ["empresa", "empresa"],
+  ["mes", "mes_comercial"],
+  ["proveedor", "proveedor"],
+];
+
 /**
  * Filtro fijo de la página (canal + exclusión de no-vendedores) más los
  * filtros opcionales que haya elegido el usuario.
  * `extra` son condiciones adicionales propias de cada consulta.
+ * `omitir` desactiva un filtro opcional para esa consulta puntual: los dos
+ * gráficos por proveedor siguen mostrando el ranking completo aunque haya un
+ * proveedor seleccionado, si no se quedarían con una sola barra.
  */
-function whereBase(f: Filtros, extra: string[] = [], alias = "fv"): Where {
+function whereBase(
+  f: Filtros,
+  extra: string[] = [],
+  alias = "fv",
+  omitir: (keyof Filtros)[] = [],
+): Where {
   const params: unknown[] = [CANAL_MAYORISTA, VENDEDORES_EXCLUIDOS];
   const clauses = [
     `${alias}.canal = $1`,
@@ -29,15 +44,9 @@ function whereBase(f: Filtros, extra: string[] = [], alias = "fv"): Where {
     ...extra,
   ];
 
-  const opcionales: [keyof Filtros, string][] = [
-    ["vendedor", "vendedor"],
-    ["empresa", "empresa"],
-    ["mes", "mes_comercial"],
-  ];
-
-  for (const [key, columna] of opcionales) {
+  for (const [key, columna] of OPCIONALES) {
     const valor = f[key];
-    if (valor) {
+    if (valor && !omitir.includes(key)) {
       params.push(valor);
       clauses.push(`${alias}.${columna} = $${params.length}`);
     }
@@ -117,24 +126,37 @@ async function getTop10Clientes(f: Filtros) {
 
 // --- 3. Facturación por proveedor (torta) ------------------------------------
 
-async function getFacturacionPorProveedor(f: Filtros): Promise<PuntoProveedor[]> {
-  const w = whereBase(f);
-  return query<PuntoProveedor>(
-    `select coalesce(fv.proveedor, '—') as label,
-            coalesce(sum(fv.precio_neto * fv.cantidad), 0)::float8 as total
-     from gold.fact_ventas fv
-     where ${w.sql}
-     group by fv.proveedor
-     order by total desc nulls last
-     limit 12`,
-    w.params,
-  );
+async function getFacturacionPorProveedor(f: Filtros) {
+  const w = whereBase(f, [], "fv", ["proveedor"]);
+
+  // El total va aparte porque la lista está cortada en 12 y porque acá no
+  // aplica el filtro de proveedor: los porcentajes son sobre el total real.
+  const [datos, totalFila] = await Promise.all([
+    query<PuntoProveedor>(
+      `select coalesce(fv.proveedor, '—') as label,
+              coalesce(sum(fv.precio_neto * fv.cantidad), 0)::float8 as total
+       from gold.fact_ventas fv
+       where ${w.sql}
+       group by fv.proveedor
+       order by total desc nulls last
+       limit 12`,
+      w.params,
+    ),
+    queryOne<{ total: number }>(
+      `select coalesce(sum(fv.precio_neto * fv.cantidad), 0)::float8 as total
+       from gold.fact_ventas fv
+       where ${w.sql}`,
+      w.params,
+    ),
+  ]);
+
+  return { datos, total: totalFila?.total ?? 0 };
 }
 
 // --- 4. Margen % por proveedor (barras horizontales) -------------------------
 
 async function getMargenPorProveedor(f: Filtros): Promise<MargenProveedor[]> {
-  const w = whereBase(f, ["fv.proveedor is not null"]);
+  const w = whereBase(f, ["fv.proveedor is not null"], "fv", ["proveedor"]);
   return query<MargenProveedor>(
     `select fv.proveedor as label,
             case when sum(fv.precio_neto * fv.cantidad) = 0 then 0
@@ -268,6 +290,8 @@ export async function getDashboardVentasMayoristas(
     ]);
 
   return {
+    facturacionPorProveedor: facturacionPorProveedor.datos,
+    facturacionTotalProveedores: facturacionPorProveedor.total,
     kpis: {
       ...totales,
       ...fletes,
@@ -277,7 +301,6 @@ export async function getDashboardVentasMayoristas(
       ticketPromedio:
         totales.cantidadPedidos > 0 ? totales.facturacionNeta / totales.cantidadPedidos : null,
     },
-    facturacionPorProveedor,
     margenPorProveedor,
     serieDiaria,
     generadoEn: new Date().toISOString(),

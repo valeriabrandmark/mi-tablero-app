@@ -48,7 +48,7 @@ export default function BarraFiltros({
   opciones: OpcionesFiltro | null;
   onChange: (f: Filtros) => void;
 }) {
-  const vacio = !filtros.vendedor && !filtros.empresa && !filtros.mes;
+  const vacio = !filtros.vendedor && !filtros.empresa && !filtros.mes && !filtros.proveedor;
 
   return (
     <div className="border-line bg-panel flex flex-wrap items-end gap-3 rounded-xl border p-3">

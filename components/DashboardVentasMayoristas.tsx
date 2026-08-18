@@ -17,6 +17,7 @@ function queryString(f: Filtros) {
   if (f.vendedor) sp.set("vendedor", f.vendedor);
   if (f.empresa) sp.set("empresa", f.empresa);
   if (f.mes) sp.set("mes", f.mes);
+  if (f.proveedor) sp.set("proveedor", f.proveedor);
   return sp.toString();
 }
 
@@ -63,6 +64,14 @@ export default function Dashboard() {
     setCargando(true);
     setError(null);
     setFiltros(f);
+  }, []);
+
+  /** Click en un proveedor de cualquier gráfico: filtra el resto del tablero.
+   *  Volver a clickearlo (o el chip) limpia la selección. */
+  const alternarProveedor = useCallback((proveedor: string) => {
+    setCargando(true);
+    setError(null);
+    setFiltros((f) => ({ ...f, proveedor: f.proveedor === proveedor ? undefined : proveedor }));
   }, []);
 
   const recargar = useCallback(() => {
@@ -116,6 +125,25 @@ export default function Dashboard() {
       </div>
 
       <BarraFiltros filtros={filtros} opciones={opciones} onChange={cambiarFiltros} />
+
+      {filtros.proveedor && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted">Filtrado por proveedor:</span>
+          <button
+            onClick={() => alternarProveedor(filtros.proveedor!)}
+            className="border-c1/40 bg-c1/15 text-c1 hover:bg-c1/25 flex items-center gap-1.5 rounded-full border px-3 py-1 font-medium"
+          >
+            {filtros.proveedor}
+            <span aria-hidden className="text-sm leading-none">
+              ×
+            </span>
+          </button>
+          <span className="text-muted">
+            Los KPIs y el gráfico diario muestran solo este proveedor; los dos gráficos por
+            proveedor siguen mostrando el ranking completo, con el resto atenuado.
+          </span>
+        </div>
+      )}
 
       {error && (
         <Aviso>
@@ -203,7 +231,9 @@ export default function Dashboard() {
             <Panel titulo="Facturación Neta por proveedor" nota="Top 12">
               <TortaProveedores
                 datos={data.facturacionPorProveedor}
-                totalGeneral={data.kpis.facturacionNeta}
+                totalGeneral={data.facturacionTotalProveedores}
+                seleccionado={filtros.proveedor}
+                onSeleccionar={alternarProveedor}
               />
             </Panel>
 
@@ -211,7 +241,11 @@ export default function Dashboard() {
               titulo="Margen % por proveedor"
               nota={`Ajustado por flete · mín. ${MIN_UNIDADES_MARGEN} unidades`}
             >
-              <BarrasMargen datos={data.margenPorProveedor} />
+              <BarrasMargen
+                datos={data.margenPorProveedor}
+                seleccionado={filtros.proveedor}
+                onSeleccionar={alternarProveedor}
+              />
             </Panel>
           </div>
         </div>

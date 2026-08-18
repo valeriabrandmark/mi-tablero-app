@@ -37,11 +37,15 @@ function Contenido({
 export default function TortaProveedores({
   datos,
   totalGeneral,
+  seleccionado,
+  onSeleccionar,
 }: {
   datos: PuntoProveedor[];
   /** Facturación neta de TODOS los proveedores, no solo los del top 12:
    *  los porcentajes tienen que ser sobre el total real. */
   totalGeneral: number;
+  seleccionado?: string;
+  onSeleccionar: (proveedor: string) => void;
 }) {
   if (datos.length === 0) {
     return <p className="text-muted py-16 text-center text-sm">Sin datos para el filtro elegido.</p>;
@@ -65,9 +69,19 @@ export default function TortaProveedores({
               stroke={TEMA.panel}
               strokeWidth={2}
               isAnimationActive={false}
+              onClick={(d: unknown) => {
+                const label = (d as { payload?: PuntoProveedor })?.payload?.label;
+                if (label) onSeleccionar(label);
+              }}
+              className="cursor-pointer"
             >
               {datos.map((d, i) => (
-                <Cell key={d.label} fill={colorSerie(i)} />
+                <Cell
+                  key={d.label}
+                  fill={colorSerie(i)}
+                  // Al seleccionar uno, los demás se atenúan en vez de desaparecer.
+                  fillOpacity={!seleccionado || seleccionado === d.label ? 1 : 0.25}
+                />
               ))}
             </Pie>
             <Tooltip content={<Contenido total={total} />} />
@@ -77,20 +91,30 @@ export default function TortaProveedores({
 
       {/* Leyenda propia: 12 proveedores no entran en la de recharts. */}
       <ul className="grid shrink-0 grid-cols-1 gap-x-6 gap-y-1.5 text-xs sm:grid-cols-2 lg:w-[42%] lg:grid-cols-1">
-        {datos.map((d, i) => (
-          <li key={d.label} className="flex items-center gap-2">
-            <span
-              className="size-2.5 shrink-0 rounded-full"
-              style={{ background: colorSerie(i) }}
-            />
-            <span className="text-muted truncate" title={d.label}>
-              {d.label}
-            </span>
-            <span className="ml-auto shrink-0 tabular-nums">
-              {total > 0 ? fmtPct(d.total / total) : "—"}
-            </span>
-          </li>
-        ))}
+        {datos.map((d, i) => {
+          const activo = seleccionado === d.label;
+          return (
+            <li key={d.label}>
+              <button
+                onClick={() => onSeleccionar(d.label)}
+                className={`hover:bg-panel-2 flex w-full items-center gap-2 rounded px-1 py-0.5 text-left ${
+                  seleccionado && !activo ? "opacity-40" : ""
+                }`}
+              >
+                <span
+                  className="size-2.5 shrink-0 rounded-full"
+                  style={{ background: colorSerie(i) }}
+                />
+                <span className={`truncate ${activo ? "text-ink" : "text-muted"}`} title={d.label}>
+                  {d.label}
+                </span>
+                <span className="ml-auto shrink-0 tabular-nums">
+                  {total > 0 ? fmtPct(d.total / total) : "—"}
+                </span>
+              </button>
+            </li>
+          );
+        })}
         {total > cubierto && (
           <li className="text-muted border-line mt-1 flex items-center gap-2 border-t pt-1.5">
             <span className="size-2.5 shrink-0" />

@@ -2,6 +2,8 @@ export type Filtros = {
   vendedor?: string;
   empresa?: string;
   mes?: string;
+  /** Filtro cruzado: sale de hacer click en un proveedor de un gráfico. */
+  proveedor?: string;
 };
 
 export type Kpis = {
@@ -44,6 +46,8 @@ export type OpcionesFiltro = {
 export type DashboardVentasMayoristas = {
   kpis: Kpis;
   facturacionPorProveedor: PuntoProveedor[];
+  /** Denominador de la torta: total de TODOS los proveedores, sin el filtro cruzado. */
+  facturacionTotalProveedores: number;
   margenPorProveedor: MargenProveedor[];
   serieDiaria: SerieDiaria;
   generadoEn: string;
