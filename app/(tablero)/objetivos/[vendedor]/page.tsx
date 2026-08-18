@@ -1,6 +1,9 @@
 import { notFound } from "next/navigation";
 import DashboardObjetivos from "@/components/DashboardObjetivos";
 import { vendedorDesdeSlug } from "@/lib/constantes";
+import { permisoDelUsuario, puedeVerVendedor } from "@/lib/permisos";
+import { authConfigurada } from "@/lib/supabase/env";
+import { getUsuario } from "@/lib/supabase/server";
 import { getMesInicialObjetivos } from "@/lib/queries-objetivos";
 
 /**
@@ -26,6 +29,13 @@ export default async function ObjetivosVendedorPage(props: PageProps<"/objetivos
   // Un slug que no es de la lista es 404, no una página vacía: esta ruta es la
   // que va a estar detrás de los permisos por vendedor.
   if (!nombre) notFound();
+
+  // Defensa en profundidad: el proxy ya manda a cada uno a lo suyo, pero si esa
+  // regla se rompiera, acá la página de otro es un 404 y no una filtración.
+  if (authConfigurada) {
+    const permiso = permisoDelUsuario(await getUsuario());
+    if (!puedeVerVendedor(permiso, nombre)) notFound();
+  }
 
   return <DashboardObjetivos vendedor={nombre} mesInicial={await getMesInicialObjetivos(nombre)} />;
 }

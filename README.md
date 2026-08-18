@@ -185,6 +185,12 @@ porque así lo pensó la comercial. Cada grupo declara dos cosas:
 | Marca entera | `marca` | Todo lo que tenga esa marca (caso AVENO, que en la planilla no tiene SKU) |
 | Empresa | `empresa` | Todas las ventas de esas empresas |
 
+Los grupos de producto (`sku` y `marca`) **no filtran por empresa**: cuentan
+tanto lo de Quo como lo de NOA. Es una decisión tomada, no un descuido — si
+mañana entra una venta de esos SKUs por NOA, suma al objetivo. En la práctica
+hoy no cambia nada, porque esos SKUs son de Quo: en los cuatro meses cargados
+no hay ni una línea de ellos por NOA.
+
 `metrica` — cómo se mide el avance:
 
 | `metrica` | Cálculo |
@@ -211,6 +217,98 @@ las ventas: si no, un vendedor sin ninguna venta del mes desaparecería de la
 tabla en vez de aparecer con 0 de avance, que es justo la fila a mirar.
 
 Para cambiar un objetivo o sumar un grupo se toca solo la base, no el código.
+
+### % de facturación vencida
+
+La cuarta tarjeta no es un objetivo sino una alerta, y tiene dos diferencias
+importantes con el resto de la página:
+
+- **Es una foto, no un acumulado del mes.** Sale de
+  `bronze.cuentas_corrientes_scoring`, que es el estado de la cartera al momento
+  de la última carga. **No se mueve al cambiar el filtro de mes comercial**, por
+  eso la tarjeta muestra la fecha de la foto.
+- **El vendedor va por CÓDIGO de SIGMA** (`006`, `007`…) y no por nombre, porque
+  así lo guardan las tablas de cuentas corrientes. El mapeo está en
+  `CODIGO_SIGMA` de [lib/constantes.ts](lib/constantes.ts) y salió de cruzar
+  `bronze.sigma_ventas` con `gold.fact_ventas` por comprobante y SKU.
+
+Usa la misma fórmula que la página de Cuentas Corrientes
+(`saldo_vencido / saldo_total`) para que el mismo número no dé distinto en dos
+pantallas.
+
+Hoy solo SILVIO (43 %) y RAMON (52 %) tienen cartera cargada; PABLO y RICARDO no
+tienen ninguna cuenta corriente y la tarjeta muestra "Sin cuenta corriente".
+**RICARDO además no tiene código de SIGMA** porque nunca facturó: cuando lo haga
+hay que agregarlo a `CODIGO_SIGMA` o su deuda no va a aparecer nunca.
+
+---
+
+## Permisos y roles
+
+Cada usuario de Supabase Auth lleva su rol en `app_metadata`:
+
+```json
+{ "rol": "supervisor" }
+{ "rol": "vendedor", "vendedor": "SILVIO" }
+```
+
+| Rol | Qué ve |
+|---|---|
+| `superadmin` | Todo |
+| `admin` | Todo, sin editar |
+| `supervisor` | Las páginas de objetivos de los cuatro vendedores |
+| `vendedor` | Únicamente su propia página de objetivos |
+| *(sin claim)* | **Nada** |
+
+Dos advertencias que importan:
+
+- **`admin` hoy ve lo mismo que `superadmin`**, porque el tablero no tiene nada
+  editable. El rol existe para que la distinción esté modelada, pero no promete
+  una restricción que todavía no hace falta. El día que se pueda cargar un
+  objetivo desde la pantalla, ahí sí hay que separarlos.
+- **Un usuario sin claim no ve nada.** Es a propósito: si alguien crea un
+  usuario y se olvida del rol, que se quede afuera y llame, en vez de entrar y
+  ver la facturación de la empresa entera. Por eso hay que **cargar el claim
+  antes de desplegar**, o el usuario que ya existía se queda sin acceso.
+
+### Cómo se asigna
+
+`app_metadata` **no se puede editar desde el dashboard de Supabase** (solo
+muestra el `user_metadata`). Se carga con un `update` en el SQL Editor:
+
+```sql
+update auth.users
+set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
+                        || '{"rol":"supervisor"}'::jsonb
+where email = 'persona@ejemplo.com';
+
+-- Un vendedor lleva las dos claves:
+update auth.users
+set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
+                        || '{"rol":"vendedor","vendedor":"SILVIO"}'::jsonb
+where email = 'silvio@ejemplo.com';
+```
+
+El `||` fusiona en vez de reemplazar, así no se pisan las claves que Supabase
+guarda ahí (`provider`, `providers`). El nombre del vendedor va **en mayúsculas
+y exacto**; cualquier otro valor deja al usuario sin acceso, que es la falla
+segura y no la peligrosa.
+
+### Dónde se aplica
+
+La regla vive entera en [lib/permisos.ts](lib/permisos.ts) y la comparten las
+**tres** barreras, para que no puedan discrepar entre sí:
+
+1. [proxy.ts](proxy.ts) — corta el acceso a las páginas y a las rutas de API.
+2. [app/api/objetivos/route.ts](app/api/objetivos/route.ts) — revalida que el
+   `?vendedor=` pedido sea uno que el usuario puede ver. **Sin esto el resto no
+   sirve**: el middleware protege la página, no el dato, y desde ahí no se ve la
+   query string.
+3. La página de objetivos — devuelve 404 si el vendedor no le corresponde.
+
+El nav además esconde los links que el proxy le va a rebotar igual.
+
+---
 
 ### Con qué mes abre
 

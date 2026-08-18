@@ -7,8 +7,9 @@ import type {
   OpcionesObjetivos,
   PuntoFacturacion,
   ResumenMetrica,
+  VencidoVendedor,
 } from "@/lib/types";
-import { CANAL_MAYORISTA, mesComercialActual } from "@/lib/constantes";
+import { CANAL_MAYORISTA, codigoSigmaDe, mesComercialActual } from "@/lib/constantes";
 
 /**
  * Página "Objetivos" — avance de UN vendedor contra su objetivo.
@@ -242,6 +243,43 @@ function getComprobantes(f: FiltrosObjetivos): Promise<FilaComprobanteObjetivo[]
   );
 }
 
+// --- Deuda vencida -----------------------------------------------------------
+
+/**
+ * Cartera vencida del vendedor.
+ *
+ * Usa la MISMA definición que la página de Cuentas Corrientes
+ * (`saldo_vencido / saldo_total` sobre `cuentas_corrientes_scoring`), para que
+ * el mismo número no dé distinto en dos pantallas.
+ *
+ * Dos cosas que la separan del resto de la página:
+ *
+ *  - El vendedor va por CÓDIGO de SIGMA (006, 007…), no por nombre, porque así
+ *    lo guardan las tablas de cuentas corrientes. Ver `CODIGO_SIGMA`.
+ *  - Es una FOTO al momento de la carga, no un acumulado del mes comercial, así
+ *    que NO se filtra por mes: cambiar el selector de mes no la mueve. La
+ *    `fechaCarga` viaja con el dato para poder decirlo en pantalla.
+ */
+async function getVencido(f: FiltrosObjetivos): Promise<VencidoVendedor | null> {
+  const codigo = codigoSigmaDe(f.vendedor);
+  if (!codigo) return null;
+
+  const filas = await query<VencidoVendedor>(
+    `select coalesce(sum(s.saldo_total), 0)::float8 as "deudaTotal",
+            coalesce(sum(s.saldo_vencido), 0)::float8 as "deudaVencida",
+            case when coalesce(sum(s.saldo_total), 0) = 0 then null
+                 else sum(s.saldo_vencido)::float8 / sum(s.saldo_total)
+            end::float8 as "pctVencida",
+            count(distinct s.razon_social)::float8 as clientes,
+            to_char(max(s.fecha_carga), 'YYYY-MM-DD') as "fechaCarga"
+     from bronze.cuentas_corrientes_scoring s
+     where s.vendedor = $1`,
+    [codigo],
+  );
+
+  return filas[0] ?? null;
+}
+
 // --- Opciones de los selectores ----------------------------------------------
 
 export async function getOpcionesObjetivos(): Promise<OpcionesObjetivos> {
@@ -290,15 +328,17 @@ export async function getMesInicialObjetivos(vendedor: string): Promise<string> 
 // --- Dashboard completo ------------------------------------------------------
 
 export async function getDashboardObjetivos(f: FiltrosObjetivos): Promise<DashboardObjetivos> {
-  const [resumen, porGrupo, serieFacturacion, comprobantes] = await Promise.all([
+  const [resumen, porGrupo, serieFacturacion, comprobantes, vencido] = await Promise.all([
     getResumen(f),
     getPorGrupo(f),
     getSerieFacturacion(f),
     getComprobantes(f),
+    getVencido(f),
   ]);
 
   return {
     resumen,
+    vencido,
     porGrupo,
     serieFacturacion,
     comprobantes,
