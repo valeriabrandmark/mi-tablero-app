@@ -1,5 +1,6 @@
 import Link from "next/link";
 import BotonSalir from "@/components/BotonSalir";
+import { slugVendedor, VENDEDORES_OBJETIVOS } from "@/lib/constantes";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
 
@@ -7,7 +8,11 @@ const NAV = [
   { href: "/ventas-mayoristas", label: "Ventas Mayoristas" },
   { href: "/logistica", label: "Logística" },
   { href: "/cuentas-corrientes", label: "Cuentas Corrientes" },
-  { href: "/objetivos", label: "Objetivos" },
+  // Una entrada por vendedor: cada uno entra directo a su tablero.
+  ...VENDEDORES_OBJETIVOS.map((v) => ({
+    href: `/objetivos/${slugVendedor(v)}`,
+    label: `Objetivos ${v.charAt(0)}${v.slice(1).toLowerCase()}`,
+  })),
 ] as const;
 
 export default async function TableroLayout({ children }: LayoutProps<"/">) {
@@ -19,7 +24,7 @@ export default async function TableroLayout({ children }: LayoutProps<"/">) {
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
           <span className="text-sm font-semibold tracking-tight">Brandmark negocio</span>
 
-          <nav className="flex gap-1 text-sm">
+          <nav className="flex flex-wrap gap-1 text-sm">
             {NAV.map((item) => (
               <Link
                 key={item.href}

@@ -1,7 +1,7 @@
-import DashboardObjetivos from "@/components/DashboardObjetivos";
+import { redirect } from "next/navigation";
+import { slugVendedor, VENDEDORES_OBJETIVOS } from "@/lib/constantes";
 
-export const metadata = { title: "Objetivos — Tablero Brandmark" };
-
+/** `/objetivos` no tiene contenido propio: cada vendedor tiene su página. */
 export default function ObjetivosPage() {
-  return <DashboardObjetivos />;
+  redirect(`/objetivos/${slugVendedor(VENDEDORES_OBJETIVOS[0])}`);
 }

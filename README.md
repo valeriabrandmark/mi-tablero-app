@@ -109,7 +109,8 @@ app/
     ventas-mayoristas/page.tsx
     logistica/page.tsx
     cuentas-corrientes/page.tsx
-    objetivos/page.tsx
+    objetivos/page.tsx            redirige al primer vendedor
+    objetivos/[vendedor]/page.tsx una página por vendedor
   api/
     ventas-mayoristas/route.ts     KPIs + datos de los 3 gráficos
     filtros/route.ts               opciones de los selectores
@@ -122,7 +123,7 @@ components/
   DashboardVentasMayoristas.tsx    orquesta filtros + fetch + render
   Filtros.tsx, ui.tsx, FormularioLogin.tsx, BotonSalir.tsx
   BarraAvance.tsx                  barra de avance contra objetivo
-  charts/                          recharts: líneas, torta, barras
+  charts/                          recharts: líneas, torta, barras, área
 lib/
   db.ts                            pool de `pg` (credenciales por env)
   queries.ts                       las 6 consultas SQL
@@ -160,8 +161,17 @@ vista está vacía para la mayoría de los proveedores y no se puede asumir dato
 
 ## Definición de la página "Objetivos"
 
+Hay **una página por vendedor** (`/objetivos/silvio`, `/objetivos/ramon`,
+`/objetivos/pablo`, `/objetivos/ricardo`): el vendedor lo fija la ruta y no un
+selector, para poder dar permiso sobre una sola página y que cada vendedor entre
+directo a la suya. Un slug que no esté en `VENDEDORES_OBJETIVOS` da 404, y la
+ruta de API valida el vendedor contra esa misma lista.
+
+RICARDO tiene página aunque todavía no tenga ninguna venta: aparece con su
+objetivo y 0 de avance, que es la fila que hay que mirar.
+
 Los objetivos son de la fuerza de venta mayorista, así que la página filtra
-`canal = 'Mayorista'`. Se miden en **unidades**, no en pesos.
+`canal = 'Mayorista'`.
 
 La pieza no obvia es que **el objetivo no cuelga del SKU sino de un GRUPO**,
 porque así lo pensó la comercial. Cada grupo declara dos cosas:
@@ -201,6 +211,18 @@ las ventas: si no, un vendedor sin ninguna venta del mes desaparecería de la
 tabla en vez de aparecer con 0 de avance, que es justo la fila a mirar.
 
 Para cambiar un objetivo o sumar un grupo se toca solo la base, no el código.
+
+### Con qué mes abre
+
+Abre en el **mes comercial vigente**. Si ese mes todavía no tiene objetivos
+cargados, cae al último que sí los tenga (`getMesInicialObjetivos`), así al
+pasar de mes la página no abre vacía. El selector muestra cuál quedó elegido y
+se puede cambiar a cualquier otro mes.
+
+Se resuelve en el servidor y la página va `force-dynamic`: si se prerenderizara,
+el mes quedaría congelado en el del build. La fecha se lee en hora argentina,
+porque el servidor de Vercel corre en UTC y en el cambio de mes comercial eso
+daría el mes equivocado.
 
 ### Dos cosas que hay que saber para que los números cierren
 

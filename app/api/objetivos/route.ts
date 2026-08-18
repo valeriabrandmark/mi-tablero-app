@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getDashboardObjetivos, getOpcionesObjetivos } from "@/lib/queries-objetivos";
+import { VENDEDORES_OBJETIVOS } from "@/lib/constantes";
 import type { FiltrosObjetivos } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -7,10 +8,18 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
+  const vendedor = sp.get("vendedor");
+
+  // El vendedor se valida contra la lista, no se pasa tal cual a la consulta:
+  // esta ruta es la que va a haber que proteger cuando cada vendedor tenga
+  // permiso sobre su propia página.
+  if (!vendedor || !VENDEDORES_OBJETIVOS.some((v) => v === vendedor)) {
+    return NextResponse.json({ error: "Vendedor inválido" }, { status: 400 });
+  }
 
   const filtros: FiltrosObjetivos = {
+    vendedor,
     mes: sp.get("mes") || undefined,
-    vendedor: sp.get("vendedor") || undefined,
     grupo: sp.get("grupo") || undefined,
   };
 
