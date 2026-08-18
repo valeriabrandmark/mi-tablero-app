@@ -164,19 +164,34 @@ Los objetivos son de la fuerza de venta mayorista, así que la página filtra
 `canal = 'Mayorista'`. Se miden en **unidades**, no en pesos.
 
 La pieza no obvia es que **el objetivo no cuelga del SKU sino de un GRUPO**,
-porque así lo pensó la comercial. Un grupo puede ser:
+porque así lo pensó la comercial. Cada grupo declara dos cosas:
+
+`criterio` — contra qué se matchean sus items:
 
 | Caso | `criterio` | Cómo se mide |
 |---|---|---|
 | SKU suelto | `sku` | Un grupo con un solo item |
 | MIX de varios SKUs | `sku` | Sobre la **suma** del grupo, no SKU por SKU |
 | Marca entera | `marca` | Todo lo que tenga esa marca (caso AVENO, que en la planilla no tiene SKU) |
+| Empresa | `empresa` | Todas las ventas de esas empresas |
 
-Vive en tres tablas (migración `objetivos_vendedor`):
+`metrica` — cómo se mide el avance:
+
+| `metrica` | Cálculo |
+|---|---|
+| `unidades` | `sum(cantidad)` |
+| `facturacion` | `sum(precio_neto * cantidad)` |
+| `clientes` | `count(distinct cliente)` |
+
+La métrica obliga a que **todo lo que agrega objetivos agrupe por ella**: sumar
+un objetivo de $45.000.000 con uno de 480 unidades no significa nada. Por eso
+los totales de la página son una tarjeta por métrica y no un número solo.
+
+Vive en tres tablas (migraciones `objetivos_vendedor` y `objetivos_metrica`):
 
 ```
-gold.objetivos_grupo        grupo -> criterio ('sku' | 'marca'), orden
-gold.objetivos_grupo_item   los SKUs (o la marca) que componen el grupo
+gold.objetivos_grupo        grupo -> criterio, metrica, orden
+gold.objetivos_grupo_item   los SKUs / la marca / las empresas del grupo
 gold.objetivos              (mes_comercial, vendedor, grupo) -> cantidad
 ```
 
@@ -186,6 +201,20 @@ las ventas: si no, un vendedor sin ninguna venta del mes desaparecería de la
 tabla en vez de aparecer con 0 de avance, que es justo la fila a mirar.
 
 Para cambiar un objetivo o sumar un grupo se toca solo la base, no el código.
+
+### Dos cosas que hay que saber para que los números cierren
+
+- **El mes comercial va del 6 al 5**, no del 1 al 31. Una factura del 05/08
+  tiene `mes_comercial = '2026-07'`. Salió de comparar contra el tablero de
+  Data Studio, donde las dos puntas coinciden.
+- **Los presupuestos cuentan.** Las empresas de `fact_ventas` son cuatro y van
+  de a pares: Brandmark = `Quo Marketing SRL` + `Presupuesto QUO`, NOA =
+  `Noa Comercial SRL` + `Presupuesto Noa`. Medir solo lo fiscal deja afuera
+  parte del avance.
+
+Verificado contra el Data Studio "Objetivos Vendedores Agosto 2026" (pestaña de
+Silvio): los cinco grupos de producto, la facturación de las dos empresas
+($9.645.218,53 y $413.238,16) y los clientes con compra (13 y 2) dan idénticos.
 
 ---
 

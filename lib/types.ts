@@ -204,6 +204,15 @@ export type DashboardVentasMayoristas = {
 
 // --- Página "Objetivos" ------------------------------------------------------
 
+/**
+ * Cómo se mide el avance de un grupo. Existe porque un objetivo en pesos y uno
+ * en unidades no se pueden sumar entre sí: todo lo que agrega objetivos tiene
+ * que agrupar por esto primero.
+ */
+export type Metrica = "unidades" | "facturacion" | "clientes";
+
+export const METRICAS = ["unidades", "facturacion", "clientes"] as const;
+
 export type FiltrosObjetivos = {
   mes?: string;
   vendedor?: string;
@@ -211,7 +220,9 @@ export type FiltrosObjetivos = {
   grupo?: string;
 };
 
-export type KpisObjetivos = {
+/** Totales de una métrica. Nunca se mezclan dos métricas en un mismo total. */
+export type ResumenMetrica = {
+  metrica: Metrica;
   objetivo: number;
   vendido: number;
   /** Fracción (0.13 = 13 %). Null si el objetivo del recorte es 0. */
@@ -221,10 +232,11 @@ export type KpisObjetivos = {
   pares: number;
 };
 
-/** Una línea de avance. `vendedor` es null cuando la fila agrega varios. */
+/** Una línea de avance. `grupo` o `vendedor` son null cuando la fila agrega. */
 export type FilaObjetivo = {
-  grupo: string;
+  grupo: string | null;
   vendedor: string | null;
+  metrica: Metrica;
   objetivo: number;
   vendido: number;
   avancePct: number | null;
@@ -246,7 +258,7 @@ export type OpcionesObjetivos = {
 };
 
 export type DashboardObjetivos = {
-  kpis: KpisObjetivos;
+  resumen: ResumenMetrica[];
   porGrupo: FilaObjetivo[];
   porVendedor: FilaObjetivo[];
   detalle: FilaObjetivo[];

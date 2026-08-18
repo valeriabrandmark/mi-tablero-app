@@ -4,31 +4,35 @@ import type {
   FilaAporteSku,
   FilaObjetivo,
   FiltrosObjetivos,
-  KpisObjetivos,
   OpcionesObjetivos,
+  ResumenMetrica,
 } from "@/lib/types";
 import { CANAL_MAYORISTA } from "@/lib/constantes";
 
 /**
- * Página "Objetivos" — avance de cada vendedor contra su objetivo en unidades.
+ * Página "Objetivos" — avance de cada vendedor contra su objetivo.
  *
  * El objetivo NO cuelga del SKU sino de un GRUPO (`gold.objetivos_grupo`), que
- * es la unidad en la que la comercial lo pensó:
+ * es la unidad en la que la comercial lo pensó. Cada grupo declara dos cosas:
  *
- *   - un SKU suelto            -> grupo con un solo item (criterio 'sku')
- *   - un MIX de varios SKUs    -> grupo con N items; el objetivo se mide sobre
- *                                 la SUMA del grupo, no SKU por SKU
- *   - una marca entera         -> grupo con criterio 'marca' (caso AVENO, que
- *                                 en la planilla original no tiene SKU)
+ *   `criterio` — contra qué se matchean sus items:
+ *     'sku'     un SKU suelto, o un MIX de varios SKUs (el objetivo se mide
+ *               sobre la SUMA del grupo, no SKU por SKU)
+ *     'marca'   una marca entera (caso AVENO, que en la planilla no tiene SKU)
+ *     'empresa' todas las ventas de esas empresas (Brandmark = Quo Marketing
+ *               SRL + Presupuesto QUO; NOA = Noa Comercial SRL + Presupuesto Noa)
  *
- * Por eso todo arranca del CTE `ventas`, que le pega a cada línea de venta el
- * grupo al que corresponde. Un SKU vive en un solo grupo, así que el join no
- * multiplica filas; si algún día un SKU entrara en dos grupos, esa línea
- * contaría en ambos (que es lo que uno querría).
+ *   `metrica` — cómo se mide el avance: unidades, facturación o clientes.
  *
- * Filtro fijo de la página: `canal = 'Mayorista'`, igual que Ventas Mayoristas.
- * Los objetivos son de la fuerza de venta mayorista; sumar Mercado Libre o
- * Tienda Nube les infla el avance con ventas que no son suyas.
+ * La métrica es lo que obliga a que TODO lo que agrega objetivos agrupe por
+ * ella: sumar un objetivo de $45.000.000 con uno de 480 unidades no significa
+ * nada. Por eso los totales son una fila por métrica y no un número solo.
+ *
+ * Filtro fijo de la página: `canal = 'Mayorista'`. Los objetivos son de la
+ * fuerza de venta mayorista; sumar Mercado Libre o Tienda Nube les infla el
+ * avance con ventas que no son suyas. Los presupuestos SÍ cuentan (entran como
+ * las empresas "Presupuesto QUO" / "Presupuesto Noa"), igual que en el tablero
+ * de Data Studio del que sale esta página.
  */
 
 type Where = { sql: string; params: unknown[] };
@@ -66,103 +70,121 @@ function whereObjetivos(f: FiltrosObjetivos, omitir: (keyof FiltrosObjetivos)[] 
  *
  * El `left join` contra las ventas es deliberado: sin él, un objetivo sin
  * ventas no daría fila y el avance se leería como si no existiera.
+ *
+ * Ojo con `clientes`: a nivel grupo es un `count(distinct)`, pero al agregar
+ * varios grupos se SUMAN esos conteos en vez de recontar. Es lo correcto acá,
+ * porque cada grupo es un objetivo separado (Brandmark 40 y NOA 10 son dos
+ * metas, no una sola de 50 clientes distintos).
  */
 function cteAvance(w: Where): string {
   return `with mapa as (
-    select g.grupo, g.criterio, i.valor
+    select g.grupo, g.criterio, g.metrica, i.valor
     from gold.objetivos_grupo g
     join gold.objetivos_grupo_item i on i.grupo = g.grupo
   ),
   ventas as (
-    select m.grupo, fv.mes_comercial, fv.vendedor, fv.sku, fv.producto, fv.cantidad
+    select m.grupo, fv.mes_comercial, fv.vendedor, fv.cliente,
+           fv.sku, fv.producto, fv.cantidad, fv.precio_neto
     from gold.fact_ventas fv
     join mapa m
-      on (m.criterio = 'sku'   and m.valor = fv.sku)
-      or (m.criterio = 'marca' and m.valor = fv.marca)
+      on (m.criterio = 'sku'     and m.valor = fv.sku)
+      or (m.criterio = 'marca'   and m.valor = fv.marca)
+      or (m.criterio = 'empresa' and m.valor = fv.empresa)
     where fv.canal = '${CANAL_MAYORISTA}'
   ),
   avance as (
     select o.mes_comercial,
            o.vendedor,
            o.grupo,
+           g.metrica,
+           g.orden,
            o.cantidad as objetivo,
-           coalesce(sum(v.cantidad), 0) as vendido
+           case g.metrica
+             when 'clientes'    then count(distinct v.cliente)
+             when 'facturacion' then coalesce(sum(v.precio_neto * v.cantidad), 0)
+             else                    coalesce(sum(v.cantidad), 0)
+           end as vendido
     from gold.objetivos o
+    join gold.objetivos_grupo g on g.grupo = o.grupo
     left join ventas v
       on v.grupo = o.grupo
      and v.mes_comercial = o.mes_comercial
      and v.vendedor = o.vendedor
     where ${w.sql}
-    group by o.mes_comercial, o.vendedor, o.grupo, o.cantidad
+    group by o.mes_comercial, o.vendedor, o.grupo, g.metrica, g.orden, o.cantidad
   )`;
 }
 
-/** `vendido / objetivo` como fracción; null si el objetivo es 0. */
-const AVANCE_PCT = `case when sum(objetivo) = 0 then null
-                         else sum(vendido)::float8 / sum(objetivo)
-                    end::float8 as "avancePct"`;
+/** Columnas derivadas comunes a todas las aperturas. */
+const DERIVADAS = `case when sum(objetivo) = 0 then null
+                        else sum(vendido)::float8 / sum(objetivo)
+                   end::float8 as "avancePct",
+                   greatest(sum(objetivo) - sum(vendido), 0)::float8 as faltan`;
 
-const FALTAN = `greatest(sum(objetivo) - sum(vendido), 0)::float8 as faltan`;
+// --- Totales por métrica -----------------------------------------------------
 
-// --- KPIs --------------------------------------------------------------------
-
-async function getKpis(f: FiltrosObjetivos): Promise<KpisObjetivos> {
+function getResumen(f: FiltrosObjetivos): Promise<ResumenMetrica[]> {
   const w = whereObjetivos(f);
-  const filas = await query<KpisObjetivos>(
+  return query<ResumenMetrica>(
     `${cteAvance(w)}
-     select coalesce(sum(objetivo), 0)::float8 as objetivo,
+     select metrica,
+            coalesce(sum(objetivo), 0)::float8 as objetivo,
             coalesce(sum(vendido), 0)::float8 as vendido,
             case when sum(objetivo) = 0 then null
                  else sum(vendido)::float8 / sum(objetivo)
             end::float8 as "avancePct",
             count(*) filter (where vendido >= objetivo)::float8 as cumplidos,
             count(*)::float8 as pares
-     from avance`,
+     from avance
+     group by metrica
+     order by case metrica when 'unidades' then 1 when 'facturacion' then 2 else 3 end`,
     w.params,
   );
-
-  return filas[0] ?? { objetivo: 0, vendido: 0, avancePct: null, cumplidos: 0, pares: 0 };
 }
 
 // --- Aperturas ---------------------------------------------------------------
 
 /**
  * Avance por grupo. Se omite el filtro cruzado de grupo a propósito: si no, al
- * clickear una barra el gráfico se quedaría con una sola y no habría contra qué
+ * clickear una barra el panel se quedaría con una sola y no habría contra qué
  * comparar (mismo criterio que las tortas de Logística).
  */
 function getPorGrupo(f: FiltrosObjetivos): Promise<FilaObjetivo[]> {
   const w = whereObjetivos(f, ["grupo"]);
   return query<FilaObjetivo>(
     `${cteAvance(w)}
-     select a.grupo,
+     select grupo,
             null::text as vendedor,
-            sum(a.objetivo)::float8 as objetivo,
-            sum(a.vendido)::float8 as vendido,
-            ${AVANCE_PCT},
-            ${FALTAN}
-     from avance a
-     join gold.objetivos_grupo g on g.grupo = a.grupo
-     group by a.grupo, g.orden
-     order by g.orden`,
+            metrica,
+            sum(objetivo)::float8 as objetivo,
+            sum(vendido)::float8 as vendido,
+            ${DERIVADAS}
+     from avance
+     group by grupo, metrica, orden
+     order by orden`,
     w.params,
   );
 }
 
-/** Avance por vendedor. Omite el filtro de vendedor, por el mismo motivo. */
+/**
+ * Avance por vendedor y métrica. Omite el filtro de vendedor, por el mismo
+ * motivo. Va abierto por métrica porque un vendedor tiene tres avances
+ * distintos que no se pueden promediar entre sí.
+ */
 function getPorVendedor(f: FiltrosObjetivos): Promise<FilaObjetivo[]> {
   const w = whereObjetivos(f, ["vendedor"]);
   return query<FilaObjetivo>(
     `${cteAvance(w)}
      select null::text as grupo,
             vendedor,
+            metrica,
             sum(objetivo)::float8 as objetivo,
             sum(vendido)::float8 as vendido,
-            ${AVANCE_PCT},
-            ${FALTAN}
+            ${DERIVADAS}
      from avance
-     group by vendedor
-     order by vendedor`,
+     group by vendedor, metrica
+     order by vendedor,
+              case metrica when 'unidades' then 1 when 'facturacion' then 2 else 3 end`,
     w.params,
   );
 }
@@ -172,16 +194,15 @@ function getDetalle(f: FiltrosObjetivos): Promise<FilaObjetivo[]> {
   const w = whereObjetivos(f);
   return query<FilaObjetivo>(
     `${cteAvance(w)}
-     select a.grupo,
-            a.vendedor,
-            sum(a.objetivo)::float8 as objetivo,
-            sum(a.vendido)::float8 as vendido,
-            ${AVANCE_PCT},
-            ${FALTAN}
-     from avance a
-     join gold.objetivos_grupo g on g.grupo = a.grupo
-     group by a.grupo, a.vendedor, g.orden
-     order by g.orden, a.vendedor`,
+     select grupo,
+            vendedor,
+            metrica,
+            sum(objetivo)::float8 as objetivo,
+            sum(vendido)::float8 as vendido,
+            ${DERIVADAS}
+     from avance
+     group by grupo, vendedor, metrica, orden
+     order by orden, vendedor`,
     w.params,
   );
 }
@@ -190,6 +211,9 @@ function getDetalle(f: FiltrosObjetivos): Promise<FilaObjetivo[]> {
  * Qué SKU aportó cada unidad dentro de un MIX. Sin esto el grupo es una caja
  * negra: se ve que faltan 400 unidades pero no si es porque un sabor no se
  * vende o porque no se vende ninguno.
+ *
+ * Solo tiene sentido para los grupos de unidades: en los de empresa el "aporte
+ * por SKU" serían todos los artículos que vendió la empresa, que no dice nada.
  */
 function getAportesSku(f: FiltrosObjetivos): Promise<FilaAporteSku[]> {
   const w = whereObjetivos(f);
@@ -203,7 +227,8 @@ function getAportesSku(f: FiltrosObjetivos): Promise<FilaAporteSku[]> {
      where exists (select 1 from avance a
                    where a.grupo = v.grupo
                      and a.mes_comercial = v.mes_comercial
-                     and a.vendedor = v.vendedor)
+                     and a.vendedor = v.vendedor
+                     and a.metrica = 'unidades')
      group by v.grupo, v.sku
      having sum(v.cantidad) <> 0
      order by v.grupo, vendido desc`,
@@ -234,13 +259,20 @@ export async function getOpcionesObjetivos(): Promise<OpcionesObjetivos> {
 // --- Dashboard completo ------------------------------------------------------
 
 export async function getDashboardObjetivos(f: FiltrosObjetivos): Promise<DashboardObjetivos> {
-  const [kpis, porGrupo, porVendedor, detalle, aportesSku] = await Promise.all([
-    getKpis(f),
+  const [resumen, porGrupo, porVendedor, detalle, aportesSku] = await Promise.all([
+    getResumen(f),
     getPorGrupo(f),
     getPorVendedor(f),
     getDetalle(f),
     getAportesSku(f),
   ]);
 
-  return { kpis, porGrupo, porVendedor, detalle, aportesSku, generadoEn: new Date().toISOString() };
+  return {
+    resumen,
+    porGrupo,
+    porVendedor,
+    detalle,
+    aportesSku,
+    generadoEn: new Date().toISOString(),
+  };
 }

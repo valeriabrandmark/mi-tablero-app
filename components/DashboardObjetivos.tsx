@@ -5,7 +5,7 @@ import { ListaAvance } from "@/components/BarraAvance";
 import { BotonLimpiar, SelectorFiltro } from "@/components/SelectorFiltro";
 import { Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
-import { fmtMes, fmtNumero, fmtPct } from "@/lib/format";
+import { fmtMes, fmtMetrica, fmtNumero, fmtPct } from "@/lib/format";
 import { PALETA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
@@ -13,24 +13,33 @@ import type {
   FilaAporteSku,
   FilaObjetivo,
   FiltrosObjetivos,
+  Metrica,
   OpcionesObjetivos,
 } from "@/lib/types";
 
 type Respuesta = DashboardObjetivos & { opciones: OpcionesObjetivos | null };
 
+const NOMBRE_METRICA: Record<Metrica, string> = {
+  unidades: "Unidades",
+  facturacion: "Facturación",
+  clientes: "Clientes con compra",
+};
+
+const cumplido = (f: { objetivo: number; vendido: number }) =>
+  f.objetivo > 0 && f.vendido >= f.objetivo;
+
 const COLUMNAS_DETALLE: Columna<FilaObjetivo>[] = [
-  { titulo: "Grupo", celda: (f) => f.grupo },
+  { titulo: "Grupo", celda: (f) => f.grupo ?? "—" },
   { titulo: "Vendedor", celda: (f) => f.vendedor ?? "—" },
-  { titulo: "Objetivo", celda: (f) => fmtNumero(f.objetivo), numerica: true },
-  { titulo: "Vendido", celda: (f) => fmtNumero(f.vendido), numerica: true },
-  { titulo: "Faltan", celda: (f) => fmtNumero(f.faltan), numerica: true },
+  { titulo: "Mide", celda: (f) => NOMBRE_METRICA[f.metrica] },
+  { titulo: "Objetivo", celda: (f) => fmtMetrica(f.metrica)(f.objetivo), numerica: true },
+  { titulo: "Vendido", celda: (f) => fmtMetrica(f.metrica)(f.vendido), numerica: true },
+  { titulo: "Faltan", celda: (f) => fmtMetrica(f.metrica)(f.faltan), numerica: true },
   {
     titulo: "Avance",
     numerica: true,
     celda: (f) => (
-      <span style={f.objetivo > 0 && f.vendido >= f.objetivo ? { color: PALETA[1] } : undefined}>
-        {fmtPct(f.avancePct)}
-      </span>
+      <span style={cumplido(f) ? { color: PALETA[1] } : undefined}>{fmtPct(f.avancePct)}</span>
     ),
   },
 ];
@@ -65,8 +74,13 @@ export default function DashboardObjetivosPage() {
   const alternar = (campo: "grupo" | "vendedor") => (valor: string) =>
     cambiar({ ...filtros, [campo]: filtros[campo] === valor ? undefined : valor });
 
-  const k = data?.kpis;
+  const resumen = data?.resumen ?? [];
   const vacio = !filtros.mes && !filtros.vendedor && !filtros.grupo;
+
+  // Los grupos de producto y los de empresa se muestran por separado: comparten
+  // la escala de porcentaje pero no responden la misma pregunta.
+  const porProducto = data?.porGrupo.filter((g) => g.metrica === "unidades") ?? [];
+  const porEmpresa = data?.porGrupo.filter((g) => g.metrica !== "unidades") ?? [];
 
   return (
     <div className="space-y-4">
@@ -111,7 +125,8 @@ export default function DashboardObjetivosPage() {
         <BotonLimpiar onClick={() => cambiar({})} deshabilitado={vacio} />
 
         <span className="text-muted ml-auto max-w-md text-[11px] leading-tight">
-          Solo canal Mayorista. Un MIX se mide sobre la suma de sus SKUs, no SKU por SKU.
+          Solo canal Mayorista, presupuestos incluidos. Un MIX se mide sobre la suma de sus
+          SKUs, no SKU por SKU. El mes comercial va del 6 al 5.
         </span>
       </div>
 
@@ -122,57 +137,62 @@ export default function DashboardObjetivosPage() {
         </Aviso>
       )}
 
-      {!k && !error ? (
+      {resumen.length === 0 && !error ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />
           ))}
         </div>
-      ) : k ? (
+      ) : (
+        // Una tarjeta por métrica: sumar pesos con unidades no significaría nada.
         <div
           className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
         >
-          <TarjetaKpi
-            titulo="Objetivo (unidades)"
-            valor={fmtNumero(k.objetivo)}
-            detalle={`${fmtNumero(k.pares)} objetivos cargados`}
-          />
-          <TarjetaKpi titulo="Vendido (unidades)" valor={fmtNumero(k.vendido)} acento={PALETA[0]} />
-          <TarjetaKpi
-            titulo="Avance"
-            valor={fmtPct(k.avancePct)}
-            detalle={`Faltan ${fmtNumero(Math.max(k.objetivo - k.vendido, 0))} unidades`}
-            acento={k.avancePct != null && k.avancePct >= 1 ? PALETA[1] : PALETA[2]}
-          />
-          <TarjetaKpi
-            titulo="Objetivos cumplidos"
-            valor={`${fmtNumero(k.cumplidos)} / ${fmtNumero(k.pares)}`}
-            detalle="Pares vendedor × grupo al 100%"
-            acento={PALETA[1]}
-          />
+          {resumen.map((r) => {
+            const fmt = fmtMetrica(r.metrica);
+            return (
+              <TarjetaKpi
+                key={r.metrica}
+                titulo={NOMBRE_METRICA[r.metrica]}
+                valor={fmtPct(r.avancePct)}
+                detalle={`${fmt(r.vendido)} de ${fmt(r.objetivo)} · ${fmtNumero(r.cumplidos)}/${fmtNumero(r.pares)} cumplidos`}
+                acento={r.avancePct != null && r.avancePct >= 1 ? PALETA[1] : PALETA[0]}
+              />
+            );
+          })}
         </div>
-      ) : null}
+      )}
 
       {data && (
         <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
           <div className="grid gap-4 xl:grid-cols-2">
-            <Panel titulo="Avance por grupo" nota="Click para filtrar">
+            <Panel titulo="Objetivos por empresa" nota="Brandmark y NOA · click para filtrar">
               <ListaAvance
-                filas={data.porGrupo}
-                etiqueta={(f) => f.grupo}
+                filas={porEmpresa}
+                etiqueta={(f) => f.grupo ?? "—"}
                 seleccionado={filtros.grupo}
                 onSeleccionar={alternar("grupo")}
               />
             </Panel>
-            <Panel titulo="Avance por vendedor" nota="Click para filtrar">
+            <Panel titulo="Objetivos de producto" nota="En unidades · click para filtrar">
               <ListaAvance
-                filas={data.porVendedor}
-                etiqueta={(f) => f.vendedor ?? "—"}
-                seleccionado={filtros.vendedor}
-                onSeleccionar={alternar("vendedor")}
+                filas={porProducto}
+                etiqueta={(f) => f.grupo ?? "—"}
+                seleccionado={filtros.grupo}
+                onSeleccionar={alternar("grupo")}
               />
             </Panel>
           </div>
+
+          <Panel titulo="Avance por vendedor" nota="Abierto por métrica · click para filtrar">
+            <ListaAvance
+              filas={data.porVendedor}
+              etiqueta={(f) => `${f.vendedor ?? "—"} · ${NOMBRE_METRICA[f.metrica]}`}
+              clave={(f) => f.vendedor ?? ""}
+              seleccionado={filtros.vendedor}
+              onSeleccionar={alternar("vendedor")}
+            />
+          </Panel>
 
           <Panel titulo="Detalle por vendedor y grupo" nota={`${data.detalle.length} filas`}>
             <Tabla
@@ -184,7 +204,7 @@ export default function DashboardObjetivosPage() {
 
           <Panel
             titulo="Qué SKU aporta a cada grupo"
-            nota="Unidades vendidas dentro del recorte elegido"
+            nota="Solo los objetivos de producto, dentro del recorte elegido"
           >
             <Tabla
               filas={data.aportesSku}

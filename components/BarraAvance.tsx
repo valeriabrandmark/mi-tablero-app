@@ -1,6 +1,6 @@
 "use client";
 
-import { fmtNumero, fmtPct } from "@/lib/format";
+import { fmtMetrica, fmtPct } from "@/lib/format";
 import { PALETA } from "@/lib/paleta";
 import type { FilaObjetivo } from "@/lib/types";
 
@@ -15,6 +15,9 @@ import type { FilaObjetivo } from "@/lib/types";
  * La barra se recorta al 100% para que las filas sigan siendo comparables, pero
  * el número de la derecha muestra el porcentaje real, así un 240% no se lee
  * igual que un 100% justo.
+ *
+ * Cada fila se formatea según su métrica: en una misma lista puede convivir un
+ * objetivo en pesos con uno en unidades, porque la barra es un porcentaje.
  */
 export function BarraAvance({
   fila,
@@ -31,6 +34,7 @@ export function BarraAvance({
   const pct = fila.avancePct ?? 0;
   const ancho = Math.min(Math.max(pct, 0), 1) * 100;
   const color = cumplido ? PALETA[1] : PALETA[0];
+  const fmt = fmtMetrica(fila.metrica);
 
   const Contenedor = onClick ? "button" : "div";
 
@@ -44,7 +48,7 @@ export function BarraAvance({
       <div className="flex items-baseline justify-between gap-3">
         <span className="truncate text-xs">{etiqueta}</span>
         <span className="text-muted shrink-0 text-[11px] tabular-nums">
-          {fmtNumero(fila.vendido)} / {fmtNumero(fila.objetivo)}
+          {fmt(fila.vendido)} / {fmt(fila.objetivo)}
         </span>
       </div>
       <div className="mt-1.5 flex items-center gap-2">
@@ -68,12 +72,15 @@ export function BarraAvance({
 export function ListaAvance({
   filas,
   etiqueta,
+  clave,
   seleccionado,
   onSeleccionar,
   vacio = "Sin objetivos cargados para el filtro elegido.",
 }: {
   filas: FilaObjetivo[];
   etiqueta: (f: FilaObjetivo) => string;
+  /** Valor con el que filtra el click; si se omite, usa la etiqueta. */
+  clave?: (f: FilaObjetivo) => string;
   seleccionado?: string;
   onSeleccionar?: (valor: string) => void;
   vacio?: string;
@@ -85,12 +92,13 @@ export function ListaAvance({
   return (
     <div className="space-y-3">
       {filas.map((f) => {
-        const valor = etiqueta(f);
+        const texto = etiqueta(f);
+        const valor = clave ? clave(f) : texto;
         return (
           <BarraAvance
-            key={valor}
+            key={`${valor}-${f.metrica}`}
             fila={f}
-            etiqueta={valor}
+            etiqueta={texto}
             seleccionada={seleccionado ? seleccionado === valor : undefined}
             onClick={onSeleccionar ? () => onSeleccionar(valor) : undefined}
           />
