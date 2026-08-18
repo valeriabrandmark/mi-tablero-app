@@ -3,14 +3,42 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import BarraFiltros from "@/components/Filtros";
+import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import BarrasMargen from "@/components/charts/BarrasMargen";
 import LineasPorVendedor from "@/components/charts/LineasPorVendedor";
 import TortaProveedores from "@/components/charts/TortaProveedores";
+import { Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
+import type { FilaArticulo, FilaComprobanteVenta } from "@/lib/types";
 import { MIN_UNIDADES_MARGEN } from "@/lib/constantes";
 import { PALETA } from "@/lib/paleta";
 import type { DashboardVentasMayoristas, Filtros, OpcionesFiltro } from "@/lib/types";
+
+const COL_ARTICULOS: Columna<FilaArticulo>[] = [
+  { titulo: "SKU", celda: (a) => a.sku ?? "—" },
+  {
+    titulo: "Producto",
+    celda: (a) => <span className="block max-w-[280px] truncate">{a.producto ?? "—"}</span>,
+  },
+  { titulo: "Unidades", celda: (a) => fmtNumero(a.cantidad), numerica: true },
+  { titulo: "Oferta %", celda: (a) => (a.ofertaPct == null ? "—" : fmtPct(a.ofertaPct / 100)), numerica: true },
+  { titulo: "Precio prom.", celda: (a) => fmtMoneda(a.precioPromedio), numerica: true },
+  { titulo: "Costo prom.", celda: (a) => fmtMoneda(a.costoPromedio), numerica: true },
+  { titulo: "Facturación", celda: (a) => fmtMoneda(a.facturacion), numerica: true },
+  { titulo: "% Rentab.", celda: (a) => fmtPct(a.rentabilidadPct), numerica: true },
+];
+
+const COL_COMPROBANTES: Columna<FilaComprobanteVenta>[] = [
+  { titulo: "Fecha", celda: (c) => c.fecha ?? "—" },
+  { titulo: "Comprobante", celda: (c) => c.comprobante ?? "—" },
+  {
+    titulo: "Cliente",
+    celda: (c) => <span className="block max-w-[260px] truncate">{c.cliente ?? "—"}</span>,
+  },
+  { titulo: "Unidades", celda: (c) => fmtNumero(c.unidades), numerica: true },
+  { titulo: "Facturación", celda: (c) => fmtMoneda(c.facturacion), numerica: true },
+];
 
 function queryString(f: Filtros) {
   const sp = new URLSearchParams();
@@ -18,6 +46,7 @@ function queryString(f: Filtros) {
   if (f.empresa) sp.set("empresa", f.empresa);
   if (f.mes) sp.set("mes", f.mes);
   if (f.proveedor) sp.set("proveedor", f.proveedor);
+  if (f.provincia) sp.set("provincia", f.provincia);
   return sp.toString();
 }
 
@@ -245,6 +274,34 @@ export default function Dashboard() {
                 datos={data.margenPorProveedor}
                 seleccionado={filtros.proveedor}
                 onSeleccionar={alternarProveedor}
+              />
+            </Panel>
+          </div>
+
+          <Panel
+            titulo="% Rentabilidad Ajustada por cliente"
+            nota="Los 15 clientes más grandes por facturación"
+          >
+            <BarrasCategoria
+              datos={data.rentabilidadPorCliente}
+              formato={(n) => fmtPct(n)}
+              colorUnico={PALETA[3]}
+            />
+          </Panel>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Panel titulo="Artículos incluídos" nota={`${data.articulos.length} SKUs`}>
+              <Tabla
+                filas={data.articulos}
+                columnas={COL_ARTICULOS}
+                clave={(a, i) => `${a.sku}-${i}`}
+              />
+            </Panel>
+            <Panel titulo="Comprobantes" nota={`${data.comprobantes.length} por facturación`}>
+              <Tabla
+                filas={data.comprobantes}
+                columnas={COL_COMPROBANTES}
+                clave={(c, i) => `${c.comprobante}-${i}`}
               />
             </Panel>
           </div>

@@ -6,8 +6,11 @@ import {
 } from "@/lib/constantes";
 import type {
   DashboardVentasMayoristas,
+  FilaArticulo,
+  FilaComprobanteVenta,
   Filtros,
   MargenProveedor,
+  RentabilidadCliente,
   OpcionesFiltro,
   PuntoDiaVendedor,
   PuntoProveedor,
@@ -50,6 +53,20 @@ function whereBase(
       params.push(valor);
       clauses.push(`${alias}.${columna} = $${params.length}`);
     }
+  }
+
+  // La provincia no está en fact_ventas: se llega por el envío. Va como EXISTS
+  // para no duplicar filas, y solo cuando el filtro está puesto, así las
+  // consultas sin provincia no quedan atadas a la cobertura de logística.
+  if (f.provincia && !omitir.includes("provincia")) {
+    params.push(f.provincia);
+    clauses.push(`exists (
+      select 1 from gold.fact_ventas_flete fvf
+      join gold.reporte_logistica rl on rl.clave_fila = fvf.clave_fila
+      where fvf.nro_orden = ${alias}.nro_orden::text
+        and fvf.sku = ${alias}.sku
+        and rl.provincia = $${params.length}
+    )`);
   }
 
   return { sql: clauses.join("\n    and "), params };
@@ -176,6 +193,92 @@ async function getMargenPorProveedor(f: Filtros): Promise<MargenProveedor[]> {
   );
 }
 
+// --- Rentabilidad por cliente (barras) ---------------------------------------
+
+/**
+ * Barras de % rentabilidad ajustada por cliente.
+ * Se toman los 15 clientes más grandes por facturación y se los ordena por
+ * rentabilidad: rankear directo por el porcentaje llenaría el gráfico de
+ * clientes chicos con márgenes irreales, el mismo problema que el corte de
+ * unidades en el ranking de proveedores.
+ */
+async function getRentabilidadPorCliente(f: Filtros): Promise<RentabilidadCliente[]> {
+  const w = whereBase(f, ["fv.cliente is not null"]);
+  return query<RentabilidadCliente>(
+    `with por_cliente as (
+       select fv.cliente as label,
+              coalesce(sum(fv.precio_neto * fv.cantidad), 0)::float8 as facturacion,
+              case when sum(fv.precio_neto * fv.cantidad) = 0 then null
+                   else (sum(fv.margen_total)
+                         - sum(fv.costo_unitario * fv.cantidad * coalesce(fpm.pct_flete, 0)))
+                        / sum(fv.precio_neto * fv.cantidad)
+              end::float8 as valor
+       from gold.fact_ventas fv
+       left join gold.fletes_proveedores_pct_mensual fpm
+         on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
+       where ${w.sql}
+       group by fv.cliente
+       order by facturacion desc nulls last
+       limit 15
+     )
+     select * from por_cliente order by valor desc nulls last`,
+    w.params,
+  );
+}
+
+// --- Tabla "Articulos incluídos" ---------------------------------------------
+
+async function getArticulos(f: Filtros): Promise<FilaArticulo[]> {
+  const w = whereBase(f);
+  return query<FilaArticulo>(
+    `select fv.sku,
+            max(fv.producto) as producto,
+            coalesce(sum(fv.cantidad), 0)::float8 as cantidad,
+            avg(nullif(fv.oferta_pct, 0))::float8 as "ofertaPct",
+            -- Promedios ponderados por cantidad; sumar precios unitarios no
+            -- significaría nada (en el .pbit están como Sum, es un error).
+            case when sum(fv.cantidad) = 0 then null
+                 else sum(fv.precio_neto * fv.cantidad) / sum(fv.cantidad)
+            end::float8 as "precioPromedio",
+            case when sum(fv.cantidad) = 0 then null
+                 else sum(fv.costo_unitario * fv.cantidad) / sum(fv.cantidad)
+            end::float8 as "costoPromedio",
+            coalesce(sum(fv.precio_neto * fv.cantidad), 0)::float8 as facturacion,
+            case when sum(fv.precio_neto * fv.cantidad) = 0 then null
+                 else (sum(fv.margen_total)
+                       - sum(fv.costo_unitario * fv.cantidad * coalesce(fpm.pct_flete, 0)))
+                      / sum(fv.precio_neto * fv.cantidad)
+            end::float8 as "rentabilidadPct"
+     from gold.fact_ventas fv
+     left join gold.fletes_proveedores_pct_mensual fpm
+       on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
+     where ${w.sql}
+     group by fv.sku
+     order by facturacion desc nulls last
+     limit 200`,
+    w.params,
+  );
+}
+
+// --- Tabla "Comprobantes" ----------------------------------------------------
+
+async function getComprobantesVenta(f: Filtros): Promise<FilaComprobanteVenta[]> {
+  const w = whereBase(f, ["fv.comprobante is not null"]);
+  return query<FilaComprobanteVenta>(
+    `select fv.comprobante,
+            to_char(max(fv.fecha), 'YYYY-MM-DD') as fecha,
+            max(fv.cliente) as cliente,
+            coalesce(sum(fv.cantidad), 0)::float8 as unidades,
+            coalesce(sum(fv.precio_neto * fv.cantidad), 0)::float8 as facturacion
+     from gold.fact_ventas fv
+     where ${w.sql}
+     group by fv.comprobante
+     order by facturacion desc nulls last
+     limit 200`,
+    w.params,
+  );
+}
+
 // --- 5. Facturación por día y vendedor (líneas) ------------------------------
 
 type FilaDiaria = { fecha: string; vendedor: string; total: number };
@@ -249,6 +352,10 @@ async function getFletes(f: Filtros) {
 // --- Opciones de los selectores ----------------------------------------------
 
 export async function getOpcionesFiltro(): Promise<OpcionesFiltro> {
+  const provincias = await query<{ valor: string }>(
+    `select distinct rl.provincia as valor from gold.reporte_logistica rl
+     where rl.provincia is not null and rl.provincia <> '' order by valor`,
+  );
   // Sin filtros opcionales: las opciones no dependen de lo ya seleccionado.
   const w = whereBase({});
 
@@ -271,6 +378,7 @@ export async function getOpcionesFiltro(): Promise<OpcionesFiltro> {
     vendedores: vendedores.map((r) => r.valor),
     empresas: empresas.map((r) => r.valor),
     meses: meses.map((r) => r.valor),
+    provincias: provincias.map((r) => r.valor),
   };
 }
 
@@ -279,15 +387,27 @@ export async function getOpcionesFiltro(): Promise<OpcionesFiltro> {
 export async function getDashboardVentasMayoristas(
   f: Filtros,
 ): Promise<DashboardVentasMayoristas> {
-  const [totales, pctTop10Clientes, facturacionPorProveedor, margenPorProveedor, serieDiaria, fletes] =
-    await Promise.all([
-      getTotales(f),
-      getTop10Clientes(f),
-      getFacturacionPorProveedor(f),
-      getMargenPorProveedor(f),
-      getSerieDiaria(f),
-      getFletes(f),
-    ]);
+  const [
+    totales,
+    pctTop10Clientes,
+    facturacionPorProveedor,
+    margenPorProveedor,
+    serieDiaria,
+    fletes,
+    rentabilidadPorCliente,
+    articulos,
+    comprobantes,
+  ] = await Promise.all([
+    getTotales(f),
+    getTop10Clientes(f),
+    getFacturacionPorProveedor(f),
+    getMargenPorProveedor(f),
+    getSerieDiaria(f),
+    getFletes(f),
+    getRentabilidadPorCliente(f),
+    getArticulos(f),
+    getComprobantesVenta(f),
+  ]);
 
   return {
     facturacionPorProveedor: facturacionPorProveedor.datos,
@@ -302,6 +422,9 @@ export async function getDashboardVentasMayoristas(
         totales.cantidadPedidos > 0 ? totales.facturacionNeta / totales.cantidadPedidos : null,
     },
     margenPorProveedor,
+    rentabilidadPorCliente,
+    articulos,
+    comprobantes,
     serieDiaria,
     generadoEn: new Date().toISOString(),
   };

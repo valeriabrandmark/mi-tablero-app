@@ -13,6 +13,7 @@ export async function GET(request: NextRequest) {
     empresa: sp.get("empresa") || undefined,
     mes: sp.get("mes") || undefined,
     proveedor: sp.get("proveedor") || undefined,
+    provincia: sp.get("provincia") || undefined,
   };
 
   try {

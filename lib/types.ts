@@ -4,6 +4,33 @@ export type Filtros = {
   mes?: string;
   /** Filtro cruzado: sale de hacer click en un proveedor de un gráfico. */
   proveedor?: string;
+  /** Vía `fact_ventas_flete` -> `reporte_logistica`, igual que el slicer del .pbit. */
+  provincia?: string;
+};
+
+export type FilaArticulo = {
+  sku: string | null;
+  producto: string | null;
+  cantidad: number;
+  ofertaPct: number | null;
+  precioPromedio: number | null;
+  costoPromedio: number | null;
+  facturacion: number;
+  rentabilidadPct: number | null;
+};
+
+export type FilaComprobanteVenta = {
+  comprobante: string | null;
+  fecha: string | null;
+  cliente: string | null;
+  unidades: number;
+  facturacion: number;
+};
+
+export type RentabilidadCliente = {
+  label: string;
+  valor: number;
+  facturacion: number;
 };
 
 export type Kpis = {
@@ -41,6 +68,7 @@ export type OpcionesFiltro = {
   vendedores: string[];
   empresas: string[];
   meses: string[];
+  provincias: string[];
 };
 
 // --- Logística --------------------------------------------------------------
@@ -159,6 +187,9 @@ export type DashboardVentasMayoristas = {
   /** Denominador de la torta: total de TODOS los proveedores, sin el filtro cruzado. */
   facturacionTotalProveedores: number;
   margenPorProveedor: MargenProveedor[];
+  rentabilidadPorCliente: RentabilidadCliente[];
+  articulos: FilaArticulo[];
+  comprobantes: FilaComprobanteVenta[];
   serieDiaria: SerieDiaria;
   generadoEn: string;
 };

@@ -48,7 +48,8 @@ export default function BarraFiltros({
   opciones: OpcionesFiltro | null;
   onChange: (f: Filtros) => void;
 }) {
-  const vacio = !filtros.vendedor && !filtros.empresa && !filtros.mes && !filtros.proveedor;
+  const vacio =
+    !filtros.vendedor && !filtros.empresa && !filtros.mes && !filtros.proveedor && !filtros.provincia;
 
   return (
     <div className="border-line bg-panel flex flex-wrap items-end gap-3 rounded-xl border p-3">
@@ -71,6 +72,12 @@ export default function BarraFiltros({
         onChange={(v) => onChange({ ...filtros, mes: v })}
         formato={fmtMes}
       />
+      <Selector
+        etiqueta="Provincia"
+        valor={filtros.provincia}
+        opciones={opciones?.provincias ?? []}
+        onChange={(v) => onChange({ ...filtros, provincia: v })}
+      />
 
       <button
         onClick={() => onChange({})}
@@ -81,8 +88,9 @@ export default function BarraFiltros({
       </button>
 
       <span className="text-muted ml-auto max-w-md text-[11px] leading-tight">
-        Canal Mayorista, excluyendo <code>AGENCIA</code>. El filtro por provincia no está
-        disponible: no hay forma confiable de cruzar clientes.
+        Canal Mayorista, excluyendo <code>AGENCIA</code>. La provincia sale del envío
+        (<code>reporte_logistica</code>), así que al usarla quedan solo las líneas que ya
+        tienen logística cargada.
       </span>
     </div>
   );
