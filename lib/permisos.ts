@@ -15,12 +15,13 @@ import { slugVendedor, VENDEDORES_OBJETIVOS, type VendedorObjetivos } from "@/li
  * `app_metadata` no se puede editar desde el dashboard de Supabase; se carga
  * con un `update` sobre `auth.users` (ver README).
  *
- * | Rol          | Qué ve                                          |
- * |--------------|-------------------------------------------------|
- * | `superadmin` | Todo                                            |
- * | `admin`      | Todo, sin editar                                |
- * | `supervisor` | Las páginas de objetivos de los cuatro vendedores |
- * | `vendedor`   | Únicamente su propia página de objetivos        |
+ * | Rol                | Qué ve                                            |
+ * |--------------------|---------------------------------------------------|
+ * | `superadmin`       | Todo                                              |
+ * | `admin`            | Todo, sin editar                                  |
+ * | `supervisor`       | Las páginas de objetivos de los cuatro vendedores |
+ * | `vendedor`         | Únicamente su propia página de objetivos          |
+ * | `responsable_meli` | Únicamente la sección Venta minorista             |
  *
  * OJO con `admin`: hoy el tablero **no tiene nada editable**, así que en la
  * práctica ve lo mismo que `superadmin`. El rol existe para que la diferencia
@@ -35,8 +36,24 @@ import { slugVendedor, VENDEDORES_OBJETIVOS, type VendedorObjetivos } from "@/li
  * acceso a su propio tablero.
  */
 
-export const ROLES = ["superadmin", "admin", "supervisor", "vendedor"] as const;
+export const ROLES = [
+  "superadmin",
+  "admin",
+  "supervisor",
+  "vendedor",
+  "responsable_meli",
+] as const;
 export type Rol = (typeof ROLES)[number];
+
+/**
+ * Cómo se escribe el rol en el claim. Se normaliza porque el rol se carga a
+ * mano con un `update` sobre `auth.users`, y "responsable meli" con espacio es
+ * lo que uno escribe naturalmente: si solo aceptáramos el guión bajo, el
+ * usuario quedaría sin acceso y el motivo no se vería por ningún lado.
+ */
+function normalizarRol(valor: string): string {
+  return valor.trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
 
 // Un miembro por rol y no `{ rol: "superadmin" | "admin" | "supervisor" }`:
 // con el discriminante múltiple, TypeScript no termina de descartar el miembro
@@ -45,6 +62,7 @@ export type Permiso =
   | { rol: "superadmin" }
   | { rol: "admin" }
   | { rol: "supervisor" }
+  | { rol: "responsable_meli" }
   | { rol: "vendedor"; vendedor: VendedorObjetivos };
 
 /** Forma mínima del usuario de Supabase que hace falta acá. */
@@ -73,13 +91,13 @@ export function permisoDelUsuario(usuario: UsuarioConClaim): Permiso | null {
   const rolCrudo = texto(meta.rol) ?? (vendedorCrudo ? "vendedor" : null);
   if (!rolCrudo) return null;
 
-  const rol = ROLES.find((r) => r === rolCrudo.toLowerCase());
+  const rol = ROLES.find((r) => r === normalizarRol(rolCrudo));
   if (!rol) return null;
 
   if (rol === "vendedor") {
     return vendedor ? { rol, vendedor } : null;
   }
-  return { rol };   // superadmin | admin | supervisor
+  return { rol };   // superadmin | admin | supervisor | responsable_meli
 }
 
 const PAGINAS_OBJETIVOS = VENDEDORES_OBJETIVOS.map((v) => `/objetivos/${slugVendedor(v)}`);
@@ -90,6 +108,21 @@ const PAGINAS_OBJETIVOS = VENDEDORES_OBJETIVOS.map((v) => `/objetivos/${slugVend
  * contraseña.
  */
 const PAGINAS_DE_CUENTA = ["/cuenta", "/nueva-contrasena"];
+
+/** Raíz de la sección Venta minorista: la ven los admins y el responsable de Meli. */
+const RAIZ_MINORISTA = "/venta-minorista";
+
+export const INICIO_MINORISTA = `${RAIZ_MINORISTA}/mercado-libre`;
+
+/**
+ * `startsWith` acá SÍ es lo que corresponde (al revés que en objetivos): la
+ * sección es un árbol entero —Mercado Libre, sus pestañas, Tienda Nube— y quien
+ * la ve, la ve completa. Si mañana una subpágina necesita otro permiso, va a
+ * tener que salir de este prefijo y tener su propia regla.
+ */
+function esDeMinorista(pathname: string): boolean {
+  return pathname === RAIZ_MINORISTA || pathname.startsWith(`${RAIZ_MINORISTA}/`);
+}
 
 /**
  * Única regla de acceso del tablero. La usan las TRES barreras —el proxy, la
@@ -105,6 +138,10 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
 
   const esDeObjetivos = pathname === "/objetivos" || PAGINAS_OBJETIVOS.includes(pathname);
 
+  if (permiso.rol === "responsable_meli") {
+    return esDeMinorista(pathname) || pathname.startsWith("/api/meli");
+  }
+
   if (permiso.rol === "supervisor") {
     return esDeObjetivos || pathname === "/api/objetivos";
   }
@@ -119,6 +156,7 @@ export function paginaInicial(permiso: Permiso | null): string {
   if (!permiso) return "/login";
   if (permiso.rol === "vendedor") return `/objetivos/${slugVendedor(permiso.vendedor)}`;
   if (permiso.rol === "supervisor") return PAGINAS_OBJETIVOS[0];
+  if (permiso.rol === "responsable_meli") return INICIO_MINORISTA;
   return "/ventas-mayoristas";
 }
 
@@ -126,5 +164,10 @@ export function paginaInicial(permiso: Permiso | null): string {
 export function puedeVerVendedor(permiso: Permiso | null, vendedor: string): boolean {
   if (!permiso) return false;
   if (permiso.rol === "vendedor") return permiso.vendedor === vendedor;
-  return true; // superadmin, admin y supervisor ven los cuatro
+  // Se lista explícitamente en vez de `return true`: con el `true` de antes,
+  // cada rol nuevo pasaba a ver los objetivos de los cuatro vendedores sin que
+  // nadie lo decidiera — que es justo lo que NO tiene que ver el de Meli.
+  return (
+    permiso.rol === "superadmin" || permiso.rol === "admin" || permiso.rol === "supervisor"
+  );
 }

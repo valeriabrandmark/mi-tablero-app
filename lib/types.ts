@@ -293,3 +293,136 @@ export type DashboardObjetivos = {
   comprobantes: FilaComprobanteObjetivo[];
   generadoEn: string;
 };
+
+// --- Venta minorista: Mercado Libre -----------------------------------------
+
+export type FiltrosMeli = {
+  mes?: string[];
+  proveedor?: string[];
+  marca?: string[];
+  /** Filtro cruzado: sale de hacer click en una fila del ranking de artículos. */
+  sku?: string[];
+  /** Solo en la pestaña Alertas: nivel de alerta (ver `NIVELES_ALERTA`). */
+  alerta?: string[];
+};
+
+/**
+ * Todos los importes son de la LÍNEA ya multiplicada por cantidad. Ver la tabla
+ * de granos en lib/meli.ts: `comision` viene por unidad y `envio` por línea, así
+ * que sumarlos de más o de menos es el error fácil de esta página.
+ */
+export type KpisMeli = {
+  ventaCiva: number;
+  ventaSiva: number;
+  unidades: number;
+  ordenes: number;
+  lineas: number;
+  costo: number;
+  comision: number;
+  envio: number;
+  /** Venta s/IVA − costo − comisión − envío. */
+  rentabilidad: number;
+  /** Fracción. Denominador VENTA C/IVA, como la pestaña "Tablero" de la planilla. */
+  margenPct: number | null;
+  /** IIBB + Imp. Cheque + Imp. Municipal sobre la venta s/IVA. */
+  impuestos: number;
+  rentabilidadNeta: number;
+  /** Fracción. Denominador VENTA S/IVA, como la pestaña "Alertas". */
+  margenNetoPct: number | null;
+  /** Comisión sobre venta s/IVA, en fracción. */
+  pctComision: number | null;
+  ticketPromedio: number | null;
+};
+
+/** Un punto del timeline: venta y rentabilidad del día, para leerlas juntas. */
+export type PuntoDiaMeli = { fecha: string; venta: number; rentabilidad: number };
+
+/** Una fila de cualquier ranking (proveedor, marca). */
+export type RankingMeli = {
+  label: string;
+  venta: number;
+  unidades: number;
+  rentabilidad: number;
+  /** Fracción, sobre venta c/IVA. */
+  margenPct: number | null;
+};
+
+export type ArticuloMeli = {
+  sku: string | null;
+  producto: string | null;
+  proveedor: string | null;
+  marca: string | null;
+  unidades: number;
+  ventaCiva: number;
+  ventaSiva: number;
+  costo: number;
+  comision: number;
+  envio: number;
+  rentabilidad: number;
+  margenPct: number | null;
+};
+
+export type OpcionesMeli = {
+  meses: string[];
+  proveedores: string[];
+  marcas: string[];
+};
+
+export type DashboardMeli = {
+  kpis: KpisMeli;
+  porDia: PuntoDiaMeli[];
+  porProveedor: RankingMeli[];
+  porMarca: RankingMeli[];
+  articulos: ArticuloMeli[];
+  /** Denominador de la torta: venta de TODOS los proveedores, sin filtro cruzado. */
+  ventaTotalProveedores: number;
+  /** Último día con ventas cargadas: avisa si el dato viene atrasado. */
+  ultimaVenta: string | null;
+  generadoEn: string;
+};
+
+// --- Venta minorista: Mercado Libre / Alertas --------------------------------
+
+/** Una venta individual con su rentabilidad desagregada, como la planilla. */
+export type FilaAlertaMeli = {
+  nivel: string;
+  fecha: string | null;
+  nroOrden: string | null;
+  sku: string | null;
+  producto: string | null;
+  proveedor: string | null;
+  marca: string | null;
+  cantidad: number;
+  ventaCiva: number;
+  ventaSiva: number;
+  costoUnitario: number | null;
+  costo: number;
+  comision: number;
+  envio: number;
+  rentabilidad: number;
+  margenPct: number | null;
+  iibb: number;
+  cheque: number;
+  municipal: number;
+  rentabilidadNeta: number;
+  margenNetoPct: number | null;
+  accion: string;
+};
+
+/** Cuánto pesa cada nivel de alerta en el recorte elegido. */
+export type ResumenAlerta = {
+  nivel: string;
+  lineas: number;
+  ventaSiva: number;
+  rentabilidadNeta: number;
+};
+
+export type DashboardAlertasMeli = {
+  resumen: ResumenAlerta[];
+  /** Total de líneas del recorte, para saber sobre qué se está mirando. */
+  lineasTotales: number;
+  filas: FilaAlertaMeli[];
+  /** `true` si `filas` quedó recortada por el tope de la consulta. */
+  recortada: boolean;
+  generadoEn: string;
+};
