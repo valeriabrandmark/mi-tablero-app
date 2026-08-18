@@ -294,6 +294,106 @@ guarda ahí (`provider`, `providers`). El nombre del vendedor va **en mayúscula
 y exacto**; cualquier otro valor deja al usuario sin acceso, que es la falla
 segura y no la peligrosa.
 
+### Cómo se cambian los objetivos
+
+Todo se toca en la base, sin desplegar nada: el tablero lee en vivo, así que el
+cambio se ve al recargar.
+
+**Cambiarle el número a un objetivo**
+
+```sql
+update gold.objetivos
+set cantidad = 300
+where mes_comercial = '2026-08' and vendedor = 'RAMON'
+  and grupo = 'IMPULSE TRUE LOVE 150 ML';
+```
+
+**Copiar los objetivos de un vendedor a otro, a la mitad**
+
+```sql
+update gold.objetivos r
+set cantidad = round(s.cantidad / 2)
+from gold.objetivos s
+where s.vendedor = 'SILVIO' and r.vendedor = 'RAMON'
+  and r.grupo = s.grupo and r.mes_comercial = s.mes_comercial;
+```
+
+**Abrir el mes siguiente** copiando el mes actual:
+
+```sql
+insert into gold.objetivos (mes_comercial, vendedor, grupo, cantidad)
+select '2026-09', vendedor, grupo, cantidad
+from gold.objetivos where mes_comercial = '2026-08'
+on conflict (mes_comercial, vendedor, grupo) do nothing;
+```
+
+**Sumar un grupo nuevo** — los tres pasos, en orden:
+
+```sql
+-- 1. El grupo: cómo se matchea y cómo se mide
+insert into gold.objetivos_grupo (grupo, criterio, metrica, orden, descripcion)
+values ('SEDAL SHAMPOO', 'sku', 'unidades', 6, 'MIX de shampoos Sedal');
+
+-- 2. Qué SKUs lo componen (o la marca, o las empresas)
+insert into gold.objetivos_grupo_item (grupo, valor)
+values ('SEDAL SHAMPOO', 'XX00001'), ('SEDAL SHAMPOO', 'XX00002');
+
+-- 3. El objetivo de cada vendedor
+insert into gold.objetivos (mes_comercial, vendedor, grupo, cantidad)
+select '2026-08', v, 'SEDAL SHAMPOO', 240
+from unnest(array['SILVIO','RAMON','PABLO','RICARDO']) as v;
+```
+
+**Sacar un grupo**: `delete from gold.objetivos_grupo where grupo = '...'`. Los
+items y los objetivos se van solos, por el `on delete cascade`.
+
+Para ver cómo quedó todo:
+
+```sql
+select o.mes_comercial, o.vendedor, o.grupo, g.metrica, o.cantidad
+from gold.objetivos o
+join gold.objetivos_grupo g on g.grupo = o.grupo
+order by o.mes_comercial desc, o.vendedor, g.orden;
+```
+
+Dos cosas para no pisar: el vendedor va **en mayúsculas y exacto**, y si el
+grupo no existe en `objetivos_grupo` el `insert` falla por la foreign key —
+que es lo que queremos, porque un objetivo huérfano no se mostraría en ningún
+lado.
+
+---
+
+## Contraseñas
+
+| Pantalla | Para qué |
+|---|---|
+| `/recuperar` | Pide el link por mail. Link desde el login |
+| `/auth/confirmar` | Canjea el link por una sesión |
+| `/nueva-contrasena` | Pone la contraseña nueva después del link |
+| `/cuenta` | Cambia la contraseña con la sesión abierta |
+
+**El cambio desde `/cuenta` pide la contraseña actual** y la verifica con un
+`signInWithPassword` antes de tocar nada. Supabase no lo exige, pero sin eso
+alcanza con encontrar una sesión abierta en una máquina prestada para quedarse
+con la cuenta.
+
+`/auth/confirmar` soporta los **dos** formatos de link que puede mandar Supabase
+(`?code=` de PKCE y `?token_hash=&type=` de los links de mail), porque cuál
+llega depende de la plantilla del proyecto y no del código. También valida el
+`next`: solo rutas internas, para que el link del mail no se pueda usar para
+mandar a alguien a otro sitio.
+
+### Lo que hay que configurar en Supabase
+
+1. **Authentication → URL Configuration → Redirect URLs**: agregar
+   `https://brandmark-business.vercel.app/**` y `http://localhost:3000/**`. Sin
+   esto Supabase ignora el `redirectTo` y el link del mail no vuelve al tablero.
+2. **Authentication → Emails**: el SMTP que viene por defecto tiene un límite
+   bajo de mails por hora y no es para producción. Si los vendedores van a usar
+   la recuperación seguido, hay que configurar un SMTP propio.
+
+---
+
 ### Dónde se aplica
 
 La regla vive entera en [lib/permisos.ts](lib/permisos.ts) y la comparten las

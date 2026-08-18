@@ -85,6 +85,13 @@ export function permisoDelUsuario(usuario: UsuarioConClaim): Permiso | null {
 const PAGINAS_OBJETIVOS = VENDEDORES_OBJETIVOS.map((v) => `/objetivos/${slugVendedor(v)}`);
 
 /**
+ * Rutas que ve cualquiera con permiso válido, sin importar el rol: son de la
+ * propia cuenta, no del negocio. Sin esto, un vendedor no podría ni cambiar su
+ * contraseña.
+ */
+const PAGINAS_DE_CUENTA = ["/cuenta", "/nueva-contrasena"];
+
+/**
  * Única regla de acceso del tablero. La usan las TRES barreras —el proxy, la
  * ruta de API y la página— para que no puedan discrepar entre sí.
  *
@@ -93,6 +100,7 @@ const PAGINAS_OBJETIVOS = VENDEDORES_OBJETIVOS.map((v) => `/objetivos/${slugVend
  */
 export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   if (!permiso) return false;
+  if (PAGINAS_DE_CUENTA.includes(pathname)) return true;
   if (permiso.rol === "superadmin" || permiso.rol === "admin") return true;
 
   const esDeObjetivos = pathname === "/objetivos" || PAGINAS_OBJETIVOS.includes(pathname);
