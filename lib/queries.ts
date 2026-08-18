@@ -2,7 +2,7 @@ import { query, queryOne } from "@/lib/db";
 import {
   CANAL_MAYORISTA,
   MIN_UNIDADES_MARGEN,
-  VENDEDORES_EXCLUIDOS,
+  VENDEDORES_INCLUIDOS,
 } from "@/lib/constantes";
 import type {
   DashboardVentasMayoristas,
@@ -40,10 +40,10 @@ function whereBase(
   alias = "fv",
   omitir: (keyof Filtros)[] = [],
 ): Where {
-  const params: unknown[] = [CANAL_MAYORISTA, VENDEDORES_EXCLUIDOS];
+  const params: unknown[] = [CANAL_MAYORISTA, VENDEDORES_INCLUIDOS];
   const clauses = [
     `${alias}.canal = $1`,
-    `coalesce(${alias}.vendedor, '') <> all($2::text[])`,
+    `${alias}.vendedor = any($2::text[])`,
     ...extra,
   ];
 

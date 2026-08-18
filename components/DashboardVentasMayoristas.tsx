@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import BarraFiltros from "@/components/Filtros";
+import EncabezadoPagina from "@/components/EncabezadoPagina";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import BarrasMargen from "@/components/charts/BarrasMargen";
 import LineasPorVendedor from "@/components/charts/LineasPorVendedor";
@@ -133,9 +134,8 @@ export default function Dashboard() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Ventas Mayoristas</h1>
-          <p className="text-muted mt-0.5 text-xs">
+        <EncabezadoPagina pagina="ventas">
+          <p className="text-muted mt-1 text-xs">
             {data
               ? `Actualizado ${new Date(data.generadoEn).toLocaleTimeString("es-AR", {
                   hour: "2-digit",
@@ -143,7 +143,7 @@ export default function Dashboard() {
                 })}`
               : "Cargando datos en vivo…"}
           </p>
-        </div>
+        </EncabezadoPagina>
         <button
           onClick={recargar}
           disabled={cargando}

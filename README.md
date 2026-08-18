@@ -151,14 +151,13 @@ vista está vacía para la mayoría de los proveedores y no se puede asumir dato
 
 ## Pendientes / decisiones abiertas
 
-- **Vendedores a excluir** — hoy solo se excluye `AGENCIA`. Falta definir si
-  `BTL`, `PROYECTOS ESPECIALES` y `TRADE` también quedan afuera del reporte
-  comercial. Cuando se decida, se agregan a `VENDEDORES_EXCLUIDOS` en
-  [lib/constantes.ts](lib/constantes.ts) y aplica a todo el tablero de una.
-- **Filtro por provincia** — no implementado a propósito. `fact_ventas.cliente`
-  es texto libre y no cruza con `gold.clientes_clasificados.cliente_id` (match
-  menor al 1% probando por nombre normalizado). Hace falta una columna de cruce
-  real antes de intentarlo.
+- **Vendedores** — la página usa la lista blanca `PABLO`, `RAMON`, `SILVIO`,
+  igual que el filtro de página del `.pbit`. Se cambia en
+  `VENDEDORES_INCLUIDOS` de [lib/constantes.ts](lib/constantes.ts) y aplica a
+  todas las consultas y selectores de una.
+- **Filtro por provincia** — sale del envío (`reporte_logistica`, cruzando por
+  `clave_fila`), no del cliente. Funciona, pero al usarlo quedan solo las
+  líneas con logística cargada, que hoy son 512 envíos.
 - **Cobertura de flete a clientes** — el join con `gold.fact_ventas_flete` cubre
   ~89% de las líneas; los pedidos recientes todavía no tienen flete calculado.
 ## Diferencias con el tablero de Power BI

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import EncabezadoPagina from "@/components/EncabezadoPagina";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import { BotonLimpiar, SelectorFiltro } from "@/components/SelectorFiltro";
@@ -71,14 +72,13 @@ export default function DashboardCuentasPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Cuentas Corrientes</h1>
-          <p className="text-muted mt-0.5 text-xs">
+        <EncabezadoPagina pagina="cuentas-corrientes">
+          <p className="text-muted mt-1 text-xs">
             {data
               ? `Actualizado ${new Date(data.generadoEn).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`
               : "Cargando datos en vivo…"}
           </p>
-        </div>
+        </EncabezadoPagina>
         <button
           onClick={recargar}
           disabled={cargando}

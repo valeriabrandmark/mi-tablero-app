@@ -16,7 +16,7 @@ export default async function TableroLayout({ children }: LayoutProps<"/">) {
     <div className="flex min-h-full flex-1 flex-col">
       <header className="border-line bg-panel/80 sticky top-0 z-20 border-b backdrop-blur">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
-          <span className="text-sm font-semibold tracking-tight">Tablero Brandmark</span>
+          <span className="text-sm font-semibold tracking-tight">Brandmark negocio</span>
 
           <nav className="flex gap-1 text-sm">
             {NAV.map((item) => (

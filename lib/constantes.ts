@@ -8,17 +8,19 @@
 export const CANAL_MAYORISTA = "Mayorista";
 
 /**
- * TODO (decisión de negocio pendiente):
- * `vendedor` incluye valores que no son vendedores reales: AGENCIA, BTL,
- * PROYECTOS ESPECIALES y TRADE. Por ahora solo se excluye AGENCIA — falta
- * definir si los otros tres también quedan afuera del reporte comercial.
- * Cuando se decida, se agregan acá y aplica a las 6 consultas y a los
- * selectores, porque todas pasan por `whereBase()` en lib/queries.ts.
+ * Vendedores que entran en la página de Ventas Mayoristas.
+ *
+ * Es una lista BLANCA, igual que el filtro de página del tablero de Power BI
+ * (`vendedor IN ('PABLO','RAMON','SILVIO')`). Así quedan afuera de una todos
+ * los valores de `vendedor` que no son vendedores reales — AGENCIA, BTL,
+ * TRADE, PROYECTOS ESPECIALES — y también los canales que no son fuerza de
+ * venta mayorista: CASA CENTRAL, MELI, VENDEDOR WEB, IGNACIO, IVANA.
+ *
+ * Para sumar o sacar un vendedor alcanza con tocar esta lista: aplica a las
+ * consultas y a los selectores, porque todas pasan por `whereBase()` en
+ * lib/queries.ts.
  */
-export const VENDEDORES_EXCLUIDOS = ["AGENCIA"];
-
-/** Candidatos a excluir, pendientes de confirmación con Ana. */
-export const VENDEDORES_A_DEFINIR = ["BTL", "PROYECTOS ESPECIALES", "TRADE"];
+export const VENDEDORES_INCLUIDOS = ["PABLO", "RAMON", "SILVIO"];
 
 /**
  * Mínimo de unidades para que un proveedor entre al ranking de margen.
