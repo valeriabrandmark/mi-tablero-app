@@ -7,6 +7,8 @@ depende de `frontend-unibrandco`, `backend-unibrandco` ni de AWS.
 Páginas: **Ventas Mayoristas**, **Logística** y **Cuentas Corrientes**, portadas
 desde el tablero de Power BI (`Tablero_AnaV1.2.pbit`).
 
+**Producción:** https://brandmark-business.vercel.app/
+
 ---
 
 ## Correr en local
@@ -81,6 +83,8 @@ las dos anda.
 3. Antes del primer deploy, **Settings → Environment Variables**: cargá las 7
    variables de arriba en los 3 entornos (Production / Preview / Development).
 4. Deploy. Cada `git push` a `main` redespliega solo.
+
+El proyecto ya está desplegado en **https://brandmark-business.vercel.app/**.
 
 No hace falta ningún servidor aparte: las rutas de `app/api/*` se despliegan
 como funciones serverless dentro del mismo proyecto.
