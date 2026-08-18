@@ -2,16 +2,16 @@
 
 import { useState } from "react";
 import { ListaAvance } from "@/components/BarraAvance";
+import LineaFacturacion from "@/components/charts/LineaFacturacion";
 import { BotonLimpiar, SelectorFiltro } from "@/components/SelectorFiltro";
 import { Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
-import { fmtMes, fmtMetrica, fmtNumero, fmtPct } from "@/lib/format";
+import { fmtMes, fmtMetrica, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { PALETA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
   DashboardObjetivos,
-  FilaAporteSku,
-  FilaObjetivo,
+  FilaComprobanteObjetivo,
   FiltrosObjetivos,
   Metrica,
   OpcionesObjetivos,
@@ -25,41 +25,31 @@ const NOMBRE_METRICA: Record<Metrica, string> = {
   clientes: "Clientes con compra",
 };
 
-const cumplido = (f: { objetivo: number; vendido: number }) =>
-  f.objetivo > 0 && f.vendido >= f.objetivo;
-
-const COLUMNAS_DETALLE: Columna<FilaObjetivo>[] = [
-  { titulo: "Grupo", celda: (f) => f.grupo ?? "—" },
-  { titulo: "Vendedor", celda: (f) => f.vendedor ?? "—" },
-  { titulo: "Mide", celda: (f) => NOMBRE_METRICA[f.metrica] },
-  { titulo: "Objetivo", celda: (f) => fmtMetrica(f.metrica)(f.objetivo), numerica: true },
-  { titulo: "Vendido", celda: (f) => fmtMetrica(f.metrica)(f.vendido), numerica: true },
-  { titulo: "Faltan", celda: (f) => fmtMetrica(f.metrica)(f.faltan), numerica: true },
+const COLUMNAS_COMPROBANTES: Columna<FilaComprobanteObjetivo>[] = [
+  { titulo: "Comprobante", celda: (f) => f.comprobante ?? "—" },
+  { titulo: "Fecha", celda: (f) => f.fecha ?? "—" },
   {
-    titulo: "Avance",
-    numerica: true,
-    celda: (f) => (
-      <span style={cumplido(f) ? { color: PALETA[1] } : undefined}>{fmtPct(f.avancePct)}</span>
-    ),
+    titulo: "Cliente",
+    celda: (f) => <span className="block max-w-[280px] truncate">{f.cliente ?? "—"}</span>,
   },
+  { titulo: "Empresa", celda: (f) => f.empresa ?? "—" },
+  { titulo: "Unidades", celda: (f) => fmtNumero(f.unidades), numerica: true },
+  { titulo: "Facturación", celda: (f) => fmtMoneda(f.facturacion), numerica: true },
 ];
 
-const COLUMNAS_SKU: Columna<FilaAporteSku>[] = [
-  { titulo: "Grupo", celda: (f) => f.grupo },
-  { titulo: "SKU", celda: (f) => f.sku ?? "—" },
-  {
-    titulo: "Producto",
-    celda: (f) => <span className="block max-w-[420px] truncate">{f.producto ?? "—"}</span>,
-  },
-  { titulo: "Unidades", celda: (f) => fmtNumero(f.vendido), numerica: true },
-];
-
-export default function DashboardObjetivosPage() {
-  const [filtros, setFiltros] = useState<FiltrosObjetivos>({});
+export default function DashboardObjetivosPage({
+  vendedor,
+  mesInicial,
+}: {
+  vendedor: string;
+  /** Mes con el que abre, resuelto en el servidor (ver getMesInicialObjetivos). */
+  mesInicial: string;
+}) {
+  const [filtros, setFiltros] = useState<FiltrosObjetivos>({ vendedor, mes: mesInicial });
 
   const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
     "/api/objetivos",
-    filtros as Record<string, string | undefined>,
+    filtros as unknown as Record<string, string | undefined>,
     { conOpciones: "1" },
   );
 
@@ -70,23 +60,27 @@ export default function DashboardObjetivosPage() {
     setFiltros(f);
   };
 
-  /** Click en una barra: aplica el valor, o lo saca si ya estaba puesto. */
-  const alternar = (campo: "grupo" | "vendedor") => (valor: string) =>
-    cambiar({ ...filtros, [campo]: filtros[campo] === valor ? undefined : valor });
+  /** Click en una barra: aplica el grupo, o lo saca si ya estaba puesto. */
+  const alternarGrupo = (valor: string) =>
+    cambiar({ ...filtros, grupo: filtros.grupo === valor ? undefined : valor });
 
   const resumen = data?.resumen ?? [];
-  const vacio = !filtros.mes && !filtros.vendedor && !filtros.grupo;
+  const sinCambios = filtros.mes === mesInicial && !filtros.grupo;
 
-  // Los grupos de producto y los de empresa se muestran por separado: comparten
-  // la escala de porcentaje pero no responden la misma pregunta.
   const porProducto = data?.porGrupo.filter((g) => g.metrica === "unidades") ?? [];
   const porEmpresa = data?.porGrupo.filter((g) => g.metrica !== "unidades") ?? [];
+
+  const notaRecorte = filtros.grupo
+    ? `Solo las líneas de ${filtros.grupo}`
+    : "Todas las ventas mayoristas del mes";
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight">Objetivos</h1>
+          <h1 className="text-lg font-semibold tracking-tight">
+            Objetivos <span className="text-c1">{vendedor}</span>
+          </h1>
           <p className="text-muted mt-1 text-xs">
             {data
               ? `Actualizado ${new Date(data.generadoEn).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`
@@ -109,12 +103,7 @@ export default function DashboardObjetivosPage() {
           opciones={opciones?.meses ?? []}
           onChange={(v) => cambiar({ ...filtros, mes: v })}
           formato={fmtMes}
-        />
-        <SelectorFiltro
-          etiqueta="Vendedor"
-          valor={filtros.vendedor}
-          opciones={opciones?.vendedores ?? []}
-          onChange={(v) => cambiar({ ...filtros, vendedor: v })}
+          todos="Todos los meses"
         />
         <SelectorFiltro
           etiqueta="Grupo"
@@ -122,7 +111,10 @@ export default function DashboardObjetivosPage() {
           opciones={opciones?.grupos ?? []}
           onChange={(v) => cambiar({ ...filtros, grupo: v })}
         />
-        <BotonLimpiar onClick={() => cambiar({})} deshabilitado={vacio} />
+        <BotonLimpiar
+          onClick={() => cambiar({ vendedor, mes: mesInicial })}
+          deshabilitado={sinCambios}
+        />
 
         <span className="text-muted ml-auto max-w-md text-[11px] leading-tight">
           Solo canal Mayorista, presupuestos incluidos. Un MIX se mide sobre la suma de sus
@@ -138,15 +130,15 @@ export default function DashboardObjetivosPage() {
       )}
 
       {resumen.length === 0 && !error ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }, (_, i) => (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 3 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />
           ))}
         </div>
       ) : (
         // Una tarjeta por métrica: sumar pesos con unidades no significaría nada.
         <div
-          className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
+          className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-3 ${cargando ? "opacity-50" : ""}`}
         >
           {resumen.map((r) => {
             const fmt = fmtMetrica(r.metrica);
@@ -171,7 +163,7 @@ export default function DashboardObjetivosPage() {
                 filas={porEmpresa}
                 etiqueta={(f) => f.grupo ?? "—"}
                 seleccionado={filtros.grupo}
-                onSeleccionar={alternar("grupo")}
+                onSeleccionar={alternarGrupo}
               />
             </Panel>
             <Panel titulo="Objetivos de producto" nota="En unidades · click para filtrar">
@@ -179,38 +171,24 @@ export default function DashboardObjetivosPage() {
                 filas={porProducto}
                 etiqueta={(f) => f.grupo ?? "—"}
                 seleccionado={filtros.grupo}
-                onSeleccionar={alternar("grupo")}
+                onSeleccionar={alternarGrupo}
               />
             </Panel>
           </div>
 
-          <Panel titulo="Avance por vendedor" nota="Abierto por métrica · click para filtrar">
-            <ListaAvance
-              filas={data.porVendedor}
-              etiqueta={(f) => `${f.vendedor ?? "—"} · ${NOMBRE_METRICA[f.metrica]}`}
-              clave={(f) => f.vendedor ?? ""}
-              seleccionado={filtros.vendedor}
-              onSeleccionar={alternar("vendedor")}
-            />
-          </Panel>
-
-          <Panel titulo="Detalle por vendedor y grupo" nota={`${data.detalle.length} filas`}>
-            <Tabla
-              filas={data.detalle}
-              columnas={COLUMNAS_DETALLE}
-              clave={(f) => `${f.grupo}-${f.vendedor}`}
-            />
+          <Panel titulo="Facturación por fecha" nota={notaRecorte}>
+            <LineaFacturacion datos={data.serieFacturacion} />
           </Panel>
 
           <Panel
-            titulo="Qué SKU aporta a cada grupo"
-            nota="Solo los objetivos de producto, dentro del recorte elegido"
+            titulo="Comprobantes involucrados"
+            nota={`${data.comprobantes.length} comprobantes · ${notaRecorte.toLowerCase()}`}
           >
             <Tabla
-              filas={data.aportesSku}
-              columnas={COLUMNAS_SKU}
-              clave={(f, i) => `${f.grupo}-${f.sku}-${i}`}
-              vacio="Todavía no hay ventas de estos productos en el recorte elegido."
+              filas={data.comprobantes}
+              columnas={COLUMNAS_COMPROBANTES}
+              clave={(f, i) => `${f.comprobante}-${i}`}
+              vacio="Sin comprobantes en el recorte elegido."
             />
           </Panel>
         </div>

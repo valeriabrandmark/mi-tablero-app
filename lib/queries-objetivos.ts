@@ -1,16 +1,21 @@
 import { query } from "@/lib/db";
 import type {
   DashboardObjetivos,
-  FilaAporteSku,
+  FilaComprobanteObjetivo,
   FilaObjetivo,
   FiltrosObjetivos,
   OpcionesObjetivos,
+  PuntoFacturacion,
   ResumenMetrica,
 } from "@/lib/types";
-import { CANAL_MAYORISTA } from "@/lib/constantes";
+import { CANAL_MAYORISTA, mesComercialActual } from "@/lib/constantes";
 
 /**
- * Página "Objetivos" — avance de cada vendedor contra su objetivo.
+ * Página "Objetivos" — avance de UN vendedor contra su objetivo.
+ *
+ * El vendedor no es un filtro: lo fija la ruta (`/objetivos/[vendedor]`). Hay
+ * una página por vendedor para que más adelante se pueda dar permiso sobre una
+ * sola y cada uno vea únicamente la suya.
  *
  * El objetivo NO cuelga del SKU sino de un GRUPO (`gold.objetivos_grupo`), que
  * es la unidad en la que la comercial lo pensó. Cada grupo declara dos cosas:
@@ -41,15 +46,14 @@ type Where = { sql: string; params: unknown[] };
  * Los filtros se aplican SIEMPRE sobre la tabla de objetivos (alias `o`), no
  * sobre las ventas. Es lo que hace que un vendedor sin ninguna venta del mes
  * siga apareciendo con su objetivo y 0 de avance, en vez de desaparecer de la
- * tabla — que es justo la fila que hay que mirar.
+ * tabla — que es justo la fila que hay que mirar, y el caso de RICARDO hoy.
  */
 function whereObjetivos(f: FiltrosObjetivos, omitir: (keyof FiltrosObjetivos)[] = []): Where {
-  const params: unknown[] = [];
-  const clauses: string[] = [];
+  const params: unknown[] = [f.vendedor];
+  const clauses = ["o.vendedor = $1"];
 
   const opcionales: [keyof FiltrosObjetivos, string][] = [
     ["mes", "o.mes_comercial"],
-    ["vendedor", "o.vendedor"],
     ["grupo", "o.grupo"],
   ];
 
@@ -61,11 +65,11 @@ function whereObjetivos(f: FiltrosObjetivos, omitir: (keyof FiltrosObjetivos)[] 
     }
   }
 
-  return { sql: clauses.length > 0 ? clauses.join("\n     and ") : "true", params };
+  return { sql: clauses.join("\n     and "), params };
 }
 
 /**
- * Avance por par (mes, vendedor, grupo): el grano más fino que existe.
+ * Avance por par (mes, grupo): el grano más fino que existe para un vendedor.
  * Todo lo demás sale de agregar esto.
  *
  * El `left join` contra las ventas es deliberado: sin él, un objetivo sin
@@ -83,8 +87,7 @@ function cteAvance(w: Where): string {
     join gold.objetivos_grupo_item i on i.grupo = g.grupo
   ),
   ventas as (
-    select m.grupo, fv.mes_comercial, fv.vendedor, fv.cliente,
-           fv.sku, fv.producto, fv.cantidad, fv.precio_neto
+    select m.grupo, fv.mes_comercial, fv.vendedor, fv.cliente, fv.cantidad, fv.precio_neto
     from gold.fact_ventas fv
     join mapa m
       on (m.criterio = 'sku'     and m.valor = fv.sku)
@@ -94,7 +97,6 @@ function cteAvance(w: Where): string {
   ),
   avance as (
     select o.mes_comercial,
-           o.vendedor,
            o.grupo,
            g.metrica,
            g.orden,
@@ -111,15 +113,9 @@ function cteAvance(w: Where): string {
      and v.mes_comercial = o.mes_comercial
      and v.vendedor = o.vendedor
     where ${w.sql}
-    group by o.mes_comercial, o.vendedor, o.grupo, g.metrica, g.orden, o.cantidad
+    group by o.mes_comercial, o.grupo, g.metrica, g.orden, o.cantidad
   )`;
 }
-
-/** Columnas derivadas comunes a todas las aperturas. */
-const DERIVADAS = `case when sum(objetivo) = 0 then null
-                        else sum(vendido)::float8 / sum(objetivo)
-                   end::float8 as "avancePct",
-                   greatest(sum(objetivo) - sum(vendido), 0)::float8 as faltan`;
 
 // --- Totales por métrica -----------------------------------------------------
 
@@ -142,8 +138,6 @@ function getResumen(f: FiltrosObjetivos): Promise<ResumenMetrica[]> {
   );
 }
 
-// --- Aperturas ---------------------------------------------------------------
-
 /**
  * Avance por grupo. Se omite el filtro cruzado de grupo a propósito: si no, al
  * clickear una barra el panel se quedaría con una sola y no habría contra qué
@@ -158,7 +152,10 @@ function getPorGrupo(f: FiltrosObjetivos): Promise<FilaObjetivo[]> {
             metrica,
             sum(objetivo)::float8 as objetivo,
             sum(vendido)::float8 as vendido,
-            ${DERIVADAS}
+            case when sum(objetivo) = 0 then null
+                 else sum(vendido)::float8 / sum(objetivo)
+            end::float8 as "avancePct",
+            greatest(sum(objetivo) - sum(vendido), 0)::float8 as faltan
      from avance
      group by grupo, metrica, orden
      order by orden`,
@@ -166,113 +163,145 @@ function getPorGrupo(f: FiltrosObjetivos): Promise<FilaObjetivo[]> {
   );
 }
 
-/**
- * Avance por vendedor y métrica. Omite el filtro de vendedor, por el mismo
- * motivo. Va abierto por métrica porque un vendedor tiene tres avances
- * distintos que no se pueden promediar entre sí.
- */
-function getPorVendedor(f: FiltrosObjetivos): Promise<FilaObjetivo[]> {
-  const w = whereObjetivos(f, ["vendedor"]);
-  return query<FilaObjetivo>(
-    `${cteAvance(w)}
-     select null::text as grupo,
-            vendedor,
-            metrica,
-            sum(objetivo)::float8 as objetivo,
-            sum(vendido)::float8 as vendido,
-            ${DERIVADAS}
-     from avance
-     group by vendedor, metrica
-     order by vendedor,
-              case metrica when 'unidades' then 1 when 'facturacion' then 2 else 3 end`,
-    w.params,
-  );
-}
-
-/** El detalle fino: una fila por vendedor y grupo, que es como se controla. */
-function getDetalle(f: FiltrosObjetivos): Promise<FilaObjetivo[]> {
-  const w = whereObjetivos(f);
-  return query<FilaObjetivo>(
-    `${cteAvance(w)}
-     select grupo,
-            vendedor,
-            metrica,
-            sum(objetivo)::float8 as objetivo,
-            sum(vendido)::float8 as vendido,
-            ${DERIVADAS}
-     from avance
-     group by grupo, vendedor, metrica, orden
-     order by orden, vendedor`,
-    w.params,
-  );
-}
+// --- Líneas de venta del vendedor --------------------------------------------
 
 /**
- * Qué SKU aportó cada unidad dentro de un MIX. Sin esto el grupo es una caja
- * negra: se ve que faltan 400 unidades pero no si es porque un sabor no se
- * vende o porque no se vende ninguno.
+ * Las líneas de venta del recorte, que alimentan el timeline y el listado de
+ * comprobantes.
  *
- * Solo tiene sentido para los grupos de unidades: en los de empresa el "aporte
- * por SKU" serían todos los artículos que vendió la empresa, que no dice nada.
+ * Si hay un grupo seleccionado, se acotan a las líneas DE ESE GRUPO: así el
+ * listado contesta "qué comprobantes traen este MIX y cuánto trae cada uno",
+ * que es para lo que sirve el filtro cruzado. Sin grupo seleccionado son todas
+ * las ventas mayoristas del vendedor en el mes.
  */
-function getAportesSku(f: FiltrosObjetivos): Promise<FilaAporteSku[]> {
-  const w = whereObjetivos(f);
-  return query<FilaAporteSku>(
-    `${cteAvance(w)}
-     select v.grupo,
-            v.sku,
-            max(v.producto) as producto,
-            coalesce(sum(v.cantidad), 0)::float8 as vendido
-     from ventas v
-     where exists (select 1 from avance a
-                   where a.grupo = v.grupo
-                     and a.mes_comercial = v.mes_comercial
-                     and a.vendedor = v.vendedor
-                     and a.metrica = 'unidades')
-     group by v.grupo, v.sku
-     having sum(v.cantidad) <> 0
-     order by v.grupo, vendido desc`,
-    w.params,
+function cteLineas(f: FiltrosObjetivos): Where {
+  const params: unknown[] = [f.vendedor];
+  const clauses = [`fv.canal = '${CANAL_MAYORISTA}'`, "fv.vendedor = $1"];
+
+  if (f.mes) {
+    params.push(f.mes);
+    clauses.push(`fv.mes_comercial = $${params.length}`);
+  }
+
+  let join = "";
+  if (f.grupo) {
+    params.push(f.grupo);
+    join = `join (select g.criterio, i.valor
+                  from gold.objetivos_grupo g
+                  join gold.objetivos_grupo_item i on i.grupo = g.grupo
+                  where g.grupo = $${params.length}) m
+              on (m.criterio = 'sku'     and m.valor = fv.sku)
+              or (m.criterio = 'marca'   and m.valor = fv.marca)
+              or (m.criterio = 'empresa' and m.valor = fv.empresa)`;
+  }
+
+  return {
+    sql: `with lineas as (
+      select fv.comprobante, fv.fecha, fv.cliente, fv.empresa,
+             fv.cantidad, fv.precio_neto
+      from gold.fact_ventas fv
+      ${join}
+      where ${clauses.join("\n        and ")}
+    )`,
+    params,
+  };
+}
+
+/** Timeline: facturación neta por día. */
+function getSerieFacturacion(f: FiltrosObjetivos): Promise<PuntoFacturacion[]> {
+  const l = cteLineas(f);
+  return query<PuntoFacturacion>(
+    `${l.sql}
+     select to_char(fecha, 'YYYY-MM-DD') as fecha,
+            coalesce(sum(precio_neto * cantidad), 0)::float8 as total
+     from lineas
+     where fecha is not null
+     group by fecha
+     order by fecha`,
+    l.params,
+  );
+}
+
+/** Listado de comprobantes involucrados. */
+function getComprobantes(f: FiltrosObjetivos): Promise<FilaComprobanteObjetivo[]> {
+  const l = cteLineas(f);
+  return query<FilaComprobanteObjetivo>(
+    `${l.sql}
+     select comprobante,
+            to_char(max(fecha), 'YYYY-MM-DD') as fecha,
+            max(cliente) as cliente,
+            max(empresa) as empresa,
+            coalesce(sum(cantidad), 0)::float8 as unidades,
+            coalesce(sum(precio_neto * cantidad), 0)::float8 as facturacion
+     from lineas
+     where comprobante is not null
+     group by comprobante
+     order by max(fecha) desc nulls last, facturacion desc
+     limit 300`,
+    l.params,
   );
 }
 
 // --- Opciones de los selectores ----------------------------------------------
 
 export async function getOpcionesObjetivos(): Promise<OpcionesObjetivos> {
-  const [meses, vendedores, grupos] = await Promise.all([
+  const [meses, grupos] = await Promise.all([
     query<{ valor: string }>(
       `select distinct mes_comercial as valor from gold.objetivos order by valor desc`,
-    ),
-    query<{ valor: string }>(
-      `select distinct vendedor as valor from gold.objetivos order by valor`,
     ),
     query<{ valor: string }>(`select grupo as valor from gold.objetivos_grupo order by orden`),
   ]);
 
   return {
     meses: meses.map((r) => r.valor),
-    vendedores: vendedores.map((r) => r.valor),
     grupos: grupos.map((r) => r.valor),
   };
+}
+
+/**
+ * Mes con el que abre la página: el mes comercial vigente si ya tiene objetivos
+ * cargados, y si no el último que sí los tenga.
+ *
+ * El fallback existe para que al pasar de mes la página no abra vacía mientras
+ * nadie cargó los objetivos nuevos. No queda escondido: el selector muestra el
+ * mes que quedó elegido, y el usuario lo puede cambiar.
+ *
+ * Si la base no responde devuelve el mes vigente igual, así el error lo muestra
+ * el dashboard con su propio cartel en vez de romper la página entera.
+ */
+export async function getMesInicialObjetivos(vendedor: string): Promise<string> {
+  const vigente = mesComercialActual();
+  try {
+    const filas = await query<{ valor: string }>(
+      `select mes_comercial as valor
+       from gold.objetivos
+       where vendedor = $1
+       group by mes_comercial
+       order by (mes_comercial = $2) desc, mes_comercial desc
+       limit 1`,
+      [vendedor, vigente],
+    );
+    return filas[0]?.valor ?? vigente;
+  } catch {
+    return vigente;
+  }
 }
 
 // --- Dashboard completo ------------------------------------------------------
 
 export async function getDashboardObjetivos(f: FiltrosObjetivos): Promise<DashboardObjetivos> {
-  const [resumen, porGrupo, porVendedor, detalle, aportesSku] = await Promise.all([
+  const [resumen, porGrupo, serieFacturacion, comprobantes] = await Promise.all([
     getResumen(f),
     getPorGrupo(f),
-    getPorVendedor(f),
-    getDetalle(f),
-    getAportesSku(f),
+    getSerieFacturacion(f),
+    getComprobantes(f),
   ]);
 
   return {
     resumen,
     porGrupo,
-    porVendedor,
-    detalle,
-    aportesSku,
+    serieFacturacion,
+    comprobantes,
     generadoEn: new Date().toISOString(),
   };
 }

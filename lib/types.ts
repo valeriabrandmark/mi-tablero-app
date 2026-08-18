@@ -214,9 +214,10 @@ export type Metrica = "unidades" | "facturacion" | "clientes";
 export const METRICAS = ["unidades", "facturacion", "clientes"] as const;
 
 export type FiltrosObjetivos = {
+  /** Lo fija la ruta (`/objetivos/[vendedor]`), no un selector. */
+  vendedor: string;
   mes?: string;
-  vendedor?: string;
-  /** Filtro cruzado: sale de hacer click en una barra o en una fila. */
+  /** Filtro cruzado: sale de hacer click en una barra. */
   grupo?: string;
 };
 
@@ -243,25 +244,28 @@ export type FilaObjetivo = {
   faltan: number;
 };
 
-/** Composición de un MIX: cuánto aportó cada SKU al total del grupo. */
-export type FilaAporteSku = {
-  grupo: string;
-  sku: string | null;
-  producto: string | null;
-  vendido: number;
+/** Un comprobante del vendedor dentro del recorte elegido. */
+export type FilaComprobanteObjetivo = {
+  comprobante: string | null;
+  fecha: string | null;
+  cliente: string | null;
+  empresa: string | null;
+  unidades: number;
+  facturacion: number;
 };
+
+/** Un punto del timeline de facturación. */
+export type PuntoFacturacion = { fecha: string; total: number };
 
 export type OpcionesObjetivos = {
   meses: string[];
-  vendedores: string[];
   grupos: string[];
 };
 
 export type DashboardObjetivos = {
   resumen: ResumenMetrica[];
   porGrupo: FilaObjetivo[];
-  porVendedor: FilaObjetivo[];
-  detalle: FilaObjetivo[];
-  aportesSku: FilaAporteSku[];
+  serieFacturacion: PuntoFacturacion[];
+  comprobantes: FilaComprobanteObjetivo[];
   generadoEn: string;
 };
