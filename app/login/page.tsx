@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import FormularioLogin from "@/components/FormularioLogin";
 import { authConfigurada } from "@/lib/supabase/env";
@@ -11,7 +12,15 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   return (
     <main className="flex flex-1 items-center justify-center p-6">
       <div className="border-line bg-panel w-full max-w-sm rounded-xl border p-6">
-        <h1 className="text-lg font-semibold">Tablero Brandmark</h1>
+        <Image
+          src="/isotipo.png"
+          alt=""
+          width={256}
+          height={256}
+          priority
+          className="mb-5 h-16 w-auto"
+        />
+        <h1 className="text-lg font-semibold tracking-tight">Brandmark Negocio</h1>
         <p className="text-muted mt-1 text-sm">Ingresá con tu email y contraseña.</p>
 
         {authConfigurada ? (
