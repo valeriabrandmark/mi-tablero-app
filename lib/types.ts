@@ -201,3 +201,67 @@ export type DashboardVentasMayoristas = {
   serieDiaria: SerieDiaria;
   generadoEn: string;
 };
+
+// --- Página "Objetivos" ------------------------------------------------------
+
+/**
+ * Cómo se mide el avance de un grupo. Existe porque un objetivo en pesos y uno
+ * en unidades no se pueden sumar entre sí: todo lo que agrega objetivos tiene
+ * que agrupar por esto primero.
+ */
+export type Metrica = "unidades" | "facturacion" | "clientes";
+
+export const METRICAS = ["unidades", "facturacion", "clientes"] as const;
+
+export type FiltrosObjetivos = {
+  mes?: string;
+  vendedor?: string;
+  /** Filtro cruzado: sale de hacer click en una barra o en una fila. */
+  grupo?: string;
+};
+
+/** Totales de una métrica. Nunca se mezclan dos métricas en un mismo total. */
+export type ResumenMetrica = {
+  metrica: Metrica;
+  objetivo: number;
+  vendido: number;
+  /** Fracción (0.13 = 13 %). Null si el objetivo del recorte es 0. */
+  avancePct: number | null;
+  /** Cuántos pares vendedor×grupo llegaron al objetivo, sobre el total. */
+  cumplidos: number;
+  pares: number;
+};
+
+/** Una línea de avance. `grupo` o `vendedor` son null cuando la fila agrega. */
+export type FilaObjetivo = {
+  grupo: string | null;
+  vendedor: string | null;
+  metrica: Metrica;
+  objetivo: number;
+  vendido: number;
+  avancePct: number | null;
+  faltan: number;
+};
+
+/** Composición de un MIX: cuánto aportó cada SKU al total del grupo. */
+export type FilaAporteSku = {
+  grupo: string;
+  sku: string | null;
+  producto: string | null;
+  vendido: number;
+};
+
+export type OpcionesObjetivos = {
+  meses: string[];
+  vendedores: string[];
+  grupos: string[];
+};
+
+export type DashboardObjetivos = {
+  resumen: ResumenMetrica[];
+  porGrupo: FilaObjetivo[];
+  porVendedor: FilaObjetivo[];
+  detalle: FilaObjetivo[];
+  aportesSku: FilaAporteSku[];
+  generadoEn: string;
+};

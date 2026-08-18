@@ -1,3 +1,5 @@
+import type { Metrica } from "@/lib/types";
+
 const money = new Intl.NumberFormat("es-AR", {
   style: "currency",
   currency: "ARS",
@@ -56,4 +58,13 @@ export function fmtMes(mesComercial: string): string {
 export function fmtFechaCorta(iso: string): string {
   const [, m, d] = iso.split("-");
   return m && d ? `${d}/${m}` : iso;
+}
+
+/**
+ * Formateador que le corresponde a cada métrica de objetivos. Existe para que
+ * un objetivo de facturación no se muestre como "45.000.000" pelado ni uno de
+ * unidades con signo de pesos.
+ */
+export function fmtMetrica(metrica: Metrica): (n: number | null | undefined) => string {
+  return metrica === "facturacion" ? fmtMoneda : fmtNumero;
 }
