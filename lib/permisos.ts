@@ -125,6 +125,19 @@ function esDeMinorista(pathname: string): boolean {
 }
 
 /**
+ * Las rutas de API que alimentan la sección. Se listan una por una y NO con un
+ * prefijo común: las tres barreras usan esta misma función, así que una ruta
+ * nueva tiene que entrar acá a mano. Es más trabajo y es a propósito — con un
+ * `startsWith("/api/")` genérico, cualquier API que se agregue mañana quedaría
+ * abierta al responsable de Meli sin que nadie lo haya decidido.
+ */
+const APIS_MINORISTA = ["/api/meli", "/api/tienda-nube"];
+
+function esApiMinorista(pathname: string): boolean {
+  return APIS_MINORISTA.some((r) => pathname === r || pathname.startsWith(`${r}/`));
+}
+
+/**
  * Única regla de acceso del tablero. La usan las TRES barreras —el proxy, la
  * ruta de API y la página— para que no puedan discrepar entre sí.
  *
@@ -139,7 +152,7 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   const esDeObjetivos = pathname === "/objetivos" || PAGINAS_OBJETIVOS.includes(pathname);
 
   if (permiso.rol === "responsable_meli") {
-    return esDeMinorista(pathname) || pathname.startsWith("/api/meli");
+    return esDeMinorista(pathname) || esApiMinorista(pathname);
   }
 
   if (permiso.rol === "supervisor") {

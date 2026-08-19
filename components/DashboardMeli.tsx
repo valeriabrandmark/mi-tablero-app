@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import VentaRentabilidadMeli from "@/components/charts/VentaRentabilidadMeli";
+import VentaRentabilidad from "@/components/charts/VentaRentabilidad";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import BarraFiltrosMeli from "@/components/FiltrosMeli";
@@ -334,7 +334,7 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
               titulo="Venta y rentabilidad por día"
               nota="Venta c/IVA contra rentabilidad bruta"
             >
-              <VentaRentabilidadMeli datos={data.porDia} />
+              <VentaRentabilidad datos={data.porDia} />
             </Panel>
           )}
 
