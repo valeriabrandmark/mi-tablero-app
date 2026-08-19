@@ -72,34 +72,45 @@ function Delta({ actual, anterior, contra }: { actual: number; anterior: number;
  * que se decide si esa venta convino.
  */
 const COLUMNAS_PEDIDOS: Columna<PedidoTiendaNube>[] = [
-  { titulo: "Fecha", celda: (p) => (p.fecha ? fmtFechaCorta(p.fecha) : "—") },
+  { titulo: "Fecha", celda: (p) => (p.fecha ? fmtFechaCorta(p.fecha) : "—"), orden: (p) => p.fecha },
   {
     titulo: "N° Pedido",
     celda: (p) => <span className="font-mono text-[11px]">{p.nroOrden ?? "—"}</span>,
+    // Por número y no por texto: como texto, el pedido 9 iría después del 100.
+    orden: (p) => (p.nroOrden == null ? null : Number(p.nroOrden)),
   },
   {
     titulo: "Cliente",
     celda: (p) => <span className="block max-w-[200px] truncate">{p.cliente ?? "—"}</span>,
+    orden: (p) => p.cliente,
   },
-  { titulo: "Prod.", celda: (p) => fmtNumero(p.lineas), numerica: true },
-  { titulo: "Unid.", celda: (p) => fmtNumero(p.unidades), numerica: true },
-  { titulo: "Venta c/IVA", celda: (p) => fmtMoneda(p.ventaCiva), numerica: true },
-  { titulo: "Costo", celda: (p) => fmtMoneda(p.costo), numerica: true },
-  { titulo: "Envío", celda: (p) => fmtMoneda(p.envio), numerica: true },
+  { titulo: "Prod.", celda: (p) => fmtNumero(p.lineas), numerica: true, orden: (p) => p.lineas },
+  { titulo: "Unid.", celda: (p) => fmtNumero(p.unidades), numerica: true, orden: (p) => p.unidades },
+  {
+    titulo: "Venta c/IVA",
+    celda: (p) => fmtMoneda(p.ventaCiva),
+    numerica: true,
+    orden: (p) => p.ventaCiva,
+  },
+  { titulo: "Costo", celda: (p) => fmtMoneda(p.costo), numerica: true, orden: (p) => p.costo },
+  { titulo: "Envío", celda: (p) => fmtMoneda(p.envio), numerica: true, orden: (p) => p.envio },
   {
     titulo: "Rent. bruta",
     celda: (p) => <Importe valor={p.rentabilidad} />,
     numerica: true,
+    orden: (p) => p.rentabilidad,
   },
   {
     titulo: "Rent. neta",
     celda: (p) => <Importe valor={p.rentabilidadNeta} />,
     numerica: true,
+    orden: (p) => p.rentabilidadNeta,
   },
   {
     titulo: "Margen neto",
     celda: (p) => <Porcentaje valor={p.margenNetoPct} />,
     numerica: true,
+    orden: (p) => p.margenNetoPct,
   },
 ];
 
@@ -107,6 +118,7 @@ const COLUMNAS_CLIENTES: Columna<ClienteTiendaNube>[] = [
   {
     titulo: "Cliente",
     celda: (c) => <span className="block max-w-[220px] truncate">{c.cliente}</span>,
+    orden: (c) => c.cliente,
   },
   {
     titulo: "Pedidos",
@@ -119,30 +131,67 @@ const COLUMNAS_CLIENTES: Columna<ClienteTiendaNube>[] = [
       </span>
     ),
     numerica: true,
+    orden: (c) => c.pedidos,
   },
-  { titulo: "Unid.", celda: (c) => fmtNumero(c.unidades), numerica: true },
-  { titulo: "Venta c/IVA", celda: (c) => fmtMoneda(c.ventaCiva), numerica: true },
-  { titulo: "Rentab.", celda: (c) => <Importe valor={c.rentabilidad} />, numerica: true },
-  { titulo: "Margen", celda: (c) => <Porcentaje valor={c.margenPct} />, numerica: true },
-  { titulo: "Última", celda: (c) => (c.ultima ? fmtFechaCorta(c.ultima) : "—") },
+  { titulo: "Unid.", celda: (c) => fmtNumero(c.unidades), numerica: true, orden: (c) => c.unidades },
+  {
+    titulo: "Venta c/IVA",
+    celda: (c) => fmtMoneda(c.ventaCiva),
+    numerica: true,
+    orden: (c) => c.ventaCiva,
+  },
+  {
+    titulo: "Rentab.",
+    celda: (c) => <Importe valor={c.rentabilidad} />,
+    numerica: true,
+    orden: (c) => c.rentabilidad,
+  },
+  {
+    titulo: "Margen",
+    celda: (c) => <Porcentaje valor={c.margenPct} />,
+    numerica: true,
+    orden: (c) => c.margenPct,
+  },
+  {
+    titulo: "Última",
+    celda: (c) => (c.ultima ? fmtFechaCorta(c.ultima) : "—"),
+    orden: (c) => c.ultima,
+  },
 ];
 
 const COLUMNAS_ARTICULOS: Columna<ArticuloTiendaNube>[] = [
-  { titulo: "SKU", celda: (a) => a.sku ?? "—" },
+  { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
   {
     titulo: "Producto",
     celda: (a) => <span className="block max-w-[320px] truncate">{a.producto ?? "—"}</span>,
+    orden: (a) => a.producto,
   },
   {
     titulo: "Marca",
     celda: (a) => <span className="block max-w-[140px] truncate">{a.marca ?? "—"}</span>,
+    orden: (a) => a.marca,
   },
-  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true },
-  { titulo: "Venta c/IVA", celda: (a) => fmtMoneda(a.ventaCiva), numerica: true },
-  { titulo: "Costo", celda: (a) => fmtMoneda(a.costo), numerica: true },
-  { titulo: "Envío", celda: (a) => fmtMoneda(a.envio), numerica: true },
-  { titulo: "Rentabilidad", celda: (a) => <Importe valor={a.rentabilidad} />, numerica: true },
-  { titulo: "Margen", celda: (a) => <Porcentaje valor={a.margenPct} />, numerica: true },
+  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true, orden: (a) => a.unidades },
+  {
+    titulo: "Venta c/IVA",
+    celda: (a) => fmtMoneda(a.ventaCiva),
+    numerica: true,
+    orden: (a) => a.ventaCiva,
+  },
+  { titulo: "Costo", celda: (a) => fmtMoneda(a.costo), numerica: true, orden: (a) => a.costo },
+  { titulo: "Envío", celda: (a) => fmtMoneda(a.envio), numerica: true, orden: (a) => a.envio },
+  {
+    titulo: "Rentabilidad",
+    celda: (a) => <Importe valor={a.rentabilidad} />,
+    numerica: true,
+    orden: (a) => a.rentabilidad,
+  },
+  {
+    titulo: "Margen",
+    celda: (a) => <Porcentaje valor={a.margenPct} />,
+    numerica: true,
+    orden: (a) => a.margenPct,
+  },
 ];
 
 /** El top por rentabilidad va con menos columnas: se lee de un vistazo. */
@@ -155,7 +204,7 @@ const COLUMNAS_TOP: Columna<ArticuloTiendaNube>[] = [
       </span>
     ),
   },
-  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true },
+  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true, orden: (a) => a.unidades },
   {
     titulo: "Rentabilidad",
     celda: (a) => (
@@ -164,8 +213,14 @@ const COLUMNAS_TOP: Columna<ArticuloTiendaNube>[] = [
       </span>
     ),
     numerica: true,
+    orden: (a) => a.rentabilidad,
   },
-  { titulo: "Margen", celda: (a) => <Porcentaje valor={a.margenPct} />, numerica: true },
+  {
+    titulo: "Margen",
+    celda: (a) => <Porcentaje valor={a.margenPct} />,
+    numerica: true,
+    orden: (a) => a.margenPct,
+  },
 ];
 
 /** Ranking en tabla y no en gráfico: son cuatro números por fila, no uno. */
@@ -181,11 +236,25 @@ function TablaRanking({
   onSeleccionar: (v: string) => void;
 }) {
   const columnas: Columna<RankingTiendaNube>[] = [
-    { titulo, celda: (r) => <span className="block max-w-[220px] truncate">{r.label}</span> },
-    { titulo: "Venta c/IVA", celda: (r) => fmtMoneda(r.venta), numerica: true },
-    { titulo: "Unid.", celda: (r) => fmtNumero(r.unidades), numerica: true },
-    { titulo: "Rentab.", celda: (r) => <Importe valor={r.rentabilidad} />, numerica: true },
-    { titulo: "Margen", celda: (r) => <Porcentaje valor={r.margenPct} />, numerica: true },
+    {
+      titulo,
+      celda: (r) => <span className="block max-w-[220px] truncate">{r.label}</span>,
+      orden: (r) => r.label,
+    },
+    { titulo: "Venta c/IVA", celda: (r) => fmtMoneda(r.venta), numerica: true, orden: (r) => r.venta },
+    { titulo: "Unid.", celda: (r) => fmtNumero(r.unidades), numerica: true, orden: (r) => r.unidades },
+    {
+      titulo: "Rentab.",
+      celda: (r) => <Importe valor={r.rentabilidad} />,
+      numerica: true,
+      orden: (r) => r.rentabilidad,
+    },
+    {
+      titulo: "Margen",
+      celda: (r) => <Porcentaje valor={r.margenPct} />,
+      numerica: true,
+      orden: (r) => r.margenPct,
+    },
   ];
 
   return (
@@ -271,12 +340,23 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
         nota={`${CRITERIO_VENTA} Márgenes sobre venta c/IVA, igual que Mercado Libre — Ventas Mayoristas los mide s/IVA.`}
       />
 
-      {/* Chips para los filtros cruzados que no tienen selector arriba. */}
-      {!sinValores(filtros.sku) && (
+      {/* Chips de los filtros cruzados, que no tienen selector en la barra.
+          Sin esto un filtro puesto de un click quedaría invisible: el tablero
+          mostraría un recorte y no habría nada en pantalla diciendo por qué. */}
+      {(!sinValores(filtros.sku) || !sinValores(filtros.cliente)) && (
         <div className="flex flex-wrap items-center gap-2">
-          {filtros.sku!.map((s) => (
+          {filtros.cliente?.map((c) => (
             <button
-              key={s}
+              key={`cli-${c}`}
+              onClick={() => alternarEn("cliente")(c)}
+              className="border-c1/40 bg-c1/10 text-c1 hover:bg-c1/20 rounded-full border px-3 py-1 text-xs"
+            >
+              {c} ✕
+            </button>
+          ))}
+          {filtros.sku?.map((s) => (
+            <button
+              key={`sku-${s}`}
               onClick={() => alternarEn("sku")(s)}
               className="border-c1/40 bg-c1/10 text-c1 hover:bg-c1/20 rounded-full border px-3 py-1 text-xs"
             >
@@ -371,7 +451,7 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
               contra && comp ? (
                 <Delta actual={k.pedidos} anterior={comp.pedidos} contra={contra} />
               ) : (
-                `${fmtNumero(k.unidades)} unidades · ticket ${fmtMoneda(k.ticketPromedio)}`
+                `${fmtNumero(k.unidades)} unidades en ${fmtNumero(k.lineas)} líneas`
               )
             }
           />
@@ -390,9 +470,19 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
             }
           />
           <TarjetaKpi
-            titulo="Costo mercadería"
-            valor={fmtMoneda(k.costo)}
-            detalle="Sin IVA, ya con el descuento del proveedor"
+            titulo="Ticket promedio"
+            valor={fmtMoneda(k.ticketPromedio)}
+            detalle={
+              contra && comp && comp.pedidos > 0 ? (
+                <Delta
+                  actual={k.ticketPromedio ?? 0}
+                  anterior={comp.ventaCiva / comp.pedidos}
+                  contra={contra}
+                />
+              ) : (
+                `${fmtMoneda(k.costo)} de costo de mercadería`
+              )
+            }
           />
           {/* El envío que absorbe LA TIENDA, no el que paga el comprador. Son dos
               campos distintos en Tienda Nube y solo este es un costo. */}
@@ -489,15 +579,6 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
               />
             </Panel>
           </div>
-
-          <Panel titulo="Rentabilidad por marca" nota="Top 12 por venta · click para filtrar">
-            <TablaRanking
-              filas={data.porMarca}
-              titulo="Marca"
-              seleccionados={filtros.marca}
-              onSeleccionar={alternarEn("marca")}
-            />
-          </Panel>
 
           <Panel
             titulo="Artículos"

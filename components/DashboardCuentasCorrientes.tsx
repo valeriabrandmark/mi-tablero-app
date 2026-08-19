@@ -28,6 +28,7 @@ const COLUMNAS: Columna<FilaCliente>[] = [
   {
     titulo: "Cliente",
     celda: (f) => <span className="block max-w-[260px] truncate">{f.razonSocial}</span>,
+    orden: (f) => f.razonSocial,
   },
   {
     titulo: "Categoría",
@@ -36,14 +37,16 @@ const COLUMNAS: Columna<FilaCliente>[] = [
         {f.categoria ?? "—"}
       </span>
     ),
+    orden: (f) => f.categoria,
   },
-  { titulo: "Vendedor", celda: (f) => f.vendedor ?? "—" },
-  { titulo: "Saldo total", celda: (f) => fmtMoneda(f.saldoTotal), numerica: true },
-  { titulo: "Saldo vencido", celda: (f) => fmtMoneda(f.saldoVencido), numerica: true },
+  { titulo: "Vendedor", celda: (f) => f.vendedor ?? "—", orden: (f) => f.vendedor },
+  { titulo: "Saldo total", celda: (f) => fmtMoneda(f.saldoTotal), numerica: true, orden: (f) => f.saldoTotal },
+  { titulo: "Saldo vencido", celda: (f) => fmtMoneda(f.saldoVencido), numerica: true, orden: (f) => f.saldoVencido },
   {
     titulo: "Atraso máx.",
     celda: (f) => (f.atrasoMax == null ? "—" : `${fmtNumero(f.atrasoMax)} d`),
     numerica: true,
+    orden: (f) => f.atrasoMax,
   },
 ];
 

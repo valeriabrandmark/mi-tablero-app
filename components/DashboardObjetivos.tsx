@@ -27,15 +27,16 @@ const NOMBRE_METRICA: Record<Metrica, string> = {
 };
 
 const COLUMNAS_COMPROBANTES: Columna<FilaComprobanteObjetivo>[] = [
-  { titulo: "Comprobante", celda: (f) => f.comprobante ?? "—" },
-  { titulo: "Fecha", celda: (f) => f.fecha ?? "—" },
+  { titulo: "Comprobante", celda: (f) => f.comprobante ?? "—", orden: (f) => f.comprobante },
+  { titulo: "Fecha", celda: (f) => f.fecha ?? "—", orden: (f) => f.fecha },
   {
     titulo: "Cliente",
     celda: (f) => <span className="block max-w-[280px] truncate">{f.cliente ?? "—"}</span>,
+    orden: (f) => f.cliente,
   },
-  { titulo: "Empresa", celda: (f) => f.empresa ?? "—" },
-  { titulo: "Unidades", celda: (f) => fmtNumero(f.unidades), numerica: true },
-  { titulo: "Facturación", celda: (f) => fmtMoneda(f.facturacion), numerica: true },
+  { titulo: "Empresa", celda: (f) => f.empresa ?? "—", orden: (f) => f.empresa },
+  { titulo: "Unidades", celda: (f) => fmtNumero(f.unidades), numerica: true, orden: (f) => f.unidades },
+  { titulo: "Facturación", celda: (f) => fmtMoneda(f.facturacion), numerica: true, orden: (f) => f.facturacion },
 ];
 
 export default function DashboardObjetivosPage({

@@ -579,7 +579,6 @@ export type PedidoTiendaNube = {
 export type OpcionesTiendaNube = {
   proveedores: string[];
   marcas: string[];
-  clientes: string[];
   /** Primer y último día con ventas, para acotar los selectores de fecha. */
   primeraVenta: string | null;
   ultimaVenta: string | null;
@@ -592,7 +591,9 @@ export type DashboardTiendaNube = {
   comparacion: ComparacionTiendaNube | null;
   porDia: PuntoDiaTiendaNube[];
   porProveedor: RankingTiendaNube[];
-  porMarca: RankingTiendaNube[];
+  // No hay `porMarca`: el panel de rentabilidad por marca se saco de este
+  // tablero. La marca sigue estando como FILTRO y como columna de la tabla de
+  // articulos, que es donde se la mira en un canal de 50 lineas.
   topRentabilidad: ArticuloTiendaNube[];
   articulos: ArticuloTiendaNube[];
   clientes: ClienteTiendaNube[];

@@ -28,14 +28,14 @@ const MODOS: [ModoFlete, string][] = [
 ];
 
 const COLUMNAS: Columna<FilaComprobante>[] = [
-  { titulo: "Comprobante", celda: (f) => f.comprobante ?? "—" },
-  { titulo: "N° orden", celda: (f) => f.nroOrden ?? "—" },
-  { titulo: "Cliente", celda: (f) => <span className="block max-w-[220px] truncate">{f.cliente ?? "—"}</span> },
-  { titulo: "Provincia", celda: (f) => f.provincia ?? "—" },
-  { titulo: "Fecha", celda: (f) => f.fecha ?? "—" },
-  { titulo: "Facturación", celda: (f) => fmtMoneda(f.facturacion), numerica: true },
-  { titulo: "Flete", celda: (f) => fmtMoneda(f.flete), numerica: true },
-  { titulo: "% Flete", celda: (f) => fmtPct(f.pctFlete), numerica: true },
+  { titulo: "Comprobante", celda: (f) => f.comprobante ?? "—", orden: (f) => f.comprobante },
+  { titulo: "N° orden", celda: (f) => f.nroOrden ?? "—", orden: (f) => f.nroOrden },
+  { titulo: "Cliente", celda: (f) => <span className="block max-w-[220px] truncate">{f.cliente ?? "—"}</span>, orden: (f) => f.cliente },
+  { titulo: "Provincia", celda: (f) => f.provincia ?? "—", orden: (f) => f.provincia },
+  { titulo: "Fecha", celda: (f) => f.fecha ?? "—", orden: (f) => f.fecha },
+  { titulo: "Facturación", celda: (f) => fmtMoneda(f.facturacion), numerica: true, orden: (f) => f.facturacion },
+  { titulo: "Flete", celda: (f) => fmtMoneda(f.flete), numerica: true, orden: (f) => f.flete },
+  { titulo: "% Flete", celda: (f) => fmtPct(f.pctFlete), numerica: true, orden: (f) => f.pctFlete },
 ];
 
 export default function DashboardLogisticaPage() {

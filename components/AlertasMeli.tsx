@@ -67,33 +67,37 @@ function Importe({ valor }: { valor: number | null }) {
  * contra la columna "Costo real s/IVA" de la planilla).
  */
 const COLUMNAS: Columna<FilaAlertaMeli>[] = [
-  { titulo: "Alerta", celda: (f) => <Etiqueta nivel={f.nivel} /> },
-  { titulo: "Fecha", celda: (f) => (f.fecha ? fmtFechaCorta(f.fecha) : "—") },
+  { titulo: "Alerta", celda: (f) => <Etiqueta nivel={f.nivel} />, orden: (f) => f.nivel },
+  { titulo: "Fecha", celda: (f) => (f.fecha ? fmtFechaCorta(f.fecha) : "—"), orden: (f) => f.fecha },
   {
     titulo: "N° Orden",
     celda: (f) => <span className="font-mono text-[11px]">{f.nroOrden ?? "—"}</span>,
+    orden: (f) => (f.nroOrden == null ? null : Number(f.nroOrden)),
   },
-  { titulo: "SKU", celda: (f) => f.sku ?? "—" },
+  { titulo: "SKU", celda: (f) => f.sku ?? "—", orden: (f) => f.sku },
   {
     titulo: "Descripción",
     celda: (f) => <span className="block max-w-[260px] truncate">{f.producto ?? "—"}</span>,
+    orden: (f) => f.producto,
   },
   {
     titulo: "Proveedor",
     celda: (f) => <span className="block max-w-[180px] truncate">{f.proveedor ?? "—"}</span>,
+    orden: (f) => f.proveedor,
   },
   {
     titulo: "Marca",
     celda: (f) => <span className="block max-w-[130px] truncate">{f.marca ?? "—"}</span>,
+    orden: (f) => f.marca,
   },
-  { titulo: "Cant.", celda: (f) => fmtNumero(f.cantidad), numerica: true },
-  { titulo: "Venta c/IVA", celda: (f) => fmtMoneda(f.ventaCiva), numerica: true },
-  { titulo: "Venta s/IVA", celda: (f) => fmtMoneda(f.ventaSiva), numerica: true },
-  { titulo: "Costo unit.", celda: (f) => fmtMoneda(f.costoUnitario), numerica: true },
-  { titulo: "Costo total", celda: (f) => fmtMoneda(f.costo), numerica: true },
-  { titulo: "Comisión", celda: (f) => fmtMoneda(f.comision), numerica: true },
-  { titulo: "Envío", celda: (f) => fmtMoneda(f.envio), numerica: true },
-  { titulo: "Rent. bruta", celda: (f) => <Importe valor={f.rentabilidad} />, numerica: true },
+  { titulo: "Cant.", celda: (f) => fmtNumero(f.cantidad), numerica: true, orden: (f) => f.cantidad },
+  { titulo: "Venta c/IVA", celda: (f) => fmtMoneda(f.ventaCiva), numerica: true, orden: (f) => f.ventaCiva },
+  { titulo: "Venta s/IVA", celda: (f) => fmtMoneda(f.ventaSiva), numerica: true, orden: (f) => f.ventaSiva },
+  { titulo: "Costo unit.", celda: (f) => fmtMoneda(f.costoUnitario), numerica: true, orden: (f) => f.costoUnitario },
+  { titulo: "Costo total", celda: (f) => fmtMoneda(f.costo), numerica: true, orden: (f) => f.costo },
+  { titulo: "Comisión", celda: (f) => fmtMoneda(f.comision), numerica: true, orden: (f) => f.comision },
+  { titulo: "Envío", celda: (f) => fmtMoneda(f.envio), numerica: true, orden: (f) => f.envio },
+  { titulo: "Rent. bruta", celda: (f) => <Importe valor={f.rentabilidad} />, numerica: true, orden: (f) => f.rentabilidad },
   {
     titulo: "Margen bruto c/IVA",
     celda: (f) => (
@@ -102,11 +106,12 @@ const COLUMNAS: Columna<FilaAlertaMeli>[] = [
       </span>
     ),
     numerica: true,
+    orden: (f) => f.margenPct,
   },
-  { titulo: "IIBB", celda: (f) => fmtMoneda(f.iibb), numerica: true },
-  { titulo: "Imp. cheque", celda: (f) => fmtMoneda(f.cheque), numerica: true },
-  { titulo: "Imp. municipal", celda: (f) => fmtMoneda(f.municipal), numerica: true },
-  { titulo: "Rent. neta", celda: (f) => <Importe valor={f.rentabilidadNeta} />, numerica: true },
+  { titulo: "IIBB", celda: (f) => fmtMoneda(f.iibb), numerica: true, orden: (f) => f.iibb },
+  { titulo: "Imp. cheque", celda: (f) => fmtMoneda(f.cheque), numerica: true, orden: (f) => f.cheque },
+  { titulo: "Imp. municipal", celda: (f) => fmtMoneda(f.municipal), numerica: true, orden: (f) => f.municipal },
+  { titulo: "Rent. neta", celda: (f) => <Importe valor={f.rentabilidadNeta} />, numerica: true, orden: (f) => f.rentabilidadNeta },
   {
     titulo: "Margen neto c/IVA",
     celda: (f) => (
@@ -115,8 +120,9 @@ const COLUMNAS: Columna<FilaAlertaMeli>[] = [
       </span>
     ),
     numerica: true,
+    orden: (f) => f.margenNetoPct,
   },
-  { titulo: "Acción", celda: (f) => <span className="whitespace-nowrap">{f.accion}</span> },
+  { titulo: "Acción", celda: (f) => <span className="whitespace-nowrap">{f.accion}</span>, orden: (f) => f.accion },
 ];
 
 export default function AlertasMeliPage({ diaInicial }: { diaInicial: string }) {

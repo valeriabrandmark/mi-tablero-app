@@ -17,20 +17,22 @@ import type { ArticuloMeli, DashboardMeli, FiltrosMeli, OpcionesMeli, RankingMel
 type Respuesta = DashboardMeli & { opciones: OpcionesMeli | null };
 
 const COLUMNAS_ARTICULOS: Columna<ArticuloMeli>[] = [
-  { titulo: "SKU", celda: (a) => a.sku ?? "—" },
+  { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
   {
     titulo: "Producto",
     celda: (a) => <span className="block max-w-[320px] truncate">{a.producto ?? "—"}</span>,
+    orden: (a) => a.producto,
   },
   {
     titulo: "Marca",
     celda: (a) => <span className="block max-w-[140px] truncate">{a.marca ?? "—"}</span>,
+    orden: (a) => a.marca,
   },
-  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true },
-  { titulo: "Venta c/IVA", celda: (a) => fmtMoneda(a.ventaCiva), numerica: true },
-  { titulo: "Costo", celda: (a) => fmtMoneda(a.costo), numerica: true },
-  { titulo: "Comisión", celda: (a) => fmtMoneda(a.comision), numerica: true },
-  { titulo: "Envío", celda: (a) => fmtMoneda(a.envio), numerica: true },
+  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true, orden: (a) => a.unidades },
+  { titulo: "Venta c/IVA", celda: (a) => fmtMoneda(a.ventaCiva), numerica: true, orden: (a) => a.ventaCiva },
+  { titulo: "Costo", celda: (a) => fmtMoneda(a.costo), numerica: true, orden: (a) => a.costo },
+  { titulo: "Comisión", celda: (a) => fmtMoneda(a.comision), numerica: true, orden: (a) => a.comision },
+  { titulo: "Envío", celda: (a) => fmtMoneda(a.envio), numerica: true, orden: (a) => a.envio },
   {
     titulo: "Rentabilidad",
     celda: (a) => (
@@ -39,6 +41,7 @@ const COLUMNAS_ARTICULOS: Columna<ArticuloMeli>[] = [
       </span>
     ),
     numerica: true,
+    orden: (a) => a.rentabilidad,
   },
   {
     titulo: "Margen",
@@ -48,6 +51,7 @@ const COLUMNAS_ARTICULOS: Columna<ArticuloMeli>[] = [
       </span>
     ),
     numerica: true,
+    orden: (a) => a.margenPct,
   },
 ];
 
@@ -61,7 +65,7 @@ const COLUMNAS_TOP: Columna<ArticuloMeli>[] = [
       </span>
     ),
   },
-  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true },
+  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true, orden: (a) => a.unidades },
   {
     titulo: "Rentabilidad",
     celda: (a) => (
@@ -70,8 +74,9 @@ const COLUMNAS_TOP: Columna<ArticuloMeli>[] = [
       </span>
     ),
     numerica: true,
+    orden: (a) => a.rentabilidad,
   },
-  { titulo: "Margen", celda: (a) => fmtPct(a.margenPct), numerica: true },
+  { titulo: "Margen", celda: (a) => fmtPct(a.margenPct), numerica: true, orden: (a) => a.margenPct },
 ];
 
 /**
@@ -116,9 +121,10 @@ function TablaRanking({
     {
       titulo,
       celda: (r) => <span className="block max-w-[220px] truncate">{r.label}</span>,
+      orden: (r) => r.label,
     },
-    { titulo: "Venta c/IVA", celda: (r) => fmtMoneda(r.venta), numerica: true },
-    { titulo: "Unid.", celda: (r) => fmtNumero(r.unidades), numerica: true },
+    { titulo: "Venta c/IVA", celda: (r) => fmtMoneda(r.venta), numerica: true, orden: (r) => r.venta },
+    { titulo: "Unid.", celda: (r) => fmtNumero(r.unidades), numerica: true, orden: (r) => r.unidades },
     {
       titulo: "Rentab.",
       celda: (r) => (
@@ -127,6 +133,7 @@ function TablaRanking({
         </span>
       ),
       numerica: true,
+      orden: (r) => r.rentabilidad,
     },
     {
       titulo: "Margen",
@@ -136,6 +143,7 @@ function TablaRanking({
         </span>
       ),
       numerica: true,
+      orden: (r) => r.margenPct,
     },
   ];
 
