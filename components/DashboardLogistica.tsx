@@ -205,7 +205,19 @@ export default function DashboardLogisticaPage() {
           </div>
 
           <Panel titulo="Comprobantes Asociados" nota={`${data.comprobantes.length} de mayor flete`}>
-            <Tabla filas={data.comprobantes} columnas={COLUMNAS} clave={(f, i) => `${f.comprobante}-${i}`} />
+            {/* Click en una fila filtra por su PROVINCIA, que es la dimensión
+                de esta tabla que ya existe como filtro y a la que responden los
+                KPIs y los gráficos de arriba. Filtrar por el comprobante suelto
+                dejaría el tablero entero mostrando una sola venta. */}
+            <Tabla
+              filas={data.comprobantes}
+              columnas={COLUMNAS}
+              clave={(f, i) => `${f.comprobante}-${i}`}
+              onClickFila={(f) => f.provincia && alternar("provincia")(f.provincia)}
+              activa={(f) =>
+                filtros.provincia?.length ? filtros.provincia.includes(f.provincia ?? "") : false
+              }
+            />
           </Panel>
         </div>
       )}

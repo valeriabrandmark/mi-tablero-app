@@ -244,6 +244,13 @@ export type FiltrosObjetivos = {
   mes?: string[];
   /** Filtro cruzado: sale de hacer click en una barra. */
   grupo?: string[];
+  /**
+   * Filtro cruzado: sale de hacer click en una fila de la tabla de
+   * comprobantes. Recorta las VENTAS del vendedor a ese cliente, pero NO el
+   * objetivo: el objetivo del mes es el mismo tenga uno o veinte clientes. Por
+   * eso el avance sigue midiéndose contra la meta entera y la pantalla lo dice.
+   */
+  cliente?: string[];
 };
 
 /** Totales de una métrica. Nunca se mezclan dos métricas en un mismo total. */

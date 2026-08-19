@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
     vendedor,
     mes: lista(sp, "mes"),
     grupo: lista(sp, "grupo"),
+    cliente: lista(sp, "cliente"),
   };
 
   try {

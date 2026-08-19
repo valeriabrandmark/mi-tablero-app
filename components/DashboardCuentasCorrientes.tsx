@@ -196,7 +196,19 @@ export default function DashboardCuentasPage() {
           </Panel>
 
           <Panel titulo="Clientes y Saldos" nota={`${data.clientes.length} ordenados por saldo vencido`}>
-            <Tabla filas={data.clientes} columnas={COLUMNAS} clave={(f) => f.razonSocial} />
+            {/* Click en una fila filtra por su CATEGORÍA, que es la dimensión de
+                esta tabla que ya existe como filtro y a la que responden los
+                KPIs de arriba. Filtrar por el cliente suelto dejaría un tablero
+                de una fila, que es lo que ya se está mirando. */}
+            <Tabla
+              filas={data.clientes}
+              columnas={COLUMNAS}
+              clave={(f) => f.razonSocial}
+              onClickFila={(f) => f.categoria && alternar("categoria")(f.categoria)}
+              activa={(f) =>
+                filtros.categoria?.length ? filtros.categoria.includes(f.categoria ?? "") : false
+              }
+            />
           </Panel>
         </div>
       )}
