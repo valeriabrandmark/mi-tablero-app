@@ -5,7 +5,7 @@ import VentaRentabilidad from "@/components/charts/VentaRentabilidad";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import BarraFiltrosTiendaNube from "@/components/FiltrosTiendaNube";
 import { Tabla, type Columna } from "@/components/Tabla";
-import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
+import { Aviso, Delta, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
@@ -35,31 +35,6 @@ function Importe({ valor }: { valor: number | null }) {
 function Porcentaje({ valor }: { valor: number | null }) {
   return (
     <span style={(valor ?? 0) < 0 ? { color: TEMA.negativo } : undefined}>{fmtPct(valor)}</span>
-  );
-}
-
-/**
- * Variación contra el período anterior. Se muestra el PORCENTAJE y no la
- * diferencia en pesos porque la pregunta es "¿venimos mejor o peor?", y para eso
- * 100.000 pesos más no dice nada sin saber sobre cuánto.
- *
- * Cuando el período anterior fue 0 no se dibuja nada: un "+∞ %" salido de
- * dividir por cero se lee como un dato y no lo es. En este canal pasa seguido —
- * con ocho pedidos por mes, un mes sin ventas de una marca es normal.
- */
-function Delta({ actual, anterior, contra }: { actual: number; anterior: number; contra: string }) {
-  if (!Number.isFinite(anterior) || anterior === 0) {
-    return <span className="text-muted">{contra}: sin ventas</span>;
-  }
-  const variacion = (actual - anterior) / Math.abs(anterior);
-  const sube = variacion >= 0;
-  return (
-    <>
-      <span style={{ color: sube ? PALETA[1] : TEMA.negativo }}>
-        {sube ? "▲" : "▼"} {fmtPct(Math.abs(variacion))}
-      </span>{" "}
-      <span className="text-muted">{contra}</span>
-    </>
   );
 }
 

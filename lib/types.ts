@@ -197,6 +197,21 @@ export type DashboardCuentas = {
   generadoEn: string;
 };
 
+/**
+ * El mes anterior, para comparar. `hasta` dice hasta qué día se lo midió: tiene
+ * valor cuando el mes elegido es el que está corriendo —y por lo tanto está a
+ * medio pasar—, y es null cuando los dos meses están cerrados.
+ */
+export type ComparacionMayorista = {
+  mes: string;
+  hasta: string | null;
+  facturacionNeta: number;
+  unidades: number;
+  cantidadPedidos: number;
+  margenAjustado: number;
+  rentabilidadAjustadaPct: number | null;
+};
+
 export type DashboardVentasMayoristas = {
   kpis: Kpis;
   facturacionPorProveedor: PuntoProveedor[];
@@ -207,6 +222,8 @@ export type DashboardVentasMayoristas = {
   articulos: FilaArticulo[];
   comprobantes: FilaComprobanteVenta[];
   serieDiaria: SerieDiaria;
+  /** Null si no hay un solo mes elegido: sin eso no hay "mes anterior". */
+  comparacion: ComparacionMayorista | null;
   generadoEn: string;
 };
 

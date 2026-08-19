@@ -9,8 +9,8 @@ import BarrasMargen from "@/components/charts/BarrasMargen";
 import LineasPorVendedor from "@/components/charts/LineasPorVendedor";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import { Tabla, type Columna } from "@/components/Tabla";
-import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
-import { fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
+import { Aviso, Delta, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
+import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { alternar as alternarValor } from "@/lib/filtros";
 import { CRUZADOS, type FilaArticulo, type FilaComprobanteVenta } from "@/lib/types";
 
@@ -137,6 +137,17 @@ export default function Dashboard() {
   }, [filtros, recargas, manejarError]);
 
   const k = data?.kpis;
+  const comp = data?.comparacion ?? null;
+
+  // La etiqueta dice hasta qué día se midió el mes anterior. Cuando el mes
+  // elegido está corriendo, el actual va por la mitad: compararlo contra un mes
+  // entero mostraría una caída que no existe, y sin decirlo el porcentaje no se
+  // puede interpretar.
+  const contra = comp
+    ? comp.hasta
+      ? `vs ${comp.mes} hasta ${fmtFechaCorta(comp.hasta)}`
+      : `vs ${comp.mes}`
+    : null;
 
   return (
     <div className="space-y-4">
@@ -215,10 +226,23 @@ export default function Dashboard() {
           <TarjetaKpi
             titulo="Facturación Neta (sin IVA)"
             valor={fmtMoneda(k.facturacionNeta)}
+            detalle={
+              contra && comp ? (
+                <Delta actual={k.facturacionNeta} anterior={comp.facturacionNeta} contra={contra} />
+              ) : undefined
+            }
             acento={PALETA[0]}
           />
           <TarjetaKpi titulo="Costo Mercadería" valor={fmtMoneda(k.costoMercaderia)} />
-          <TarjetaKpi titulo="Unidades" valor={fmtNumero(k.unidades)} />
+          <TarjetaKpi
+            titulo="Unidades"
+            valor={fmtNumero(k.unidades)}
+            detalle={
+              contra && comp ? (
+                <Delta actual={k.unidades} anterior={comp.unidades} contra={contra} />
+              ) : undefined
+            }
+          />
           <TarjetaKpi
             titulo="Clientes con Compra"
             valor={fmtNumero(k.clientesConCompra)}
@@ -227,19 +251,39 @@ export default function Dashboard() {
           <TarjetaKpi
             titulo="Margen Ajustado"
             valor={fmtMoneda(k.margenAjustado)}
-            detalle={`Margen sin ajustar ${fmtMoneda(k.margenTotal)}`}
+            detalle={
+              contra && comp ? (
+                <Delta actual={k.margenAjustado} anterior={comp.margenAjustado} contra={contra} />
+              ) : (
+                `Margen sin ajustar ${fmtMoneda(k.margenTotal)}`
+              )
+            }
             acento={k.margenAjustado >= 0 ? PALETA[1] : "#f43f5e"}
           />
           <TarjetaKpi
             titulo="% Rentabilidad Ajustada"
             valor={fmtPct(k.rentabilidadAjustadaPct)}
-            detalle="Margen ajustado / facturación neta (s/IVA)"
+            detalle={
+              contra && comp && comp.rentabilidadAjustadaPct != null && k.rentabilidadAjustadaPct != null
+                ? `${comp.rentabilidadAjustadaPct < k.rentabilidadAjustadaPct ? "▲" : "▼"} era ${fmtPct(comp.rentabilidadAjustadaPct)} ${contra}`
+                : "Margen ajustado / facturación neta (s/IVA)"
+            }
             acento={PALETA[1]}
           />
           <TarjetaKpi
             titulo="Ticket Promedio"
             valor={fmtMoneda(k.ticketPromedio)}
-            detalle="Facturación / pedidos distintos"
+            detalle={
+              contra && comp && comp.cantidadPedidos > 0 ? (
+                <Delta
+                  actual={k.ticketPromedio ?? 0}
+                  anterior={comp.facturacionNeta / comp.cantidadPedidos}
+                  contra={contra}
+                />
+              ) : (
+                "Facturación / pedidos distintos"
+              )
+            }
           />
           <TarjetaKpi
             titulo="% Facturación Top 10 Clientes"

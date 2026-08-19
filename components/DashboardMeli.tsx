@@ -6,7 +6,7 @@ import TortaProveedores from "@/components/charts/TortaProveedores";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import BarraFiltrosMeli from "@/components/FiltrosMeli";
 import { Tabla, type Columna } from "@/components/Tabla";
-import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
+import { Aviso, Delta, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { CARGA_IMPOSITIVA } from "@/lib/meli";
@@ -78,32 +78,6 @@ const COLUMNAS_TOP: Columna<ArticuloMeli>[] = [
   },
   { titulo: "Margen", celda: (a) => fmtPct(a.margenPct), numerica: true, orden: (a) => a.margenPct },
 ];
-
-/**
- * Variación contra el período anterior.
- *
- * Se muestra el PORCENTAJE y no la diferencia en pesos porque lo que se quiere
- * saber es "¿venimos mejor o peor?", y para eso 100.000 pesos más no dice nada
- * sin saber sobre cuánto.
- *
- * Cuando el período anterior fue 0 no se dibuja nada: un "+∞ %" o un "+100 %"
- * salido de dividir por cero se lee como un dato y no lo es.
- */
-function Delta({ actual, anterior, contra }: { actual: number; anterior: number; contra: string }) {
-  if (!Number.isFinite(anterior) || anterior === 0) {
-    return <span className="text-muted">{contra}: sin ventas</span>;
-  }
-  const variacion = (actual - anterior) / Math.abs(anterior);
-  const sube = variacion >= 0;
-  return (
-    <>
-      <span style={{ color: sube ? PALETA[1] : TEMA.negativo }}>
-        {sube ? "▲" : "▼"} {fmtPct(Math.abs(variacion))}
-      </span>{" "}
-      <span className="text-muted">{contra}</span>
-    </>
-  );
-}
 
 /** Ranking en tabla y no en gráfico: son cuatro números por fila, no uno. */
 function TablaRanking({
