@@ -9,8 +9,8 @@ import BarrasMargen from "@/components/charts/BarrasMargen";
 import LineasPorVendedor from "@/components/charts/LineasPorVendedor";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import { Tabla, type Columna } from "@/components/Tabla";
-import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
-import { fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
+import { Aviso, Delta, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
+import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { alternar as alternarValor } from "@/lib/filtros";
 import { CRUZADOS, type FilaArticulo, type FilaComprobanteVenta } from "@/lib/types";
 
@@ -26,28 +26,30 @@ import { PALETA } from "@/lib/paleta";
 import type { DashboardVentasMayoristas, Filtros, OpcionesFiltro } from "@/lib/types";
 
 const COL_ARTICULOS: Columna<FilaArticulo>[] = [
-  { titulo: "SKU", celda: (a) => a.sku ?? "—" },
+  { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
   {
     titulo: "Producto",
     celda: (a) => <span className="block max-w-[280px] truncate">{a.producto ?? "—"}</span>,
+    orden: (a) => a.producto,
   },
-  { titulo: "Unidades", celda: (a) => fmtNumero(a.cantidad), numerica: true },
-  { titulo: "Oferta %", celda: (a) => (a.ofertaPct == null ? "—" : fmtPct(a.ofertaPct / 100)), numerica: true },
-  { titulo: "Precio prom.", celda: (a) => fmtMoneda(a.precioPromedio), numerica: true },
-  { titulo: "Costo prom.", celda: (a) => fmtMoneda(a.costoPromedio), numerica: true },
-  { titulo: "Facturación", celda: (a) => fmtMoneda(a.facturacion), numerica: true },
-  { titulo: "% Rentab.", celda: (a) => fmtPct(a.rentabilidadPct), numerica: true },
+  { titulo: "Unidades", celda: (a) => fmtNumero(a.cantidad), numerica: true, orden: (a) => a.cantidad },
+  { titulo: "Oferta %", celda: (a) => (a.ofertaPct == null ? "—" : fmtPct(a.ofertaPct / 100)), numerica: true, orden: (a) => a.ofertaPct },
+  { titulo: "Precio prom.", celda: (a) => fmtMoneda(a.precioPromedio), numerica: true, orden: (a) => a.precioPromedio },
+  { titulo: "Costo prom.", celda: (a) => fmtMoneda(a.costoPromedio), numerica: true, orden: (a) => a.costoPromedio },
+  { titulo: "Facturación", celda: (a) => fmtMoneda(a.facturacion), numerica: true, orden: (a) => a.facturacion },
+  { titulo: "% Rentab.", celda: (a) => fmtPct(a.rentabilidadPct), numerica: true, orden: (a) => a.rentabilidadPct },
 ];
 
 const COL_COMPROBANTES: Columna<FilaComprobanteVenta>[] = [
-  { titulo: "Fecha", celda: (c) => c.fecha ?? "—" },
-  { titulo: "Comprobante", celda: (c) => c.comprobante ?? "—" },
+  { titulo: "Fecha", celda: (c) => c.fecha ?? "—", orden: (c) => c.fecha },
+  { titulo: "Comprobante", celda: (c) => c.comprobante ?? "—", orden: (c) => c.comprobante },
   {
     titulo: "Cliente",
     celda: (c) => <span className="block max-w-[260px] truncate">{c.cliente ?? "—"}</span>,
+    orden: (c) => c.cliente,
   },
-  { titulo: "Unidades", celda: (c) => fmtNumero(c.unidades), numerica: true },
-  { titulo: "Facturación", celda: (c) => fmtMoneda(c.facturacion), numerica: true },
+  { titulo: "Unidades", celda: (c) => fmtNumero(c.unidades), numerica: true, orden: (c) => c.unidades },
+  { titulo: "Facturación", celda: (c) => fmtMoneda(c.facturacion), numerica: true, orden: (c) => c.facturacion },
 ];
 
 
@@ -135,6 +137,17 @@ export default function Dashboard() {
   }, [filtros, recargas, manejarError]);
 
   const k = data?.kpis;
+  const comp = data?.comparacion ?? null;
+
+  // La etiqueta dice hasta qué día se midió el mes anterior. Cuando el mes
+  // elegido está corriendo, el actual va por la mitad: compararlo contra un mes
+  // entero mostraría una caída que no existe, y sin decirlo el porcentaje no se
+  // puede interpretar.
+  const contra = comp
+    ? comp.hasta
+      ? `vs ${comp.mes} hasta ${fmtFechaCorta(comp.hasta)}`
+      : `vs ${comp.mes}`
+    : null;
 
   return (
     <div className="space-y-4">
@@ -213,10 +226,23 @@ export default function Dashboard() {
           <TarjetaKpi
             titulo="Facturación Neta (sin IVA)"
             valor={fmtMoneda(k.facturacionNeta)}
+            detalle={
+              contra && comp ? (
+                <Delta actual={k.facturacionNeta} anterior={comp.facturacionNeta} contra={contra} />
+              ) : undefined
+            }
             acento={PALETA[0]}
           />
           <TarjetaKpi titulo="Costo Mercadería" valor={fmtMoneda(k.costoMercaderia)} />
-          <TarjetaKpi titulo="Unidades" valor={fmtNumero(k.unidades)} />
+          <TarjetaKpi
+            titulo="Unidades"
+            valor={fmtNumero(k.unidades)}
+            detalle={
+              contra && comp ? (
+                <Delta actual={k.unidades} anterior={comp.unidades} contra={contra} />
+              ) : undefined
+            }
+          />
           <TarjetaKpi
             titulo="Clientes con Compra"
             valor={fmtNumero(k.clientesConCompra)}
@@ -225,19 +251,39 @@ export default function Dashboard() {
           <TarjetaKpi
             titulo="Margen Ajustado"
             valor={fmtMoneda(k.margenAjustado)}
-            detalle={`Margen sin ajustar ${fmtMoneda(k.margenTotal)}`}
+            detalle={
+              contra && comp ? (
+                <Delta actual={k.margenAjustado} anterior={comp.margenAjustado} contra={contra} />
+              ) : (
+                `Margen sin ajustar ${fmtMoneda(k.margenTotal)}`
+              )
+            }
             acento={k.margenAjustado >= 0 ? PALETA[1] : "#f43f5e"}
           />
           <TarjetaKpi
             titulo="% Rentabilidad Ajustada"
             valor={fmtPct(k.rentabilidadAjustadaPct)}
-            detalle="Margen ajustado / facturación neta (s/IVA)"
+            detalle={
+              contra && comp && comp.rentabilidadAjustadaPct != null && k.rentabilidadAjustadaPct != null
+                ? `${comp.rentabilidadAjustadaPct < k.rentabilidadAjustadaPct ? "▲" : "▼"} era ${fmtPct(comp.rentabilidadAjustadaPct)} ${contra}`
+                : "Margen ajustado / facturación neta (s/IVA)"
+            }
             acento={PALETA[1]}
           />
           <TarjetaKpi
             titulo="Ticket Promedio"
             valor={fmtMoneda(k.ticketPromedio)}
-            detalle="Facturación / pedidos distintos"
+            detalle={
+              contra && comp && comp.cantidadPedidos > 0 ? (
+                <Delta
+                  actual={k.ticketPromedio ?? 0}
+                  anterior={comp.facturacionNeta / comp.cantidadPedidos}
+                  contra={contra}
+                />
+              ) : (
+                "Facturación / pedidos distintos"
+              )
+            }
           />
           <TarjetaKpi
             titulo="% Facturación Top 10 Clientes"

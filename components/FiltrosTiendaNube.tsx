@@ -19,8 +19,9 @@ import type { FiltrosTiendaNube, OpcionesTiendaNube } from "@/lib/types";
  *   líneas) y acá sí: la historia entera son treinta pedidos. Sale de las
  *   opciones y no de una fecha fija, así que se corre solo.
  *
- * - Hay un selector de CLIENTE. En Mercado Libre el cliente es el apodo del
- *   comprador y hay 33.000 distintos; acá son personas con nombre que vuelven.
+ * Al cliente NO se llega por un desplegable sino clickeando su fila: uno ve un
+ * pedido raro y quiere saber qué más compró esa persona. Elegir a ciegas de una
+ * lista de nombres no era un camino que nadie fuera a usar.
  */
 export default function BarraFiltrosTiendaNube({
   filtros,
@@ -106,12 +107,11 @@ export default function BarraFiltrosTiendaNube({
           {todo && boton("Todo", todo)}
         </div>
 
-        <SelectorMultiple
-          etiqueta="Cliente"
-          valores={filtros.cliente}
-          opciones={opciones?.clientes ?? []}
-          onChange={(v) => onChange({ ...filtros, cliente: v })}
-        />
+        {/* No hay selector de Cliente a propósito. Al cliente se llega
+            clickeando su fila en el panel de Clientes o en el de Pedidos, que
+            es como se lo busca de verdad: uno ve un pedido raro y quiere ver
+            qué más compró esa persona. Un desplegable con 27 nombres para
+            elegir a ciegas no servía para nada. */}
         <SelectorMultiple
           etiqueta="Proveedor"
           valores={filtros.proveedor}

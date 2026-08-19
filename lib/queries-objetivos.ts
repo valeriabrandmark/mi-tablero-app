@@ -179,6 +179,9 @@ function cteLineas(f: FiltrosObjetivos): Where {
   const clauses = [`fv.canal = '${CANAL_MAYORISTA}'`, "fv.vendedor = $1"];
 
   agregarFiltro(clauses, params, "fv.mes_comercial", f.mes);
+  // El cliente recorta las ventas y no el objetivo: va acá, en las líneas, y
+  // NO en `whereObjetivos`, que es el que arma la meta contra la que se compara.
+  agregarFiltro(clauses, params, "fv.cliente", f.cliente);
 
   let join = "";
   if (!vacio(f.grupo)) {

@@ -1,9 +1,12 @@
 import { query, queryOne } from "@/lib/db";
 import {
   CANAL_MAYORISTA,
+  DIA_INICIO_MES_COMERCIAL,
+  mesComercialActual,
   MIN_UNIDADES_MARGEN,
   VENDEDORES_INCLUIDOS,
 } from "@/lib/constantes";
+import { hoyArgentina } from "@/lib/rangos";
 import type {
   DashboardVentasMayoristas,
   FilaArticulo,
@@ -84,8 +87,23 @@ type FilaTotales = {
   cantidadPedidos: string;
 };
 
-async function getTotales(f: Filtros) {
-  const w = whereBase(f);
+/**
+ * Totales del recorte. `hastaFecha` corta el periodo en ese dia, y solo se usa
+ * para el mes de comparacion.
+ *
+ * POR QUE: el mes comercial en curso esta a medio pasar -- hoy es el dia 14 de
+ * 31 --, asi que compararlo contra el mes anterior COMPLETO da una caida que no
+ * existe. Con el corte, el mes anterior se mide tambien hasta su dia 14.
+ */
+async function getTotales(f: Filtros, hastaFecha?: string) {
+  // `extra` va como texto crudo al SQL (no acepta parámetros), así que la fecha
+  // se valida antes de interpolarla. Hoy siempre la calcula el servidor y nunca
+  // llega del navegador, pero eso es una propiedad de QUIEN LLAMA, y quien
+  // llama puede cambiar: la barrera va acá, donde está el riesgo.
+  if (hastaFecha != null && !/^\d{4}-\d{2}-\d{2}$/.test(hastaFecha)) {
+    throw new Error(`Fecha de corte inválida: ${hastaFecha}`);
+  }
+  const w = whereBase(f, hastaFecha ? [`fv.fecha <= '${hastaFecha}'::date`] : []);
   const fila = await queryOne<FilaTotales>(
     `select coalesce(sum(fv.precio_neto * fv.cantidad), 0)::float8 as "facturacionNeta",
             coalesce(sum(fv.costo_unitario * fv.cantidad), 0)::float8 as "costoMercaderia",
@@ -384,9 +402,50 @@ export async function getOpcionesFiltro(): Promise<OpcionesFiltro> {
 
 // --- Dashboard completo ------------------------------------------------------
 
+/** "2026-08" -> "2026-07". */
+function mesAnterior(mes: string): string {
+  const [anio, m] = mes.split("-").map(Number);
+  return m === 1
+    ? `${anio - 1}-12`
+    : `${anio}-${String(m - 1).padStart(2, "0")}`;
+}
+
+/**
+ * Con qué mes comparar, y hasta qué día medirlo.
+ *
+ * Solo se compara cuando hay UN mes elegido: con varios, o con ninguno, no hay
+ * un "mes anterior" que signifique algo, y un número que no significa nada es
+ * peor que no mostrarlo.
+ *
+ * `hasta` sale de cuántos días lleva el mes en curso. Si estamos en el día 14
+ * de agosto comercial, julio se mide hasta SU día 14. Sin eso, el tablero
+ * compararía medio mes contra un mes entero y mostraría una caída todos los
+ * meses hasta el día 5.
+ */
+function mesDeComparacion(f: Filtros): { mes: string; hasta: string | null } | null {
+  if (f.mes?.length !== 1) return null;
+  const mes = f.mes[0];
+  const anterior = mesAnterior(mes);
+
+  // Si el mes elegido no es el que está corriendo, ya está cerrado: se comparan
+  // los dos enteros y no hay nada que recortar.
+  if (mes !== mesComercialActual()) return { mes: anterior, hasta: null };
+
+  const dd = String(DIA_INICIO_MES_COMERCIAL).padStart(2, "0");
+  const inicioActual = new Date(`${mes}-${dd}T00:00:00Z`);
+  const hoy = new Date(`${hoyArgentina()}T00:00:00Z`);
+  const dias = Math.round((hoy.getTime() - inicioActual.getTime()) / 86_400_000);
+
+  const inicioAnterior = new Date(`${anterior}-${dd}T00:00:00Z`);
+  const corte = new Date(inicioAnterior.getTime() + dias * 86_400_000);
+  return { mes: anterior, hasta: corte.toISOString().slice(0, 10) };
+}
+
 export async function getDashboardVentasMayoristas(
   f: Filtros,
 ): Promise<DashboardVentasMayoristas> {
+  const comparar = mesDeComparacion(f);
+
   const [
     totales,
     pctTop10Clientes,
@@ -397,6 +456,7 @@ export async function getDashboardVentasMayoristas(
     rentabilidadPorCliente,
     articulos,
     comprobantes,
+    totalesAnterior,
   ] = await Promise.all([
     getTotales(f),
     getTop10Clientes(f),
@@ -407,6 +467,11 @@ export async function getDashboardVentasMayoristas(
     getRentabilidadPorCliente(f),
     getArticulos(f),
     getComprobantesVenta(f),
+    // El mes anterior mantiene TODOS los otros filtros: comparar "agosto de
+    // ALGABO" contra "julio de todo" no diría nada.
+    comparar
+      ? getTotales({ ...f, mes: [comparar.mes] }, comparar.hasta ?? undefined)
+      : Promise.resolve(null),
   ]);
 
   return {
@@ -426,6 +491,21 @@ export async function getDashboardVentasMayoristas(
     articulos,
     comprobantes,
     serieDiaria,
+    comparacion:
+      comparar && totalesAnterior && totalesAnterior.cantidadPedidos > 0
+        ? {
+            mes: comparar.mes,
+            hasta: comparar.hasta,
+            facturacionNeta: totalesAnterior.facturacionNeta,
+            unidades: totalesAnterior.unidades,
+            cantidadPedidos: totalesAnterior.cantidadPedidos,
+            margenAjustado: totalesAnterior.margenAjustado,
+            rentabilidadAjustadaPct:
+              totalesAnterior.facturacionNeta > 0
+                ? totalesAnterior.margenAjustado / totalesAnterior.facturacionNeta
+                : null,
+          }
+        : null,
     generadoEn: new Date().toISOString(),
   };
 }

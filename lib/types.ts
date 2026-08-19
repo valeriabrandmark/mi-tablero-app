@@ -197,6 +197,21 @@ export type DashboardCuentas = {
   generadoEn: string;
 };
 
+/**
+ * El mes anterior, para comparar. `hasta` dice hasta qué día se lo midió: tiene
+ * valor cuando el mes elegido es el que está corriendo —y por lo tanto está a
+ * medio pasar—, y es null cuando los dos meses están cerrados.
+ */
+export type ComparacionMayorista = {
+  mes: string;
+  hasta: string | null;
+  facturacionNeta: number;
+  unidades: number;
+  cantidadPedidos: number;
+  margenAjustado: number;
+  rentabilidadAjustadaPct: number | null;
+};
+
 export type DashboardVentasMayoristas = {
   kpis: Kpis;
   facturacionPorProveedor: PuntoProveedor[];
@@ -207,6 +222,8 @@ export type DashboardVentasMayoristas = {
   articulos: FilaArticulo[];
   comprobantes: FilaComprobanteVenta[];
   serieDiaria: SerieDiaria;
+  /** Null si no hay un solo mes elegido: sin eso no hay "mes anterior". */
+  comparacion: ComparacionMayorista | null;
   generadoEn: string;
 };
 
@@ -227,6 +244,13 @@ export type FiltrosObjetivos = {
   mes?: string[];
   /** Filtro cruzado: sale de hacer click en una barra. */
   grupo?: string[];
+  /**
+   * Filtro cruzado: sale de hacer click en una fila de la tabla de
+   * comprobantes. Recorta las VENTAS del vendedor a ese cliente, pero NO el
+   * objetivo: el objetivo del mes es el mismo tenga uno o veinte clientes. Por
+   * eso el avance sigue midiéndose contra la meta entera y la pantalla lo dice.
+   */
+  cliente?: string[];
 };
 
 /** Totales de una métrica. Nunca se mezclan dos métricas en un mismo total. */
@@ -322,6 +346,16 @@ export type PuntoHora = { hora: number; ordenes: number; venta: number };
 export type ComparacionMeli = {
   desde: string;
   hasta: string;
+  /**
+   * Hasta qué hora se midió el último día del período anterior (`HH:MM:SS`), o
+   * null si se midió entero.
+   *
+   * Tiene valor solo cuando el recorte actual llega hasta hoy, que es cuando
+   * está a medio pasar: comparar "hoy hasta las 16" contra "ayer entero" es
+   * comparar diez horas contra veinticuatro. La pantalla lo dice, porque un
+   * porcentaje sin saber sobre qué se midió no se puede interpretar.
+   */
+  hastaHora: string | null;
   ventaCiva: number;
   unidades: number;
   ordenes: number;
@@ -579,7 +613,6 @@ export type PedidoTiendaNube = {
 export type OpcionesTiendaNube = {
   proveedores: string[];
   marcas: string[];
-  clientes: string[];
   /** Primer y último día con ventas, para acotar los selectores de fecha. */
   primeraVenta: string | null;
   ultimaVenta: string | null;
@@ -592,7 +625,9 @@ export type DashboardTiendaNube = {
   comparacion: ComparacionTiendaNube | null;
   porDia: PuntoDiaTiendaNube[];
   porProveedor: RankingTiendaNube[];
-  porMarca: RankingTiendaNube[];
+  // No hay `porMarca`: el panel de rentabilidad por marca se saco de este
+  // tablero. La marca sigue estando como FILTRO y como columna de la tabla de
+  // articulos, que es donde se la mira en un canal de 50 lineas.
   topRentabilidad: ArticuloTiendaNube[];
   articulos: ArticuloTiendaNube[];
   clientes: ClienteTiendaNube[];

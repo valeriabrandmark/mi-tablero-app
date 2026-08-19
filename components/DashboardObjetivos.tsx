@@ -27,15 +27,16 @@ const NOMBRE_METRICA: Record<Metrica, string> = {
 };
 
 const COLUMNAS_COMPROBANTES: Columna<FilaComprobanteObjetivo>[] = [
-  { titulo: "Comprobante", celda: (f) => f.comprobante ?? "—" },
-  { titulo: "Fecha", celda: (f) => f.fecha ?? "—" },
+  { titulo: "Comprobante", celda: (f) => f.comprobante ?? "—", orden: (f) => f.comprobante },
+  { titulo: "Fecha", celda: (f) => f.fecha ?? "—", orden: (f) => f.fecha },
   {
     titulo: "Cliente",
     celda: (f) => <span className="block max-w-[280px] truncate">{f.cliente ?? "—"}</span>,
+    orden: (f) => f.cliente,
   },
-  { titulo: "Empresa", celda: (f) => f.empresa ?? "—" },
-  { titulo: "Unidades", celda: (f) => fmtNumero(f.unidades), numerica: true },
-  { titulo: "Facturación", celda: (f) => fmtMoneda(f.facturacion), numerica: true },
+  { titulo: "Empresa", celda: (f) => f.empresa ?? "—", orden: (f) => f.empresa },
+  { titulo: "Unidades", celda: (f) => fmtNumero(f.unidades), numerica: true, orden: (f) => f.unidades },
+  { titulo: "Facturación", celda: (f) => fmtMoneda(f.facturacion), numerica: true, orden: (f) => f.facturacion },
 ];
 
 export default function DashboardObjetivosPage({
@@ -65,17 +66,35 @@ export default function DashboardObjetivosPage({
   const alternarGrupo = (valor: string) =>
     cambiar({ ...filtros, grupo: alternarValor(filtros.grupo, valor) });
 
+  const alternarCliente = (valor: string) =>
+    cambiar({ ...filtros, cliente: alternarValor(filtros.cliente, valor) });
+
   const resumen = data?.resumen ?? [];
   const vencido = data?.vencido ?? null;
   const sinCambios =
-    filtros.mes?.length === 1 && filtros.mes[0] === mesInicial && sinValores(filtros.grupo);
+    filtros.mes?.length === 1 &&
+    filtros.mes[0] === mesInicial &&
+    sinValores(filtros.grupo) &&
+    sinValores(filtros.cliente);
 
   const porProducto = data?.porGrupo.filter((g) => g.metrica === "unidades") ?? [];
   const porEmpresa = data?.porGrupo.filter((g) => g.metrica !== "unidades") ?? [];
 
-  const notaRecorte = sinValores(filtros.grupo)
-    ? "Todas las ventas mayoristas del mes"
-    : `Solo las líneas de ${filtros.grupo!.join(", ")}`;
+  // La nota es lo único que dice qué se está viendo, así que tiene que nombrar
+  // los dos recortes. Y el del cliente lleva la advertencia pegada: recorta las
+  // VENTAS pero no el objetivo, así que el avance deja de ser "cuánto llevo" y
+  // pasa a ser "cuánto de la meta puso este cliente". Sin decirlo, un 8 % se
+  // lee como que el vendedor está muy atrasado.
+  const recortes = [
+    sinValores(filtros.grupo) ? null : `las líneas de ${filtros.grupo!.join(", ")}`,
+    sinValores(filtros.cliente) ? null : `las ventas a ${filtros.cliente!.join(", ")}`,
+  ].filter(Boolean);
+
+  const notaRecorte =
+    recortes.length === 0
+      ? "Todas las ventas mayoristas del mes"
+      : `Solo ${recortes.join(" y ")}` +
+        (sinValores(filtros.cliente) ? "" : " — el objetivo sigue siendo el del mes entero");
 
   return (
     <div className="space-y-4">
@@ -204,11 +223,20 @@ export default function DashboardObjetivosPage({
             titulo="Comprobantes involucrados"
             nota={`${data.comprobantes.length} comprobantes · ${notaRecorte.toLowerCase()}`}
           >
+            {/* Click en una fila filtra por su CLIENTE. Ojo con lo que eso
+                significa acá: recorta las VENTAS, no el objetivo. El objetivo
+                del mes es el mismo tenga uno o veinte clientes, así que el
+                avance pasa a leerse como "cuánto de la meta puso este cliente".
+                Es un dato útil y por eso el chip lo dice explícitamente. */}
             <Tabla
               filas={data.comprobantes}
               columnas={COLUMNAS_COMPROBANTES}
               clave={(f, i) => `${f.comprobante}-${i}`}
               vacio="Sin comprobantes en el recorte elegido."
+              onClickFila={(f) => f.cliente && alternarCliente(f.cliente)}
+              activa={(f) =>
+                filtros.cliente?.length ? filtros.cliente.includes(f.cliente ?? "") : false
+              }
             />
           </Panel>
         </div>

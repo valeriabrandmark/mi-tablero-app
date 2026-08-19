@@ -258,7 +258,7 @@ async function getArticulos(f: FiltrosTiendaNube): Promise<ArticuloTiendaNube[]>
  */
 async function getRanking(
   f: FiltrosTiendaNube,
-  clave: "proveedor" | "marca",
+  clave: "proveedor",
   limite: number,
 ): Promise<RankingTiendaNube[]> {
   const w = whereBase(f, [clave]);
@@ -420,7 +420,7 @@ async function getUltimaVenta(): Promise<string | null> {
 // --- Opciones de los filtros -------------------------------------------------
 
 export async function getOpcionesTiendaNube(): Promise<OpcionesTiendaNube> {
-  const [proveedores, marcas, clientes, bordes] = await Promise.all([
+  const [proveedores, marcas, bordes] = await Promise.all([
     query<{ v: string }>(
       `select distinct proveedor as v from gold.fact_ventas
        where canal = $1 and proveedor is not null order by 1`,
@@ -429,11 +429,6 @@ export async function getOpcionesTiendaNube(): Promise<OpcionesTiendaNube> {
     query<{ v: string }>(
       `select distinct marca as v from gold.fact_ventas
        where canal = $1 and marca is not null order by 1`,
-      [CANAL_TIENDA_NUBE],
-    ),
-    query<{ v: string }>(
-      `select distinct cliente as v from gold.fact_ventas
-       where canal = $1 and cliente is not null order by 1`,
       [CANAL_TIENDA_NUBE],
     ),
     queryOne<{ primera: string | null; ultima: string | null }>(
@@ -447,7 +442,6 @@ export async function getOpcionesTiendaNube(): Promise<OpcionesTiendaNube> {
   return {
     proveedores: proveedores.map((r) => r.v),
     marcas: marcas.map((r) => r.v),
-    clientes: clientes.map((r) => r.v),
     primeraVenta: bordes?.primera ?? null,
     ultimaVenta: bordes?.ultima ?? null,
   };
@@ -481,7 +475,6 @@ export async function getDashboardTiendaNube(
     kpis,
     porDia,
     porProveedor,
-    porMarca,
     topRentabilidad,
     articulos,
     clientes,
@@ -493,7 +486,6 @@ export async function getDashboardTiendaNube(
     getKpis(f),
     getPorDia(f),
     getRanking(f, "proveedor", 12),
-    getRanking(f, "marca", 12),
     getTopRentabilidad(f),
     getArticulos(f),
     getClientes(f),
@@ -522,7 +514,6 @@ export async function getDashboardTiendaNube(
         : null,
     porDia,
     porProveedor,
-    porMarca,
     topRentabilidad,
     articulos,
     clientes,

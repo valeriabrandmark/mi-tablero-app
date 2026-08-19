@@ -6,7 +6,7 @@ import TortaProveedores from "@/components/charts/TortaProveedores";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import BarraFiltrosMeli from "@/components/FiltrosMeli";
 import { Tabla, type Columna } from "@/components/Tabla";
-import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
+import { Aviso, Delta, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { CARGA_IMPOSITIVA } from "@/lib/meli";
@@ -17,20 +17,22 @@ import type { ArticuloMeli, DashboardMeli, FiltrosMeli, OpcionesMeli, RankingMel
 type Respuesta = DashboardMeli & { opciones: OpcionesMeli | null };
 
 const COLUMNAS_ARTICULOS: Columna<ArticuloMeli>[] = [
-  { titulo: "SKU", celda: (a) => a.sku ?? "—" },
+  { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
   {
     titulo: "Producto",
     celda: (a) => <span className="block max-w-[320px] truncate">{a.producto ?? "—"}</span>,
+    orden: (a) => a.producto,
   },
   {
     titulo: "Marca",
     celda: (a) => <span className="block max-w-[140px] truncate">{a.marca ?? "—"}</span>,
+    orden: (a) => a.marca,
   },
-  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true },
-  { titulo: "Venta c/IVA", celda: (a) => fmtMoneda(a.ventaCiva), numerica: true },
-  { titulo: "Costo", celda: (a) => fmtMoneda(a.costo), numerica: true },
-  { titulo: "Comisión", celda: (a) => fmtMoneda(a.comision), numerica: true },
-  { titulo: "Envío", celda: (a) => fmtMoneda(a.envio), numerica: true },
+  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true, orden: (a) => a.unidades },
+  { titulo: "Venta c/IVA", celda: (a) => fmtMoneda(a.ventaCiva), numerica: true, orden: (a) => a.ventaCiva },
+  { titulo: "Costo", celda: (a) => fmtMoneda(a.costo), numerica: true, orden: (a) => a.costo },
+  { titulo: "Comisión", celda: (a) => fmtMoneda(a.comision), numerica: true, orden: (a) => a.comision },
+  { titulo: "Envío", celda: (a) => fmtMoneda(a.envio), numerica: true, orden: (a) => a.envio },
   {
     titulo: "Rentabilidad",
     celda: (a) => (
@@ -39,6 +41,7 @@ const COLUMNAS_ARTICULOS: Columna<ArticuloMeli>[] = [
       </span>
     ),
     numerica: true,
+    orden: (a) => a.rentabilidad,
   },
   {
     titulo: "Margen",
@@ -48,6 +51,7 @@ const COLUMNAS_ARTICULOS: Columna<ArticuloMeli>[] = [
       </span>
     ),
     numerica: true,
+    orden: (a) => a.margenPct,
   },
 ];
 
@@ -61,7 +65,7 @@ const COLUMNAS_TOP: Columna<ArticuloMeli>[] = [
       </span>
     ),
   },
-  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true },
+  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true, orden: (a) => a.unidades },
   {
     titulo: "Rentabilidad",
     celda: (a) => (
@@ -70,35 +74,10 @@ const COLUMNAS_TOP: Columna<ArticuloMeli>[] = [
       </span>
     ),
     numerica: true,
+    orden: (a) => a.rentabilidad,
   },
-  { titulo: "Margen", celda: (a) => fmtPct(a.margenPct), numerica: true },
+  { titulo: "Margen", celda: (a) => fmtPct(a.margenPct), numerica: true, orden: (a) => a.margenPct },
 ];
-
-/**
- * Variación contra el período anterior.
- *
- * Se muestra el PORCENTAJE y no la diferencia en pesos porque lo que se quiere
- * saber es "¿venimos mejor o peor?", y para eso 100.000 pesos más no dice nada
- * sin saber sobre cuánto.
- *
- * Cuando el período anterior fue 0 no se dibuja nada: un "+∞ %" o un "+100 %"
- * salido de dividir por cero se lee como un dato y no lo es.
- */
-function Delta({ actual, anterior, contra }: { actual: number; anterior: number; contra: string }) {
-  if (!Number.isFinite(anterior) || anterior === 0) {
-    return <span className="text-muted">{contra}: sin ventas</span>;
-  }
-  const variacion = (actual - anterior) / Math.abs(anterior);
-  const sube = variacion >= 0;
-  return (
-    <>
-      <span style={{ color: sube ? PALETA[1] : TEMA.negativo }}>
-        {sube ? "▲" : "▼"} {fmtPct(Math.abs(variacion))}
-      </span>{" "}
-      <span className="text-muted">{contra}</span>
-    </>
-  );
-}
 
 /** Ranking en tabla y no en gráfico: son cuatro números por fila, no uno. */
 function TablaRanking({
@@ -116,9 +95,10 @@ function TablaRanking({
     {
       titulo,
       celda: (r) => <span className="block max-w-[220px] truncate">{r.label}</span>,
+      orden: (r) => r.label,
     },
-    { titulo: "Venta c/IVA", celda: (r) => fmtMoneda(r.venta), numerica: true },
-    { titulo: "Unid.", celda: (r) => fmtNumero(r.unidades), numerica: true },
+    { titulo: "Venta c/IVA", celda: (r) => fmtMoneda(r.venta), numerica: true, orden: (r) => r.venta },
+    { titulo: "Unid.", celda: (r) => fmtNumero(r.unidades), numerica: true, orden: (r) => r.unidades },
     {
       titulo: "Rentab.",
       celda: (r) => (
@@ -127,6 +107,7 @@ function TablaRanking({
         </span>
       ),
       numerica: true,
+      orden: (r) => r.rentabilidad,
     },
     {
       titulo: "Margen",
@@ -136,6 +117,7 @@ function TablaRanking({
         </span>
       ),
       numerica: true,
+      orden: (r) => r.margenPct,
     },
   ];
 
@@ -180,10 +162,15 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
     sinValores(filtros.sku);
 
   /** Texto del período anterior para las tarjetas, o null si no hay con qué comparar. */
+  // Si el período anterior se midió hasta una hora, la etiqueta LO DICE. Un
+  // "−12 % vs 18/08" y un "−12 % vs 18/08 hasta 16:05" son dos afirmaciones
+  // distintas, y la segunda es la única que se puede interpretar cuando el día
+  // de hoy está a medio pasar.
+  const hasta = comp?.hastaHora ? ` hasta ${comp.hastaHora.slice(0, 5)}` : "";
   const contra = comp
     ? comp.desde === comp.hasta
-      ? `vs ${fmtFechaCorta(comp.desde)}`
-      : `vs ${fmtFechaCorta(comp.desde)}–${fmtFechaCorta(comp.hasta)}`
+      ? `vs ${fmtFechaCorta(comp.desde)}${hasta}`
+      : `vs ${fmtFechaCorta(comp.desde)}–${fmtFechaCorta(comp.hasta)}${hasta}`
     : null;
 
   return (
@@ -249,7 +236,7 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
         </div>
       ) : (
         <div
-          className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
+          className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 ${cargando ? "opacity-50" : ""}`}
         >
           <TarjetaKpi
             titulo="Venta c/IVA"
@@ -301,7 +288,33 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
               contra && comp ? (
                 <Delta actual={k.ordenes} anterior={comp.ordenes} contra={contra} />
               ) : (
-                `${fmtNumero(k.unidades)} unidades · ticket ${fmtMoneda(k.ticketPromedio)}`
+                `${fmtNumero(k.lineas)} líneas · ${fmtNumero(k.unidades)} unidades`
+              )
+            }
+          />
+          <TarjetaKpi
+            titulo="Unidades vendidas"
+            valor={fmtNumero(k.unidades)}
+            detalle={
+              contra && comp ? (
+                <Delta actual={k.unidades} anterior={comp.unidades} contra={contra} />
+              ) : (
+                `${fmtNumero(k.lineas)} líneas de venta`
+              )
+            }
+          />
+          <TarjetaKpi
+            titulo="Ticket promedio"
+            valor={fmtMoneda(k.ticketPromedio)}
+            detalle={
+              contra && comp && comp.ordenes > 0 ? (
+                <Delta
+                  actual={k.ticketPromedio ?? 0}
+                  anterior={comp.ventaCiva / comp.ordenes}
+                  contra={contra}
+                />
+              ) : (
+                "Venta c/IVA por orden"
               )
             }
           />

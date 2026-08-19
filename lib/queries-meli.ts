@@ -1,5 +1,6 @@
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro, vacio } from "@/lib/filtros";
+import { hoyArgentina } from "@/lib/rangos";
 import {
   CANAL_MELI,
   CARGA_IMPOSITIVA,
@@ -49,6 +50,18 @@ const COSTO = "coalesce(costo_unitario, 0) * cantidad";
 const COMISION = "coalesce(comision, 0) * cantidad";
 const ENVIO = "coalesce(envio, 0)";
 const RENTABILIDAD = `(${VENTA_SIVA}) - (${COSTO}) - (${COMISION}) - (${ENVIO})`;
+
+// Las mismas expresiones calificadas con el alias de la tabla, para las
+// consultas que hacen join contra bronze.ml_ventas y donde una columna suelta
+// seria ambigua. Se derivan de las de arriba en vez de escribirse dos veces:
+// una copia a mano es una copia que algun dia se va a desincronizar.
+const conAlias = (expr: string) =>
+  expr.replace(/\b(total_linea|precio_neto|cantidad|costo_unitario|comision|envio)\b/g, "fv.$1");
+const VENTA_CIVA_P = conAlias(VENTA_CIVA);
+const VENTA_SIVA_P = conAlias(VENTA_SIVA);
+const COSTO_P = conAlias(COSTO);
+const COMISION_P = conAlias(COMISION);
+const ENVIO_P = conAlias(ENVIO);
 
 type Where = { sql: string; params: unknown[] };
 
@@ -132,6 +145,24 @@ export function diasDelRango(desde: string, hasta: string): number {
   return Math.round((aFecha(hasta).getTime() - aFecha(desde).getTime()) / DIA_MS) + 1;
 }
 
+/**
+ * La hora de Argentina como `HH:MM:SS`.
+ *
+ * Con `timeZone` explicito, igual que `hoyArgentina`: Vercel corre en UTC, y
+ * sin esto el corte quedaria tres horas adelantado -- a las 21 de Argentina
+ * compararia contra las 24 del dia anterior, o sea el dia entero, que es
+ * exactamente lo que este corte viene a evitar.
+ */
+function horaArgentina(ahora: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(ahora);
+}
+
 /** Fracción, o null cuando el denominador es 0 (que no es lo mismo que 0 %). */
 function pct(numerador: number, denominador: number): number | null {
   return denominador === 0 ? null : numerador / denominador;
@@ -141,20 +172,59 @@ const num = (v: unknown): number => Number(v ?? 0);
 
 // --- KPIs --------------------------------------------------------------------
 
-async function getKpis(f: FiltrosMeli): Promise<KpisMeli> {
-  const w = whereBase(f);
+/**
+ * KPIs del recorte. `corteHora` (`HH:MM:SS`) recorta el ULTIMO dia del rango a
+ * esa hora, y solo se usa para el periodo anterior.
+ *
+ * POR QUE EXISTE
+ * Comparar el dia de hoy a las 16 contra el dia de ayer ENTERO es comparar diez
+ * horas de venta contra veinticuatro: el tablero mostraba una caida todos los
+ * dias hasta la noche, y esa caida no existia. Con el corte, "ayer" se mide
+ * hasta las 16 tambien.
+ *
+ * La hora no esta en `gold.fact_ventas` -- ahi `fecha` es un `date` pelado --,
+ * asi que hay que cruzar contra `bronze.ml_ventas`, que guarda `date_created`
+ * con hora y offset. El cruce por numero de orden da 100%.
+ *
+ * El `at time zone` no es opcional: ML manda el offset -04:00, que no es el de
+ * Argentina. Sin convertir, el corte quedaria una hora corrido.
+ *
+ * Solo se recorta el ULTIMO dia. Los anteriores del rango entran completos, que
+ * es lo correcto: si mirás los ultimos 7 dias, los 6 primeros del periodo de
+ * comparacion pasaron enteros y el septimo es el que hay que cortar.
+ */
+async function getKpis(f: FiltrosMeli, corteHora?: string): Promise<KpisMeli> {
+  const conCorte = corteHora != null && f.hasta != null;
+  const w = whereBase(f, [], conCorte ? "fv." : "");
+
+  let sql = w.sql;
+  if (conCorte) {
+    w.params.push(f.hasta, corteHora);
+    const iHasta = w.params.length - 1;
+    const iHora = w.params.length;
+    sql += `
+     and (fv.fecha < $${iHasta}::date
+          or (v.date_created::timestamptz
+              at time zone 'America/Argentina/Buenos_Aires')::time <= $${iHora}::time)`;
+  }
+
+  const desde = conCorte
+    ? `gold.fact_ventas fv
+       join bronze.ml_ventas v on v.id::bigint = fv.nro_orden::bigint`
+    : "gold.fact_ventas";
+  const col = conCorte ? "fv." : "";
 
   const fila = await queryOne<Record<string, string>>(
-    `select coalesce(sum(${VENTA_CIVA}), 0)  as venta_civa,
-            coalesce(sum(${VENTA_SIVA}), 0)  as venta_siva,
-            coalesce(sum(cantidad), 0)       as unidades,
-            count(distinct nro_orden)        as ordenes,
-            count(*)                         as lineas,
-            coalesce(sum(${COSTO}), 0)       as costo,
-            coalesce(sum(${COMISION}), 0)    as comision,
-            coalesce(sum(${ENVIO}), 0)       as envio
-     from gold.fact_ventas
-     where ${w.sql}`,
+    `select coalesce(sum(${conCorte ? VENTA_CIVA_P : VENTA_CIVA}), 0)  as venta_civa,
+            coalesce(sum(${conCorte ? VENTA_SIVA_P : VENTA_SIVA}), 0)  as venta_siva,
+            coalesce(sum(${col}cantidad), 0)       as unidades,
+            count(distinct ${col}nro_orden)        as ordenes,
+            count(*)                               as lineas,
+            coalesce(sum(${conCorte ? COSTO_P : COSTO}), 0)       as costo,
+            coalesce(sum(${conCorte ? COMISION_P : COMISION}), 0) as comision,
+            coalesce(sum(${conCorte ? ENVIO_P : ENVIO}), 0)       as envio
+     from ${desde}
+     where ${sql}`,
     w.params,
   );
 
@@ -469,6 +539,15 @@ export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
   const hasta = f.hasta ?? f.desde ?? "";
   const anterior = desde && hasta ? periodoAnterior(desde, hasta) : null;
 
+  // Si el recorte llega hasta HOY, esta a medio pasar: son las 16 y todavia
+  // faltan ocho horas de venta. Comparar eso contra un dia entero da una caida
+  // que no existe, todos los dias hasta la noche. Se le pasa la hora actual al
+  // periodo anterior para medirlo hasta el mismo punto.
+  //
+  // Cuando el recorte NO llega a hoy -- "el mes pasado", "la semana pasada" --
+  // los dos periodos estan cerrados y no hay nada que recortar.
+  const corteHora = hasta === hoyArgentina() ? horaArgentina() : undefined;
+
   const [
     kpis,
     porDia,
@@ -492,7 +571,7 @@ export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
     getUltimaVenta(),
     // El período anterior mantiene TODOS los otros filtros: comparar "esta
     // semana de ALGABO" contra "la semana pasada de todo" no diría nada.
-    anterior ? getKpis({ ...f, ...anterior }) : Promise.resolve(null),
+    anterior ? getKpis({ ...f, ...anterior }, corteHora) : Promise.resolve(null),
   ]);
 
   return {
@@ -503,6 +582,7 @@ export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
         ? {
             desde: anterior.desde,
             hasta: anterior.hasta,
+            hastaHora: corteHora ?? null,
             ventaCiva: kpisAnterior.ventaCiva,
             unidades: kpisAnterior.unidades,
             ordenes: kpisAnterior.ordenes,
