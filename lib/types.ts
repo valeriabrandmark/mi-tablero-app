@@ -297,7 +297,13 @@ export type DashboardObjetivos = {
 // --- Venta minorista: Mercado Libre -----------------------------------------
 
 export type FiltrosMeli = {
-  mes?: string[];
+  /**
+   * Rango de fechas (`YYYY-MM-DD`), inclusivo en las dos puntas. Es el filtro
+   * principal de la sección, en vez del mes comercial: en Mercado Libre se mira
+   * el día, y el mes comercial del 6 al 5 no significa nada para este canal.
+   */
+  desde?: string;
+  hasta?: string;
   proveedor?: string[];
   marca?: string[];
   /** Filtro cruzado: sale de hacer click en una fila del ranking de artículos. */
@@ -305,6 +311,26 @@ export type FiltrosMeli = {
   /** Solo en la pestaña Alertas: nivel de alerta (ver `NIVELES_ALERTA`). */
   alerta?: string[];
 };
+
+/** Una hora del día (0-23) con lo que se vendió en ella. */
+export type PuntoHora = { hora: number; ordenes: number; venta: number };
+
+/**
+ * El mismo recorte corrido hacia atrás, para comparar. Si mirás hoy, es ayer;
+ * si mirás una semana, es la semana anterior.
+ */
+export type ComparacionMeli = {
+  desde: string;
+  hasta: string;
+  ventaCiva: number;
+  unidades: number;
+  ordenes: number;
+  rentabilidad: number;
+  margenPct: number | null;
+};
+
+/** El recorte que se está mirando, resuelto en el servidor. */
+export type RangoMeli = { desde: string; hasta: string; dias: number };
 
 /**
  * Todos los importes son de la LÍNEA ya multiplicada por cantidad. Ver la tabla
@@ -363,16 +389,25 @@ export type ArticuloMeli = {
 };
 
 export type OpcionesMeli = {
-  meses: string[];
   proveedores: string[];
   marcas: string[];
+  /** Primer y último día con ventas, para acotar los selectores de fecha. */
+  primeraVenta: string | null;
+  ultimaVenta: string | null;
 };
 
 export type DashboardMeli = {
   kpis: KpisMeli;
+  rango: RangoMeli;
+  /** Null si el período anterior cae antes del primer día con datos. */
+  comparacion: ComparacionMeli | null;
   porDia: PuntoDiaMeli[];
+  /** Las 24 horas, siempre completas: una hora sin ventas es un dato. */
+  porHora: PuntoHora[];
   porProveedor: RankingMeli[];
   porMarca: RankingMeli[];
+  /** Los SKUs que más plata dejaron, que no son los que más vendieron. */
+  topRentabilidad: ArticuloMeli[];
   articulos: ArticuloMeli[];
   /** Denominador de la torta: venta de TODOS los proveedores, sin filtro cruzado. */
   ventaTotalProveedores: number;

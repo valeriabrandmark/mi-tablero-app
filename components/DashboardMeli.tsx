@@ -3,6 +3,7 @@
 import { useState } from "react";
 import VentaRentabilidadMeli from "@/components/charts/VentaRentabilidadMeli";
 import TortaProveedores from "@/components/charts/TortaProveedores";
+import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import BarraFiltrosMeli from "@/components/FiltrosMeli";
 import { Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
@@ -49,6 +50,55 @@ const COLUMNAS_ARTICULOS: Columna<ArticuloMeli>[] = [
     numerica: true,
   },
 ];
+
+/** El top por rentabilidad va con menos columnas: se lee de un vistazo. */
+const COLUMNAS_TOP: Columna<ArticuloMeli>[] = [
+  {
+    titulo: "Producto",
+    celda: (a) => (
+      <span className="block max-w-[260px] truncate" title={a.producto ?? undefined}>
+        {a.producto ?? a.sku ?? "—"}
+      </span>
+    ),
+  },
+  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true },
+  {
+    titulo: "Rentabilidad",
+    celda: (a) => (
+      <span style={a.rentabilidad < 0 ? { color: TEMA.negativo } : { color: PALETA[1] }}>
+        {fmtMoneda(a.rentabilidad)}
+      </span>
+    ),
+    numerica: true,
+  },
+  { titulo: "Margen", celda: (a) => fmtPct(a.margenPct), numerica: true },
+];
+
+/**
+ * Variación contra el período anterior.
+ *
+ * Se muestra el PORCENTAJE y no la diferencia en pesos porque lo que se quiere
+ * saber es "¿venimos mejor o peor?", y para eso 100.000 pesos más no dice nada
+ * sin saber sobre cuánto.
+ *
+ * Cuando el período anterior fue 0 no se dibuja nada: un "+∞ %" o un "+100 %"
+ * salido de dividir por cero se lee como un dato y no lo es.
+ */
+function Delta({ actual, anterior, contra }: { actual: number; anterior: number; contra: string }) {
+  if (!Number.isFinite(anterior) || anterior === 0) {
+    return <span className="text-muted">{contra}: sin ventas</span>;
+  }
+  const variacion = (actual - anterior) / Math.abs(anterior);
+  const sube = variacion >= 0;
+  return (
+    <>
+      <span style={{ color: sube ? PALETA[1] : TEMA.negativo }}>
+        {sube ? "▲" : "▼"} {fmtPct(Math.abs(variacion))}
+      </span>{" "}
+      <span className="text-muted">{contra}</span>
+    </>
+  );
+}
 
 /** Ranking en tabla y no en gráfico: son cuatro números por fila, no uno. */
 function TablaRanking({
@@ -100,8 +150,10 @@ function TablaRanking({
   );
 }
 
-export default function DashboardMeliPage({ mesInicial }: { mesInicial: string }) {
-  const inicial: FiltrosMeli = { mes: [mesInicial] };
+export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }) {
+  // Abre en un solo día, como el reporte de Data Studio. `diaInicial` lo resuelve
+  // el servidor: es hoy, o el último día con ventas si hoy todavía no cargó.
+  const inicial: FiltrosMeli = { desde: diaInicial, hasta: diaInicial };
   const [filtros, setFiltros] = useState<FiltrosMeli>(inicial);
 
   const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
@@ -119,12 +171,20 @@ export default function DashboardMeliPage({ mesInicial }: { mesInicial: string }
     cambiar({ ...filtros, [clave]: alternarValor(filtros[clave], valor) });
 
   const k = data?.kpis;
+  const comp = data?.comparacion ?? null;
   const sinCambios =
-    filtros.mes?.length === 1 &&
-    filtros.mes[0] === mesInicial &&
+    filtros.desde === diaInicial &&
+    filtros.hasta === diaInicial &&
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
     sinValores(filtros.sku);
+
+  /** Texto del período anterior para las tarjetas, o null si no hay con qué comparar. */
+  const contra = comp
+    ? comp.desde === comp.hasta
+      ? `vs ${fmtFechaCorta(comp.desde)}`
+      : `vs ${fmtFechaCorta(comp.desde)}–${fmtFechaCorta(comp.hasta)}`
+    : null;
 
   return (
     <div className="space-y-4">
@@ -155,7 +215,7 @@ export default function DashboardMeliPage({ mesInicial }: { mesInicial: string }
         onChange={cambiar}
         onLimpiar={() => cambiar(inicial)}
         sinCambios={!!sinCambios}
-        nota="Solo canal Mercado Libre. El mes comercial va del 6 al 5. El margen es sobre venta c/IVA, igual que la planilla."
+        nota="Solo canal Mercado Libre. Todos los márgenes son sobre venta c/IVA — Ventas Mayoristas los mide s/IVA, ojo al comparar."
       />
 
       {/* Los chips solo aparecen para los filtros que no tienen selector arriba:
@@ -194,18 +254,34 @@ export default function DashboardMeliPage({ mesInicial }: { mesInicial: string }
           <TarjetaKpi
             titulo="Venta c/IVA"
             valor={fmtMoneda(k.ventaCiva)}
-            detalle={`${fmtMoneda(k.ventaSiva)} sin IVA`}
+            detalle={
+              contra && comp ? (
+                <Delta actual={k.ventaCiva} anterior={comp.ventaCiva} contra={contra} />
+              ) : (
+                `${fmtMoneda(k.ventaSiva)} sin IVA`
+              )
+            }
           />
           <TarjetaKpi
             titulo="Rentabilidad bruta"
             valor={fmtMoneda(k.rentabilidad)}
-            detalle="Venta s/IVA − costo − comisión − envío"
+            detalle={
+              contra && comp ? (
+                <Delta actual={k.rentabilidad} anterior={comp.rentabilidad} contra={contra} />
+              ) : (
+                "Venta s/IVA − costo − comisión − envío"
+              )
+            }
             acento={k.rentabilidad < 0 ? TEMA.negativo : PALETA[1]}
           />
           <TarjetaKpi
             titulo="Margen bruto"
             valor={fmtPct(k.margenPct)}
-            detalle="Sobre venta c/IVA"
+            detalle={
+              contra && comp && comp.margenPct != null && k.margenPct != null
+                ? `${comp.margenPct < k.margenPct ? "▲" : "▼"} era ${fmtPct(comp.margenPct)} ${contra}`
+                : "Rentabilidad sobre venta c/IVA"
+            }
             acento={(k.margenPct ?? 0) < 0 ? TEMA.negativo : undefined}
           />
           {/* La neta va al lado de la bruta a propósito: la diferencia entre las
@@ -214,14 +290,20 @@ export default function DashboardMeliPage({ mesInicial }: { mesInicial: string }
           <TarjetaKpi
             titulo="Rentabilidad neta"
             valor={fmtMoneda(k.rentabilidadNeta)}
-            detalle={`${fmtPct(k.margenNetoPct)} sobre venta s/IVA · ${fmtMoneda(k.impuestos)} de impuestos`}
+            detalle={`${fmtPct(k.margenNetoPct)} sobre venta c/IVA · ${fmtMoneda(k.impuestos)} de impuestos`}
             acento={k.rentabilidadNeta < 0 ? TEMA.negativo : undefined}
           />
 
           <TarjetaKpi
             titulo="Órdenes"
             valor={fmtNumero(k.ordenes)}
-            detalle={`${fmtNumero(k.unidades)} unidades · ticket ${fmtMoneda(k.ticketPromedio)}`}
+            detalle={
+              contra && comp ? (
+                <Delta actual={k.ordenes} anterior={comp.ordenes} contra={contra} />
+              ) : (
+                `${fmtNumero(k.unidades)} unidades · ticket ${fmtMoneda(k.ticketPromedio)}`
+              )
+            }
           />
           <TarjetaKpi
             titulo="Costo mercadería"
@@ -231,7 +313,7 @@ export default function DashboardMeliPage({ mesInicial }: { mesInicial: string }
           <TarjetaKpi
             titulo="Comisión Mercado Libre"
             valor={fmtMoneda(k.comision)}
-            detalle={`${fmtPct(k.pctComision)} de la venta s/IVA`}
+            detalle={`${fmtPct(k.pctComision)} de la venta c/IVA`}
           />
           <TarjetaKpi
             titulo="Costo de envío"
@@ -239,7 +321,7 @@ export default function DashboardMeliPage({ mesInicial }: { mesInicial: string }
             detalle={
               k.envio === 0
                 ? "Sin envíos cargados en este recorte"
-                : `${fmtPct(k.envio / k.ventaSiva)} de la venta s/IVA`
+                : `${fmtPct(k.envio / k.ventaCiva)} de la venta c/IVA`
             }
           />
         </div>
@@ -247,12 +329,49 @@ export default function DashboardMeliPage({ mesInicial }: { mesInicial: string }
 
       {data && (
         <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
-          <Panel
-            titulo="Venta y rentabilidad por día"
-            nota="Venta c/IVA contra rentabilidad bruta"
-          >
-            <VentaRentabilidadMeli datos={data.porDia} />
-          </Panel>
+          {data.rango.dias > 1 && (
+            <Panel
+              titulo="Venta y rentabilidad por día"
+              nota="Venta c/IVA contra rentabilidad bruta"
+            >
+              <VentaRentabilidadMeli datos={data.porDia} />
+            </Panel>
+          )}
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Panel
+              titulo="Órdenes por hora del día"
+              nota="Hora argentina · todo el recorte elegido"
+            >
+              {/* Órdenes y no facturación: la pregunta es a qué hora COMPRA la
+                  gente, y una sola venta grande movería el pico de lugar. */}
+              <BarrasCategoria
+                datos={data.porHora.map((h) => ({
+                  label: `${h.hora}`,
+                  valor: h.ordenes,
+                }))}
+                formato={fmtNumero}
+                horizontal={false}
+                colorUnico={PALETA[4]}
+                alturaMinima={220}
+                vacio="Sin ventas en el recorte elegido."
+              />
+            </Panel>
+
+            <Panel
+              titulo="Top artículos por rentabilidad"
+              nota="Los que más plata dejaron · no son los que más vendieron"
+            >
+              <Tabla
+                filas={data.topRentabilidad}
+                columnas={COLUMNAS_TOP}
+                clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
+                onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
+                activa={(a) => (filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false)}
+                vacio="Sin ventas en el recorte elegido."
+              />
+            </Panel>
+          </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
             <Panel titulo="Venta por proveedor" nota="Top 12 · click para filtrar">

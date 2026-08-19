@@ -231,7 +231,7 @@ export default function Dashboard() {
           <TarjetaKpi
             titulo="% Rentabilidad Ajustada"
             valor={fmtPct(k.rentabilidadAjustadaPct)}
-            detalle="Margen ajustado / facturación neta"
+            detalle="Margen ajustado / facturación neta (s/IVA)"
             acento={PALETA[1]}
           />
           <TarjetaKpi
@@ -284,7 +284,7 @@ export default function Dashboard() {
 
             <Panel
               titulo="Margen % por proveedor"
-              nota={`Ajustado por flete · mín. ${MIN_UNIDADES_MARGEN} unidades`}
+              nota={`Sobre facturación s/IVA · ajustado por flete · mín. ${MIN_UNIDADES_MARGEN} unidades`}
             >
               <BarrasMargen
                 datos={data.margenPorProveedor}
@@ -296,7 +296,7 @@ export default function Dashboard() {
 
           <Panel
             titulo="% Rentabilidad Ajustada por cliente"
-            nota="Los 15 clientes más grandes por facturación"
+            nota="Los 15 clientes más grandes · rentabilidad sobre facturación s/IVA"
           >
             <BarrasCategoria
               datos={data.rentabilidadPorCliente}
