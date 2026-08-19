@@ -269,9 +269,30 @@ Rentabilidad neta  = bruta - 7,4 % de la Venta s/IVA
                      (IIBB 5 % + Imp. Cheque 1,2 % + Imp. Municipal 1,2 %)
 ```
 
-Los dos márgenes usan denominadores distintos, igual que la planilla: el
-**Tablero** divide por venta **c/IVA** y **Alertas** por venta **s/IVA**. No es un
-descuido; es lo que hace que los números coincidan con el reporte de origen.
+### El denominador del margen
+
+**En Mercado Libre TODOS los porcentajes van sobre la venta c/IVA.** En Ventas
+Mayoristas van sobre la venta **s/IVA**. La misma venta da 7,5 % c/IVA y 9,1 %
+s/IVA, así que no se comparan entre canales sin tener esto presente; por eso
+cada pantalla lo dice al lado del número.
+
+Que cada canal use el suyo es una decisión del negocio: en Mercado Libre se
+razona sobre el precio de publicación, que es el que ve el comprador y lleva el
+IVA adentro.
+
+La planilla de origen usaba c/IVA en su pestaña "Tablero" y s/IVA en "Alertas",
+y al principio se copiaron las dos tal cual. Eso hacía que la misma venta
+mostrara 7,50 % en una pantalla y 9,08 % en la otra, las dos etiquetadas "margen
+bruto". Se unificó en c/IVA.
+
+**Los impuestos son la excepción y no se tocan**: IIBB, cheque y municipal se
+calculan sobre la venta **s/IVA**, porque así se liquidan. Lo que se unificó es
+el denominador del porcentaje, no la base imponible.
+
+Los umbrales de alerta se convirtieron a la misma unidad: el corte de la
+planilla era 1,5 % s/IVA, que pasado a c/IVA da 1,25 %. Se verificó contra los
+datos que la clasificación queda igual — de 37.698 líneas solo 2 cambian de
+banda.
 
 Verificado contra filas concretas de la planilla, al centavo:
 

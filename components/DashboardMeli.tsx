@@ -155,7 +155,7 @@ export default function DashboardMeliPage({ mesInicial }: { mesInicial: string }
         onChange={cambiar}
         onLimpiar={() => cambiar(inicial)}
         sinCambios={!!sinCambios}
-        nota="Solo canal Mercado Libre. El mes comercial va del 6 al 5. El margen es sobre venta c/IVA, igual que la planilla."
+        nota="Solo canal Mercado Libre. El mes comercial va del 6 al 5. Todos los márgenes son sobre venta c/IVA — Ventas Mayoristas los mide s/IVA, ojo al comparar."
       />
 
       {/* Los chips solo aparecen para los filtros que no tienen selector arriba:
@@ -205,7 +205,7 @@ export default function DashboardMeliPage({ mesInicial }: { mesInicial: string }
           <TarjetaKpi
             titulo="Margen bruto"
             valor={fmtPct(k.margenPct)}
-            detalle="Sobre venta c/IVA"
+            detalle="Rentabilidad sobre venta c/IVA"
             acento={(k.margenPct ?? 0) < 0 ? TEMA.negativo : undefined}
           />
           {/* La neta va al lado de la bruta a propósito: la diferencia entre las
@@ -214,7 +214,7 @@ export default function DashboardMeliPage({ mesInicial }: { mesInicial: string }
           <TarjetaKpi
             titulo="Rentabilidad neta"
             valor={fmtMoneda(k.rentabilidadNeta)}
-            detalle={`${fmtPct(k.margenNetoPct)} sobre venta s/IVA · ${fmtMoneda(k.impuestos)} de impuestos`}
+            detalle={`${fmtPct(k.margenNetoPct)} sobre venta c/IVA · ${fmtMoneda(k.impuestos)} de impuestos`}
             acento={k.rentabilidadNeta < 0 ? TEMA.negativo : undefined}
           />
 
@@ -231,7 +231,7 @@ export default function DashboardMeliPage({ mesInicial }: { mesInicial: string }
           <TarjetaKpi
             titulo="Comisión Mercado Libre"
             valor={fmtMoneda(k.comision)}
-            detalle={`${fmtPct(k.pctComision)} de la venta s/IVA`}
+            detalle={`${fmtPct(k.pctComision)} de la venta c/IVA`}
           />
           <TarjetaKpi
             titulo="Costo de envío"
@@ -239,7 +239,7 @@ export default function DashboardMeliPage({ mesInicial }: { mesInicial: string }
             detalle={
               k.envio === 0
                 ? "Sin envíos cargados en este recorte"
-                : `${fmtPct(k.envio / k.ventaSiva)} de la venta s/IVA`
+                : `${fmtPct(k.envio / k.ventaCiva)} de la venta c/IVA`
             }
           />
         </div>

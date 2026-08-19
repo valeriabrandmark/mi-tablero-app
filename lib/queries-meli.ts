@@ -121,14 +121,18 @@ async function getKpis(f: FiltrosMeli): Promise<KpisMeli> {
     comision,
     envio,
     rentabilidad,
-    // Denominador c/IVA: es el margen que muestra la pestaña "Tablero" de la
-    // planilla. El de la pestaña Alertas usa s/IVA y da distinto; los dos están,
-    // cada uno donde corresponde, para poder cotejar contra la planilla.
+    // Denominador c/IVA en TODA la sección (ver DENOMINADOR en lib/meli.ts).
     margenPct: pct(rentabilidad, ventaCiva),
     impuestos,
     rentabilidadNeta: rentabilidad - impuestos,
-    margenNetoPct: pct(rentabilidad - impuestos, ventaSiva),
-    pctComision: pct(comision, ventaSiva),
+    // Denominador c/IVA, igual que el margen bruto: las dos tarjetas se leen
+    // una al lado de la otra y con bases distintas la resta no cerraría.
+    margenNetoPct: pct(rentabilidad - impuestos, ventaCiva),
+    // Sobre c/IVA igual que todo lo demás, y además es la base real: Mercado
+    // Libre cobra su comisión como un % del precio de publicación, que lleva el
+    // IVA adentro. Sobre c/IVA da ~13 %, que es la tarifa que ML publica; sobre
+    // s/IVA daría ~16 %, un número que no existe en ningún lado.
+    pctComision: pct(comision, ventaCiva),
     ticketPromedio: pct(ventaCiva, ordenes),
   };
 }
@@ -353,10 +357,12 @@ const TOPE_ALERTAS = 500;
  * se calcula acá y no en el cliente: si filtrás por "muy bajo", el recorte tiene
  * que pasar dentro de la consulta o el tope de filas devolvería cualquier cosa.
  *
- * Denominador venta s/IVA, como la pestaña Alertas de la planilla.
+ * Denominador venta C/IVA, igual que el resto de la sección. Los impuestos en
+ * cambio se calculan sobre la venta S/IVA, que es como se liquidan: son dos
+ * cosas distintas y por eso conviven las dos en la misma fórmula.
  */
-const MARGEN_NETO = `case when (${VENTA_SIVA}) = 0 then null
-       else ((${RENTABILIDAD}) - (${VENTA_SIVA}) * ${CARGA_IMPOSITIVA}) / (${VENTA_SIVA}) end`;
+const MARGEN_NETO = `case when (${VENTA_CIVA}) = 0 then null
+       else ((${RENTABILIDAD}) - (${VENTA_SIVA}) * ${CARGA_IMPOSITIVA}) / (${VENTA_CIVA}) end`;
 
 /** Nivel de alerta en SQL, con los mismos cortes que `nivelDeMargen`. */
 const NIVEL = `case
@@ -420,6 +426,7 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
   );
 
   return filas.map((r) => {
+    const ventaCiva = num(r.venta_civa);
     const ventaSiva = num(r.venta_siva);
     const rentabilidad = num(r.rentabilidad);
 
@@ -430,7 +437,9 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
     const cheque = ventaSiva * IMPUESTOS.cheque;
     const municipal = ventaSiva * IMPUESTOS.municipal;
     const rentabilidadNeta = rentabilidad - iibb - cheque - municipal;
-    const margenNetoPct = pct(rentabilidadNeta, ventaSiva);
+    // Los dos porcentajes sobre venta c/IVA. Los impuestos de arriba SÍ se
+    // calculan sobre la venta s/IVA: esa es su base real de liquidación.
+    const margenNetoPct = pct(rentabilidadNeta, ventaCiva);
     const nivel = nivelDeMargen(margenNetoPct);
 
     return {
@@ -442,14 +451,14 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
       proveedor: r.proveedor,
       marca: r.marca,
       cantidad: num(r.cantidad),
-      ventaCiva: num(r.venta_civa),
+      ventaCiva,
       ventaSiva,
       costoUnitario: r.costo_unitario == null ? null : num(r.costo_unitario),
       costo: num(r.costo),
       comision: num(r.comision),
       envio: num(r.envio),
       rentabilidad,
-      margenPct: pct(rentabilidad, ventaSiva),
+      margenPct: pct(rentabilidad, ventaCiva),
       iibb,
       cheque,
       municipal,

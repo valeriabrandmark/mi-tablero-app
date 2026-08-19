@@ -59,15 +59,41 @@ export const IMPUESTOS = {
 export const CARGA_IMPOSITIVA = IMPUESTOS.iibb + IMPUESTOS.cheque + IMPUESTOS.municipal;
 
 /**
- * Bandas de alerta por margen NETO (rentabilidad neta / venta s/IVA).
+ * Sobre qué se mide el margen en Mercado Libre: la venta CON IVA.
  *
- * La única banda que se pudo leer entera de la planilla es "MUY BAJO": las 93
- * filas de la pestaña Alertas van de -7,4 % a 1,4 % de margen neto, así que el
- * corte está en 1,5 %. Las otras dos son un umbral nuestro para que la página
- * no sea binaria; se cambian acá y en ningún otro lado.
+ * No es lo mismo que en Ventas Mayoristas, que lo mide sobre la venta SIN IVA,
+ * y la diferencia no es chica: la misma venta da 7,5 % c/IVA y 9,1 % s/IVA.
+ *
+ * Que cada canal use el suyo es una decisión del negocio, no un descuido: en
+ * Mercado Libre se razona sobre el precio de publicación, que es el que ve el
+ * comprador y lleva el IVA adentro. Lo que NO puede pasar es que dos pantallas
+ * del mismo canal usen denominadores distintos — que es exactamente el bug que
+ * tenía esta sección, con el Tablero midiendo c/IVA y las Alertas s/IVA.
+ *
+ * OJO: esto es SOLO el denominador del porcentaje. La base de los impuestos
+ * sigue siendo la venta s/IVA, porque así se liquidan; eso no se toca.
  */
-export const UMBRAL_MUY_BAJO = 0.015;
-export const UMBRAL_BAJO = 0.05;
+export const DENOMINADOR = "venta c/IVA";
+
+/**
+ * Bandas de alerta por margen NETO.
+ *
+ * OJO CON EL DENOMINADOR: el margen de esta sección se mide sobre la venta
+ * CON IVA (ver `DENOMINADOR` más abajo), así que estos umbrales también están
+ * expresados sobre venta c/IVA.
+ *
+ * La única banda que se pudo leer entera de la planilla es "MUY BAJO": sus 93
+ * filas van de -7,4 % a 1,4 % de margen neto sobre venta s/IVA, o sea que el
+ * corte de la planilla está en 1,5 % s/IVA. Pasado a c/IVA (dividir por 1,21)
+ * da 1,24 %, y se redondeó a 1,25 %. Se verificó contra los datos: de 37.698
+ * líneas, solo 2 cambian de banda respecto de la regla original — o sea que es
+ * la misma clasificación, dicha en la otra unidad.
+ *
+ * El corte de "BAJO" es nuestro, no de la planilla: 5 % s/IVA -> 4,15 % c/IVA.
+ * Se cambian acá y en ningún otro lado.
+ */
+export const UMBRAL_MUY_BAJO = 0.0125;
+export const UMBRAL_BAJO = 0.0415;
 
 export const NIVELES_ALERTA = ["muy-bajo", "bajo", "ok"] as const;
 export type NivelAlerta = (typeof NIVELES_ALERTA)[number];

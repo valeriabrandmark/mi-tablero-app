@@ -94,7 +94,7 @@ const COLUMNAS: Columna<FilaAlertaMeli>[] = [
   { titulo: "Envío", celda: (f) => fmtMoneda(f.envio), numerica: true },
   { titulo: "Rent. bruta", celda: (f) => <Importe valor={f.rentabilidad} />, numerica: true },
   {
-    titulo: "Margen bruto",
+    titulo: "Margen bruto c/IVA",
     celda: (f) => (
       <span style={(f.margenPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}>
         {fmtPct(f.margenPct)}
@@ -107,7 +107,7 @@ const COLUMNAS: Columna<FilaAlertaMeli>[] = [
   { titulo: "Imp. municipal", celda: (f) => fmtMoneda(f.municipal), numerica: true },
   { titulo: "Rent. neta", celda: (f) => <Importe valor={f.rentabilidadNeta} />, numerica: true },
   {
-    titulo: "Margen neto",
+    titulo: "Margen neto c/IVA",
     celda: (f) => (
       <span style={(f.margenNetoPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}>
         {fmtPct(f.margenNetoPct)}
@@ -184,7 +184,7 @@ export default function AlertasMeliPage({ mesInicial }: { mesInicial: string }) 
         onLimpiar={() => cambiar(inicial)}
         sinCambios={!!sinCambios}
         conAlerta
-        nota={`Margen NETO sobre venta s/IVA: descuenta IIBB ${fmtPct(IMPUESTOS.iibb)}, cheque ${fmtPct(IMPUESTOS.cheque)} y municipal ${fmtPct(IMPUESTOS.municipal)}. Muy bajo = menos de ${fmtPct(UMBRAL_MUY_BAJO)}; bajo = hasta ${fmtPct(UMBRAL_BAJO)}.`}
+        nota={`Márgenes sobre venta c/IVA. El neto descuenta IIBB ${fmtPct(IMPUESTOS.iibb)}, cheque ${fmtPct(IMPUESTOS.cheque)} y municipal ${fmtPct(IMPUESTOS.municipal)}, que se liquidan sobre la venta s/IVA. Muy bajo = menos de ${fmtPct(UMBRAL_MUY_BAJO)}; bajo = hasta ${fmtPct(UMBRAL_BAJO)}.`}
       />
 
       {error && (
@@ -242,7 +242,8 @@ export default function AlertasMeliPage({ mesInicial }: { mesInicial: string }) 
           <p className="text-muted mt-3 text-[11px] leading-relaxed">
             Rentabilidad bruta = venta s/IVA − costo (ya con descuento de proveedor) − comisión
             de Mercado Libre − costo de envío. Rentabilidad neta = bruta − {fmtPct(CARGA_IMPOSITIVA)}{" "}
-            de impuestos sobre la venta s/IVA.
+            de impuestos sobre la venta s/IVA. Los dos <strong>porcentajes</strong> se calculan
+            sobre la venta <strong>c/IVA</strong>, igual que en el Tablero.
           </p>
         </div>
       )}
