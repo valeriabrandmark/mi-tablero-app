@@ -188,10 +188,15 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
     sinValores(filtros.sku);
 
   /** Texto del período anterior para las tarjetas, o null si no hay con qué comparar. */
+  // Si el período anterior se midió hasta una hora, la etiqueta LO DICE. Un
+  // "−12 % vs 18/08" y un "−12 % vs 18/08 hasta 16:05" son dos afirmaciones
+  // distintas, y la segunda es la única que se puede interpretar cuando el día
+  // de hoy está a medio pasar.
+  const hasta = comp?.hastaHora ? ` hasta ${comp.hastaHora.slice(0, 5)}` : "";
   const contra = comp
     ? comp.desde === comp.hasta
-      ? `vs ${fmtFechaCorta(comp.desde)}`
-      : `vs ${fmtFechaCorta(comp.desde)}–${fmtFechaCorta(comp.hasta)}`
+      ? `vs ${fmtFechaCorta(comp.desde)}${hasta}`
+      : `vs ${fmtFechaCorta(comp.desde)}–${fmtFechaCorta(comp.hasta)}${hasta}`
     : null;
 
   return (
@@ -257,7 +262,7 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
         </div>
       ) : (
         <div
-          className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
+          className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 ${cargando ? "opacity-50" : ""}`}
         >
           <TarjetaKpi
             titulo="Venta c/IVA"
@@ -309,7 +314,33 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
               contra && comp ? (
                 <Delta actual={k.ordenes} anterior={comp.ordenes} contra={contra} />
               ) : (
-                `${fmtNumero(k.unidades)} unidades · ticket ${fmtMoneda(k.ticketPromedio)}`
+                `${fmtNumero(k.lineas)} líneas · ${fmtNumero(k.unidades)} unidades`
+              )
+            }
+          />
+          <TarjetaKpi
+            titulo="Unidades vendidas"
+            valor={fmtNumero(k.unidades)}
+            detalle={
+              contra && comp ? (
+                <Delta actual={k.unidades} anterior={comp.unidades} contra={contra} />
+              ) : (
+                `${fmtNumero(k.lineas)} líneas de venta`
+              )
+            }
+          />
+          <TarjetaKpi
+            titulo="Ticket promedio"
+            valor={fmtMoneda(k.ticketPromedio)}
+            detalle={
+              contra && comp && comp.ordenes > 0 ? (
+                <Delta
+                  actual={k.ticketPromedio ?? 0}
+                  anterior={comp.ventaCiva / comp.ordenes}
+                  contra={contra}
+                />
+              ) : (
+                "Venta c/IVA por orden"
               )
             }
           />

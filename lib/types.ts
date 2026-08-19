@@ -322,6 +322,16 @@ export type PuntoHora = { hora: number; ordenes: number; venta: number };
 export type ComparacionMeli = {
   desde: string;
   hasta: string;
+  /**
+   * Hasta qué hora se midió el último día del período anterior (`HH:MM:SS`), o
+   * null si se midió entero.
+   *
+   * Tiene valor solo cuando el recorte actual llega hasta hoy, que es cuando
+   * está a medio pasar: comparar "hoy hasta las 16" contra "ayer entero" es
+   * comparar diez horas contra veinticuatro. La pantalla lo dice, porque un
+   * porcentaje sin saber sobre qué se midió no se puede interpretar.
+   */
+  hastaHora: string | null;
   ventaCiva: number;
   unidades: number;
   ordenes: number;
