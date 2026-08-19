@@ -30,7 +30,8 @@ export function TarjetaKpi({
 }: {
   titulo: string;
   valor: string;
-  detalle?: string;
+  /** Nodo y no string: hay tarjetas que muestran la variación con color. */
+  detalle?: ReactNode;
   acento?: string;
 }) {
   return (

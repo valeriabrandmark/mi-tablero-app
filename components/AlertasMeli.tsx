@@ -13,6 +13,7 @@ import {
   NOMBRE_ALERTA,
   UMBRAL_BAJO,
   UMBRAL_MUY_BAJO,
+  mesComercialComoRango,
   type NivelAlerta,
 } from "@/lib/meli";
 import { PALETA, TEMA } from "@/lib/paleta";
@@ -118,8 +119,13 @@ const COLUMNAS: Columna<FilaAlertaMeli>[] = [
   { titulo: "Acción", celda: (f) => <span className="whitespace-nowrap">{f.accion}</span> },
 ];
 
-export default function AlertasMeliPage({ mesInicial }: { mesInicial: string }) {
-  const inicial: FiltrosMeli = { mes: [mesInicial], alerta: ["muy-bajo"] };
+export default function AlertasMeliPage({ diaInicial }: { diaInicial: string }) {
+  // Acá el default NO es el día, como en el Tablero: esta página es para
+  // revisar ventas problemáticas, y con un solo día suelen ser tres filas —
+  // se lee como si no hubiera nada que mirar. Abre en el mes comercial, que es
+  // el recorte sobre el que se decide corregir un precio.
+  const rangoInicial = mesComercialComoRango(diaInicial);
+  const inicial: FiltrosMeli = { ...rangoInicial, alerta: ["muy-bajo"] };
   const [filtros, setFiltros] = useState<FiltrosMeli>(inicial);
 
   const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
@@ -134,8 +140,8 @@ export default function AlertasMeliPage({ mesInicial }: { mesInicial: string }) 
   };
 
   const sinCambios =
-    filtros.mes?.length === 1 &&
-    filtros.mes[0] === mesInicial &&
+    filtros.desde === rangoInicial.desde &&
+    filtros.hasta === rangoInicial.hasta &&
     filtros.alerta?.length === 1 &&
     filtros.alerta[0] === "muy-bajo" &&
     sinValores(filtros.proveedor) &&

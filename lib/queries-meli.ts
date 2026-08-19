@@ -9,7 +9,6 @@ import {
   accionSugerida,
   nivelDeMargen,
 } from "@/lib/meli";
-import { mesComercialActual } from "@/lib/constantes";
 import type {
   ArticuloMeli,
   DashboardAlertasMeli,
@@ -19,6 +18,7 @@ import type {
   KpisMeli,
   OpcionesMeli,
   PuntoDiaMeli,
+  PuntoHora,
   RankingMeli,
   ResumenAlerta,
 } from "@/lib/types";
@@ -53,7 +53,6 @@ const RENTABILIDAD = `(${VENTA_SIVA}) - (${COSTO}) - (${COMISION}) - (${ENVIO})`
 type Where = { sql: string; params: unknown[] };
 
 const OPCIONALES: [keyof FiltrosMeli, string][] = [
-  ["mes", "mes_comercial"],
   ["proveedor", "proveedor"],
   ["marca", "marca"],
   ["sku", "sku"],
@@ -64,15 +63,73 @@ const OPCIONALES: [keyof FiltrosMeli, string][] = [
  * proveedores tiene que seguir mostrándolos a todos aunque haya uno
  * seleccionado, si no queda con una sola barra.
  */
-function whereBase(f: FiltrosMeli, omitir: (keyof FiltrosMeli)[] = []): Where {
+/**
+ * `prefijo` califica las columnas cuando la consulta tiene join y "fecha" sola
+ * sería ambigua. Se pasa como parámetro en vez de parchear el SQL después,
+ * porque un reemplazo de texto sobre el where terminaría tocando también los
+ * valores de los parámetros.
+ */
+function whereBase(
+  f: FiltrosMeli,
+  omitir: (keyof FiltrosMeli)[] = [],
+  prefijo = "",
+): Where {
+  const col = (c: string) => `${prefijo}${c}`;
   const params: unknown[] = [CANAL_MELI];
-  const clauses = ["canal = $1"];
+  const clauses = [`${col("canal")} = $1`];
+
+  // El rango va con `::date` explícito: `fecha` es un date y sin el casteo
+  // Postgres compara contra texto.
+  if (f.desde) {
+    params.push(f.desde);
+    clauses.push(`${col("fecha")} >= $${params.length}::date`);
+  }
+  if (f.hasta) {
+    params.push(f.hasta);
+    clauses.push(`${col("fecha")} <= $${params.length}::date`);
+  }
 
   for (const [clave, columna] of OPCIONALES) {
-    if (!omitir.includes(clave)) agregarFiltro(clauses, params, columna, f[clave]);
+    if (!omitir.includes(clave)) {
+      agregarFiltro(clauses, params, col(columna), f[clave] as string[] | undefined);
+    }
   }
 
   return { sql: clauses.join("\n     and "), params };
+}
+
+// --- Rango y período anterior ------------------------------------------------
+
+const DIA_MS = 86_400_000;
+
+/** `YYYY-MM-DD` de un Date leído en UTC (los rangos no tienen hora). */
+function iso(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function aFecha(s: string): Date {
+  return new Date(`${s}T00:00:00Z`);
+}
+
+/**
+ * El mismo recorte corrido hacia atrás, pegado al de adelante: si mirás hoy, es
+ * ayer; si mirás del 1 al 7, es del 25 al 31.
+ *
+ * Se usa la misma CANTIDAD de días y no "el mes anterior" ni "la semana
+ * anterior" a propósito: comparar 5 días contra 7 haría que el período anterior
+ * gane siempre, y la comparación no querría decir nada.
+ */
+export function periodoAnterior(desde: string, hasta: string): { desde: string; hasta: string } {
+  const d = aFecha(desde);
+  const h = aFecha(hasta);
+  const dias = Math.round((h.getTime() - d.getTime()) / DIA_MS) + 1;
+  const hastaAnt = new Date(d.getTime() - DIA_MS);
+  const desdeAnt = new Date(hastaAnt.getTime() - (dias - 1) * DIA_MS);
+  return { desde: iso(desdeAnt), hasta: iso(hastaAnt) };
+}
+
+export function diasDelRango(desde: string, hasta: string): number {
+  return Math.round((aFecha(hasta).getTime() - aFecha(desde).getTime()) / DIA_MS) + 1;
 }
 
 /** Fracción, o null cuando el denominador es 0 (que no es lo mismo que 0 %). */
@@ -160,6 +217,89 @@ async function getPorDia(f: FiltrosMeli): Promise<PuntoDiaMeli[]> {
   }));
 }
 
+/** Fila de artículo -> objeto. La comparten el ranking por venta y el de rentabilidad. */
+function aArticulo(r: Record<string, string>): ArticuloMeli {
+  const ventaCiva = num(r.venta_civa);
+  const rentabilidad = num(r.rentabilidad);
+  return {
+    sku: r.sku,
+    producto: r.producto,
+    proveedor: r.proveedor,
+    marca: r.marca,
+    unidades: num(r.unidades),
+    ventaCiva,
+    ventaSiva: num(r.venta_siva),
+    costo: num(r.costo),
+    comision: num(r.comision),
+    envio: num(r.envio),
+    rentabilidad,
+    margenPct: pct(rentabilidad, ventaCiva),
+  };
+}
+
+/**
+ * Ventas por hora del día, en hora ARGENTINA.
+ *
+ * La hora no está en `gold.fact_ventas`: ahí `fecha` es un `date` pelado. Sale
+ * de cruzar contra `bronze.ml_ventas`, que guarda `date_created` con la hora y
+ * el offset (`2026-08-19T09:54:37.000-04:00`). El cruce es por número de orden
+ * y da 100%: las 37.881 líneas de Mercado Libre encuentran su orden.
+ *
+ * El `at time zone` no es opcional: ML manda el offset -04:00, que no es el de
+ * Argentina. Sin convertir, el pico de ventas aparecería una hora antes de
+ * cuando pasó. Verificado contra la planilla, que muestra la hora local.
+ *
+ * Se cuentan ÓRDENES y no líneas: una orden de tres productos es una compra a
+ * esa hora, no tres.
+ */
+async function getPorHora(f: FiltrosMeli): Promise<Record<string, number>[]> {
+  const w = whereBase(f, [], "fv.");
+
+  return query<Record<string, number>>(
+    `select extract(hour from (v.date_created::timestamptz
+              at time zone 'America/Argentina/Buenos_Aires'))::int as hora,
+            count(distinct fv.nro_orden)                           as ordenes,
+            coalesce(sum(${VENTA_CIVA}), 0)                        as venta
+     from gold.fact_ventas fv
+     join bronze.ml_ventas v on v.id::bigint = fv.nro_orden::bigint
+     where ${w.sql}
+     group by 1
+     order by 1`,
+    w.params,
+  );
+}
+
+/**
+ * Los SKUs que más plata dejaron. Es una consulta aparte y no un `sort` de la
+ * tabla de artículos porque esa trae el top 300 POR VENTA: un producto que se
+ * vende poco pero deja mucho puede no estar ahí, y es justo el que interesa.
+ */
+async function getTopRentabilidad(f: FiltrosMeli): Promise<ArticuloMeli[]> {
+  const w = whereBase(f);
+
+  const filas = await query<Record<string, string>>(
+    `select sku,
+            max(producto)                     as producto,
+            max(proveedor)                    as proveedor,
+            max(marca)                        as marca,
+            coalesce(sum(cantidad), 0)        as unidades,
+            coalesce(sum(${VENTA_CIVA}), 0)   as venta_civa,
+            coalesce(sum(${VENTA_SIVA}), 0)   as venta_siva,
+            coalesce(sum(${COSTO}), 0)        as costo,
+            coalesce(sum(${COMISION}), 0)     as comision,
+            coalesce(sum(${ENVIO}), 0)        as envio,
+            coalesce(sum(${RENTABILIDAD}), 0) as rentabilidad
+     from gold.fact_ventas
+     where ${w.sql}
+     group by sku
+     order by rentabilidad desc
+     limit 12`,
+    w.params,
+  );
+
+  return filas.map(aArticulo);
+}
+
 /**
  * Ranking por una dimensión. Se omite el filtro de esa misma dimensión para que
  * al clickear un proveedor el gráfico no se quede con una sola barra.
@@ -230,24 +370,7 @@ async function getArticulos(f: FiltrosMeli): Promise<ArticuloMeli[]> {
     w.params,
   );
 
-  return filas.map((r) => {
-    const ventaCiva = num(r.venta_civa);
-    const rentabilidad = num(r.rentabilidad);
-    return {
-      sku: r.sku,
-      producto: r.producto,
-      proveedor: r.proveedor,
-      marca: r.marca,
-      unidades: num(r.unidades),
-      ventaCiva,
-      ventaSiva: num(r.venta_siva),
-      costo: num(r.costo),
-      comision: num(r.comision),
-      envio: num(r.envio),
-      rentabilidad,
-      margenPct: pct(rentabilidad, ventaCiva),
-    };
-  });
+  return filas.map(aArticulo);
 }
 
 /**
@@ -267,12 +390,7 @@ async function getUltimaVenta(): Promise<string | null> {
 // --- Opciones de los filtros -------------------------------------------------
 
 export async function getOpcionesMeli(): Promise<OpcionesMeli> {
-  const [meses, proveedores, marcas] = await Promise.all([
-    query<{ v: string }>(
-      `select distinct mes_comercial as v from gold.fact_ventas
-       where canal = $1 and mes_comercial is not null order by 1 desc`,
-      [CANAL_MELI],
-    ),
+  const [proveedores, marcas, bordes] = await Promise.all([
     query<{ v: string }>(
       `select distinct proveedor as v from gold.fact_ventas
        where canal = $1 and proveedor is not null order by 1`,
@@ -283,59 +401,120 @@ export async function getOpcionesMeli(): Promise<OpcionesMeli> {
        where canal = $1 and marca is not null order by 1`,
       [CANAL_MELI],
     ),
+    queryOne<{ primera: string | null; ultima: string | null }>(
+      `select to_char(min(fecha), 'YYYY-MM-DD') as primera,
+              to_char(max(fecha), 'YYYY-MM-DD') as ultima
+       from gold.fact_ventas where canal = $1`,
+      [CANAL_MELI],
+    ),
   ]);
 
   return {
-    meses: meses.map((r) => r.v),
     proveedores: proveedores.map((r) => r.v),
     marcas: marcas.map((r) => r.v),
+    primeraVenta: bordes?.primera ?? null,
+    ultimaVenta: bordes?.ultima ?? null,
   };
 }
 
 /**
- * Mes con el que abre la sección, resuelto en el servidor.
+ * El día con el que abre el tablero, resuelto en el SERVIDOR.
  *
- * No alcanza con `mesComercialActual()`: el dato de Mercado Libre puede venir
- * atrasado, y abrir en un mes sin ninguna venta se ve igual que un tablero roto.
- * Por eso se toma el mes vigente solo si tiene datos; si no, el último que tenga.
+ * Es "hoy", como el reporte de Data Studio. Pero "hoy" se calcula en hora
+ * argentina y no en la del servidor: Vercel corre en UTC, así que entre las 21
+ * y las 24 de Argentina un `new Date()` pelado ya estaría en el día siguiente y
+ * el tablero abriría vacío justo en la franja de más venta.
+ *
+ * Y si hoy todavía no tiene ninguna venta cargada —el orquestador corre en una
+ * computadora que puede estar apagada— se abre en el último día que sí tenga.
+ * Un tablero en cero se lee como "no vendimos", no como "no hay dato".
  */
-export async function getMesInicialMeli(): Promise<string> {
-  const vigente = mesComercialActual();
+export async function getDiaInicialMeli(): Promise<string> {
+  const hoy = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+
   try {
-    const fila = await queryOne<{ v: string }>(
-      `select mes_comercial as v
-       from gold.fact_ventas
-       where canal = $1 and mes_comercial is not null
-       group by mes_comercial
-       order by (mes_comercial = $2) desc, mes_comercial desc
-       limit 1`,
-      [CANAL_MELI, vigente],
+    const fila = await queryOne<{ v: string | null }>(
+      `select to_char(max(fecha), 'YYYY-MM-DD') as v
+       from gold.fact_ventas where canal = $1 and fecha <= $2::date`,
+      [CANAL_MELI, hoy],
     );
-    return fila?.v ?? vigente;
+    return fila?.v ?? hoy;
   } catch {
-    return vigente;
+    return hoy;
   }
 }
 
+
 // --- Dashboard "Tablero" -----------------------------------------------------
 
+/** Las 24 horas siempre presentes: una hora en cero es un dato, no un hueco. */
+function completarHoras(filas: Record<string, number>[]): PuntoHora[] {
+  const porHora = new Map(filas.map((r) => [Number(r.hora), r]));
+  return Array.from({ length: 24 }, (_, hora) => {
+    const r = porHora.get(hora);
+    return { hora, ordenes: num(r?.ordenes), venta: num(r?.venta) };
+  });
+}
+
 export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
-  const [kpis, porDia, porProveedor, porMarca, articulos, ventaTotalProveedores, ultimaVenta] =
-    await Promise.all([
-      getKpis(f),
-      getPorDia(f),
-      getRanking(f, "proveedor", 12),
-      getRanking(f, "marca", 12),
-      getArticulos(f),
-      getVentaTotalProveedores(f),
-      getUltimaVenta(),
-    ]);
+  // El rango siempre está resuelto para cuando llega acá (lo fija la ruta de
+  // API), pero el tipo lo permite vacío: sin este piso, `periodoAnterior` haría
+  // cuentas con undefined y devolvería fechas inválidas.
+  const desde = f.desde ?? f.hasta ?? "";
+  const hasta = f.hasta ?? f.desde ?? "";
+  const anterior = desde && hasta ? periodoAnterior(desde, hasta) : null;
+
+  const [
+    kpis,
+    porDia,
+    horasCrudas,
+    porProveedor,
+    porMarca,
+    topRentabilidad,
+    articulos,
+    ventaTotalProveedores,
+    ultimaVenta,
+    kpisAnterior,
+  ] = await Promise.all([
+    getKpis(f),
+    getPorDia(f),
+    getPorHora(f),
+    getRanking(f, "proveedor", 12),
+    getRanking(f, "marca", 12),
+    getTopRentabilidad(f),
+    getArticulos(f),
+    getVentaTotalProveedores(f),
+    getUltimaVenta(),
+    // El período anterior mantiene TODOS los otros filtros: comparar "esta
+    // semana de ALGABO" contra "la semana pasada de todo" no diría nada.
+    anterior ? getKpis({ ...f, ...anterior }) : Promise.resolve(null),
+  ]);
 
   return {
     kpis,
+    rango: { desde, hasta, dias: desde && hasta ? diasDelRango(desde, hasta) : 0 },
+    comparacion:
+      anterior && kpisAnterior && kpisAnterior.lineas > 0
+        ? {
+            desde: anterior.desde,
+            hasta: anterior.hasta,
+            ventaCiva: kpisAnterior.ventaCiva,
+            unidades: kpisAnterior.unidades,
+            ordenes: kpisAnterior.ordenes,
+            rentabilidad: kpisAnterior.rentabilidad,
+            margenPct: kpisAnterior.margenPct,
+          }
+        : null,
     porDia,
+    porHora: completarHoras(horasCrudas),
     porProveedor,
     porMarca,
+    topRentabilidad,
     articulos,
     ventaTotalProveedores,
     ultimaVenta,

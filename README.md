@@ -318,6 +318,36 @@ Verificado contra filas concretas de la planilla, al centavo:
 3. **Los impuestos son alícuotas, no un dato de la venta.** Están en
    `lib/meli.ts` y se cambian ahí, en un solo lugar.
 
+### El filtro de fechas
+
+El filtro principal de la sección es un **rango de fechas**, no el mes comercial:
+en este canal se mira el día. El Tablero abre en **hoy** (o el último día con
+ventas, si hoy todavía no cargó) y las Alertas en el mes comercial, que es el
+recorte sobre el que se decide corregir un precio.
+
+"Hoy" se calcula en **hora argentina**, no en la del servidor: Vercel corre en
+UTC, así que entre las 21 y las 24 de acá un `new Date()` pelado ya está en el
+día siguiente y el tablero abriría vacío justo en la franja de más venta.
+
+La comparación contra el período anterior usa **la misma cantidad de días**,
+pegada justo antes del recorte: un día contra el anterior, siete días contra los
+siete previos. Comparar 5 días contra 7 haría que el período anterior gane
+siempre. Mantiene los demás filtros puestos: comparar "esta semana de ALGABO"
+contra "la semana pasada de todo" no diría nada.
+
+### La hora del día
+
+`gold.fact_ventas.fecha` es un `date` pelado, sin hora. El gráfico de órdenes por
+hora sale de cruzar contra `bronze.ml_ventas`, que guarda `date_created` con hora
+y offset. El cruce es por número de orden y da 100 %.
+
+El `at time zone 'America/Argentina/Buenos_Aires'` no es opcional: Mercado Libre
+manda el offset `-04:00`, que no es el de Argentina. Sin convertir, el pico
+aparecería una hora antes de cuando pasó.
+
+Se cuentan **órdenes** y no líneas: una orden de tres productos es una compra a
+esa hora, no tres.
+
 ### Por qué falta la pestaña de stock
 
 `bronze.ml_stock_full` (3.826 filas) y `bronze.ml_publicaciones` (8.504) se

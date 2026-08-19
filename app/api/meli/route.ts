@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { lista } from "@/lib/filtros";
-import { NIVELES_ALERTA } from "@/lib/meli";
+import { NIVELES_ALERTA, hoyArgentina } from "@/lib/meli";
 import { permisoDelUsuario, puedeVer } from "@/lib/permisos";
 import {
   getDashboardAlertasMeli,
@@ -38,8 +38,24 @@ export async function GET(request: NextRequest) {
   // exactamente lo contrario de lo que pidió quien lo mandó.
   const alerta = lista(sp, "alerta")?.filter((v) => NIVELES_ALERTA.some((n) => n === v));
 
+  // Las fechas se validan con una expresión y no con `new Date()`: acá no se
+  // quiere interpretar nada raro, se quiere `YYYY-MM-DD` o nada. Un valor con
+  // otra forma se descarta y el rango cae al default, que es mejor que meter
+  // basura en la consulta.
+  const fecha = (clave: string): string | undefined => {
+    const v = sp.get(clave);
+    return v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined;
+  };
+
+  const hoy = hoyArgentina();
+  let desde = fecha("desde") ?? hoy;
+  let hasta = fecha("hasta") ?? hoy;
+  // Si vienen dadas vuelta se ordenan en vez de devolver un recorte vacío.
+  if (desde > hasta) [desde, hasta] = [hasta, desde];
+
   const filtros: FiltrosMeli = {
-    mes: lista(sp, "mes"),
+    desde,
+    hasta,
     proveedor: lista(sp, "proveedor"),
     marca: lista(sp, "marca"),
     sku: lista(sp, "sku"),

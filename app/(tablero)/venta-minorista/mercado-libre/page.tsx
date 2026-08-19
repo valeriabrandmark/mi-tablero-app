@@ -1,5 +1,5 @@
 import DashboardMeli from "@/components/DashboardMeli";
-import { getMesInicialMeli } from "@/lib/queries-meli";
+import { getDiaInicialMeli } from "@/lib/queries-meli";
 
 /**
  * Dinámica y no prerenderizada: el mes comercial con el que abre se resuelve por
@@ -10,5 +10,5 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Mercado Libre — Tablero Brandmark" };
 
 export default async function MercadoLibrePage() {
-  return <DashboardMeli mesInicial={await getMesInicialMeli()} />;
+  return <DashboardMeli diaInicial={await getDiaInicialMeli()} />;
 }
