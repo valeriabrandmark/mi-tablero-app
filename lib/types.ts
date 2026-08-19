@@ -461,3 +461,147 @@ export type DashboardAlertasMeli = {
   recortada: boolean;
   generadoEn: string;
 };
+
+// --- Venta minorista: Tienda Nube -------------------------------------------
+//
+// Tipos propios y no los de Mercado Libre aunque varios se parezcan: en Tienda
+// Nube no hay comisión, y los pedidos y los clientes son entidades que ahí
+// significan algo (treinta pedidos con nombre y apellido) y en Mercado Libre no
+// (33.000 apodos irrepetibles). Compartir el tipo obligaría a llenar campos que
+// en un canal no existen.
+
+export type FiltrosTiendaNube = {
+  /** Rango de fechas (`YYYY-MM-DD`), inclusivo en las dos puntas. */
+  desde?: string;
+  hasta?: string;
+  proveedor?: string[];
+  marca?: string[];
+  /** Filtro cruzado: sale de hacer click en una fila de artículos. */
+  sku?: string[];
+  /** Filtro cruzado: sale de hacer click en un cliente o en un pedido. */
+  cliente?: string[];
+};
+
+/** Todos los importes son de la LÍNEA, ya multiplicada por cantidad. */
+export type KpisTiendaNube = {
+  ventaCiva: number;
+  ventaSiva: number;
+  unidades: number;
+  pedidos: number;
+  lineas: number;
+  clientes: number;
+  costo: number;
+  /** Lo que paga LA TIENDA por el flete (`shipping_cost_owner`), no el comprador. */
+  envio: number;
+  /** Venta s/IVA − costo − envío. Sin comisión: Tienda Nube no la informa. */
+  rentabilidad: number;
+  /** Fracción, sobre venta c/IVA. */
+  margenPct: number | null;
+  /** IIBB + Imp. Cheque + Imp. Municipal sobre la venta s/IVA. */
+  impuestos: number;
+  rentabilidadNeta: number;
+  margenNetoPct: number | null;
+  ticketPromedio: number | null;
+};
+
+/** El mismo recorte corrido hacia atrás, para comparar. */
+export type ComparacionTiendaNube = {
+  desde: string;
+  hasta: string;
+  ventaCiva: number;
+  unidades: number;
+  pedidos: number;
+  rentabilidad: number;
+  margenPct: number | null;
+};
+
+export type PuntoDiaTiendaNube = { fecha: string; venta: number; rentabilidad: number };
+
+/** Una fila de cualquier ranking por dimensión (proveedor, marca). */
+export type RankingTiendaNube = {
+  label: string;
+  venta: number;
+  unidades: number;
+  rentabilidad: number;
+  margenPct: number | null;
+};
+
+export type ArticuloTiendaNube = {
+  sku: string | null;
+  producto: string | null;
+  proveedor: string | null;
+  marca: string | null;
+  unidades: number;
+  ventaCiva: number;
+  ventaSiva: number;
+  costo: number;
+  envio: number;
+  rentabilidad: number;
+  margenPct: number | null;
+};
+
+/**
+ * Un cliente con su historia. `pedidos` cuenta los del recorte elegido;
+ * `primera` y `ultima` son sus fechas dentro de ese recorte.
+ */
+export type ClienteTiendaNube = {
+  cliente: string;
+  pedidos: number;
+  unidades: number;
+  ventaCiva: number;
+  rentabilidad: number;
+  margenPct: number | null;
+  primera: string | null;
+  ultima: string | null;
+};
+
+/**
+ * Un pedido, entero. Existe porque en este canal se puede: son treinta en cuatro
+ * meses, así que la venta individual es una unidad de análisis real y no un
+ * volcado de base.
+ */
+export type PedidoTiendaNube = {
+  nroOrden: string | null;
+  fecha: string | null;
+  cliente: string | null;
+  lineas: number;
+  unidades: number;
+  ventaCiva: number;
+  ventaSiva: number;
+  costo: number;
+  envio: number;
+  rentabilidad: number;
+  margenPct: number | null;
+  rentabilidadNeta: number;
+  margenNetoPct: number | null;
+};
+
+export type OpcionesTiendaNube = {
+  proveedores: string[];
+  marcas: string[];
+  clientes: string[];
+  /** Primer y último día con ventas, para acotar los selectores de fecha. */
+  primeraVenta: string | null;
+  ultimaVenta: string | null;
+};
+
+export type DashboardTiendaNube = {
+  kpis: KpisTiendaNube;
+  rango: RangoMeli;
+  /** Null si el período anterior no tiene ninguna venta con qué comparar. */
+  comparacion: ComparacionTiendaNube | null;
+  porDia: PuntoDiaTiendaNube[];
+  porProveedor: RankingTiendaNube[];
+  porMarca: RankingTiendaNube[];
+  topRentabilidad: ArticuloTiendaNube[];
+  articulos: ArticuloTiendaNube[];
+  clientes: ClienteTiendaNube[];
+  pedidos: PedidoTiendaNube[];
+  /** `true` si `pedidos` quedó recortada por el tope de la consulta. */
+  pedidosRecortados: boolean;
+  /** Denominador de la torta: venta de TODOS los proveedores, sin filtro cruzado. */
+  ventaTotalProveedores: number;
+  /** Último día con ventas cargadas: avisa si el dato viene atrasado. */
+  ultimaVenta: string | null;
+  generadoEn: string;
+};

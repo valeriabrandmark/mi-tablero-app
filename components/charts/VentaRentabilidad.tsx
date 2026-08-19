@@ -54,7 +54,7 @@ function Contenido({
  * venta, así que un segundo eje escalado a la rentabilidad la haría parecer del
  * mismo tamaño que la venta.
  */
-export default function VentaRentabilidadMeli({ datos }: { datos: PuntoDiaMeli[] }) {
+export default function VentaRentabilidad({ datos }: { datos: PuntoDiaMeli[] }) {
   if (datos.length === 0) {
     return <p className="text-muted py-10 text-center text-sm">Sin ventas en el recorte elegido.</p>;
   }
@@ -63,7 +63,7 @@ export default function VentaRentabilidadMeli({ datos }: { datos: PuntoDiaMeli[]
     <ResponsiveContainer width="100%" height={260}>
       <ComposedChart data={datos} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
         <defs>
-          <linearGradient id="gradVentaMeli" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id="gradVentaDia" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={PALETA[0]} stopOpacity={0.35} />
             <stop offset="100%" stopColor={PALETA[0]} stopOpacity={0} />
           </linearGradient>
@@ -90,7 +90,7 @@ export default function VentaRentabilidadMeli({ datos }: { datos: PuntoDiaMeli[]
           dataKey="venta"
           stroke={PALETA[0]}
           strokeWidth={1.5}
-          fill="url(#gradVentaMeli)"
+          fill="url(#gradVentaDia)"
         />
         <Line
           type="monotone"
