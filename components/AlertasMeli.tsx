@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import BarraFiltrosMeli from "@/components/FiltrosMeli";
-import { Tabla, type Columna } from "@/components/Tabla";
+import {
+  promedioPonderado,
+  sumar,
+  Tabla,
+  type Columna,
+} from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
@@ -65,92 +70,217 @@ function Importe({ valor }: { valor: number | null }) {
  * falta porque `costo_unitario` YA viene con el descuento aplicado (verificado
  * contra la columna "Costo real s/IVA" de la planilla).
  */
-const COLUMNAS: Columna<FilaAlertaMeli>[] = [
-  { titulo: "Alerta", celda: (f) => <Etiqueta nivel={f.nivel} />, orden: (f) => f.nivel },
-  { titulo: "Fecha", celda: (f) => (f.fecha ? fmtFechaCorta(f.fecha) : "—"), orden: (f) => f.fecha },
-  {
-    titulo: "N° Orden",
-    celda: (f) => (
-      <span className="flex items-center gap-1.5 whitespace-nowrap">
-        <span className="font-mono text-[11px]">{f.nroOrden ?? "—"}</span>
-        {/* Una devolución parcial SÍ es venta —el cliente se quedó con parte—
+/**
+ * Los totales de la lista de alertas.
+ *
+ * Los importes y las cantidades se suman. Los dos MÁRGENES son ponderados
+ * —rentabilidad total sobre venta c/IVA total—, no el promedio de los
+ * porcentajes: acá cada fila es una línea de venta, y una línea de una unidad
+ * con margen negativo del 300 % arrastraría el promedio simple a cualquier
+ * lado. El COSTO UNITARIO no lleva total: sumar precios por unidad de
+ * artículos distintos no da nada.
+ */
+function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
+  return [
+    {
+      titulo: "Alerta",
+      celda: (f) => <Etiqueta nivel={f.nivel} />,
+      orden: (f) => f.nivel,
+    },
+    {
+      titulo: "Fecha",
+      celda: (f) => (f.fecha ? fmtFechaCorta(f.fecha) : "—"),
+      orden: (f) => f.fecha,
+    },
+    {
+      titulo: "N° Orden",
+      celda: (f) => (
+        <span className="flex items-center gap-1.5 whitespace-nowrap">
+          <span className="font-mono text-[11px]">{f.nroOrden ?? "—"}</span>
+          {/* Una devolución parcial SÍ es venta —el cliente se quedó con parte—
             pero entra por el importe completo, porque la API no informa cuánto
             se devolvió. Su rentabilidad queda algo sobreestimada, y quien mire
             esta fila para decidir un precio tiene que saberlo. */}
-        {f.parcial && (
-          <span
-            title="Devolución parcial: cuenta como venta, pero por el importe completo — la API no informa cuánto se devolvió, así que la rentabilidad está algo sobreestimada."
-            className="rounded-full border px-1.5 py-0.5 text-[9px] whitespace-nowrap"
-            style={{
-              color: PALETA[2],
-              borderColor: `${PALETA[2]}66`,
-              backgroundColor: `${PALETA[2]}1a`,
-            }}
-          >
-            parcial
-          </span>
-        )}
-      </span>
-    ),
-    orden: (f) => (f.nroOrden == null ? null : Number(f.nroOrden)),
-  },
-  {
-    // Columna propia y no solo la marquita: sin esto no habría forma de juntar
-    // todas las parciales, que es justo lo que uno quiere al revisarlas.
-    titulo: "Tipo",
-    celda: (f) => (f.parcial ? "Parcial" : "Venta"),
-    orden: (f) => (f.parcial ? 0 : 1),
-  },
-  { titulo: "SKU", celda: (f) => f.sku ?? "—", orden: (f) => f.sku },
-  {
-    titulo: "Descripción",
-    celda: (f) => <span className="block max-w-[260px] truncate">{f.producto ?? "—"}</span>,
-    orden: (f) => f.producto,
-  },
-  {
-    titulo: "Proveedor",
-    celda: (f) => <span className="block max-w-[180px] truncate">{f.proveedor ?? "—"}</span>,
-    orden: (f) => f.proveedor,
-  },
-  {
-    titulo: "Marca",
-    celda: (f) => <span className="block max-w-[130px] truncate">{f.marca ?? "—"}</span>,
-    orden: (f) => f.marca,
-  },
-  { titulo: "Cant.", celda: (f) => fmtNumero(f.cantidad), numerica: true, orden: (f) => f.cantidad },
-  { titulo: "Venta c/IVA", celda: (f) => fmtMoneda(f.ventaCiva), numerica: true, orden: (f) => f.ventaCiva },
-  { titulo: "Venta s/IVA", celda: (f) => fmtMoneda(f.ventaSiva), numerica: true, orden: (f) => f.ventaSiva },
-  { titulo: "Costo unit.", celda: (f) => fmtMoneda(f.costoUnitario), numerica: true, orden: (f) => f.costoUnitario },
-  { titulo: "Costo total", celda: (f) => fmtMoneda(f.costo), numerica: true, orden: (f) => f.costo },
-  { titulo: "Comisión", celda: (f) => fmtMoneda(f.comision), numerica: true, orden: (f) => f.comision },
-  { titulo: "Envío", celda: (f) => fmtMoneda(f.envio), numerica: true, orden: (f) => f.envio },
-  { titulo: "Rent. bruta", celda: (f) => <Importe valor={f.rentabilidad} />, numerica: true, orden: (f) => f.rentabilidad },
-  {
-    titulo: "Margen bruto c/IVA",
-    celda: (f) => (
-      <span style={(f.margenPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}>
-        {fmtPct(f.margenPct)}
-      </span>
-    ),
-    numerica: true,
-    orden: (f) => f.margenPct,
-  },
-  { titulo: "IIBB", celda: (f) => fmtMoneda(f.iibb), numerica: true, orden: (f) => f.iibb },
-  { titulo: "Imp. cheque", celda: (f) => fmtMoneda(f.cheque), numerica: true, orden: (f) => f.cheque },
-  { titulo: "Imp. municipal", celda: (f) => fmtMoneda(f.municipal), numerica: true, orden: (f) => f.municipal },
-  { titulo: "Rent. neta", celda: (f) => <Importe valor={f.rentabilidadNeta} />, numerica: true, orden: (f) => f.rentabilidadNeta },
-  {
-    titulo: "Margen neto c/IVA",
-    celda: (f) => (
-      <span style={(f.margenNetoPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}>
-        {fmtPct(f.margenNetoPct)}
-      </span>
-    ),
-    numerica: true,
-    orden: (f) => f.margenNetoPct,
-  },
-  { titulo: "Acción", celda: (f) => <span className="whitespace-nowrap">{f.accion}</span>, orden: (f) => f.accion },
-];
+          {f.parcial && (
+            <span
+              title="Devolución parcial: cuenta como venta, pero por el importe completo — la API no informa cuánto se devolvió, así que la rentabilidad está algo sobreestimada."
+              className="rounded-full border px-1.5 py-0.5 text-[9px] whitespace-nowrap"
+              style={{
+                color: PALETA[2],
+                borderColor: `${PALETA[2]}66`,
+                backgroundColor: `${PALETA[2]}1a`,
+              }}
+            >
+              parcial
+            </span>
+          )}
+        </span>
+      ),
+      orden: (f) => (f.nroOrden == null ? null : Number(f.nroOrden)),
+    },
+    {
+      // Columna propia y no solo la marquita: sin esto no habría forma de juntar
+      // todas las parciales, que es justo lo que uno quiere al revisarlas.
+      titulo: "Tipo",
+      celda: (f) => (f.parcial ? "Parcial" : "Venta"),
+      orden: (f) => (f.parcial ? 0 : 1),
+    },
+    { titulo: "SKU", celda: (f) => f.sku ?? "—", orden: (f) => f.sku },
+    {
+      titulo: "Descripción",
+      celda: (f) => (
+        <span className="block max-w-[260px] truncate">
+          {f.producto ?? "—"}
+        </span>
+      ),
+      orden: (f) => f.producto,
+    },
+    {
+      titulo: "Proveedor",
+      celda: (f) => (
+        <span className="block max-w-[180px] truncate">
+          {f.proveedor ?? "—"}
+        </span>
+      ),
+      orden: (f) => f.proveedor,
+    },
+    {
+      titulo: "Marca",
+      celda: (f) => (
+        <span className="block max-w-[130px] truncate">{f.marca ?? "—"}</span>
+      ),
+      orden: (f) => f.marca,
+    },
+    {
+      titulo: "Cant.",
+      celda: (f) => fmtNumero(f.cantidad),
+      numerica: true,
+      orden: (f) => f.cantidad,
+      total: fmtNumero(sumar(filas, (f) => f.cantidad)),
+    },
+    {
+      titulo: "Venta c/IVA",
+      celda: (f) => fmtMoneda(f.ventaCiva),
+      numerica: true,
+      orden: (f) => f.ventaCiva,
+      total: fmtMoneda(sumar(filas, (f) => f.ventaCiva)),
+    },
+    {
+      titulo: "Venta s/IVA",
+      celda: (f) => fmtMoneda(f.ventaSiva),
+      numerica: true,
+      orden: (f) => f.ventaSiva,
+      total: fmtMoneda(sumar(filas, (f) => f.ventaSiva)),
+    },
+    {
+      titulo: "Costo unit.",
+      celda: (f) => fmtMoneda(f.costoUnitario),
+      numerica: true,
+      orden: (f) => f.costoUnitario,
+    },
+    {
+      titulo: "Costo total",
+      celda: (f) => fmtMoneda(f.costo),
+      numerica: true,
+      orden: (f) => f.costo,
+      total: fmtMoneda(sumar(filas, (f) => f.costo)),
+    },
+    {
+      titulo: "Comisión",
+      celda: (f) => fmtMoneda(f.comision),
+      numerica: true,
+      orden: (f) => f.comision,
+      total: fmtMoneda(sumar(filas, (f) => f.comision)),
+    },
+    {
+      titulo: "Envío",
+      celda: (f) => fmtMoneda(f.envio),
+      numerica: true,
+      orden: (f) => f.envio,
+      total: fmtMoneda(sumar(filas, (f) => f.envio)),
+    },
+    {
+      titulo: "Rent. bruta",
+      celda: (f) => <Importe valor={f.rentabilidad} />,
+      numerica: true,
+      orden: (f) => f.rentabilidad,
+      total: <Importe valor={sumar(filas, (f) => f.rentabilidad)} />,
+    },
+    {
+      titulo: "Margen bruto c/IVA",
+      celda: (f) => (
+        <span
+          style={(f.margenPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}
+        >
+          {fmtPct(f.margenPct)}
+        </span>
+      ),
+      numerica: true,
+      orden: (f) => f.margenPct,
+      total: fmtPct(
+        promedioPonderado(
+          filas,
+          (f) => f.rentabilidad,
+          (f) => f.ventaCiva,
+        ),
+      ),
+    },
+    {
+      titulo: "IIBB",
+      celda: (f) => fmtMoneda(f.iibb),
+      numerica: true,
+      orden: (f) => f.iibb,
+      total: fmtMoneda(sumar(filas, (f) => f.iibb)),
+    },
+    {
+      titulo: "Imp. cheque",
+      celda: (f) => fmtMoneda(f.cheque),
+      numerica: true,
+      orden: (f) => f.cheque,
+      total: fmtMoneda(sumar(filas, (f) => f.cheque)),
+    },
+    {
+      titulo: "Imp. municipal",
+      celda: (f) => fmtMoneda(f.municipal),
+      numerica: true,
+      orden: (f) => f.municipal,
+      total: fmtMoneda(sumar(filas, (f) => f.municipal)),
+    },
+    {
+      titulo: "Rent. neta",
+      celda: (f) => <Importe valor={f.rentabilidadNeta} />,
+      numerica: true,
+      orden: (f) => f.rentabilidadNeta,
+      total: <Importe valor={sumar(filas, (f) => f.rentabilidadNeta)} />,
+    },
+    {
+      titulo: "Margen neto c/IVA",
+      celda: (f) => (
+        <span
+          style={
+            (f.margenNetoPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined
+          }
+        >
+          {fmtPct(f.margenNetoPct)}
+        </span>
+      ),
+      numerica: true,
+      orden: (f) => f.margenNetoPct,
+      total: fmtPct(
+        promedioPonderado(
+          filas,
+          (f) => f.rentabilidadNeta,
+          (f) => f.ventaCiva,
+        ),
+      ),
+    },
+    {
+      titulo: "Acción",
+      celda: (f) => <span className="whitespace-nowrap">{f.accion}</span>,
+      orden: (f) => f.accion,
+    },
+  ];
+}
 
 export default function AlertasMeliPage({ diaInicial }: { diaInicial: string }) {
   // Abre en EL DÍA, igual que el Tablero. `diaInicial` lo resuelve el servidor:
@@ -271,7 +401,7 @@ export default function AlertasMeliPage({ diaInicial }: { diaInicial: string }) 
                 a la vista. Scrollea dentro del panel. */}
             <Tabla
               filas={data.filas}
-              columnas={COLUMNAS}
+              columnas={columnas(data.filas)}
               clave={(f, i) => `${f.nroOrden ?? "s"}-${f.sku ?? "s"}-${i}`}
               vacio="Ninguna venta cae en los niveles elegidos. Buena noticia."
               onClickFila={(f) =>

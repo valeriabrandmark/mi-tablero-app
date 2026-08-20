@@ -5,7 +5,12 @@ import EncabezadoCanal from "@/components/EncabezadoCanal";
 import VentaRentabilidad from "@/components/charts/VentaRentabilidad";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import BarraFiltrosTiendaNube from "@/components/FiltrosTiendaNube";
-import { Tabla, type Columna } from "@/components/Tabla";
+import {
+  promedioPonderado,
+  sumar,
+  Tabla,
+  type Columna,
+} from "@/components/Tabla";
 import { Aviso, Delta, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
@@ -47,157 +52,295 @@ function Porcentaje({ valor }: { valor: number | null }) {
  * El margen que se muestra es el NETO, ya con impuestos: es el número con el
  * que se decide si esa venta convino.
  */
-const COLUMNAS_PEDIDOS: Columna<PedidoTiendaNube>[] = [
-  { titulo: "Fecha", celda: (p) => (p.fecha ? fmtFechaCorta(p.fecha) : "—"), orden: (p) => p.fecha },
-  {
-    titulo: "N° Pedido",
-    celda: (p) => <span className="font-mono text-[11px]">{p.nroOrden ?? "—"}</span>,
-    // Por número y no por texto: como texto, el pedido 9 iría después del 100.
-    orden: (p) => (p.nroOrden == null ? null : Number(p.nroOrden)),
-  },
-  {
-    titulo: "Cliente",
-    celda: (p) => <span className="block max-w-[200px] truncate">{p.cliente ?? "—"}</span>,
-    orden: (p) => p.cliente,
-  },
-  { titulo: "Prod.", celda: (p) => fmtNumero(p.lineas), numerica: true, orden: (p) => p.lineas },
-  { titulo: "Unid.", celda: (p) => fmtNumero(p.unidades), numerica: true, orden: (p) => p.unidades },
-  {
-    titulo: "Venta c/IVA",
-    celda: (p) => fmtMoneda(p.ventaCiva),
-    numerica: true,
-    orden: (p) => p.ventaCiva,
-  },
-  { titulo: "Costo", celda: (p) => fmtMoneda(p.costo), numerica: true, orden: (p) => p.costo },
-  { titulo: "Envío", celda: (p) => fmtMoneda(p.envio), numerica: true, orden: (p) => p.envio },
-  {
-    titulo: "Rent. bruta",
-    celda: (p) => <Importe valor={p.rentabilidad} />,
-    numerica: true,
-    orden: (p) => p.rentabilidad,
-  },
-  {
-    titulo: "Rent. neta",
-    celda: (p) => <Importe valor={p.rentabilidadNeta} />,
-    numerica: true,
-    orden: (p) => p.rentabilidadNeta,
-  },
-  {
-    titulo: "Margen neto",
-    celda: (p) => <Porcentaje valor={p.margenNetoPct} />,
-    numerica: true,
-    orden: (p) => p.margenNetoPct,
-  },
-];
+function columnasPedidos(
+  filas: PedidoTiendaNube[],
+): Columna<PedidoTiendaNube>[] {
+  return [
+    {
+      titulo: "Fecha",
+      celda: (p) => (p.fecha ? fmtFechaCorta(p.fecha) : "—"),
+      orden: (p) => p.fecha,
+    },
+    {
+      titulo: "N° Pedido",
+      celda: (p) => (
+        <span className="font-mono text-[11px]">{p.nroOrden ?? "—"}</span>
+      ),
+      // Por número y no por texto: como texto, el pedido 9 iría después del 100.
+      orden: (p) => (p.nroOrden == null ? null : Number(p.nroOrden)),
+    },
+    {
+      titulo: "Cliente",
+      celda: (p) => (
+        <span className="block max-w-[200px] truncate">{p.cliente ?? "—"}</span>
+      ),
+      orden: (p) => p.cliente,
+    },
+    {
+      titulo: "Prod.",
+      celda: (p) => fmtNumero(p.lineas),
+      numerica: true,
+      orden: (p) => p.lineas,
+      total: fmtNumero(sumar(filas, (p) => p.lineas)),
+    },
+    {
+      titulo: "Unid.",
+      celda: (p) => fmtNumero(p.unidades),
+      numerica: true,
+      orden: (p) => p.unidades,
+      total: fmtNumero(sumar(filas, (p) => p.unidades)),
+    },
+    {
+      titulo: "Venta c/IVA",
+      celda: (p) => fmtMoneda(p.ventaCiva),
+      numerica: true,
+      orden: (p) => p.ventaCiva,
+      total: fmtMoneda(sumar(filas, (p) => p.ventaCiva)),
+    },
+    {
+      titulo: "Costo",
+      celda: (p) => fmtMoneda(p.costo),
+      numerica: true,
+      orden: (p) => p.costo,
+      total: fmtMoneda(sumar(filas, (p) => p.costo)),
+    },
+    {
+      titulo: "Envío",
+      celda: (p) => fmtMoneda(p.envio),
+      numerica: true,
+      orden: (p) => p.envio,
+      total: fmtMoneda(sumar(filas, (p) => p.envio)),
+    },
+    {
+      titulo: "Rent. bruta",
+      celda: (p) => <Importe valor={p.rentabilidad} />,
+      numerica: true,
+      orden: (p) => p.rentabilidad,
+      total: <Importe valor={sumar(filas, (p) => p.rentabilidad)} />,
+    },
+    {
+      titulo: "Rent. neta",
+      celda: (p) => <Importe valor={p.rentabilidadNeta} />,
+      numerica: true,
+      orden: (p) => p.rentabilidadNeta,
+      total: <Importe valor={sumar(filas, (p) => p.rentabilidadNeta)} />,
+    },
+    {
+      titulo: "Margen neto",
+      celda: (p) => <Porcentaje valor={p.margenNetoPct} />,
+      numerica: true,
+      orden: (p) => p.margenNetoPct,
+      total: (
+        <Porcentaje
+          valor={promedioPonderado(
+            filas,
+            (p) => p.rentabilidadNeta,
+            (p) => p.ventaCiva,
+          )}
+        />
+      ),
+    },
+  ];
+}
 
-const COLUMNAS_CLIENTES: Columna<ClienteTiendaNube>[] = [
-  {
-    titulo: "Cliente",
-    celda: (c) => <span className="block max-w-[220px] truncate">{c.cliente}</span>,
-    orden: (c) => c.cliente,
-  },
-  {
-    titulo: "Pedidos",
-    // Un cliente que volvió se marca: en un canal de treinta pedidos, el que
-    // compra dos veces es el dato más accionable que hay.
-    celda: (c) => (
-      <span style={c.pedidos > 1 ? { color: PALETA[1] } : undefined}>
-        {fmtNumero(c.pedidos)}
-        {c.pedidos > 1 ? " ↻" : ""}
-      </span>
-    ),
-    numerica: true,
-    orden: (c) => c.pedidos,
-  },
-  { titulo: "Unid.", celda: (c) => fmtNumero(c.unidades), numerica: true, orden: (c) => c.unidades },
-  {
-    titulo: "Venta c/IVA",
-    celda: (c) => fmtMoneda(c.ventaCiva),
-    numerica: true,
-    orden: (c) => c.ventaCiva,
-  },
-  {
-    titulo: "Rentab.",
-    celda: (c) => <Importe valor={c.rentabilidad} />,
-    numerica: true,
-    orden: (c) => c.rentabilidad,
-  },
-  {
-    titulo: "Margen",
-    celda: (c) => <Porcentaje valor={c.margenPct} />,
-    numerica: true,
-    orden: (c) => c.margenPct,
-  },
-  {
-    titulo: "Última",
-    celda: (c) => (c.ultima ? fmtFechaCorta(c.ultima) : "—"),
-    orden: (c) => c.ultima,
-  },
-];
+function columnasClientes(
+  filas: ClienteTiendaNube[],
+): Columna<ClienteTiendaNube>[] {
+  return [
+    {
+      titulo: "Cliente",
+      celda: (c) => (
+        <span className="block max-w-[220px] truncate">{c.cliente}</span>
+      ),
+      orden: (c) => c.cliente,
+    },
+    {
+      titulo: "Pedidos",
+      // Un cliente que volvió se marca: en un canal de treinta pedidos, el que
+      // compra dos veces es el dato más accionable que hay.
+      celda: (c) => (
+        <span style={c.pedidos > 1 ? { color: PALETA[1] } : undefined}>
+          {fmtNumero(c.pedidos)}
+          {c.pedidos > 1 ? " ↻" : ""}
+        </span>
+      ),
+      numerica: true,
+      orden: (c) => c.pedidos,
+      total: fmtNumero(sumar(filas, (c) => c.pedidos)),
+    },
+    {
+      titulo: "Unid.",
+      celda: (c) => fmtNumero(c.unidades),
+      numerica: true,
+      orden: (c) => c.unidades,
+      total: fmtNumero(sumar(filas, (c) => c.unidades)),
+    },
+    {
+      titulo: "Venta c/IVA",
+      celda: (c) => fmtMoneda(c.ventaCiva),
+      numerica: true,
+      orden: (c) => c.ventaCiva,
+      total: fmtMoneda(sumar(filas, (c) => c.ventaCiva)),
+    },
+    {
+      titulo: "Rentab.",
+      celda: (c) => <Importe valor={c.rentabilidad} />,
+      numerica: true,
+      orden: (c) => c.rentabilidad,
+      total: <Importe valor={sumar(filas, (c) => c.rentabilidad)} />,
+    },
+    {
+      titulo: "Margen",
+      celda: (c) => <Porcentaje valor={c.margenPct} />,
+      numerica: true,
+      orden: (c) => c.margenPct,
+      total: (
+        <Porcentaje
+          valor={promedioPonderado(
+            filas,
+            (c) => c.rentabilidad,
+            (c) => c.ventaCiva,
+          )}
+        />
+      ),
+    },
+    {
+      titulo: "Última",
+      celda: (c) => (c.ultima ? fmtFechaCorta(c.ultima) : "—"),
+      orden: (c) => c.ultima,
+    },
+  ];
+}
 
-const COLUMNAS_ARTICULOS: Columna<ArticuloTiendaNube>[] = [
-  { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
-  {
-    titulo: "Producto",
-    celda: (a) => <span className="block max-w-[320px] truncate">{a.producto ?? "—"}</span>,
-    orden: (a) => a.producto,
-  },
-  {
-    titulo: "Marca",
-    celda: (a) => <span className="block max-w-[140px] truncate">{a.marca ?? "—"}</span>,
-    orden: (a) => a.marca,
-  },
-  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true, orden: (a) => a.unidades },
-  {
-    titulo: "Venta c/IVA",
-    celda: (a) => fmtMoneda(a.ventaCiva),
-    numerica: true,
-    orden: (a) => a.ventaCiva,
-  },
-  { titulo: "Costo", celda: (a) => fmtMoneda(a.costo), numerica: true, orden: (a) => a.costo },
-  { titulo: "Envío", celda: (a) => fmtMoneda(a.envio), numerica: true, orden: (a) => a.envio },
-  {
-    titulo: "Rentabilidad",
-    celda: (a) => <Importe valor={a.rentabilidad} />,
-    numerica: true,
-    orden: (a) => a.rentabilidad,
-  },
-  {
-    titulo: "Margen",
-    celda: (a) => <Porcentaje valor={a.margenPct} />,
-    numerica: true,
-    orden: (a) => a.margenPct,
-  },
-];
+function columnasArticulos(
+  filas: ArticuloTiendaNube[],
+): Columna<ArticuloTiendaNube>[] {
+  return [
+    { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
+    {
+      titulo: "Producto",
+      celda: (a) => (
+        <span className="block max-w-[320px] truncate">
+          {a.producto ?? "—"}
+        </span>
+      ),
+      orden: (a) => a.producto,
+    },
+    {
+      titulo: "Marca",
+      celda: (a) => (
+        <span className="block max-w-[140px] truncate">{a.marca ?? "—"}</span>
+      ),
+      orden: (a) => a.marca,
+    },
+    {
+      titulo: "Unid.",
+      celda: (a) => fmtNumero(a.unidades),
+      numerica: true,
+      orden: (a) => a.unidades,
+      total: fmtNumero(sumar(filas, (a) => a.unidades)),
+    },
+    {
+      titulo: "Venta c/IVA",
+      celda: (a) => fmtMoneda(a.ventaCiva),
+      numerica: true,
+      orden: (a) => a.ventaCiva,
+      total: fmtMoneda(sumar(filas, (a) => a.ventaCiva)),
+    },
+    {
+      titulo: "Costo",
+      celda: (a) => fmtMoneda(a.costo),
+      numerica: true,
+      orden: (a) => a.costo,
+      total: fmtMoneda(sumar(filas, (a) => a.costo)),
+    },
+    {
+      titulo: "Envío",
+      celda: (a) => fmtMoneda(a.envio),
+      numerica: true,
+      orden: (a) => a.envio,
+      total: fmtMoneda(sumar(filas, (a) => a.envio)),
+    },
+    {
+      titulo: "Rentabilidad",
+      celda: (a) => <Importe valor={a.rentabilidad} />,
+      numerica: true,
+      orden: (a) => a.rentabilidad,
+      total: fmtMoneda(sumar(filas, (a) => a.rentabilidad)),
+    },
+    {
+      titulo: "Margen",
+      celda: (a) => <Porcentaje valor={a.margenPct} />,
+      numerica: true,
+      orden: (a) => a.margenPct,
+      total: (
+        <Porcentaje
+          valor={promedioPonderado(
+            filas,
+            (a) => a.rentabilidad,
+            (a) => a.ventaCiva,
+          )}
+        />
+      ),
+    },
+  ];
+}
 
 /** El top por rentabilidad va con menos columnas: se lee de un vistazo. */
-const COLUMNAS_TOP: Columna<ArticuloTiendaNube>[] = [
-  {
-    titulo: "Producto",
-    celda: (a) => (
-      <span className="block max-w-[260px] truncate" title={a.producto ?? undefined}>
-        {a.producto ?? a.sku ?? "—"}
-      </span>
-    ),
-  },
-  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true, orden: (a) => a.unidades },
-  {
-    titulo: "Rentabilidad",
-    celda: (a) => (
-      <span style={a.rentabilidad < 0 ? { color: TEMA.negativo } : { color: PALETA[1] }}>
-        {fmtMoneda(a.rentabilidad)}
-      </span>
-    ),
-    numerica: true,
-    orden: (a) => a.rentabilidad,
-  },
-  {
-    titulo: "Margen",
-    celda: (a) => <Porcentaje valor={a.margenPct} />,
-    numerica: true,
-    orden: (a) => a.margenPct,
-  },
-];
+function columnasTop(
+  filas: ArticuloTiendaNube[],
+): Columna<ArticuloTiendaNube>[] {
+  return [
+    {
+      titulo: "Producto",
+      celda: (a) => (
+        <span
+          className="block max-w-[260px] truncate"
+          title={a.producto ?? undefined}
+        >
+          {a.producto ?? a.sku ?? "—"}
+        </span>
+      ),
+    },
+    {
+      titulo: "Unid.",
+      celda: (a) => fmtNumero(a.unidades),
+      numerica: true,
+      orden: (a) => a.unidades,
+      total: fmtNumero(sumar(filas, (a) => a.unidades)),
+    },
+    {
+      titulo: "Rentabilidad",
+      celda: (a) => (
+        <span
+          style={
+            a.rentabilidad < 0 ? { color: TEMA.negativo } : { color: PALETA[1] }
+          }
+        >
+          {fmtMoneda(a.rentabilidad)}
+        </span>
+      ),
+      numerica: true,
+      orden: (a) => a.rentabilidad,
+      total: fmtMoneda(sumar(filas, (a) => a.rentabilidad)),
+    },
+    {
+      titulo: "Margen",
+      celda: (a) => <Porcentaje valor={a.margenPct} />,
+      numerica: true,
+      orden: (a) => a.margenPct,
+      total: (
+        <Porcentaje
+          valor={promedioPonderado(
+            filas,
+            (a) => a.rentabilidad,
+            (a) => a.ventaCiva,
+          )}
+        />
+      ),
+    },
+  ];
+}
 
 /** Ranking en tabla y no en gráfico: son cuatro números por fila, no uno. */
 function TablaRanking({
@@ -217,19 +360,41 @@ function TablaRanking({
       celda: (r) => <span className="block max-w-[220px] truncate">{r.label}</span>,
       orden: (r) => r.label,
     },
-    { titulo: "Venta c/IVA", celda: (r) => fmtMoneda(r.venta), numerica: true, orden: (r) => r.venta },
-    { titulo: "Unid.", celda: (r) => fmtNumero(r.unidades), numerica: true, orden: (r) => r.unidades },
+    {
+      titulo: "Venta c/IVA",
+      celda: (r) => fmtMoneda(r.venta),
+      numerica: true,
+      orden: (r) => r.venta,
+      total: fmtMoneda(sumar(filas, (r) => r.venta)),
+    },
+    {
+      titulo: "Unid.",
+      celda: (r) => fmtNumero(r.unidades),
+      numerica: true,
+      orden: (r) => r.unidades,
+      total: fmtNumero(sumar(filas, (r) => r.unidades)),
+    },
     {
       titulo: "Rentab.",
       celda: (r) => <Importe valor={r.rentabilidad} />,
       numerica: true,
       orden: (r) => r.rentabilidad,
+      total: <Importe valor={sumar(filas, (r) => r.rentabilidad)} />,
     },
     {
       titulo: "Margen",
       celda: (r) => <Porcentaje valor={r.margenPct} />,
       numerica: true,
       orden: (r) => r.margenPct,
+      total: (
+        <Porcentaje
+          valor={promedioPonderado(
+            filas,
+            (r) => r.rentabilidad,
+            (r) => r.venta,
+          )}
+        />
+      ),
     },
   ];
 
@@ -489,7 +654,7 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
           >
             <Tabla
               filas={data.pedidos}
-              columnas={COLUMNAS_PEDIDOS}
+              columnas={columnasPedidos(data.pedidos)}
               clave={(p, i) => `${p.nroOrden ?? "s"}-${i}`}
               onClickFila={(p) => p.cliente && alternarEn("cliente")(p.cliente)}
               activa={(p) =>
@@ -512,7 +677,7 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
             >
               <Tabla
                 filas={data.clientes}
-                columnas={COLUMNAS_CLIENTES}
+                columnas={columnasClientes(data.clientes)}
                 clave={(c) => c.cliente}
                 onClickFila={(c) => alternarEn("cliente")(c.cliente)}
                 activa={(c) =>
@@ -528,7 +693,7 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
             >
               <Tabla
                 filas={data.topRentabilidad}
-                columnas={COLUMNAS_TOP}
+                columnas={columnasTop(data.topRentabilidad)}
                 clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
                 onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
                 activa={(a) => (filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false)}
@@ -562,7 +727,7 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
           >
             <Tabla
               filas={data.articulos}
-              columnas={COLUMNAS_ARTICULOS}
+              columnas={columnasArticulos(data.articulos)}
               clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
               onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
               activa={(a) => (filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false)}

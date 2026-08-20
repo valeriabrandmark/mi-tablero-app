@@ -6,7 +6,7 @@ import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
-import { Tabla, type Columna } from "@/components/Tabla";
+import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtMes, fmtMoneda, fmtMonedaCorta, fmtNumero, fmtPct } from "@/lib/format";
 import { PALETA } from "@/lib/paleta";
@@ -24,31 +24,62 @@ const COLOR_CATEGORIA: Record<string, string> = {
   CRÍTICO: "#f43f5e",
 };
 
-const COLUMNAS: Columna<FilaCliente>[] = [
-  {
-    titulo: "Cliente",
-    celda: (f) => <span className="block max-w-[260px] truncate">{f.razonSocial}</span>,
-    orden: (f) => f.razonSocial,
-  },
-  {
-    titulo: "Categoría",
-    celda: (f) => (
-      <span style={{ color: COLOR_CATEGORIA[f.categoria ?? ""] ?? undefined }}>
-        {f.categoria ?? "—"}
-      </span>
-    ),
-    orden: (f) => f.categoria,
-  },
-  { titulo: "Vendedor", celda: (f) => f.vendedor ?? "—", orden: (f) => f.vendedor },
-  { titulo: "Saldo total", celda: (f) => fmtMoneda(f.saldoTotal), numerica: true, orden: (f) => f.saldoTotal },
-  { titulo: "Saldo vencido", celda: (f) => fmtMoneda(f.saldoVencido), numerica: true, orden: (f) => f.saldoVencido },
-  {
-    titulo: "Atraso máx.",
-    celda: (f) => (f.atrasoMax == null ? "—" : `${fmtNumero(f.atrasoMax)} d`),
-    numerica: true,
-    orden: (f) => f.atrasoMax,
-  },
-];
+function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
+  return [
+    {
+      titulo: "Cliente",
+      celda: (f) => (
+        <span className="block max-w-[260px] truncate">{f.razonSocial}</span>
+      ),
+      orden: (f) => f.razonSocial,
+    },
+    {
+      titulo: "Categoría",
+      celda: (f) => (
+        <span
+          style={{ color: COLOR_CATEGORIA[f.categoria ?? ""] ?? undefined }}
+        >
+          {f.categoria ?? "—"}
+        </span>
+      ),
+      orden: (f) => f.categoria,
+    },
+    {
+      titulo: "Vendedor",
+      celda: (f) => f.vendedor ?? "—",
+      orden: (f) => f.vendedor,
+    },
+    {
+      titulo: "Saldo total",
+      celda: (f) => fmtMoneda(f.saldoTotal),
+      numerica: true,
+      orden: (f) => f.saldoTotal,
+      total: fmtMoneda(sumar(filas, (f) => f.saldoTotal)),
+    },
+    {
+      titulo: "Saldo vencido",
+      celda: (f) => fmtMoneda(f.saldoVencido),
+      numerica: true,
+      orden: (f) => f.saldoVencido,
+      total: fmtMoneda(sumar(filas, (f) => f.saldoVencido)),
+    },
+    {
+      titulo: "Atraso máx.",
+      celda: (f) => (f.atrasoMax == null ? "—" : `${fmtNumero(f.atrasoMax)} d`),
+      numerica: true,
+      orden: (f) => f.atrasoMax,
+      // El PEOR de la lista, no una suma ni un promedio: "atraso máximo" del
+      // conjunto es el del cliente más atrasado. Sumar días de clientes distintos
+      // no sería nada, y el promedio escondería justo al que hay que llamar.
+      total: (() => {
+        const conDato = filas.filter((f) => f.atrasoMax != null);
+        return conDato.length === 0
+          ? "—"
+          : `${fmtNumero(Math.max(...conDato.map((f) => f.atrasoMax as number)))} d`;
+      })(),
+    },
+  ];
+}
 
 export default function DashboardCuentasPage() {
   const [filtros, setFiltros] = useState<FiltrosCuentas>({});
@@ -202,7 +233,7 @@ export default function DashboardCuentasPage() {
                 de una fila, que es lo que ya se está mirando. */}
             <Tabla
               filas={data.clientes}
-              columnas={COLUMNAS}
+              columnas={columnas(data.clientes)}
               clave={(f) => f.razonSocial}
               onClickFila={(f) => f.categoria && alternar("categoria")(f.categoria)}
               activa={(f) =>

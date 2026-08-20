@@ -23,6 +23,7 @@ import type {
   PuntoHora,
   RankingMeli,
   ResumenAlerta,
+  UltimaCargaMeli,
 } from "@/lib/types";
 
 /**
@@ -470,17 +471,38 @@ async function getArticulos(f: FiltrosMeli): Promise<ArticuloMeli[]> {
 }
 
 /**
- * Último día con ventas cargadas. Va a la vista porque el dato de Mercado Libre
- * no siempre llega hasta hoy, y un tablero que muestra "el mes" sin decir hasta
- * cuándo llegó se lee como una caída de ventas que no existe.
+ * La última orden que entró a la base, con su hora y su número.
+ *
+ * REEMPLAZA a la hora de generación de la página, que no medía nada útil: se
+ * actualizaba en cada visita aunque el orquestador llevara tres horas caído, y
+ * un tablero que dice "actualizado 16:45" cuando el último dato es de las 13:20
+ * miente sin que nadie se dé cuenta.
+ *
+ * Con la orden y su hora, el atraso se ve solo: si son las 16:45 y la última
+ * orden es de las 16:30, hay quince minutos de demora. El número de orden
+ * además se puede buscar en Mercado Libre para confirmar que es la última de
+ * verdad, y no la última que llegó.
+ *
+ * Sale de `bronze.ml_ventas` y no de `gold.fact_ventas` a propósito: en gold la
+ * fecha es un `date` pelado, sin hora, y la pregunta acá es justamente la hora.
+ * Tampoco filtra por estado — mide cuándo cargó el pipeline por última vez, y
+ * para eso una orden cancelada sirve igual que una pagada.
  */
-async function getUltimaVenta(): Promise<string | null> {
-  const fila = await queryOne<{ fecha: string | null }>(
-    `select to_char(max(fecha), 'YYYY-MM-DD') as fecha
-     from gold.fact_ventas where canal = $1`,
-    [CANAL_MELI],
+async function getUltimaCarga(): Promise<UltimaCargaMeli | null> {
+  const fila = await queryOne<Record<string, string | null>>(
+    `select v.id::text as nro_orden,
+            to_char(v.date_created::timestamptz
+                      at time zone 'America/Argentina/Buenos_Aires',
+                    'YYYY-MM-DD HH24:MI')                as local,
+            to_char(v.date_created::timestamptz at time zone 'UTC',
+                    'YYYY-MM-DD"T"HH24:MI:SS"Z"')        as iso
+     from bronze.ml_ventas v
+     order by v.date_created::timestamptz desc
+     limit 1`,
   );
-  return fila?.fecha ?? null;
+
+  if (!fila?.nro_orden || !fila.local || !fila.iso) return null;
+  return { nroOrden: fila.nro_orden, local: fila.local, iso: fila.iso };
 }
 
 // --- Opciones de los filtros -------------------------------------------------
@@ -549,12 +571,19 @@ export async function getDiaInicialMeli(): Promise<string> {
 // --- Dashboard "Tablero" -----------------------------------------------------
 
 /** Las 24 horas siempre presentes: una hora en cero es un dato, no un hueco. */
-function completarHoras(filas: Record<string, number>[]): PuntoHora[] {
-  const porHora = new Map(filas.map((r) => [Number(r.hora), r]));
-  return Array.from({ length: 24 }, (_, hora) => {
-    const r = porHora.get(hora);
-    return { hora, ordenes: num(r?.ordenes), venta: num(r?.venta) };
-  });
+function completarHoras(
+  vendidas: Record<string, number>[],
+  canceladas: Record<string, number>[],
+): PuntoHora[] {
+  const v = new Map(vendidas.map((r) => [Number(r.hora), r]));
+  const c = new Map(canceladas.map((r) => [Number(r.hora), r]));
+  return Array.from({ length: 24 }, (_, hora) => ({
+    hora,
+    ordenes: num(v.get(hora)?.ordenes),
+    venta: num(v.get(hora)?.venta),
+    cancelado: num(c.get(hora)?.monto),
+    ordenesCanceladas: num(c.get(hora)?.ordenes),
+  }));
 }
 
 export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
@@ -582,8 +611,9 @@ export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
     topRentabilidad,
     articulos,
     ventaTotalProveedores,
-    ultimaVenta,
+    ultimaCarga,
     cancelaciones,
+    canceladasPorHora,
     kpisAnterior,
   ] = await Promise.all([
     getKpis(f),
@@ -593,8 +623,9 @@ export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
     getTopRentabilidad(f),
     getArticulos(f),
     getVentaTotalProveedores(f),
-    getUltimaVenta(),
+    getUltimaCarga(),
     getCancelacionesMeli(f),
+    getCanceladasPorHora(f),
     // El período anterior mantiene TODOS los otros filtros: comparar "esta
     // semana de ALGABO" contra "la semana pasada de todo" no diría nada.
     anterior ? getKpis({ ...f, ...anterior }, corteHora) : Promise.resolve(null),
@@ -617,12 +648,12 @@ export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
           }
         : null,
     porDia,
-    porHora: completarHoras(horasCrudas),
+    porHora: completarHoras(horasCrudas, canceladasPorHora),
     porProveedor,
     topRentabilidad,
     articulos,
     ventaTotalProveedores,
-    ultimaVenta,
+    ultimaCarga,
     cancelaciones,
     generadoEn: new Date().toISOString(),
   };
@@ -809,13 +840,43 @@ export async function getDashboardAlertasMeli(f: FiltrosMeli): Promise<Dashboard
  * de donde los toma `modelo.py`. Un SKU que no está en el catálogo queda sin
  * proveedor en vez de quedar afuera: la cancelación existió igual.
  */
-export async function getCancelacionesMeli(f: FiltrosMeli): Promise<CancelacionesMeli> {
+/**
+ * Las líneas de las órdenes canceladas, en hora argentina.
+ *
+ * Se define una sola vez porque la usan la tabla, el conteo de órdenes y el
+ * gráfico por hora. Escrita tres veces, el día que cambie el criterio de
+ * cancelada quedarían tres números distintos en la misma pantalla.
+ */
+const LINEAS_CANCELADAS = `
+  select v.id                                                     as nro_orden,
+         (v.date_created::timestamptz
+            at time zone 'America/Argentina/Buenos_Aires')::date   as fecha,
+         extract(hour from (v.date_created::timestamptz
+            at time zone 'America/Argentina/Buenos_Aires'))::int   as hora,
+         it->'item'->>'seller_sku'                                 as sku,
+         it->'item'->>'title'                                      as producto,
+         (it->>'quantity')::numeric                                as cantidad,
+         (it->>'unit_price')::numeric * (it->>'quantity')::numeric as monto
+  from bronze.ml_ventas v,
+       lateral jsonb_array_elements(v.order_items::jsonb) as it
+  where v.status = 'cancelled'`;
+
+/**
+ * Los filtros de la pantalla, aplicados a las canceladas.
+ *
+ * Son los mismos de `whereBase` pero contra otras columnas: las canceladas
+ * viven en bronze y no en gold, así que la fecha sale de `date_created` YA
+ * CONVERTIDA a hora argentina —ML manda el offset -04:00 y sin convertir las
+ * de la noche caerían en el día equivocado— y el proveedor y la marca de
+ * cruzar contra `bronze.sigma_articulos`.
+ */
+function whereCanceladas(
+  f: FiltrosMeli,
+  omitir: (keyof FiltrosMeli)[] = [],
+): Where {
   const params: unknown[] = [];
   const clauses: string[] = [];
 
-  // El rango se compara sobre la fecha YA CONVERTIDA a hora argentina, igual
-  // que en el resto de la sección: ML manda el offset -04:00 y sin convertir
-  // las ventas de la noche caerían en el día equivocado.
   if (f.desde) {
     params.push(f.desde);
     clauses.push(`l.fecha >= $${params.length}::date`);
@@ -824,25 +885,27 @@ export async function getCancelacionesMeli(f: FiltrosMeli): Promise<Cancelacione
     params.push(f.hasta);
     clauses.push(`l.fecha <= $${params.length}::date`);
   }
+  if (!omitir.includes("hora") && !vacio(f.hora)) {
+    params.push(f.hora);
+    clauses.push(`l.hora::text = any($${params.length}::text[])`);
+  }
   agregarFiltro(clauses, params, "l.sku", f.sku);
   agregarFiltro(clauses, params, 'a."proveedorNombre"', f.proveedor);
   agregarFiltro(clauses, params, 'a."attributes.marca"', f.marca);
 
-  const where = clauses.length ? `where ${clauses.join("\n     and ")}` : "";
+  return {
+    sql: clauses.length ? `where ${clauses.join("\n     and ")}` : "",
+    params,
+  };
+}
+
+export async function getCancelacionesMeli(
+  f: FiltrosMeli,
+): Promise<CancelacionesMeli> {
+  const w = whereCanceladas(f);
 
   const filas = await query<Record<string, string | null>>(
-    `with lineas as (
-       select v.id                                                     as nro_orden,
-              (v.date_created::timestamptz
-                 at time zone 'America/Argentina/Buenos_Aires')::date   as fecha,
-              it->'item'->>'seller_sku'                                 as sku,
-              it->'item'->>'title'                                      as producto,
-              (it->>'quantity')::numeric                                as cantidad,
-              (it->>'unit_price')::numeric * (it->>'quantity')::numeric as monto
-       from bronze.ml_ventas v,
-            lateral jsonb_array_elements(v.order_items::jsonb) as it
-       where v.status = 'cancelled'
-     )
+    `with lineas as (${LINEAS_CANCELADAS})
      select l.sku,
             max(l.producto)             as producto,
             max(a."proveedorNombre")    as proveedor,
@@ -852,11 +915,11 @@ export async function getCancelacionesMeli(f: FiltrosMeli): Promise<Cancelacione
             sum(l.monto)                as monto
      from lineas l
      left join bronze.sigma_articulos a on trim(a.id::text) = trim(l.sku)
-     ${where}
+     ${w.sql}
      group by l.sku
      order by monto desc
      limit 100`,
-    params,
+    w.params,
   );
 
   const mapeadas = filas.map((r) => ({
@@ -869,35 +932,55 @@ export async function getCancelacionesMeli(f: FiltrosMeli): Promise<Cancelacione
     monto: num(r.monto),
   }));
 
+  // Los totales NO se suman de las filas. Dos razones distintas:
+  //
+  //   - Las ÓRDENES se contarían de más. Una orden cancelada de tres productos
+  //     ocupa tres filas, y sumarlas la cuenta tres veces.
+  //   - La tabla está recortada al top 100 por monto. Con más de 100 SKUs
+  //     cancelados, sumar lo que se ve daría menos que el total real.
+  //
+  // Por eso los tres totales salen de su propia consulta, sin recorte.
+  const totales = await queryOne<Record<string, string>>(
+    `with lineas as (${LINEAS_CANCELADAS})
+     select count(distinct l.nro_orden)     as ordenes,
+            coalesce(sum(l.cantidad), 0)    as unidades,
+            coalesce(sum(l.monto), 0)       as monto
+     from lineas l
+     left join bronze.sigma_articulos a on trim(a.id::text) = trim(l.sku)
+     ${w.sql}`,
+    w.params,
+  );
+
   return {
-    // Las órdenes NO se suman de las filas: una orden cancelada de tres
-    // productos aparece en tres filas, y sumarlas la contaría tres veces.
-    // Por eso el total viene de su propia consulta.
-    ordenes: await contarOrdenesCanceladas(params, where),
-    unidades: mapeadas.reduce((a, r) => a + r.unidades, 0),
-    monto: mapeadas.reduce((a, r) => a + r.monto, 0),
+    ordenes: num(totales?.ordenes),
+    unidades: num(totales?.unidades),
+    monto: num(totales?.monto),
     filas: mapeadas,
     recortada: mapeadas.length === 100,
   };
 }
 
-/** Órdenes canceladas distintas del recorte. Ver por qué en `getCancelacionesMeli`. */
-async function contarOrdenesCanceladas(params: unknown[], where: string): Promise<number> {
-  const fila = await queryOne<{ n: string }>(
-    `with lineas as (
-       select v.id                                                    as nro_orden,
-              (v.date_created::timestamptz
-                 at time zone 'America/Argentina/Buenos_Aires')::date  as fecha,
-              it->'item'->>'seller_sku'                                as sku
-       from bronze.ml_ventas v,
-            lateral jsonb_array_elements(v.order_items::jsonb) as it
-       where v.status = 'cancelled'
-     )
-     select count(distinct l.nro_orden) as n
+/**
+ * Lo cancelado hora por hora, para apilarlo abajo de lo vendido.
+ *
+ * Omite el filtro de hora por lo mismo que `getPorHora`: si se filtrara a sí
+ * mismo, al clickear una barra el gráfico quedaría con esa sola.
+ */
+async function getCanceladasPorHora(
+  f: FiltrosMeli,
+): Promise<Record<string, number>[]> {
+  const w = whereCanceladas(f, ["hora"]);
+
+  return query<Record<string, number>>(
+    `with lineas as (${LINEAS_CANCELADAS})
+     select l.hora                      as hora,
+            count(distinct l.nro_orden) as ordenes,
+            coalesce(sum(l.monto), 0)   as monto
      from lineas l
      left join bronze.sigma_articulos a on trim(a.id::text) = trim(l.sku)
-     ${where}`,
-    params,
+     ${w.sql}
+     group by 1
+     order by 1`,
+    w.params,
   );
-  return num(fila?.n);
 }

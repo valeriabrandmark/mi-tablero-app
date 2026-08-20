@@ -3,7 +3,7 @@
 import { useState } from "react";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
-import { Tabla, type Columna } from "@/components/Tabla";
+import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
@@ -24,66 +24,98 @@ function colorDias(dias: number | null): string {
   return PALETA[1];
 }
 
-const COLUMNAS: Columna<FilaStockFull>[] = [
-  { titulo: "SKU", celda: (f) => f.sku ?? "—", orden: (f) => f.sku },
-  {
-    titulo: "Producto",
-    celda: (f) => (
-      <span className="block max-w-[300px] truncate" title={f.producto ?? undefined}>
-        {f.producto ?? "—"}
-      </span>
-    ),
-    orden: (f) => f.producto,
-  },
-  {
-    titulo: "Marca",
-    celda: (f) => <span className="block max-w-[130px] truncate">{f.marca ?? "—"}</span>,
-    orden: (f) => f.marca,
-  },
-  {
-    titulo: "Días sin venta",
-    // "Nunca" y un número grande son cosas distintas y se escriben distinto:
-    // un artículo que jamás rotó puede ser nuevo, y merece otra conversación
-    // que uno que vendía y dejó de vender.
-    celda: (f) => (
-      <span style={{ color: colorDias(f.diasSinVenta) }}>
-        {f.diasSinVenta == null ? "nunca vendió" : fmtNumero(f.diasSinVenta)}
-      </span>
-    ),
-    numerica: true,
-    // Los que nunca vendieron ordenan como el peor caso posible, no como null,
-    // para que queden arriba junto a los más parados.
-    orden: (f) => f.diasSinVenta ?? 99_999,
-  },
-  {
-    titulo: "Última venta",
-    celda: (f) => (f.ultimaVenta ? fmtFechaCorta(f.ultimaVenta) : "—"),
-    orden: (f) => f.ultimaVenta,
-  },
-  {
-    titulo: "En Full",
-    celda: (f) => fmtNumero(f.disponible),
-    numerica: true,
-    orden: (f) => f.disponible,
-  },
-  {
-    titulo: "No disponible",
-    celda: (f) => (
-      <span style={f.noDisponible > 0 ? { color: TEMA.negativo } : undefined}>
-        {fmtNumero(f.noDisponible)}
-      </span>
-    ),
-    numerica: true,
-    orden: (f) => f.noDisponible,
-  },
-  { titulo: "Vendidas 30d", celda: (f) => fmtNumero(f.uds30), numerica: true, orden: (f) => f.uds30 },
-  {
-    titulo: "Valorización",
-    celda: (f) => fmtMoneda(f.valorizacion),
-    numerica: true,
-    orden: (f) => f.valorizacion,
-  },
-];
+function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
+  return [
+    { titulo: "SKU", celda: (f) => f.sku ?? "—", orden: (f) => f.sku },
+    {
+      titulo: "Producto",
+      celda: (f) => (
+        <span
+          className="block max-w-[300px] truncate"
+          title={f.producto ?? undefined}
+        >
+          {f.producto ?? "—"}
+        </span>
+      ),
+      orden: (f) => f.producto,
+    },
+    {
+      titulo: "Marca",
+      celda: (f) => (
+        <span className="block max-w-[130px] truncate">{f.marca ?? "—"}</span>
+      ),
+      orden: (f) => f.marca,
+    },
+    {
+      titulo: "Días sin venta",
+      // "Nunca" y un número grande son cosas distintas y se escriben distinto:
+      // un artículo que jamás rotó puede ser nuevo, y merece otra conversación
+      // que uno que vendía y dejó de vender.
+      celda: (f) => (
+        <span style={{ color: colorDias(f.diasSinVenta) }}>
+          {f.diasSinVenta == null ? "nunca vendió" : fmtNumero(f.diasSinVenta)}
+        </span>
+      ),
+      numerica: true,
+      // Los que nunca vendieron ordenan como el peor caso posible, no como null,
+      // para que queden arriba junto a los más parados.
+      orden: (f) => f.diasSinVenta ?? 99_999,
+      // El PROMEDIO de días, y solo sobre los que alguna vez vendieron. Sumar
+      // días de artículos distintos no da nada, y meter a los que nunca vendieron
+      // como si fueran un número inventaría un promedio.
+      total: (() => {
+        const conVenta = filas.filter((f) => f.diasSinVenta != null);
+        const nunca = filas.length - conVenta.length;
+        if (conVenta.length === 0)
+          return nunca > 0 ? `${fmtNumero(nunca)} nunca` : "—";
+        const prom = Math.round(
+          sumar(conVenta, (f) => f.diasSinVenta) / conVenta.length,
+        );
+        return (
+          `${fmtNumero(prom)} prom.` +
+          (nunca > 0 ? ` · ${fmtNumero(nunca)} nunca` : "")
+        );
+      })(),
+    },
+    {
+      titulo: "Última venta",
+      celda: (f) => (f.ultimaVenta ? fmtFechaCorta(f.ultimaVenta) : "—"),
+      orden: (f) => f.ultimaVenta,
+    },
+    {
+      titulo: "En Full",
+      celda: (f) => fmtNumero(f.disponible),
+      numerica: true,
+      orden: (f) => f.disponible,
+      total: fmtNumero(sumar(filas, (f) => f.disponible)),
+    },
+    {
+      titulo: "No disponible",
+      celda: (f) => (
+        <span style={f.noDisponible > 0 ? { color: TEMA.negativo } : undefined}>
+          {fmtNumero(f.noDisponible)}
+        </span>
+      ),
+      numerica: true,
+      orden: (f) => f.noDisponible,
+      total: fmtNumero(sumar(filas, (f) => f.noDisponible)),
+    },
+    {
+      titulo: "Vendidas 30d",
+      celda: (f) => fmtNumero(f.uds30),
+      numerica: true,
+      orden: (f) => f.uds30,
+      total: fmtNumero(sumar(filas, (f) => f.uds30)),
+    },
+    {
+      titulo: "Valorización",
+      celda: (f) => fmtMoneda(f.valorizacion),
+      numerica: true,
+      orden: (f) => f.valorizacion,
+      total: fmtMoneda(sumar(filas, (f) => f.valorizacion)),
+    },
+  ];
+}
 
 export default function DashboardStockFullPage() {
   const inicial: FiltrosStockFull = {};
@@ -280,7 +312,10 @@ export default function DashboardStockFullPage() {
           >
             <Tabla
               filas={data.filas}
-              columnas={COLUMNAS}
+              columnas={columnas(data.filas)}
+              etiquetaTotal={
+                data.recortada ? "Total (los 500 mostrados)" : "Total"
+              }
               clave={(f, i) => `${f.sku ?? "sin-sku"}-${i}`}
               onClickFila={(f) => f.sku && alternarEn("sku")(f.sku)}
               activa={(f) => (filtros.sku?.length ? filtros.sku.includes(f.sku ?? "") : false)}
