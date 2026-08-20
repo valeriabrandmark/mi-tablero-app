@@ -1,11 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import VentaRentabilidad from "@/components/charts/VentaRentabilidad";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import BarraFiltrosMeli from "@/components/FiltrosMeli";
-import { Tabla, type Columna } from "@/components/Tabla";
+import {
+  promedioPonderado,
+  sumar,
+  Tabla,
+  type Columna,
+} from "@/components/Tabla";
 import { Aviso, Delta, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
@@ -14,104 +19,282 @@ import { PALETA, TEMA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
   ArticuloMeli,
+  CancelacionesMeli,
   DashboardMeli,
   FilaCancelacionMeli,
   FiltrosMeli,
   OpcionesMeli,
   RankingMeli,
+  UltimaCargaMeli,
 } from "@/lib/types";
 
 type Respuesta = DashboardMeli & { opciones: OpcionesMeli | null };
 
-const COLUMNAS_ARTICULOS: Columna<ArticuloMeli>[] = [
-  { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
-  {
-    titulo: "Producto",
-    celda: (a) => <span className="block max-w-[320px] truncate">{a.producto ?? "—"}</span>,
-    orden: (a) => a.producto,
-  },
-  {
-    titulo: "Marca",
-    celda: (a) => <span className="block max-w-[140px] truncate">{a.marca ?? "—"}</span>,
-    orden: (a) => a.marca,
-  },
-  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true, orden: (a) => a.unidades },
-  { titulo: "Venta c/IVA", celda: (a) => fmtMoneda(a.ventaCiva), numerica: true, orden: (a) => a.ventaCiva },
-  { titulo: "Costo", celda: (a) => fmtMoneda(a.costo), numerica: true, orden: (a) => a.costo },
-  { titulo: "Comisión", celda: (a) => fmtMoneda(a.comision), numerica: true, orden: (a) => a.comision },
-  { titulo: "Envío", celda: (a) => fmtMoneda(a.envio), numerica: true, orden: (a) => a.envio },
-  {
-    titulo: "Rentabilidad",
-    celda: (a) => (
-      <span style={a.rentabilidad < 0 ? { color: TEMA.negativo } : undefined}>
-        {fmtMoneda(a.rentabilidad)}
-      </span>
-    ),
-    numerica: true,
-    orden: (a) => a.rentabilidad,
-  },
-  {
-    titulo: "Margen",
-    celda: (a) => (
-      <span style={(a.margenPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}>
-        {fmtPct(a.margenPct)}
-      </span>
-    ),
-    numerica: true,
-    orden: (a) => a.margenPct,
-  },
-];
+/**
+ * Los totales de una tabla de artículos.
+ *
+ * Los importes y las unidades se suman. El MARGEN no: es la rentabilidad total
+ * sobre la venta total, o sea el promedio ponderado. Ver `promedioPonderado`
+ * en Tabla.tsx — el promedio simple de los porcentajes deja que un artículo de
+ * una unidad pese lo mismo que uno de mil.
+ */
+function columnasArticulos(filas: ArticuloMeli[]): Columna<ArticuloMeli>[] {
+  return [
+    { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
+    {
+      titulo: "Producto",
+      celda: (a) => (
+        <span className="block max-w-[320px] truncate">
+          {a.producto ?? "—"}
+        </span>
+      ),
+      orden: (a) => a.producto,
+    },
+    {
+      titulo: "Marca",
+      celda: (a) => (
+        <span className="block max-w-[140px] truncate">{a.marca ?? "—"}</span>
+      ),
+      orden: (a) => a.marca,
+    },
+    {
+      titulo: "Unid.",
+      celda: (a) => fmtNumero(a.unidades),
+      numerica: true,
+      orden: (a) => a.unidades,
+      total: fmtNumero(sumar(filas, (a) => a.unidades)),
+    },
+    {
+      titulo: "Venta c/IVA",
+      celda: (a) => fmtMoneda(a.ventaCiva),
+      numerica: true,
+      orden: (a) => a.ventaCiva,
+      total: fmtMoneda(sumar(filas, (a) => a.ventaCiva)),
+    },
+    {
+      titulo: "Costo",
+      celda: (a) => fmtMoneda(a.costo),
+      numerica: true,
+      orden: (a) => a.costo,
+      total: fmtMoneda(sumar(filas, (a) => a.costo)),
+    },
+    {
+      titulo: "Comisión",
+      celda: (a) => fmtMoneda(a.comision),
+      numerica: true,
+      orden: (a) => a.comision,
+      total: fmtMoneda(sumar(filas, (a) => a.comision)),
+    },
+    {
+      titulo: "Envío",
+      celda: (a) => fmtMoneda(a.envio),
+      numerica: true,
+      orden: (a) => a.envio,
+      total: fmtMoneda(sumar(filas, (a) => a.envio)),
+    },
+    {
+      titulo: "Rentabilidad",
+      celda: (a) => (
+        <span style={a.rentabilidad < 0 ? { color: TEMA.negativo } : undefined}>
+          {fmtMoneda(a.rentabilidad)}
+        </span>
+      ),
+      numerica: true,
+      orden: (a) => a.rentabilidad,
+      total: fmtMoneda(sumar(filas, (a) => a.rentabilidad)),
+    },
+    {
+      titulo: "Margen",
+      celda: (a) => (
+        <span
+          style={(a.margenPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}
+        >
+          {fmtPct(a.margenPct)}
+        </span>
+      ),
+      numerica: true,
+      orden: (a) => a.margenPct,
+      total: fmtPct(
+        promedioPonderado(
+          filas,
+          (a) => a.rentabilidad,
+          (a) => a.ventaCiva,
+        ),
+      ),
+    },
+  ];
+}
 
 /**
  * Cancelaciones. NO tiene columna de costo ni de margen a propósito: no fue una
  * venta, así que no hay ganancia que calcular. La pregunta acá es otra — qué se
  * cancela y cuánto pesa.
  */
-const COLUMNAS_CANCELACIONES: Columna<FilaCancelacionMeli>[] = [
-  { titulo: "SKU", celda: (c) => c.sku ?? "—", orden: (c) => c.sku },
-  {
-    titulo: "Producto",
-    celda: (c) => <span className="block max-w-[320px] truncate">{c.producto ?? "—"}</span>,
-    orden: (c) => c.producto,
-  },
-  {
-    titulo: "Marca",
-    celda: (c) => <span className="block max-w-[140px] truncate">{c.marca ?? "—"}</span>,
-    orden: (c) => c.marca,
-  },
-  { titulo: "Órdenes", celda: (c) => fmtNumero(c.ordenes), numerica: true, orden: (c) => c.ordenes },
-  { titulo: "Unid.", celda: (c) => fmtNumero(c.unidades), numerica: true, orden: (c) => c.unidades },
-  {
-    titulo: "Monto cancelado",
-    celda: (c) => <span style={{ color: TEMA.negativo }}>{fmtMoneda(c.monto)}</span>,
-    numerica: true,
-    orden: (c) => c.monto,
-  },
-];
+function columnasCancelaciones(
+  totales: CancelacionesMeli,
+): Columna<FilaCancelacionMeli>[] {
+  return [
+    { titulo: "SKU", celda: (c) => c.sku ?? "—", orden: (c) => c.sku },
+    {
+      titulo: "Producto",
+      celda: (c) => (
+        <span className="block max-w-[320px] truncate">
+          {c.producto ?? "—"}
+        </span>
+      ),
+      orden: (c) => c.producto,
+    },
+    {
+      titulo: "Marca",
+      celda: (c) => (
+        <span className="block max-w-[140px] truncate">{c.marca ?? "—"}</span>
+      ),
+      orden: (c) => c.marca,
+    },
+    // Los tres totales vienen del servidor y NO de sumar las filas. Las órdenes
+    // porque una orden de tres productos ocupa tres filas y sumarlas la contaría
+    // tres veces; los otros dos porque la tabla está recortada al top 100 y la
+    // suma de lo que se ve sería menos de lo que se canceló de verdad.
+    {
+      titulo: "Órdenes",
+      celda: (c) => fmtNumero(c.ordenes),
+      numerica: true,
+      orden: (c) => c.ordenes,
+      total: fmtNumero(totales.ordenes),
+    },
+    {
+      titulo: "Unid.",
+      celda: (c) => fmtNumero(c.unidades),
+      numerica: true,
+      orden: (c) => c.unidades,
+      total: fmtNumero(totales.unidades),
+    },
+    {
+      titulo: "Monto cancelado",
+      celda: (c) => (
+        <span style={{ color: TEMA.negativo }}>{fmtMoneda(c.monto)}</span>
+      ),
+      numerica: true,
+      orden: (c) => c.monto,
+      total: (
+        <span style={{ color: TEMA.negativo }}>{fmtMoneda(totales.monto)}</span>
+      ),
+    },
+  ];
+}
 
 /** El top por rentabilidad va con menos columnas: se lee de un vistazo. */
-const COLUMNAS_TOP: Columna<ArticuloMeli>[] = [
-  {
-    titulo: "Producto",
-    celda: (a) => (
-      <span className="block max-w-[260px] truncate" title={a.producto ?? undefined}>
-        {a.producto ?? a.sku ?? "—"}
-      </span>
-    ),
-  },
-  { titulo: "Unid.", celda: (a) => fmtNumero(a.unidades), numerica: true, orden: (a) => a.unidades },
-  {
-    titulo: "Rentabilidad",
-    celda: (a) => (
-      <span style={a.rentabilidad < 0 ? { color: TEMA.negativo } : { color: PALETA[1] }}>
-        {fmtMoneda(a.rentabilidad)}
-      </span>
-    ),
-    numerica: true,
-    orden: (a) => a.rentabilidad,
-  },
-  { titulo: "Margen", celda: (a) => fmtPct(a.margenPct), numerica: true, orden: (a) => a.margenPct },
-];
+function columnasTop(filas: ArticuloMeli[]): Columna<ArticuloMeli>[] {
+  return [
+    {
+      titulo: "Producto",
+      celda: (a) => (
+        <span
+          className="block max-w-[260px] truncate"
+          title={a.producto ?? undefined}
+        >
+          {a.producto ?? a.sku ?? "—"}
+        </span>
+      ),
+    },
+    {
+      titulo: "Unid.",
+      celda: (a) => fmtNumero(a.unidades),
+      numerica: true,
+      orden: (a) => a.unidades,
+      total: fmtNumero(sumar(filas, (a) => a.unidades)),
+    },
+    {
+      titulo: "Rentabilidad",
+      celda: (a) => (
+        <span
+          style={
+            a.rentabilidad < 0 ? { color: TEMA.negativo } : { color: PALETA[1] }
+          }
+        >
+          {fmtMoneda(a.rentabilidad)}
+        </span>
+      ),
+      numerica: true,
+      orden: (a) => a.rentabilidad,
+      total: fmtMoneda(sumar(filas, (a) => a.rentabilidad)),
+    },
+    {
+      titulo: "Margen",
+      celda: (a) => fmtPct(a.margenPct),
+      numerica: true,
+      orden: (a) => a.margenPct,
+      total: fmtPct(
+        promedioPonderado(
+          filas,
+          (a) => a.rentabilidad,
+          (a) => a.ventaCiva,
+        ),
+      ),
+    },
+  ];
+}
+
+/**
+ * La última orden cargada, y cuánto hace de eso.
+ *
+ * Reemplaza al "Actualizado HH:MM" que había antes, que era la hora en que se
+ * armó la página: se renovaba en cada visita aunque el orquestador llevara tres
+ * horas caído. Decía cuándo miraste, no cuán viejo es lo que estás mirando.
+ *
+ * El "hace N min" se recalcula solo cada 30 segundos. Sin eso, dejar la pestaña
+ * abierta congelaría el atraso en el valor que tenía al abrirla — que es
+ * exactamente el error que este cartel viene a corregir.
+ */
+function UltimaCarga({
+  carga,
+  cargando,
+}: {
+  carga: UltimaCargaMeli | null;
+  cargando: boolean;
+}) {
+  const [ahora, setAhora] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = setInterval(() => setAhora(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (cargando)
+    return <p className="text-muted text-xs">Cargando datos en vivo…</p>;
+  if (!carga)
+    return (
+      <p className="text-muted text-xs">Todavía no hay órdenes cargadas.</p>
+    );
+
+  const minutos = Math.max(
+    0,
+    Math.round((ahora - Date.parse(carga.iso)) / 60_000),
+  );
+  const atraso =
+    minutos < 60
+      ? `hace ${minutos} min`
+      : minutos < 60 * 24
+        ? `hace ${Math.floor(minutos / 60)} h ${minutos % 60} min`
+        : `hace ${Math.floor(minutos / 1440)} días`;
+
+  // Más de dos horas sin una orden nueva no siempre es una falla —de madrugada
+  // no se vende— pero es lo único que se puede decir sin saber la hora. Se
+  // marca en ámbar y no en rojo justo por eso: es "mirá esto", no "está roto".
+  const viejo = minutos > 120;
+  const [fecha, hora] = carga.local.split(" ");
+
+  return (
+    <p className="text-muted text-xs">
+      Última venta cargada{" "}
+      <strong className="text-ink font-medium">
+        {fmtFechaCorta(fecha)} {hora}
+      </strong>{" "}
+      · orden <span className="text-ink font-mono">{carga.nroOrden}</span> ·{" "}
+      <span style={viejo ? { color: PALETA[2] } : undefined}>{atraso}</span>
+    </p>
+  );
+}
 
 /** Ranking en tabla y no en gráfico: son cuatro números por fila, no uno. */
 function TablaRanking({
@@ -131,8 +314,20 @@ function TablaRanking({
       celda: (r) => <span className="block max-w-[220px] truncate">{r.label}</span>,
       orden: (r) => r.label,
     },
-    { titulo: "Venta c/IVA", celda: (r) => fmtMoneda(r.venta), numerica: true, orden: (r) => r.venta },
-    { titulo: "Unid.", celda: (r) => fmtNumero(r.unidades), numerica: true, orden: (r) => r.unidades },
+    {
+      titulo: "Venta c/IVA",
+      celda: (r) => fmtMoneda(r.venta),
+      numerica: true,
+      orden: (r) => r.venta,
+      total: fmtMoneda(sumar(filas, (r) => r.venta)),
+    },
+    {
+      titulo: "Unid.",
+      celda: (r) => fmtNumero(r.unidades),
+      numerica: true,
+      orden: (r) => r.unidades,
+      total: fmtNumero(sumar(filas, (r) => r.unidades)),
+    },
     {
       titulo: "Rentab.",
       celda: (r) => (
@@ -142,6 +337,7 @@ function TablaRanking({
       ),
       numerica: true,
       orden: (r) => r.rentabilidad,
+      total: fmtMoneda(sumar(filas, (r) => r.rentabilidad)),
     },
     {
       titulo: "Margen",
@@ -152,6 +348,13 @@ function TablaRanking({
       ),
       numerica: true,
       orden: (r) => r.margenPct,
+      total: fmtPct(
+        promedioPonderado(
+          filas,
+          (r) => r.rentabilidad,
+          (r) => r.venta,
+        ),
+      ),
     },
   ];
 
@@ -178,6 +381,13 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
     { conOpciones: "1" },
   );
 
+  /**
+   * Qué se cuenta como "venta". No es un filtro: los dos números vienen
+   * siempre del servidor y el switch solo elige cuál mostrar, así que cambiarlo
+   * no dispara una consulta ni hace parpadear la pantalla.
+   */
+  const [conCanceladas, setConCanceladas] = useState(false);
+
   const cambiar = (f: FiltrosMeli) => {
     empezarCarga();
     setFiltros(f);
@@ -188,6 +398,23 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
 
   const k = data?.kpis;
   const comp = data?.comparacion ?? null;
+  const canc = data?.cancelaciones ?? null;
+
+  // Con el switch en "todo lo transaccionado" se le suma lo cancelado a los
+  // números de VOLUMEN —plata, órdenes, unidades—, que son los únicos que
+  // tienen sentido sumados.
+  //
+  // El costo, la comisión, el envío y por lo tanto la rentabilidad y el margen
+  // NO cambian nunca: una orden cancelada no tiene costo ni deja ganancia, así
+  // que meterla en el margen daría un margen falso. Las tarjetas de margen lo
+  // dicen en su bajada cuando el switch está prendido.
+  const extra =
+    conCanceladas && canc ? canc : { monto: 0, ordenes: 0, unidades: 0 };
+  const ventaMostrada = (k?.ventaCiva ?? 0) + extra.monto;
+  const ordenesMostradas = (k?.ordenes ?? 0) + extra.ordenes;
+  const unidadesMostradas = (k?.unidades ?? 0) + extra.unidades;
+  const ticketMostrado =
+    ordenesMostradas === 0 ? null : ventaMostrada / ordenesMostradas;
   const sinCambios =
     filtros.desde === diaInicial &&
     filtros.hasta === diaInicial &&
@@ -213,14 +440,7 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
       {/* Sin título: el logo y la pestaña activa, los dos arriba de esto, ya
           dicen dónde estás. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-muted text-xs">
-            {data
-              ? `Actualizado ${new Date(data.generadoEn).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}` +
-                (data.ultimaVenta ? ` · última venta cargada ${fmtFechaCorta(data.ultimaVenta)}` : "")
-              : "Cargando datos en vivo…"}
-          </p>
-        </div>
+        <UltimaCarga carga={data?.ultimaCarga ?? null} cargando={!data} />
         <button
           onClick={recargar}
           disabled={cargando}
@@ -264,6 +484,37 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
         </div>
       )}
 
+      {/* El switch va acá arriba y no adentro de la barra de filtros a
+          propósito: no es un filtro. Un filtro recorta qué órdenes se miran;
+          esto cambia qué cuenta como venta, que es una definición. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="border-line inline-flex rounded-lg border p-0.5">
+          {[
+            { on: false, label: "Ventas efectivas" },
+            { on: true, label: "Todo lo transaccionado" },
+          ].map((op) => (
+            <button
+              key={op.label}
+              type="button"
+              onClick={() => setConCanceladas(op.on)}
+              aria-pressed={conCanceladas === op.on}
+              className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+                conCanceladas === op.on
+                  ? "bg-c1/15 text-c1 font-medium"
+                  : "text-muted hover:text-ink"
+              }`}
+            >
+              {op.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-muted text-[11px] leading-tight">
+          {conCanceladas
+            ? "Pagadas + canceladas. El margen sigue midiéndose solo sobre lo pagado."
+            : "Solo órdenes pagadas. Lo cancelado queda afuera de todas las tarjetas."}
+        </span>
+      </div>
+
       {error && (
         <Aviso>
           <p className="font-medium">No se pudieron leer los datos.</p>
@@ -282,11 +533,21 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
           className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 ${cargando ? "opacity-50" : ""}`}
         >
           <TarjetaKpi
-            titulo="Venta c/IVA"
-            valor={fmtMoneda(k.ventaCiva)}
+            titulo={conCanceladas ? "Transaccionado c/IVA" : "Venta c/IVA"}
+            valor={fmtMoneda(ventaMostrada)}
+            // Con canceladas NO se compara contra el período anterior. El
+            // período anterior se mide solo sobre ventas efectivas, así que un
+            // "−12 % vs ayer" estaría restando dos cosas distintas. En su lugar
+            // se muestra de qué se compone el número.
             detalle={
-              contra && comp ? (
-                <Delta actual={k.ventaCiva} anterior={comp.ventaCiva} contra={contra} />
+              conCanceladas ? (
+                `${fmtMoneda(k.ventaCiva)} vendido + ${fmtMoneda(extra.monto)} cancelado`
+              ) : contra && comp ? (
+                <Delta
+                  actual={k.ventaCiva}
+                  anterior={comp.ventaCiva}
+                  contra={contra}
+                />
               ) : (
                 `${fmtMoneda(k.ventaSiva)} sin IVA`
               )
@@ -296,8 +557,14 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
             titulo="Rentabilidad bruta"
             valor={fmtMoneda(k.rentabilidad)}
             detalle={
-              contra && comp ? (
-                <Delta actual={k.rentabilidad} anterior={comp.rentabilidad} contra={contra} />
+              conCanceladas ? (
+                "Solo de las órdenes pagadas"
+              ) : contra && comp ? (
+                <Delta
+                  actual={k.rentabilidad}
+                  anterior={comp.rentabilidad}
+                  contra={contra}
+                />
               ) : (
                 "Venta s/IVA − costo − comisión − envío"
               )
@@ -308,9 +575,14 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
             titulo="Margen bruto"
             valor={fmtPct(k.margenPct)}
             detalle={
-              contra && comp && comp.margenPct != null && k.margenPct != null
-                ? `${comp.margenPct < k.margenPct ? "▲" : "▼"} era ${fmtPct(comp.margenPct)} ${contra}`
-                : "Rentabilidad sobre venta c/IVA"
+              conCanceladas
+                ? "Sobre venta efectiva: lo cancelado no deja margen"
+                : contra &&
+                    comp &&
+                    comp.margenPct != null &&
+                    k.margenPct != null
+                  ? `${comp.margenPct < k.margenPct ? "▲" : "▼"} era ${fmtPct(comp.margenPct)} ${contra}`
+                  : "Rentabilidad sobre venta c/IVA"
             }
             acento={(k.margenPct ?? 0) < 0 ? TEMA.negativo : undefined}
           />
@@ -326,21 +598,33 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
 
           <TarjetaKpi
             titulo="Órdenes"
-            valor={fmtNumero(k.ordenes)}
+            valor={fmtNumero(ordenesMostradas)}
             detalle={
-              contra && comp ? (
-                <Delta actual={k.ordenes} anterior={comp.ordenes} contra={contra} />
+              conCanceladas ? (
+                `${fmtNumero(k.ordenes)} pagadas + ${fmtNumero(extra.ordenes)} canceladas`
+              ) : contra && comp ? (
+                <Delta
+                  actual={k.ordenes}
+                  anterior={comp.ordenes}
+                  contra={contra}
+                />
               ) : (
                 `${fmtNumero(k.lineas)} líneas · ${fmtNumero(k.unidades)} unidades`
               )
             }
           />
           <TarjetaKpi
-            titulo="Unidades vendidas"
-            valor={fmtNumero(k.unidades)}
+            titulo={conCanceladas ? "Unidades" : "Unidades vendidas"}
+            valor={fmtNumero(unidadesMostradas)}
             detalle={
-              contra && comp ? (
-                <Delta actual={k.unidades} anterior={comp.unidades} contra={contra} />
+              conCanceladas ? (
+                `${fmtNumero(k.unidades)} vendidas + ${fmtNumero(extra.unidades)} canceladas`
+              ) : contra && comp ? (
+                <Delta
+                  actual={k.unidades}
+                  anterior={comp.unidades}
+                  contra={contra}
+                />
               ) : (
                 `${fmtNumero(k.lineas)} líneas de venta`
               )
@@ -348,9 +632,11 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
           />
           <TarjetaKpi
             titulo="Ticket promedio"
-            valor={fmtMoneda(k.ticketPromedio)}
+            valor={fmtMoneda(ticketMostrado)}
             detalle={
-              contra && comp && comp.ordenes > 0 ? (
+              conCanceladas ? (
+                "Transaccionado c/IVA por orden"
+              ) : contra && comp && comp.ordenes > 0 ? (
                 <Delta
                   actual={k.ticketPromedio ?? 0}
                   anterior={comp.ventaCiva / comp.ordenes}
@@ -361,6 +647,22 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
               )
             }
           />
+          {/* La tarjeta que pidió el switch: cuánto de lo transaccionado se
+              cayó. Solo aparece con el switch prendido — en modo "ventas
+              efectivas" lo cancelado no forma parte de ningún número de arriba,
+              y una tarjeta suelta ahí daría a entender que sí. */}
+          {conCanceladas && (
+            <TarjetaKpi
+              titulo="Cancelado"
+              valor={fmtMoneda(extra.monto)}
+              detalle={
+                ventaMostrada > 0
+                  ? `${fmtPct(extra.monto / ventaMostrada)} de lo transaccionado · ${fmtNumero(extra.ordenes)} ${extra.ordenes === 1 ? "orden" : "órdenes"}`
+                  : `${fmtNumero(extra.ordenes)} ${extra.ordenes === 1 ? "orden" : "órdenes"}`
+              }
+              acento={TEMA.negativo}
+            />
+          )}
           <TarjetaKpi
             titulo="Costo mercadería"
             valor={fmtMoneda(k.costo)}
@@ -397,7 +699,12 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
           <div className="grid gap-4 xl:grid-cols-2">
             <Panel
               titulo="Facturación por hora del día"
-              nota="Venta c/IVA · hora argentina · click para filtrar el tablero por esa hora"
+              nota={
+                (conCanceladas
+                  ? "Pagado en celeste, cancelado en rojo"
+                  : "Venta c/IVA · solo órdenes pagadas") +
+                " · hora argentina · click para filtrar el tablero por esa hora"
+              }
             >
               {/* Facturación y no cantidad de órdenes. La diferencia importa:
                   la hora con más órdenes puede no ser la que más factura, y a
@@ -409,6 +716,7 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
                 datos={data.porHora.map((h) => ({
                   label: `${h.hora}`,
                   valor: h.venta,
+                  valor2: conCanceladas ? h.cancelado : undefined,
                 }))}
                 formato={fmtMoneda}
                 horizontal={false}
@@ -417,6 +725,15 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
                 vacio="Sin ventas en el recorte elegido."
                 seleccionados={filtros.hora}
                 onSeleccionar={alternarEn("hora")}
+                apilado={
+                  conCanceladas
+                    ? {
+                        titulo: "Cancelado",
+                        color: TEMA.negativo,
+                        tituloBase: "Pagado",
+                      }
+                    : undefined
+                }
               />
             </Panel>
 
@@ -426,7 +743,7 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
             >
               <Tabla
                 filas={data.topRentabilidad}
-                columnas={COLUMNAS_TOP}
+                columnas={columnasTop(data.topRentabilidad)}
                 clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
                 onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
                 activa={(a) => (filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false)}
@@ -473,17 +790,25 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
             >
               <Tabla
                 filas={data.cancelaciones.filas}
-                columnas={COLUMNAS_CANCELACIONES}
+                columnas={columnasCancelaciones(data.cancelaciones)}
+                etiquetaTotal={
+                  data.cancelaciones.recortada ? "Total (todas)" : "Total"
+                }
                 clave={(c, i) => `${c.sku ?? "sin-sku"}-${i}`}
                 onClickFila={(c) => c.sku && alternarEn("sku")(c.sku)}
                 activa={(c) => (filtros.sku?.length ? filtros.sku.includes(c.sku ?? "") : false)}
                 vacio="Ninguna orden cancelada en el recorte elegido."
               />
               <p className="text-muted mt-3 text-[11px] leading-relaxed">
-                Estas órdenes <strong>no</strong> están en ninguna tarjeta de arriba ni en el
-                resto del tablero: no fueron ventas. El monto es lo que se habría facturado, por
-                eso no hay costo ni margen. El porcentaje se mide sobre todo lo transaccionado
+                El monto es lo que se habría facturado, por eso no hay costo ni
+                margen. El porcentaje se mide sobre todo lo transaccionado
                 (vendido + cancelado).
+              </p>
+              <p className="text-muted mt-1 text-[11px] leading-relaxed">
+                En la fila de totales, las <strong>órdenes</strong> no son la
+                suma de la columna: una orden de tres productos ocupa tres filas
+                y sumarlas la contaría tres veces. El total son órdenes
+                distintas, y sale de su propia consulta.
               </p>
             </Panel>
           )}
@@ -494,7 +819,13 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
           >
             <Tabla
               filas={data.articulos}
-              columnas={COLUMNAS_ARTICULOS}
+              columnas={columnasArticulos(data.articulos)}
+              // La consulta trae hasta 300 SKUs por venta. Si llegó al tope, el
+              // total es el de lo que se ve y NO el del recorte entero, así que
+              // la etiqueta lo dice en vez de dejar creer que es todo.
+              etiquetaTotal={
+                data.articulos.length === 300 ? "Total (top 300)" : "Total"
+              }
               clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
               onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
               activa={(a) => (filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false)}

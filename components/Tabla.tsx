@@ -20,7 +20,53 @@ export type Columna<T> = {
    * dato no es "la peor", es una fila de la que no sabemos.
    */
   orden?: (fila: T) => number | string | null;
+  /**
+   * Celda de la fila de totales. Con que UNA columna lo defina, la fila
+   * aparece; las demás quedan vacías.
+   *
+   * Es un valor y no una función de las filas a propósito. Hay totales que no
+   * se pueden calcular sumando lo que se ve:
+   *
+   *   - Las ÓRDENES de una tabla por SKU. Una orden de tres productos ocupa
+   *     tres filas, y sumarlas la contaría tres veces. El total bueno es un
+   *     `count(distinct)` que ya viene resuelto del servidor.
+   *   - Cualquier tabla recortada (top 100, top 300). La suma de lo que se ve
+   *     no es el total del recorte, y quien arma la pantalla es el único que
+   *     sabe cuál de los dos quiere mostrar.
+   *
+   * Ver `sumar` y `promedioPonderado` para los casos que sí son una suma.
+   */
+  total?: ReactNode;
 };
+
+/** Suma una columna de las filas. El caso fácil de un total. */
+export function sumar<T>(
+  filas: T[],
+  valor: (fila: T) => number | null | undefined,
+): number {
+  return filas.reduce((a, f) => a + (valor(f) ?? 0), 0);
+}
+
+/**
+ * El margen del conjunto: rentabilidad total sobre venta total.
+ *
+ * NO es el promedio simple de los porcentajes de cada fila, y la diferencia no
+ * es un detalle. Con un artículo que vendió $ 500.000 al 8 % y otro que vendió
+ * $ 1.000 al 80 %, el promedio simple da 44 % — un número que no describe a
+ * ningún peso que haya entrado. Ponderado da 8,1 %, que es lo que efectivamente
+ * quedó. Un artículo de una unidad no puede mover el margen del total.
+ *
+ * Devuelve `null` si no hay denominador, para que se muestre "—" en vez de un
+ * cero que se leería como "margen cero".
+ */
+export function promedioPonderado<T>(
+  filas: T[],
+  parte: (fila: T) => number | null | undefined,
+  total: (fila: T) => number | null | undefined,
+): number | null {
+  const den = sumar(filas, total);
+  return den === 0 ? null : sumar(filas, parte) / den;
+}
 
 type Direccion = "asc" | "desc";
 
@@ -49,6 +95,7 @@ export function Tabla<T>({
   vacio = "Sin datos para el filtro elegido.",
   onClickFila,
   activa,
+  etiquetaTotal = "Total",
 }: {
   filas: T[];
   columnas: Columna<T>[];
@@ -58,6 +105,12 @@ export function Tabla<T>({
   onClickFila?: (fila: T) => void;
   /** Devuelve true para la fila que está actuando como filtro. */
   activa?: (fila: T) => boolean;
+  /**
+   * Texto de la primera celda de la fila de totales. Se cambia cuando la tabla
+   * está recortada ("Total top 100"), para no dar a entender que ese número es
+   * el total de todo.
+   */
+  etiquetaTotal?: ReactNode;
 }) {
   // Guarda el TÍTULO y no el índice: si el tablero cambia sus columnas —pasa
   // al filtrar—, un índice apuntaría a otra columna sin avisar.
@@ -93,6 +146,8 @@ export function Tabla<T>({
   if (filas.length === 0) {
     return <p className="text-muted py-10 text-center text-sm">{vacio}</p>;
   }
+
+  const hayTotales = columnas.some((c) => c.total != null);
 
   return (
     // Las tablas anchas scrollean solas, la página nunca scrollea en horizontal.
@@ -162,6 +217,33 @@ export function Tabla<T>({
             );
           })}
         </tbody>
+
+        {/* La fila de totales queda pegada abajo, igual que el encabezado queda
+            pegado arriba: en una tabla de 300 filas con scroll propio, un total
+            al final del todo no lo ve nadie.
+
+            Los totales NO se recalculan al ordenar ni al filtrar la tabla por
+            dentro, y está bien: ordenar cambia en qué orden se ven las mismas
+            filas, no cuáles son. */}
+        {hayTotales && (
+          <tfoot className="sticky bottom-0">
+            <tr className="border-line bg-panel-2 border-t-2">
+              {columnas.map((c, i) => (
+                <td
+                  key={c.titulo}
+                  className={`text-ink py-2 pr-3 font-medium ${
+                    c.numerica ? "text-right tabular-nums" : ""
+                  }`}
+                >
+                  {c.total ??
+                    (i === 0 ? (
+                      <span className="text-muted">{etiquetaTotal}</span>
+                    ) : null)}
+                </td>
+              ))}
+            </tr>
+          </tfoot>
+        )}
       </table>
     </div>
   );

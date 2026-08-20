@@ -6,7 +6,12 @@ import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import { BotonLimpiar, SelectorFiltro, SelectorMultiple } from "@/components/SelectorFiltro";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
-import { Tabla, type Columna } from "@/components/Tabla";
+import {
+  promedioPonderado,
+  sumar,
+  Tabla,
+  type Columna,
+} from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtMes, fmtMoneda, fmtMonedaCorta, fmtNumero, fmtPct } from "@/lib/format";
 import { PALETA } from "@/lib/paleta";
@@ -27,16 +32,63 @@ const MODOS: [ModoFlete, string][] = [
   ["real-estimado", "Real + estimado"],
 ];
 
-const COLUMNAS: Columna<FilaComprobante>[] = [
-  { titulo: "Comprobante", celda: (f) => f.comprobante ?? "—", orden: (f) => f.comprobante },
-  { titulo: "N° orden", celda: (f) => f.nroOrden ?? "—", orden: (f) => f.nroOrden },
-  { titulo: "Cliente", celda: (f) => <span className="block max-w-[220px] truncate">{f.cliente ?? "—"}</span>, orden: (f) => f.cliente },
-  { titulo: "Provincia", celda: (f) => f.provincia ?? "—", orden: (f) => f.provincia },
-  { titulo: "Fecha", celda: (f) => f.fecha ?? "—", orden: (f) => f.fecha },
-  { titulo: "Facturación", celda: (f) => fmtMoneda(f.facturacion), numerica: true, orden: (f) => f.facturacion },
-  { titulo: "Flete", celda: (f) => fmtMoneda(f.flete), numerica: true, orden: (f) => f.flete },
-  { titulo: "% Flete", celda: (f) => fmtPct(f.pctFlete), numerica: true, orden: (f) => f.pctFlete },
-];
+function columnas(filas: FilaComprobante[]): Columna<FilaComprobante>[] {
+  return [
+    {
+      titulo: "Comprobante",
+      celda: (f) => f.comprobante ?? "—",
+      orden: (f) => f.comprobante,
+    },
+    {
+      titulo: "N° orden",
+      celda: (f) => f.nroOrden ?? "—",
+      orden: (f) => f.nroOrden,
+    },
+    {
+      titulo: "Cliente",
+      celda: (f) => (
+        <span className="block max-w-[220px] truncate">{f.cliente ?? "—"}</span>
+      ),
+      orden: (f) => f.cliente,
+    },
+    {
+      titulo: "Provincia",
+      celda: (f) => f.provincia ?? "—",
+      orden: (f) => f.provincia,
+    },
+    { titulo: "Fecha", celda: (f) => f.fecha ?? "—", orden: (f) => f.fecha },
+    {
+      titulo: "Facturación",
+      celda: (f) => fmtMoneda(f.facturacion),
+      numerica: true,
+      orden: (f) => f.facturacion,
+      total: fmtMoneda(sumar(filas, (f) => f.facturacion)),
+    },
+    {
+      titulo: "Flete",
+      celda: (f) => fmtMoneda(f.flete),
+      numerica: true,
+      orden: (f) => f.flete,
+      total: fmtMoneda(sumar(filas, (f) => f.flete)),
+    },
+    {
+      titulo: "% Flete",
+      celda: (f) => fmtPct(f.pctFlete),
+      numerica: true,
+      orden: (f) => f.pctFlete,
+      // Flete total sobre facturación total. El promedio simple de los
+      // porcentajes daría otro número: un comprobante chico con un flete caro
+      // pesaría igual que uno de un millón.
+      total: fmtPct(
+        promedioPonderado(
+          filas,
+          (f) => f.flete,
+          (f) => f.facturacion,
+        ),
+      ),
+    },
+  ];
+}
 
 export default function DashboardLogisticaPage() {
   const [filtros, setFiltros] = useState<FiltrosLogistica>({ modoFlete: "sin" });
@@ -211,7 +263,7 @@ export default function DashboardLogisticaPage() {
                 dejaría el tablero entero mostrando una sola venta. */}
             <Tabla
               filas={data.comprobantes}
-              columnas={COLUMNAS}
+              columnas={columnas(data.comprobantes)}
               clave={(f, i) => `${f.comprobante}-${i}`}
               onClickFila={(f) => f.provincia && alternar("provincia")(f.provincia)}
               activa={(f) =>
