@@ -8,7 +8,12 @@ import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import BarrasMargen from "@/components/charts/BarrasMargen";
 import LineasPorVendedor from "@/components/charts/LineasPorVendedor";
 import TortaProveedores from "@/components/charts/TortaProveedores";
-import { Tabla, type Columna } from "@/components/Tabla";
+import {
+  promedioPonderado,
+  sumar,
+  Tabla,
+  type Columna,
+} from "@/components/Tabla";
 import { Aviso, Delta, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { alternar as alternarValor } from "@/lib/filtros";
@@ -25,32 +30,134 @@ import { aQueryString } from "@/lib/filtros";
 import { PALETA } from "@/lib/paleta";
 import type { DashboardVentasMayoristas, Filtros, OpcionesFiltro } from "@/lib/types";
 
-const COL_ARTICULOS: Columna<FilaArticulo>[] = [
-  { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
-  {
-    titulo: "Producto",
-    celda: (a) => <span className="block max-w-[280px] truncate">{a.producto ?? "—"}</span>,
-    orden: (a) => a.producto,
-  },
-  { titulo: "Unidades", celda: (a) => fmtNumero(a.cantidad), numerica: true, orden: (a) => a.cantidad },
-  { titulo: "Oferta %", celda: (a) => (a.ofertaPct == null ? "—" : fmtPct(a.ofertaPct / 100)), numerica: true, orden: (a) => a.ofertaPct },
-  { titulo: "Precio prom.", celda: (a) => fmtMoneda(a.precioPromedio), numerica: true, orden: (a) => a.precioPromedio },
-  { titulo: "Costo prom.", celda: (a) => fmtMoneda(a.costoPromedio), numerica: true, orden: (a) => a.costoPromedio },
-  { titulo: "Facturación", celda: (a) => fmtMoneda(a.facturacion), numerica: true, orden: (a) => a.facturacion },
-  { titulo: "% Rentab.", celda: (a) => fmtPct(a.rentabilidadPct), numerica: true, orden: (a) => a.rentabilidadPct },
-];
+/**
+ * Totales de la tabla de artículos.
+ *
+ * Las unidades y la facturación se suman. Los PROMEDIOS no: el precio y el
+ * costo promedio se vuelven a ponderar por cantidad, y la rentabilidad por
+ * facturación. Sumar promedios no significa nada, y promediarlos sin ponderar
+ * deja que un SKU de una unidad pese lo mismo que uno de mil.
+ */
+function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
+  return [
+    { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
+    {
+      titulo: "Producto",
+      celda: (a) => (
+        <span className="block max-w-[280px] truncate">
+          {a.producto ?? "—"}
+        </span>
+      ),
+      orden: (a) => a.producto,
+    },
+    {
+      titulo: "Unidades",
+      celda: (a) => fmtNumero(a.cantidad),
+      numerica: true,
+      orden: (a) => a.cantidad,
+      total: fmtNumero(sumar(filas, (a) => a.cantidad)),
+    },
+    {
+      titulo: "Oferta %",
+      celda: (a) => (a.ofertaPct == null ? "—" : fmtPct(a.ofertaPct / 100)),
+      numerica: true,
+      orden: (a) => a.ofertaPct,
+      // Los SKUs SIN oferta quedan afuera del promedio, no entran como cero:
+      // no tener descuento no es tener un descuento del 0 %, y contarlos
+      // hundiría el promedio de los que sí lo tuvieron.
+      total: fmtPct(
+        promedioPonderado(
+          filas.filter((a) => a.ofertaPct != null),
+          (a) => ((a.ofertaPct ?? 0) / 100) * a.cantidad,
+          (a) => a.cantidad,
+        ),
+      ),
+    },
+    {
+      titulo: "Precio prom.",
+      celda: (a) => fmtMoneda(a.precioPromedio),
+      numerica: true,
+      orden: (a) => a.precioPromedio,
+      total: fmtMoneda(
+        promedioPonderado(
+          filas,
+          (a) => a.facturacion,
+          (a) => a.cantidad,
+        ),
+      ),
+    },
+    {
+      titulo: "Costo prom.",
+      celda: (a) => fmtMoneda(a.costoPromedio),
+      numerica: true,
+      orden: (a) => a.costoPromedio,
+      total: fmtMoneda(
+        promedioPonderado(
+          filas,
+          (a) => (a.costoPromedio ?? 0) * a.cantidad,
+          (a) => a.cantidad,
+        ),
+      ),
+    },
+    {
+      titulo: "Facturación",
+      celda: (a) => fmtMoneda(a.facturacion),
+      numerica: true,
+      orden: (a) => a.facturacion,
+      total: fmtMoneda(sumar(filas, (a) => a.facturacion)),
+    },
+    {
+      titulo: "% Rentab.",
+      celda: (a) => fmtPct(a.rentabilidadPct),
+      numerica: true,
+      orden: (a) => a.rentabilidadPct,
+      // `rentabilidadPct` ya viene sobre la facturación de esa fila, así que
+      // multiplicarla por la facturación reconstruye los pesos de rentabilidad
+      // y la división devuelve el margen del conjunto.
+      total: fmtPct(
+        promedioPonderado(
+          filas,
+          (a) => (a.rentabilidadPct ?? 0) * a.facturacion,
+          (a) => a.facturacion,
+        ),
+      ),
+    },
+  ];
+}
 
-const COL_COMPROBANTES: Columna<FilaComprobanteVenta>[] = [
-  { titulo: "Fecha", celda: (c) => c.fecha ?? "—", orden: (c) => c.fecha },
-  { titulo: "Comprobante", celda: (c) => c.comprobante ?? "—", orden: (c) => c.comprobante },
-  {
-    titulo: "Cliente",
-    celda: (c) => <span className="block max-w-[260px] truncate">{c.cliente ?? "—"}</span>,
-    orden: (c) => c.cliente,
-  },
-  { titulo: "Unidades", celda: (c) => fmtNumero(c.unidades), numerica: true, orden: (c) => c.unidades },
-  { titulo: "Facturación", celda: (c) => fmtMoneda(c.facturacion), numerica: true, orden: (c) => c.facturacion },
-];
+function colComprobantes(
+  filas: FilaComprobanteVenta[],
+): Columna<FilaComprobanteVenta>[] {
+  return [
+    { titulo: "Fecha", celda: (c) => c.fecha ?? "—", orden: (c) => c.fecha },
+    {
+      titulo: "Comprobante",
+      celda: (c) => c.comprobante ?? "—",
+      orden: (c) => c.comprobante,
+    },
+    {
+      titulo: "Cliente",
+      celda: (c) => (
+        <span className="block max-w-[260px] truncate">{c.cliente ?? "—"}</span>
+      ),
+      orden: (c) => c.cliente,
+    },
+    {
+      titulo: "Unidades",
+      celda: (c) => fmtNumero(c.unidades),
+      numerica: true,
+      orden: (c) => c.unidades,
+      total: fmtNumero(sumar(filas, (c) => c.unidades)),
+    },
+    {
+      titulo: "Facturación",
+      celda: (c) => fmtMoneda(c.facturacion),
+      numerica: true,
+      orden: (c) => c.facturacion,
+      total: fmtMoneda(sumar(filas, (c) => c.facturacion)),
+    },
+  ];
+}
 
 
 async function traer<T>(url: string, signal: AbortSignal): Promise<T> {
@@ -357,7 +464,7 @@ export default function Dashboard() {
             <Panel titulo="Artículos incluídos" nota={`${data.articulos.length} SKUs`}>
               <Tabla
                 filas={data.articulos}
-                columnas={COL_ARTICULOS}
+                columnas={colArticulos(data.articulos)}
                 clave={(a, i) => `${a.sku}-${i}`}
                 onClickFila={(a) => a.sku && alternar("sku", a.sku)}
                 activa={(a) => !!a.sku && !!filtros.sku?.includes(a.sku)}
@@ -366,7 +473,7 @@ export default function Dashboard() {
             <Panel titulo="Comprobantes" nota={`${data.comprobantes.length} por facturación`}>
               <Tabla
                 filas={data.comprobantes}
-                columnas={COL_COMPROBANTES}
+                columnas={colComprobantes(data.comprobantes)}
                 clave={(c, i) => `${c.comprobante}-${i}`}
                 onClickFila={(c) => c.comprobante && alternar("comprobante", c.comprobante)}
                 activa={(c) => !!c.comprobante && !!filtros.comprobante?.includes(c.comprobante)}

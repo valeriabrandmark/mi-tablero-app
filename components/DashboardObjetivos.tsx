@@ -5,7 +5,7 @@ import { ListaAvance } from "@/components/BarraAvance";
 import LineaFacturacion from "@/components/charts/LineaFacturacion";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
-import { Tabla, type Columna } from "@/components/Tabla";
+import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtMes, fmtMetrica, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
@@ -26,18 +26,44 @@ const NOMBRE_METRICA: Record<Metrica, string> = {
   clientes: "Clientes con compra",
 };
 
-const COLUMNAS_COMPROBANTES: Columna<FilaComprobanteObjetivo>[] = [
-  { titulo: "Comprobante", celda: (f) => f.comprobante ?? "—", orden: (f) => f.comprobante },
-  { titulo: "Fecha", celda: (f) => f.fecha ?? "—", orden: (f) => f.fecha },
-  {
-    titulo: "Cliente",
-    celda: (f) => <span className="block max-w-[280px] truncate">{f.cliente ?? "—"}</span>,
-    orden: (f) => f.cliente,
-  },
-  { titulo: "Empresa", celda: (f) => f.empresa ?? "—", orden: (f) => f.empresa },
-  { titulo: "Unidades", celda: (f) => fmtNumero(f.unidades), numerica: true, orden: (f) => f.unidades },
-  { titulo: "Facturación", celda: (f) => fmtMoneda(f.facturacion), numerica: true, orden: (f) => f.facturacion },
-];
+function columnasComprobantes(
+  filas: FilaComprobanteObjetivo[],
+): Columna<FilaComprobanteObjetivo>[] {
+  return [
+    {
+      titulo: "Comprobante",
+      celda: (f) => f.comprobante ?? "—",
+      orden: (f) => f.comprobante,
+    },
+    { titulo: "Fecha", celda: (f) => f.fecha ?? "—", orden: (f) => f.fecha },
+    {
+      titulo: "Cliente",
+      celda: (f) => (
+        <span className="block max-w-[280px] truncate">{f.cliente ?? "—"}</span>
+      ),
+      orden: (f) => f.cliente,
+    },
+    {
+      titulo: "Empresa",
+      celda: (f) => f.empresa ?? "—",
+      orden: (f) => f.empresa,
+    },
+    {
+      titulo: "Unidades",
+      celda: (f) => fmtNumero(f.unidades),
+      numerica: true,
+      orden: (f) => f.unidades,
+      total: fmtNumero(sumar(filas, (f) => f.unidades)),
+    },
+    {
+      titulo: "Facturación",
+      celda: (f) => fmtMoneda(f.facturacion),
+      numerica: true,
+      orden: (f) => f.facturacion,
+      total: fmtMoneda(sumar(filas, (f) => f.facturacion)),
+    },
+  ];
+}
 
 export default function DashboardObjetivosPage({
   vendedor,
@@ -230,7 +256,7 @@ export default function DashboardObjetivosPage({
                 Es un dato útil y por eso el chip lo dice explícitamente. */}
             <Tabla
               filas={data.comprobantes}
-              columnas={COLUMNAS_COMPROBANTES}
+              columnas={columnasComprobantes(data.comprobantes)}
               clave={(f, i) => `${f.comprobante}-${i}`}
               vacio="Sin comprobantes en el recorte elegido."
               onClickFila={(f) => f.cliente && alternarCliente(f.cliente)}

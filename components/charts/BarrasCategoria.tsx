@@ -16,27 +16,66 @@ import { CajaTooltip, FilaTooltip } from "./TooltipOscuro";
 
 type ItemTooltip = { payload?: PuntoEtiqueta & { fill?: string } };
 
+/** Segunda serie apilada encima de la primera. */
+export type SerieApilada = {
+  titulo: string;
+  color: string;
+  tituloBase: string;
+};
+
 /** `formato` y `colorUnico` llegan por prop; recharts inyecta el resto al clonar. */
 function Contenido({
   active,
   payload,
   formato,
   colorUnico,
+  apilado,
 }: {
   active?: boolean;
   payload?: ItemTooltip[];
   formato?: (n: number) => string;
   colorUnico?: string;
+  apilado?: SerieApilada;
 }) {
   const item = payload?.[0]?.payload;
   if (!active || !item || !formato) return null;
+
+  // Sin segunda serie, el tooltip es una línea sola y el label de la barra
+  // alcanza. Con dos, hace falta decir cuál es cuál y cuánto suman: el alto de
+  // la barra ya no es ninguna de las dos.
+  if (!apilado) {
+    return (
+      <CajaTooltip>
+        <FilaTooltip
+          color={item.fill ?? colorUnico ?? TEMA.muted}
+          label={item.label}
+          valor={formato(item.valor)}
+        />
+      </CajaTooltip>
+    );
+  }
+
+  const segundo = item.valor2 ?? 0;
   return (
-    <CajaTooltip>
+    <CajaTooltip titulo={item.label}>
       <FilaTooltip
-        color={item.fill ?? colorUnico ?? TEMA.muted}
-        label={item.label}
+        color={colorUnico ?? TEMA.muted}
+        label={apilado.tituloBase}
         valor={formato(item.valor)}
       />
+      <FilaTooltip
+        color={apilado.color}
+        label={apilado.titulo}
+        valor={formato(segundo)}
+      />
+      {segundo > 0 && (
+        <div className="border-line mt-1 flex items-center gap-2 border-t pt-1">
+          <span className="text-muted">Total</span>
+          <span className="ml-auto tabular-nums">
+            {formato(item.valor + segundo)}
+          </span>
+        </div>
+      )}
     </CajaTooltip>
   );
 }
@@ -54,6 +93,7 @@ export default function BarrasCategoria({
   vacio = "Sin datos para el filtro elegido.",
   seleccionados,
   onSeleccionar,
+  apilado,
 }: {
   datos: PuntoEtiqueta[];
   formato: (n: number) => string;
@@ -66,6 +106,12 @@ export default function BarrasCategoria({
   seleccionados?: string[];
   /** Si se omite, las barras son solo de lectura (sin filtro cruzado). */
   onSeleccionar?: (label: string) => void;
+  /**
+   * Apila una segunda serie (`valor2` de cada punto) encima de la primera.
+   * Con esto la barra deja de ser una magnitud y pasa a ser dos, así que el
+   * tooltip cambia para desglosarlas.
+   */
+  apilado?: SerieApilada;
 }) {
   if (datos.length === 0) {
     return <p className="text-muted py-16 text-center text-sm">{vacio}</p>;
@@ -104,12 +150,23 @@ export default function BarrasCategoria({
         {horizontal ? ejeValor : <XAxis dataKey="label" tick={{ fill: TEMA.muted, fontSize: 11 }} stroke={TEMA.line} interval={0} />}
         {horizontal ? ejeCategoria : <YAxis tickFormatter={formato} tick={{ fill: TEMA.muted, fontSize: 11 }} stroke={TEMA.line} width={70} />}
         <Tooltip
-          content={<Contenido formato={formato} colorUnico={colorUnico} />}
+          content={
+            <Contenido
+              formato={formato}
+              colorUnico={colorUnico}
+              apilado={apilado}
+            />
+          }
           cursor={{ fill: "rgba(255,255,255,0.04)" }}
         />
         <Bar
           dataKey="valor"
-          radius={horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
+          stackId={apilado ? "a" : undefined}
+          // Apilada, la primera serie va SIN esquinas redondeadas: el redondeo
+          // arriba dejaría una muesca justo donde empieza la segunda.
+          radius={
+            apilado ? undefined : horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]
+          }
           isAnimationActive={false}
           onClick={(d: unknown) => {
             const label = (d as { payload?: PuntoEtiqueta })?.payload?.label;
@@ -126,6 +183,31 @@ export default function BarrasCategoria({
             />
           ))}
         </Bar>
+        {apilado && (
+          <Bar
+            dataKey="valor2"
+            stackId="a"
+            fill={apilado.color}
+            radius={horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
+            isAnimationActive={false}
+            onClick={(d: unknown) => {
+              const label = (d as { payload?: PuntoEtiqueta })?.payload?.label;
+              if (label) onSeleccionar?.(label);
+            }}
+            className={onSeleccionar ? "cursor-pointer" : undefined}
+          >
+            {datos.map((d) => (
+              <Cell
+                key={d.label}
+                fillOpacity={
+                  !seleccionados?.length || seleccionados.includes(d.label)
+                    ? 1
+                    : 0.25
+                }
+              />
+            ))}
+          </Bar>
+        )}
       </BarChart>
     </ResponsiveContainer>
   );

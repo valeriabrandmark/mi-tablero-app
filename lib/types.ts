@@ -119,7 +119,16 @@ export type KpisLogistica = {
   rentabilidadAjustadaPct: number | null;
 };
 
-export type PuntoEtiqueta = { label: string; valor: number };
+export type PuntoEtiqueta = {
+  label: string;
+  valor: number;
+  /**
+   * Segunda serie, para las barras apiladas. Solo la usa el gráfico por hora de
+   * Mercado Libre, donde `valor` es lo vendido y `valor2` lo cancelado; los dos
+   * montos son ajenos entre sí, así que apilarlos da lo transaccionado.
+   */
+  valor2?: number;
+};
 
 export type FilaComprobante = {
   comprobante: string | null;
@@ -342,8 +351,32 @@ export type FiltrosMeli = {
   alerta?: string[];
 };
 
-/** Una hora del día (0-23) con lo que se vendió en ella. */
-export type PuntoHora = { hora: number; ordenes: number; venta: number };
+/**
+ * Una hora del día (0-23) con lo que pasó en ella.
+ *
+ * `venta` y `cancelado` son montos distintos y NO se solapan: lo cancelado
+ * nunca entró a `gold.fact_ventas`. Sumarlos da lo transaccionado en esa hora.
+ */
+export type PuntoHora = {
+  hora: number;
+  ordenes: number;
+  venta: number;
+  cancelado: number;
+  ordenesCanceladas: number;
+};
+
+/**
+ * La última orden que entró a la base. Sirve para ver el atraso del pipeline
+ * contra el reloj de quien está mirando la pantalla.
+ */
+export type UltimaCargaMeli = {
+  /** El número de orden de Mercado Libre, para poder buscarla allá. */
+  nroOrden: string;
+  /** `YYYY-MM-DD HH:MM` ya en hora argentina, listo para mostrar. */
+  local: string;
+  /** El mismo instante en UTC, para calcular "hace cuánto" en el navegador. */
+  iso: string;
+};
 
 /**
  * El mismo recorte corrido hacia atrás, para comparar. Si mirás hoy, es ayer;
@@ -452,8 +485,8 @@ export type DashboardMeli = {
   articulos: ArticuloMeli[];
   /** Denominador de la torta: venta de TODOS los proveedores, sin filtro cruzado. */
   ventaTotalProveedores: number;
-  /** Último día con ventas cargadas: avisa si el dato viene atrasado. */
-  ultimaVenta: string | null;
+  /** La última orden cargada: es la medida real del atraso del tablero. */
+  ultimaCarga: UltimaCargaMeli | null;
   /** Lo que se canceló en el mismo recorte. No entra en ningún KPI de venta. */
   cancelaciones: CancelacionesMeli;
   generadoEn: string;
