@@ -677,8 +677,30 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
             ${COSTO}                         as costo,
             ${COMISION}                      as comision,
             ${ENVIO}                         as envio,
-            ${RENTABILIDAD}                  as rentabilidad
-     from gold.fact_ventas
+            ${RENTABILIDAD}                  as rentabilidad,
+            -- Si esa orden tuvo una devolucion PARCIAL. Se lee de bronze y
+            -- no de gold porque fact_ventas no guarda el estado de la orden:
+            -- guarda la venta. Asi el dato sale sin migrar nada ni esperar un
+            -- modelo.py --todo para verlo en el historico.
+            --
+            -- Va como subconsulta y no como join: si una orden no estuviera
+            -- en bronze, la linea tiene que seguir apareciendo en las alertas
+            -- (sin marca) en vez de desaparecer de la tabla.
+            -- EXISTS y no una subconsulta que devuelva el valor: bronze.ml_ventas
+            -- puede tener la misma orden mas de una vez (paso: 790 filas de mas
+            -- por un error de huso, ver limpiar_duplicados_ml_ventas.sql), y una
+            -- subconsulta escalar revienta con "more than one row returned".
+            -- EXISTS es inmune a eso, asi que la pantalla no depende de que la
+            -- limpieza este hecha.
+            --
+            -- ::text para que la fila entera siga siendo de texto, como el resto:
+            -- un solo booleano suelto obligaria a ensanchar el tipo de TODAS las
+            -- columnas y a andar comprobando cual es cual.
+            exists (select 1
+                      from bronze.ml_ventas v
+                     where v.id::bigint = fv.nro_orden::bigint
+                       and v.status = 'partially_refunded')::text as parcial
+     from gold.fact_ventas fv
      where ${w.sql}
      order by (${MARGEN_NETO}) asc nulls first, ${VENTA_SIVA} desc
      limit ${TOPE_ALERTAS}`,
@@ -704,6 +726,7 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
 
     return {
       nivel,
+      parcial: r.parcial === "true",
       fecha: r.fecha,
       nroOrden: r.nro_orden,
       sku: r.sku,

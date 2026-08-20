@@ -490,6 +490,14 @@ export type CancelacionesMeli = {
 /** Una venta individual con su rentabilidad desagregada, como la planilla. */
 export type FilaAlertaMeli = {
   nivel: string;
+  /**
+   * La orden tuvo una devolución PARCIAL: el cliente devolvió algo y se quedó
+   * con el resto. Cuenta como venta —por eso está en esta tabla— pero por el
+   * importe COMPLETO, sin descontar lo devuelto, porque la API de Mercado Libre
+   * no informa ese monto en la orden. O sea que su rentabilidad está algo
+   * sobreestimada, y por eso la fila se marca.
+   */
+  parcial: boolean;
   fecha: string | null;
   nroOrden: string | null;
   sku: string | null;

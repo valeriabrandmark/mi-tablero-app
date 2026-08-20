@@ -13,7 +13,6 @@ import {
   NOMBRE_ALERTA,
   UMBRAL_BAJO,
   UMBRAL_MUY_BAJO,
-  mesComercialComoRango,
   type NivelAlerta,
 } from "@/lib/meli";
 import { PALETA, TEMA } from "@/lib/paleta";
@@ -71,8 +70,36 @@ const COLUMNAS: Columna<FilaAlertaMeli>[] = [
   { titulo: "Fecha", celda: (f) => (f.fecha ? fmtFechaCorta(f.fecha) : "—"), orden: (f) => f.fecha },
   {
     titulo: "N° Orden",
-    celda: (f) => <span className="font-mono text-[11px]">{f.nroOrden ?? "—"}</span>,
+    celda: (f) => (
+      <span className="flex items-center gap-1.5 whitespace-nowrap">
+        <span className="font-mono text-[11px]">{f.nroOrden ?? "—"}</span>
+        {/* Una devolución parcial SÍ es venta —el cliente se quedó con parte—
+            pero entra por el importe completo, porque la API no informa cuánto
+            se devolvió. Su rentabilidad queda algo sobreestimada, y quien mire
+            esta fila para decidir un precio tiene que saberlo. */}
+        {f.parcial && (
+          <span
+            title="Devolución parcial: cuenta como venta, pero por el importe completo — la API no informa cuánto se devolvió, así que la rentabilidad está algo sobreestimada."
+            className="rounded-full border px-1.5 py-0.5 text-[9px] whitespace-nowrap"
+            style={{
+              color: PALETA[2],
+              borderColor: `${PALETA[2]}66`,
+              backgroundColor: `${PALETA[2]}1a`,
+            }}
+          >
+            parcial
+          </span>
+        )}
+      </span>
+    ),
     orden: (f) => (f.nroOrden == null ? null : Number(f.nroOrden)),
+  },
+  {
+    // Columna propia y no solo la marquita: sin esto no habría forma de juntar
+    // todas las parciales, que es justo lo que uno quiere al revisarlas.
+    titulo: "Tipo",
+    celda: (f) => (f.parcial ? "Parcial" : "Venta"),
+    orden: (f) => (f.parcial ? 0 : 1),
   },
   { titulo: "SKU", celda: (f) => f.sku ?? "—", orden: (f) => f.sku },
   {
@@ -126,11 +153,15 @@ const COLUMNAS: Columna<FilaAlertaMeli>[] = [
 ];
 
 export default function AlertasMeliPage({ diaInicial }: { diaInicial: string }) {
-  // Acá el default NO es el día, como en el Tablero: esta página es para
-  // revisar ventas problemáticas, y con un solo día suelen ser tres filas —
-  // se lee como si no hubiera nada que mirar. Abre en el mes comercial, que es
-  // el recorte sobre el que se decide corregir un precio.
-  const rangoInicial = mesComercialComoRango(diaInicial);
+  // Abre en EL DÍA, igual que el Tablero. `diaInicial` lo resuelve el servidor:
+  // es hoy, o el último día con ventas si hoy todavía no cargó.
+  //
+  // Antes abría en el mes comercial, con el argumento de que un solo día son
+  // pocas filas y se lee como si no hubiera nada que mirar. La contra pesa más:
+  // el uso real de esta página es revisar lo de HOY para corregir un precio
+  // antes de seguir vendiéndolo, y abrir en el mes obliga a achicar el recorte
+  // todas las veces. Para cerrar el mes está el atajo "Mes comercial".
+  const rangoInicial = { desde: diaInicial, hasta: diaInicial };
   const inicial: FiltrosMeli = { ...rangoInicial, alerta: ["muy-bajo"] };
   const [filtros, setFiltros] = useState<FiltrosMeli>(inicial);
 
