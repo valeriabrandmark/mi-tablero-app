@@ -9,10 +9,14 @@ const money = new Intl.NumberFormat("es-AR", {
 
 const int = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 });
 
-const pct1 = new Intl.NumberFormat("es-AR", {
+// DOS decimales, no uno. En este tablero los márgenes se mueven en décimas:
+// la diferencia entre 7,45 % y 7,54 % se redondeaba al mismo "7,5 %" y dos
+// artículos que hay que tratar distinto se leían iguales. Con dos decimales
+// también se distingue un margen chico pero positivo de uno en cero.
+const porcentaje = new Intl.NumberFormat("es-AR", {
   style: "percent",
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 });
 
 /** `$ 1.234.567` */
@@ -36,10 +40,10 @@ export function fmtNumero(n: number | null | undefined): string {
   return int.format(n);
 }
 
-/** Recibe una fracción (0.32) y devuelve `32,0 %` */
+/** Recibe una fracción (0.32) y devuelve `32,00 %` */
 export function fmtPct(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
-  return pct1.format(n);
+  return porcentaje.format(n);
 }
 
 const MESES = [

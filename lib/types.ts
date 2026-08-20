@@ -332,6 +332,12 @@ export type FiltrosMeli = {
   marca?: string[];
   /** Filtro cruzado: sale de hacer click en una fila del ranking de artículos. */
   sku?: string[];
+  /**
+   * Filtro cruzado: sale de hacer click en una barra del gráfico por hora.
+   * Son horas del día (0-23) en hora ARGENTINA, como texto porque viajan por
+   * la URL igual que el resto de los filtros.
+   */
+  hora?: string[];
   /** Solo en la pestaña Alertas: nivel de alerta (ver `NIVELES_ALERTA`). */
   alerta?: string[];
 };

@@ -1,28 +1,55 @@
-import BarraLateral, { type ClaveIcono, type ItemNav } from "@/components/BarraLateral";
+import BarraLateral, { type ItemNav } from "@/components/BarraLateral";
 import { slugVendedor, VENDEDORES_OBJETIVOS } from "@/lib/constantes";
 import { permisoDelUsuario, puedeVer, type Rol } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
 
+/**
+ * El nav, en dos secciones que se despliegan.
+ *
+ * Las rutas son EXACTAMENTE las de antes. Agrupar es puro acomodo visual: los
+ * permisos se resuelven por `href` en `puedeVer()`, así que mover una entrada
+ * adentro de un grupo no le cambia el acceso a nadie. Si alguna ruta cambiara,
+ * habría que tocar también `permisos.ts` y el proxy — por eso no cambian.
+ *
+ * Los grupos no tienen `href`: su encabezado despliega, no navega. "Tablero
+ * Ventas Brandmark" es el primer hijo justamente porque la sección sí tiene una
+ * página principal, y así se llega a ella con un click y no con dos.
+ */
 const NAV: ItemNav[] = [
-  { href: "/ventas-mayoristas", label: "Ventas Mayoristas", icono: "ventas" as ClaveIcono },
-  { href: "/logistica", label: "Logística", icono: "logistica" as ClaveIcono },
-  { href: "/cuentas-corrientes", label: "Cuentas Corrientes", icono: "cuentas" as ClaveIcono },
   {
-    href: "/venta-minorista",
-    label: "Venta minorista",
-    icono: "minorista" as ClaveIcono,
+    clave: "mayoristas",
+    label: "Ventas Mayoristas",
+    icono: "ventas",
+    logo: { src: "/isotipo.png" },
     hijos: [
-      { href: "/venta-minorista/mercado-libre", label: "Mercado Libre" },
-      { href: "/venta-minorista/tienda-nube", label: "Tienda Nube" },
+      { href: "/ventas-mayoristas", label: "Tablero Ventas Brandmark", icono: "ventas" },
+      { href: "/logistica", label: "Logística", icono: "logistica" },
+      { href: "/cuentas-corrientes", label: "Cuentas Corrientes", icono: "cuentas" },
+      // Una entrada por vendedor: cada uno entra directo a su tablero.
+      ...VENDEDORES_OBJETIVOS.map((v) => ({
+        href: `/objetivos/${slugVendedor(v)}`,
+        label: `Objetivos ${v.charAt(0)}${v.slice(1).toLowerCase()}`,
+        icono: "objetivos" as const,
+      })),
     ],
   },
-  // Una entrada por vendedor: cada uno entra directo a su tablero.
-  ...VENDEDORES_OBJETIVOS.map((v) => ({
-    href: `/objetivos/${slugVendedor(v)}`,
-    label: `Objetivos ${v.charAt(0)}${v.slice(1).toLowerCase()}`,
-    icono: "objetivos" as ClaveIcono,
-  })),
+  {
+    clave: "minoristas",
+    label: "Ventas minoristas",
+    icono: "minorista",
+    hijos: [
+      // Mercado Libre sigue teniendo sus pestañas (Tablero, Alertas, Stock
+      // Full) adentro de la página: no se abren acá porque son vistas del mismo
+      // tablero, no secciones distintas del negocio.
+      {
+        href: "/venta-minorista/mercado-libre",
+        label: "Mercado Libre",
+        icono: "mercadolibre",
+      },
+      { href: "/venta-minorista/tienda-nube", label: "Tienda Nube", icono: "tiendanube" },
+    ],
+  },
 ];
 
 /** Cómo se muestra cada rol abajo del email. */
@@ -44,7 +71,7 @@ const NOMBRE_ROL: Record<Rol, string> = {
  */
 function navPermitido(nav: ItemNav[], permiso: Parameters<typeof puedeVer>[0]): ItemNav[] {
   return nav.flatMap((item) => {
-    if (!item.hijos) return puedeVer(permiso, item.href) ? [item] : [];
+    if (!item.hijos) return item.href && puedeVer(permiso, item.href) ? [item] : [];
     const hijos = item.hijos.filter((h) => puedeVer(permiso, h.href));
     return hijos.length > 0 ? [{ ...item, hijos }] : [];
   });

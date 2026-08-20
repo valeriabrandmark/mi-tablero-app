@@ -53,9 +53,14 @@ export async function GET(request: NextRequest) {
   // Si vienen dadas vuelta se ordenan en vez de devolver un recorte vacío.
   if (desde > hasta) [desde, hasta] = [hasta, desde];
 
+  // La hora se valida contra 0-23: un valor fuera de rango no filtraría nada y
+  // la página mostraría todo, que es lo contrario de lo que pidió quien lo mandó.
+  const hora = lista(sp, "hora")?.filter((v) => /^\d{1,2}$/.test(v) && Number(v) <= 23);
+
   const filtros: FiltrosMeli = {
     desde,
     hasta,
+    hora: hora && hora.length > 0 ? hora : undefined,
     proveedor: lista(sp, "proveedor"),
     marca: lista(sp, "marca"),
     sku: lista(sp, "sku"),

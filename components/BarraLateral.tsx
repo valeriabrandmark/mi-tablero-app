@@ -1,22 +1,54 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import BotonSalir from "@/components/BotonSalir";
 
-export type ItemNav = {
+/**
+ * Un logo real servido desde /public, para cuando dibujar un ícono no alcanza:
+ * "Ventas Mayoristas" es Brandmark y se reconoce por su isotipo, no por un
+ * carrito genérico.
+ *
+ * No lleva `alt` a propósito. La imagen va pegada al texto de la entrada, así
+ * que para un lector de pantalla es decorativa: con `alt` el nombre se leería
+ * dos veces seguidas.
+ */
+export type Logo = { src: string };
+
+export type ClaveIcono =
+  | "ventas"
+  | "logistica"
+  | "cuentas"
+  | "objetivos"
+  | "minorista"
+  | "mercadolibre"
+  | "tiendanube";
+
+/** Subpágina de un grupo. Lleva su propia marca porque es la que se mira. */
+export type ItemHijo = {
   href: string;
   label: string;
   icono: ClaveIcono;
-  /** Subpáginas. Si están, la entrada es un grupo desplegable en vez de un link. */
-  hijos?: { href: string; label: string }[];
+  logo?: Logo;
 };
 
-export type ClaveIcono = "ventas" | "logistica" | "cuentas" | "objetivos" | "minorista";
+export type ItemNav = {
+  /** Identificador estable para React. En un link suelto es su propia ruta. */
+  clave: string;
+  label: string;
+  icono: ClaveIcono;
+  /** Si está, reemplaza al ícono dibujado. */
+  logo?: Logo;
+  /** Ruta propia. Un grupo NO tiene: su encabezado despliega, no navega. */
+  href?: string;
+  /** Subpáginas. Si están, la entrada es un grupo desplegable. */
+  hijos?: ItemHijo[];
+};
 
 /**
- * Íconos como SVG inline y no una librería: son cinco, no cambian, y sumar una
+ * Íconos como SVG inline y no una librería: son pocos, no cambian, y sumar una
  * dependencia entera para esto haría más pesado el bundle que el tablero.
  */
 const ICONOS: Record<ClaveIcono, ReactNode> = {
@@ -55,6 +87,19 @@ const ICONOS: Record<ClaveIcono, ReactNode> = {
       <path d="M10 20v-5h4v5" />
     </>
   ),
+  // Marcas de reemplazo hasta que estén los PNG de Mercado Libre y Tienda Nube.
+  // Son formas genéricas a propósito: una imitación dibujada a mano de un logo
+  // ajeno se ve peor que un ícono neutro, y el día que llegue el archivo se
+  // cambia agregando `logo` en el nav, sin tocar esto.
+  mercadolibre: (
+    <>
+      <path d="M5 8h14l-1.1 12H6.1L5 8Z" />
+      <path d="M9 8V6.5a3 3 0 0 1 6 0V8" />
+    </>
+  ),
+  tiendanube: (
+    <path d="M7.5 19a4.5 4.5 0 0 1-.6-8.96 5.5 5.5 0 0 1 10.65 1.06A3.95 3.95 0 0 1 17 19H7.5Z" />
+  ),
 };
 
 function Icono({ clave }: { clave: ClaveIcono }) {
@@ -74,15 +119,29 @@ function Icono({ clave }: { clave: ClaveIcono }) {
   );
 }
 
+/** El logo si lo hay, el ícono dibujado si no. Siempre ocupa el mismo lugar. */
+function Marca({ icono, logo }: { icono: ClaveIcono; logo?: Logo }) {
+  if (!logo) return <Icono clave={icono} />;
+  return (
+    <Image
+      src={logo.src}
+      alt=""
+      width={64}
+      height={64}
+      className="size-[18px] shrink-0 object-contain"
+    />
+  );
+}
+
 /** Clases del link de nav, para que el item suelto y el hijo de un grupo coincidan. */
 function clasesLink(activo: boolean, sangria = false) {
   return `flex items-center gap-3 rounded-lg py-2 text-sm transition-colors ${
-    sangria ? "pr-3 pl-11" : "px-3"
+    sangria ? "pr-3 pl-7" : "px-3"
   } ${activo ? "bg-panel-2 text-ink font-medium" : "text-muted hover:bg-panel-2/60 hover:text-ink"}`;
 }
 
 /**
- * Entrada con subpáginas ("Venta minorista" -> Mercado Libre, Tienda Nube).
+ * Entrada con subpáginas ("Ventas Mayoristas", "Ventas minoristas").
  *
  * Arranca abierta cuando estás parado en cualquiera de sus hijos: si no, entrar
  * por un link directo dejaría la barra mostrando el grupo cerrado y la página
@@ -112,7 +171,7 @@ function Grupo({
         aria-expanded={abierto}
         className={`${clasesLink(dentro && !abierto)} w-full text-left`}
       >
-        <Icono clave={item.icono} />
+        <Marca icono={item.icono} logo={item.logo} />
         <span className="flex-1 truncate">{item.label}</span>
         <svg
           viewBox="0 0 24 24"
@@ -133,6 +192,11 @@ function Grupo({
             // `startsWith` acá sí: las pestañas de Mercado Libre cuelgan de su
             // propia URL, y estando en Alertas el grupo tiene que seguir
             // marcando Mercado Libre.
+            //
+            // La excepción son las páginas de objetivos: comparten el prefijo
+            // /objetivos pero no cuelgan una de otra, así que se comparan
+            // enteras. Por eso el `===` va primero y el `startsWith` exige la
+            // barra: /objetivos/silvio nunca es prefijo de /objetivos/ramon.
             const activo = pathname === h.href || pathname.startsWith(`${h.href}/`);
             return (
               <li key={h.href}>
@@ -142,6 +206,7 @@ function Grupo({
                   aria-current={activo ? "page" : undefined}
                   className={clasesLink(activo, true)}
                 >
+                  <Marca icono={h.icono} logo={h.logo} />
                   <span className="truncate">{h.label}</span>
                 </Link>
               </li>
@@ -181,7 +246,7 @@ function Contenido({
             if (item.hijos?.length) {
               return (
                 <Grupo
-                  key={item.href}
+                  key={item.clave}
                   item={item}
                   pathname={pathname}
                   alNavegar={alNavegar}
@@ -189,18 +254,23 @@ function Contenido({
               );
             }
 
+            // Sin hijos y sin href no hay nada que mostrar: un grupo al que los
+            // permisos le sacaron todas las subpáginas ya viene filtrado, pero
+            // el tipo permite la combinación y acá se descarta.
+            if (!item.href) return null;
+
             // `startsWith` no sirve acá: /objetivos marcaría activas las cuatro
             // páginas de vendedor a la vez.
             const activo = pathname === item.href;
             return (
-              <li key={item.href}>
+              <li key={item.clave}>
                 <Link
                   href={item.href}
                   onClick={alNavegar}
                   aria-current={activo ? "page" : undefined}
                   className={clasesLink(activo)}
                 >
-                  <Icono clave={item.icono} />
+                  <Marca icono={item.icono} logo={item.logo} />
                   <span className="truncate">{item.label}</span>
                 </Link>
               </li>

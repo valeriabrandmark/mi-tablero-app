@@ -183,7 +183,7 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
     setFiltros(f);
   };
 
-  const alternarEn = (clave: "proveedor" | "marca" | "sku") => (valor: string) =>
+  const alternarEn = (clave: "proveedor" | "marca" | "sku" | "hora") => (valor: string) =>
     cambiar({ ...filtros, [clave]: alternarValor(filtros[clave], valor) });
 
   const k = data?.kpis;
@@ -193,7 +193,8 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
     filtros.hasta === diaInicial &&
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
-    sinValores(filtros.sku);
+    sinValores(filtros.sku) &&
+    sinValores(filtros.hora);
 
   /** Texto del período anterior para las tarjetas, o null si no hay con qué comparar. */
   // Si el período anterior se midió hasta una hora, la etiqueta LO DICE. Un
@@ -241,9 +242,18 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
 
       {/* Los chips solo aparecen para los filtros que no tienen selector arriba:
           proveedor y marca ya se ven en su desplegable. */}
-      {!sinValores(filtros.sku) && (
+      {(!sinValores(filtros.sku) || !sinValores(filtros.hora)) && (
         <div className="flex flex-wrap items-center gap-2">
-          {filtros.sku!.map((s) => (
+          {filtros.hora?.map((h) => (
+            <button
+              key={`hora-${h}`}
+              onClick={() => alternarEn("hora")(h)}
+              className="border-c1/40 bg-c1/10 text-c1 hover:bg-c1/20 rounded-full border px-3 py-1 text-xs"
+            >
+              {h}:00 a {h}:59 ✕
+            </button>
+          ))}
+          {filtros.sku?.map((s) => (
             <button
               key={s}
               onClick={() => alternarEn("sku")(s)}
@@ -388,7 +398,7 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
           <div className="grid gap-4 xl:grid-cols-2">
             <Panel
               titulo="Facturación por hora del día"
-              nota="Venta c/IVA · hora argentina · todo el recorte elegido"
+              nota="Venta c/IVA · hora argentina · click para filtrar el tablero por esa hora"
             >
               {/* Facturación y no cantidad de órdenes. La diferencia importa:
                   la hora con más órdenes puede no ser la que más factura, y a
@@ -406,6 +416,8 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
                 colorUnico={PALETA[4]}
                 alturaMinima={220}
                 vacio="Sin ventas en el recorte elegido."
+                seleccionados={filtros.hora}
+                onSeleccionar={alternarEn("hora")}
               />
             </Panel>
 

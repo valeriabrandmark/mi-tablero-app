@@ -109,6 +109,28 @@ function whereBase(
     }
   }
 
+  // FILTRO POR HORA DEL DÍA.
+  //
+  // La hora no está en `gold.fact_ventas` —ahí `fecha` es un `date` pelado—,
+  // así que sale de `bronze.ml_ventas`. Va como subconsulta `in (...)` y NO
+  // como join: un join habría que agregarlo en las ocho consultas de esta
+  // página y calificar cada columna, mientras que esto es una línea más en el
+  // `where` y funciona en todas por igual.
+  //
+  // Postgres arma el hash de la subconsulta UNA vez y después prueba contra
+  // él, así que no es una consulta por fila.
+  //
+  // El `at time zone` no es opcional: ML manda el offset -04:00, que no es el
+  // de Argentina. Sin convertir, filtrar "las 14" traería las ventas de las 13.
+  if (!omitir.includes("hora") && !vacio(f.hora)) {
+    params.push(f.hora);
+    clauses.push(`${col("nro_orden")}::bigint in (
+       select v.id::bigint from bronze.ml_ventas v
+        where extract(hour from (v.date_created::timestamptz
+                at time zone 'America/Argentina/Buenos_Aires'))::text
+              = any($${params.length}::text[]))`);
+  }
+
   return { sql: clauses.join("\n     and "), params };
 }
 
@@ -324,7 +346,10 @@ function aArticulo(r: Record<string, string>): ArticuloMeli {
  * esa hora, no tres.
  */
 async function getPorHora(f: FiltrosMeli): Promise<Record<string, number>[]> {
-  const w = whereBase(f, [], "fv.");
+  // Se omite el filtro de HORA a propósito, igual que en los rankings: si se
+  // filtrara a sí mismo, al clickear una barra el gráfico quedaría con esa
+  // sola y no habría forma de ver el resto ni de comparar.
+  const w = whereBase(f, ["hora"], "fv.");
 
   return query<Record<string, number>>(
     `select extract(hour from (v.date_created::timestamptz
