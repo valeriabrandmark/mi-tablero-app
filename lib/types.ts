@@ -448,7 +448,41 @@ export type DashboardMeli = {
   ventaTotalProveedores: number;
   /** Último día con ventas cargadas: avisa si el dato viene atrasado. */
   ultimaVenta: string | null;
+  /** Lo que se canceló en el mismo recorte. No entra en ningún KPI de venta. */
+  cancelaciones: CancelacionesMeli;
   generadoEn: string;
+};
+
+/** Un SKU con lo que se le canceló en el recorte. */
+export type FilaCancelacionMeli = {
+  sku: string | null;
+  producto: string | null;
+  proveedor: string | null;
+  marca: string | null;
+  ordenes: number;
+  unidades: number;
+  /** Monto c/IVA que se habría facturado. No hay costo ni margen: no fue venta. */
+  monto: number;
+};
+
+/**
+ * Las cancelaciones del recorte.
+ *
+ * NO salen de `gold.fact_ventas` sino de `bronze.ml_ventas`: una cancelación no
+ * es una venta y no tiene que estar en la tabla de ventas. Meterla ahí con una
+ * marquita obligaría a que cada consulta del sistema se acuerde de excluirla, y
+ * el día que una se olvide el número queda mal sin que nadie lo note.
+ *
+ * Por eso tampoco afecta a ningún KPI de venta: se mira aparte, que es lo que es.
+ */
+export type CancelacionesMeli = {
+  /** Órdenes DISTINTAS, no la suma de las filas: una orden puede tener varios SKU. */
+  ordenes: number;
+  unidades: number;
+  monto: number;
+  filas: FilaCancelacionMeli[];
+  /** `true` si `filas` quedó recortada por el tope de la consulta. */
+  recortada: boolean;
 };
 
 // --- Venta minorista: Mercado Libre / Alertas --------------------------------
