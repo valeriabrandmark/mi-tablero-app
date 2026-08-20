@@ -683,3 +683,65 @@ export type DashboardTiendaNube = {
   ultimaVenta: string | null;
   generadoEn: string;
 };
+
+// --- Venta minorista: Mercado Libre / Stock Full ------------------------------
+
+export type FiltrosStockFull = {
+  proveedor?: string[];
+  marca?: string[];
+  sku?: string[];
+  /** "Sin vender hace más de N días". El que nunca vendió entra siempre. */
+  minDias?: number;
+};
+
+export type KpisStockFull = {
+  skus: number;
+  /** Unidades que Mercado Libre puede vender. */
+  disponible: number;
+  /** En el depósito pero NO vendibles: dañadas, en revisión, reservadas. */
+  noDisponible: number;
+  valorizacion: number;
+  /** SKUs sin vender hace más de `UMBRAL_PARADO` días, o que nunca vendieron. */
+  skusParados: number;
+  valorizacionParada: number;
+  /** Unidades vendidas en los últimos 30 días, para saber si el stock rota. */
+  uds30: number;
+};
+
+export type TramoStockFull = {
+  proveedor: string;
+  tramo: string;
+  skus: number;
+  disponible: number;
+  valorizacion: number;
+};
+
+export type FilaStockFull = {
+  sku: string | null;
+  producto: string | null;
+  proveedor: string | null;
+  marca: string | null;
+  disponible: number;
+  noDisponible: number;
+  ultimaVenta: string | null;
+  /** Null = nunca vendió desde que hay datos (06/05), que no es "hace mucho". */
+  diasSinVenta: number | null;
+  uds30: number;
+  valorizacion: number;
+};
+
+export type DashboardStockFull = {
+  kpis: KpisStockFull;
+  /** Cuántos SKU llevan más de N días sin vender. Acumulativos, no excluyentes. */
+  umbrales: Record<number, number>;
+  tramos: TramoStockFull[];
+  filas: FilaStockFull[];
+  recortada: boolean;
+  /**
+   * Desde cuándo hay foto diaria del stock, o null si todavía no hay ninguna.
+   * Lo usa la pantalla para decir a partir de cuándo va a poder mostrar "días
+   * continuos con stock", que es la métrica que esto todavía NO es.
+   */
+  historiaDesde: string | null;
+  generadoEn: string;
+};
