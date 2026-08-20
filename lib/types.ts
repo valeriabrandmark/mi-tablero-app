@@ -439,7 +439,8 @@ export type DashboardMeli = {
   /** Las 24 horas, siempre completas: una hora sin ventas es un dato. */
   porHora: PuntoHora[];
   porProveedor: RankingMeli[];
-  porMarca: RankingMeli[];
+  // No hay `porMarca`: el panel de rentabilidad por marca se sacó. La marca
+  // sigue estando como FILTRO y como columna de la tabla de artículos.
   /** Los SKUs que más plata dejaron, que no son los que más vendieron. */
   topRentabilidad: ArticuloMeli[];
   articulos: ArticuloMeli[];

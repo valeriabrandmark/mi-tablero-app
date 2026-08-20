@@ -353,17 +353,21 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
 
           <div className="grid gap-4 xl:grid-cols-2">
             <Panel
-              titulo="Órdenes por hora del día"
-              nota="Hora argentina · todo el recorte elegido"
+              titulo="Facturación por hora del día"
+              nota="Venta c/IVA · hora argentina · todo el recorte elegido"
             >
-              {/* Órdenes y no facturación: la pregunta es a qué hora COMPRA la
-                  gente, y una sola venta grande movería el pico de lugar. */}
+              {/* Facturación y no cantidad de órdenes. La diferencia importa:
+                  la hora con más órdenes puede no ser la que más factura, y a
+                  la hora de decidir cuándo empujar una publicación lo que pesa
+                  son los pesos. Ojo con el otro lado de la moneda: una sola
+                  venta grande puede mover el pico de lugar, sobre todo en
+                  recortes de un día. */}
               <BarrasCategoria
                 datos={data.porHora.map((h) => ({
                   label: `${h.hora}`,
-                  valor: h.ordenes,
+                  valor: h.venta,
                 }))}
-                formato={fmtNumero}
+                formato={fmtMoneda}
                 horizontal={false}
                 colorUnico={PALETA[4]}
                 alturaMinima={220}
@@ -404,15 +408,6 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
               />
             </Panel>
           </div>
-
-          <Panel titulo="Rentabilidad por marca" nota="Top 12 por venta · click para filtrar">
-            <TablaRanking
-              filas={data.porMarca}
-              titulo="Marca"
-              seleccionados={filtros.marca}
-              onSeleccionar={alternarEn("marca")}
-            />
-          </Panel>
 
           <Panel
             titulo="Artículos"

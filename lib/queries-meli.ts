@@ -376,7 +376,7 @@ async function getTopRentabilidad(f: FiltrosMeli): Promise<ArticuloMeli[]> {
  */
 async function getRanking(
   f: FiltrosMeli,
-  clave: "proveedor" | "marca",
+  clave: "proveedor",
   limite: number,
 ): Promise<RankingMeli[]> {
   const w = whereBase(f, [clave]);
@@ -553,7 +553,6 @@ export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
     porDia,
     horasCrudas,
     porProveedor,
-    porMarca,
     topRentabilidad,
     articulos,
     ventaTotalProveedores,
@@ -564,7 +563,6 @@ export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
     getPorDia(f),
     getPorHora(f),
     getRanking(f, "proveedor", 12),
-    getRanking(f, "marca", 12),
     getTopRentabilidad(f),
     getArticulos(f),
     getVentaTotalProveedores(f),
@@ -593,7 +591,6 @@ export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
     porDia,
     porHora: completarHoras(horasCrudas),
     porProveedor,
-    porMarca,
     topRentabilidad,
     articulos,
     ventaTotalProveedores,
