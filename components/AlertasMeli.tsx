@@ -204,9 +204,8 @@ export default function AlertasMeliPage({ diaInicial }: { diaInicial: string }) 
     <div className="space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight">
-            Alertas de margen <span className="text-muted text-sm font-normal">· Mercado Libre</span>
-          </h1>
+          {/* h2 y no h1: el h1 de la página es el logo, que vive en el layout. */}
+          <h2 className="text-lg font-semibold tracking-tight">Alertas de margen</h2>
           <p className="text-muted mt-1 text-xs">
             Ventas individuales ordenadas por margen neto, de la peor a la mejor.
           </p>

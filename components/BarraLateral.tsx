@@ -1,25 +1,65 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import BotonSalir from "@/components/BotonSalir";
+import {
+  MarcaMercadoLibre,
+  MarcaTiendaNube,
+  MarcaUnibrandco,
+} from "@/components/Marcas";
 
-export type ItemNav = {
+/**
+ * Un logo real servido desde /public, para cuando dibujar un ícono no alcanza:
+ * "Ventas Mayoristas" es Brandmark y se reconoce por su isotipo, no por un
+ * carrito genérico.
+ *
+ * No lleva `alt` a propósito. La imagen va pegada al texto de la entrada, así
+ * que para un lector de pantalla es decorativa: con `alt` el nombre se leería
+ * dos veces seguidas.
+ */
+export type Logo = { src: string };
+
+export type ClaveIcono =
+  | "ventas"
+  | "logistica"
+  | "cuentas"
+  | "objetivos"
+  | "unibrandco"
+  | "mercadolibre"
+  | "tiendanube";
+
+/** Subpágina de un grupo. Lleva su propia marca porque es la que se mira. */
+export type ItemHijo = {
   href: string;
   label: string;
   icono: ClaveIcono;
-  /** Subpáginas. Si están, la entrada es un grupo desplegable en vez de un link. */
-  hijos?: { href: string; label: string }[];
+  logo?: Logo;
 };
 
-export type ClaveIcono = "ventas" | "logistica" | "cuentas" | "objetivos" | "minorista";
+export type ItemNav = {
+  /** Identificador estable para React. En un link suelto es su propia ruta. */
+  clave: string;
+  label: string;
+  icono: ClaveIcono;
+  /** Si está, reemplaza al ícono dibujado. */
+  logo?: Logo;
+  /** Ruta propia. Un grupo NO tiene: su encabezado despliega, no navega. */
+  href?: string;
+  /** Subpáginas. Si están, la entrada es un grupo desplegable. */
+  hijos?: ItemHijo[];
+};
 
 /**
- * Íconos como SVG inline y no una librería: son cinco, no cambian, y sumar una
- * dependencia entera para esto haría más pesado el bundle que el tablero.
+ * Los íconos de las secciones internas, dibujados a trazo. Van como SVG inline
+ * y no como librería: son cuatro, no cambian, y sumar una dependencia entera
+ * para esto haría más pesado el bundle que el tablero.
  */
-const ICONOS: Record<ClaveIcono, ReactNode> = {
+type ClaveTrazo = "ventas" | "logistica" | "cuentas" | "objetivos";
+
+const TRAZOS: Record<ClaveTrazo, ReactNode> = {
   ventas: (
     <>
       <circle cx="9" cy="20" r="1.5" />
@@ -46,18 +86,30 @@ const ICONOS: Record<ClaveIcono, ReactNode> = {
       <circle cx="12" cy="12" r="1" />
     </>
   ),
-  // Local a la calle: la venta minorista es la que le vende al consumidor final.
-  minorista: (
-    <>
-      <path d="M3.5 9.5 5 4h14l1.5 5.5" />
-      <path d="M3.5 9.5a2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 2 0" />
-      <path d="M5 11v9h14v-9" />
-      <path d="M10 20v-5h4v5" />
-    </>
-  ),
 };
 
+/**
+ * Las marcas reales. No pueden entrar en `TRAZOS` porque no son un trazo suelto
+ * dentro de un `<svg>` compartido: cada una trae su propio `viewBox` y sus
+ * propios colores (ver components/Marcas.tsx).
+ */
+const MARCAS = {
+  unibrandco: MarcaUnibrandco,
+  mercadolibre: MarcaMercadoLibre,
+  tiendanube: MarcaTiendaNube,
+} as const;
+
+/**
+ * La caja de 18 px es la misma para todos. Las marcas no tienen la misma
+ * proporción —la U es vertical, la elipse de Mercado Libre es apaisada—, así
+ * que el SVG se centra adentro sin deformarse en vez de estirarse al cuadrado.
+ */
 function Icono({ clave }: { clave: ClaveIcono }) {
+  if (clave in MARCAS) {
+    const Marca = MARCAS[clave as keyof typeof MARCAS];
+    return <Marca className="size-[18px] shrink-0" />;
+  }
+
   return (
     <svg
       viewBox="0 0 24 24"
@@ -69,20 +121,34 @@ function Icono({ clave }: { clave: ClaveIcono }) {
       className="size-[18px] shrink-0"
       aria-hidden="true"
     >
-      {ICONOS[clave]}
+      {TRAZOS[clave as ClaveTrazo]}
     </svg>
+  );
+}
+
+/** El logo si lo hay, el ícono dibujado si no. Siempre ocupa el mismo lugar. */
+function Marca({ icono, logo }: { icono: ClaveIcono; logo?: Logo }) {
+  if (!logo) return <Icono clave={icono} />;
+  return (
+    <Image
+      src={logo.src}
+      alt=""
+      width={64}
+      height={64}
+      className="size-[18px] shrink-0 object-contain"
+    />
   );
 }
 
 /** Clases del link de nav, para que el item suelto y el hijo de un grupo coincidan. */
 function clasesLink(activo: boolean, sangria = false) {
   return `flex items-center gap-3 rounded-lg py-2 text-sm transition-colors ${
-    sangria ? "pr-3 pl-11" : "px-3"
+    sangria ? "pr-3 pl-7" : "px-3"
   } ${activo ? "bg-panel-2 text-ink font-medium" : "text-muted hover:bg-panel-2/60 hover:text-ink"}`;
 }
 
 /**
- * Entrada con subpáginas ("Venta minorista" -> Mercado Libre, Tienda Nube).
+ * Entrada con subpáginas ("Ventas Mayoristas", "Ventas minoristas").
  *
  * Arranca abierta cuando estás parado en cualquiera de sus hijos: si no, entrar
  * por un link directo dejaría la barra mostrando el grupo cerrado y la página
@@ -112,7 +178,7 @@ function Grupo({
         aria-expanded={abierto}
         className={`${clasesLink(dentro && !abierto)} w-full text-left`}
       >
-        <Icono clave={item.icono} />
+        <Marca icono={item.icono} logo={item.logo} />
         <span className="flex-1 truncate">{item.label}</span>
         <svg
           viewBox="0 0 24 24"
@@ -133,6 +199,11 @@ function Grupo({
             // `startsWith` acá sí: las pestañas de Mercado Libre cuelgan de su
             // propia URL, y estando en Alertas el grupo tiene que seguir
             // marcando Mercado Libre.
+            //
+            // La excepción son las páginas de objetivos: comparten el prefijo
+            // /objetivos pero no cuelgan una de otra, así que se comparan
+            // enteras. Por eso el `===` va primero y el `startsWith` exige la
+            // barra: /objetivos/silvio nunca es prefijo de /objetivos/ramon.
             const activo = pathname === h.href || pathname.startsWith(`${h.href}/`);
             return (
               <li key={h.href}>
@@ -142,6 +213,7 @@ function Grupo({
                   aria-current={activo ? "page" : undefined}
                   className={clasesLink(activo, true)}
                 >
+                  <Marca icono={h.icono} logo={h.logo} />
                   <span className="truncate">{h.label}</span>
                 </Link>
               </li>
@@ -181,7 +253,7 @@ function Contenido({
             if (item.hijos?.length) {
               return (
                 <Grupo
-                  key={item.href}
+                  key={item.clave}
                   item={item}
                   pathname={pathname}
                   alNavegar={alNavegar}
@@ -189,18 +261,23 @@ function Contenido({
               );
             }
 
+            // Sin hijos y sin href no hay nada que mostrar: un grupo al que los
+            // permisos le sacaron todas las subpáginas ya viene filtrado, pero
+            // el tipo permite la combinación y acá se descarta.
+            if (!item.href) return null;
+
             // `startsWith` no sirve acá: /objetivos marcaría activas las cuatro
             // páginas de vendedor a la vez.
             const activo = pathname === item.href;
             return (
-              <li key={item.href}>
+              <li key={item.clave}>
                 <Link
                   href={item.href}
                   onClick={alNavegar}
                   aria-current={activo ? "page" : undefined}
                   className={clasesLink(activo)}
                 >
-                  <Icono clave={item.icono} />
+                  <Marca icono={item.icono} logo={item.logo} />
                   <span className="truncate">{item.label}</span>
                 </Link>
               </li>

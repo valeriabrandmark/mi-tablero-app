@@ -119,9 +119,10 @@ export default function DashboardStockFullPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight">
-            Stock Full <span className="text-muted text-sm font-normal">· Mercado Libre</span>
-          </h1>
+          {/* h2 y no h1: el h1 de la página es el logo, que vive en el layout. */}
+          <h2 className="text-lg font-semibold tracking-tight">
+            Stock Full <span className="text-muted text-sm font-normal">· días sin venta</span>
+          </h2>
           <p className="text-muted mt-1 text-xs">
             {data
               ? `Actualizado ${new Date(data.generadoEn).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`
