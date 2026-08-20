@@ -75,10 +75,10 @@ export function MarcaUnibrandco({ className, titulo }: Props) {
  */
 export function MarcaTiendaNube({ className, titulo }: Props) {
   return (
-    <svg viewBox="0 0 100 100" fill="none" className={className} {...accesibilidad(titulo)}>
-      <g stroke="currentColor" strokeWidth="12">
-        <circle cx="34" cy="36" r="19" />
-        <circle cx="60" cy="56" r="26" />
+    <svg viewBox="0 0 98 94" fill="none" className={className} {...accesibilidad(titulo)}>
+      <g stroke="currentColor" strokeWidth="13">
+        <circle cx="32" cy="32" r="20" />
+        <circle cx="62" cy="58" r="24" />
       </g>
     </svg>
   );
@@ -96,28 +96,53 @@ export function MarcaMercadoLibre({ className, titulo }: Props) {
   return (
     <svg viewBox="0 0 100 68" fill="none" className={className} {...accesibilidad(titulo)}>
       <ellipse cx="50" cy="34" rx="46" ry="30" fill="#ffe600" stroke="#2d3277" strokeWidth="5" />
-      {/* La banda blanca del medio se recorta contra la elipse para que no se
-          escape por los costados. */}
       <clipPath id="ml-elipse">
         <ellipse cx="50" cy="34" rx="46" ry="30" />
       </clipPath>
-      <g clipPath="url(#ml-elipse)">
-        <path d="M0 34Q50 6 100 34Q50 62 0 34Z" fill="#fff" />
-        {/* Las dos manos entran EN DIAGONAL y se cruzan en el medio: dibujadas
-            horizontales quedaban una al lado de la otra y el conjunto se leía
-            como una barra, no como un apretón.
 
-            La de la derecha va dos veces, primero en blanco y más gruesa: ese
-            halo es lo que la separa de la de abajo. Sin él las dos se funden en
-            una sola mancha azul. */}
-        <g strokeLinecap="round" fill="none">
-          <path d="M18 38 52 32" stroke="#2d3277" strokeWidth="8" />
-          <path d="M82 30 48 36" stroke="#fff" strokeWidth="12" />
-          <path d="M82 30 48 36" stroke="#2d3277" strokeWidth="8" />
-          {/* Los dedos de la mano de arriba. A 18 px no se distinguen, pero en
-              el encabezado son los que terminan de contar qué es. */}
-          <path d="M53.3 31 54.7 38.8M60.3 29.8 61.7 37.6M67.3 28.6 68.7 36.4" stroke="#fff" strokeWidth="1.5" />
+      {/* NO hay una franja blanca de fondo. El blanco del logo SON los brazos y
+          las manos: su contorno es el que separa el blanco del amarillo. Puesto
+          como franja aparte quedaban cuatro líneas horizontales cruzando la
+          elipse —el borde de la franja más el de cada brazo— y el conjunto se
+          leía como una venda a rayas.
+
+          Cada parte se dibuja dos veces: primero todos los contornos en azul y
+          más gruesos, después todos los rellenos en blanco y más finos. En ese
+          orden los contornos internos quedan tapados y sobrevive solo la
+          silueta de afuera, que es lo que hace un dibujo de línea. */}
+      <g clipPath="url(#ml-elipse)" fill="none" strokeLinecap="round">
+        <g stroke="#2d3277">
+          <path d="M0 42 40 36" strokeWidth="22" />
+          <path d="M100 25 62 30" strokeWidth="22" />
+          <path d="M40 38 62 29" strokeWidth="31" />
         </g>
+        <g stroke="#fff">
+          <path d="M0 42 40 36" strokeWidth="17" />
+          <path d="M100 25 62 30" strokeWidth="17" />
+          <path d="M40 38 62 29" strokeWidth="26" />
+        </g>
+
+        {/* Las cuatro yemas de la mano de abajo, en diagonal hacia arriba. Ese
+            gesto es el que hace que se lea un apretón: puestas en fila
+            horizontal quedaban dos palos cruzados. */}
+        <g fill="#fff" stroke="#2d3277" strokeWidth="2.2">
+          <circle cx="40" cy="44" r="4.3" />
+          <circle cx="46" cy="42" r="4.5" />
+          <circle cx="52" cy="39.5" r="4.5" />
+          <circle cx="58" cy="36.5" r="4.2" />
+        </g>
+        {/* La separación entre dedo y dedo. Sin estas líneas las yemas son
+            cuatro bolitas sueltas y no una mano. */}
+        <path
+          d="M41 40 45 35M47 38 51 33M53 35 57 30"
+          stroke="#2d3277"
+          strokeWidth="2.2"
+        />
+
+        {/* El pulgar de la mano de arriba, apoyado sobre la otra. Va último
+            porque en el logo queda por encima de todo. */}
+        <path d="M40 34 64 26" stroke="#2d3277" strokeWidth="12.5" />
+        <path d="M40 34 64 26" stroke="#fff" strokeWidth="8.5" />
       </g>
     </svg>
   );
