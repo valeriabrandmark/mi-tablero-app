@@ -210,12 +210,11 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
+      {/* Sin título: el logo y la pestaña activa, los dos arriba de esto, ya
+          dicen dónde estás. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight">
-            Mercado Libre <span className="text-muted text-sm font-normal">· Unibrandco</span>
-          </h1>
-          <p className="text-muted mt-1 text-xs">
+          <p className="text-muted text-xs">
             {data
               ? `Actualizado ${new Date(data.generadoEn).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}` +
                 (data.ultimaVenta ? ` · última venta cargada ${fmtFechaCorta(data.ultimaVenta)}` : "")

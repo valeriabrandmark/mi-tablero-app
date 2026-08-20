@@ -23,7 +23,10 @@ const NAV: ItemNav[] = [
     icono: "ventas",
     logo: { src: "/isotipo.png" },
     hijos: [
-      { href: "/ventas-mayoristas", label: "Tablero Ventas Brandmark", icono: "ventas" },
+      // "Tablero Brandmark" y no "Tablero Ventas Brandmark": el nombre largo no
+      // entra en los 240 px de la barra y quedaba cortado en "Tablero Ventas
+      // Bran…". El encabezado del grupo ya dice "Ventas Mayoristas".
+      { href: "/ventas-mayoristas", label: "Tablero Brandmark", icono: "ventas" },
       { href: "/logistica", label: "Logística", icono: "logistica" },
       { href: "/cuentas-corrientes", label: "Cuentas Corrientes", icono: "cuentas" },
       // Una entrada por vendedor: cada uno entra directo a su tablero.
@@ -37,7 +40,7 @@ const NAV: ItemNav[] = [
   {
     clave: "minoristas",
     label: "Ventas minoristas",
-    icono: "minorista",
+    icono: "unibrandco",
     hijos: [
       // Mercado Libre sigue teniendo sus pestañas (Tablero, Alertas, Stock
       // Full) adentro de la página: no se abren acá porque son vistas del mismo

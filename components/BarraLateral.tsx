@@ -5,6 +5,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import BotonSalir from "@/components/BotonSalir";
+import {
+  MarcaMercadoLibre,
+  MarcaTiendaNube,
+  MarcaUnibrandco,
+} from "@/components/Marcas";
 
 /**
  * Un logo real servido desde /public, para cuando dibujar un ícono no alcanza:
@@ -22,7 +27,7 @@ export type ClaveIcono =
   | "logistica"
   | "cuentas"
   | "objetivos"
-  | "minorista"
+  | "unibrandco"
   | "mercadolibre"
   | "tiendanube";
 
@@ -48,10 +53,13 @@ export type ItemNav = {
 };
 
 /**
- * Íconos como SVG inline y no una librería: son pocos, no cambian, y sumar una
- * dependencia entera para esto haría más pesado el bundle que el tablero.
+ * Los íconos de las secciones internas, dibujados a trazo. Van como SVG inline
+ * y no como librería: son cuatro, no cambian, y sumar una dependencia entera
+ * para esto haría más pesado el bundle que el tablero.
  */
-const ICONOS: Record<ClaveIcono, ReactNode> = {
+type ClaveTrazo = "ventas" | "logistica" | "cuentas" | "objetivos";
+
+const TRAZOS: Record<ClaveTrazo, ReactNode> = {
   ventas: (
     <>
       <circle cx="9" cy="20" r="1.5" />
@@ -78,31 +86,30 @@ const ICONOS: Record<ClaveIcono, ReactNode> = {
       <circle cx="12" cy="12" r="1" />
     </>
   ),
-  // Local a la calle: la venta minorista es la que le vende al consumidor final.
-  minorista: (
-    <>
-      <path d="M3.5 9.5 5 4h14l1.5 5.5" />
-      <path d="M3.5 9.5a2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 2 0" />
-      <path d="M5 11v9h14v-9" />
-      <path d="M10 20v-5h4v5" />
-    </>
-  ),
-  // Marcas de reemplazo hasta que estén los PNG de Mercado Libre y Tienda Nube.
-  // Son formas genéricas a propósito: una imitación dibujada a mano de un logo
-  // ajeno se ve peor que un ícono neutro, y el día que llegue el archivo se
-  // cambia agregando `logo` en el nav, sin tocar esto.
-  mercadolibre: (
-    <>
-      <path d="M5 8h14l-1.1 12H6.1L5 8Z" />
-      <path d="M9 8V6.5a3 3 0 0 1 6 0V8" />
-    </>
-  ),
-  tiendanube: (
-    <path d="M7.5 19a4.5 4.5 0 0 1-.6-8.96 5.5 5.5 0 0 1 10.65 1.06A3.95 3.95 0 0 1 17 19H7.5Z" />
-  ),
 };
 
+/**
+ * Las marcas reales. No pueden entrar en `TRAZOS` porque no son un trazo suelto
+ * dentro de un `<svg>` compartido: cada una trae su propio `viewBox` y sus
+ * propios colores (ver components/Marcas.tsx).
+ */
+const MARCAS = {
+  unibrandco: MarcaUnibrandco,
+  mercadolibre: MarcaMercadoLibre,
+  tiendanube: MarcaTiendaNube,
+} as const;
+
+/**
+ * La caja de 18 px es la misma para todos. Las marcas no tienen la misma
+ * proporción —la U es vertical, la elipse de Mercado Libre es apaisada—, así
+ * que el SVG se centra adentro sin deformarse en vez de estirarse al cuadrado.
+ */
 function Icono({ clave }: { clave: ClaveIcono }) {
+  if (clave in MARCAS) {
+    const Marca = MARCAS[clave as keyof typeof MARCAS];
+    return <Marca className="size-[18px] shrink-0" />;
+  }
+
   return (
     <svg
       viewBox="0 0 24 24"
@@ -114,7 +121,7 @@ function Icono({ clave }: { clave: ClaveIcono }) {
       className="size-[18px] shrink-0"
       aria-hidden="true"
     >
-      {ICONOS[clave]}
+      {TRAZOS[clave as ClaveTrazo]}
     </svg>
   );
 }

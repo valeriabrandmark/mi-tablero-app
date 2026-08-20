@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import EncabezadoCanal from "@/components/EncabezadoCanal";
 import VentaRentabilidad from "@/components/charts/VentaRentabilidad";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import BarraFiltrosTiendaNube from "@/components/FiltrosTiendaNube";
@@ -285,10 +286,10 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight">
-            Tienda Nube <span className="text-muted text-sm font-normal">· Unibrandco</span>
+          <h1>
+            <EncabezadoCanal canal="tienda-nube" />
           </h1>
           <p className="text-muted mt-1 text-xs">
             {data
