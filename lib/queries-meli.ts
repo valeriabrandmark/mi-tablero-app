@@ -12,6 +12,7 @@ import {
 } from "@/lib/meli";
 import type {
   ArticuloMeli,
+  CancelacionesMeli,
   DashboardAlertasMeli,
   DashboardMeli,
   FilaAlertaMeli,
@@ -376,7 +377,7 @@ async function getTopRentabilidad(f: FiltrosMeli): Promise<ArticuloMeli[]> {
  */
 async function getRanking(
   f: FiltrosMeli,
-  clave: "proveedor" | "marca",
+  clave: "proveedor",
   limite: number,
 ): Promise<RankingMeli[]> {
   const w = whereBase(f, [clave]);
@@ -553,22 +554,22 @@ export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
     porDia,
     horasCrudas,
     porProveedor,
-    porMarca,
     topRentabilidad,
     articulos,
     ventaTotalProveedores,
     ultimaVenta,
+    cancelaciones,
     kpisAnterior,
   ] = await Promise.all([
     getKpis(f),
     getPorDia(f),
     getPorHora(f),
     getRanking(f, "proveedor", 12),
-    getRanking(f, "marca", 12),
     getTopRentabilidad(f),
     getArticulos(f),
     getVentaTotalProveedores(f),
     getUltimaVenta(),
+    getCancelacionesMeli(f),
     // El período anterior mantiene TODOS los otros filtros: comparar "esta
     // semana de ALGABO" contra "la semana pasada de todo" no diría nada.
     anterior ? getKpis({ ...f, ...anterior }, corteHora) : Promise.resolve(null),
@@ -593,11 +594,11 @@ export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
     porDia,
     porHora: completarHoras(horasCrudas),
     porProveedor,
-    porMarca,
     topRentabilidad,
     articulos,
     ventaTotalProveedores,
     ultimaVenta,
+    cancelaciones,
     generadoEn: new Date().toISOString(),
   };
 }
@@ -676,8 +677,30 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
             ${COSTO}                         as costo,
             ${COMISION}                      as comision,
             ${ENVIO}                         as envio,
-            ${RENTABILIDAD}                  as rentabilidad
-     from gold.fact_ventas
+            ${RENTABILIDAD}                  as rentabilidad,
+            -- Si esa orden tuvo una devolucion PARCIAL. Se lee de bronze y
+            -- no de gold porque fact_ventas no guarda el estado de la orden:
+            -- guarda la venta. Asi el dato sale sin migrar nada ni esperar un
+            -- modelo.py --todo para verlo en el historico.
+            --
+            -- Va como subconsulta y no como join: si una orden no estuviera
+            -- en bronze, la linea tiene que seguir apareciendo en las alertas
+            -- (sin marca) en vez de desaparecer de la tabla.
+            -- EXISTS y no una subconsulta que devuelva el valor: bronze.ml_ventas
+            -- puede tener la misma orden mas de una vez (paso: 790 filas de mas
+            -- por un error de huso, ver limpiar_duplicados_ml_ventas.sql), y una
+            -- subconsulta escalar revienta con "more than one row returned".
+            -- EXISTS es inmune a eso, asi que la pantalla no depende de que la
+            -- limpieza este hecha.
+            --
+            -- ::text para que la fila entera siga siendo de texto, como el resto:
+            -- un solo booleano suelto obligaria a ensanchar el tipo de TODAS las
+            -- columnas y a andar comprobando cual es cual.
+            exists (select 1
+                      from bronze.ml_ventas v
+                     where v.id::bigint = fv.nro_orden::bigint
+                       and v.status = 'partially_refunded')::text as parcial
+     from gold.fact_ventas fv
      where ${w.sql}
      order by (${MARGEN_NETO}) asc nulls first, ${VENTA_SIVA} desc
      limit ${TOPE_ALERTAS}`,
@@ -703,6 +726,7 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
 
     return {
       nivel,
+      parcial: r.parcial === "true",
       fecha: r.fecha,
       nroOrden: r.nro_orden,
       sku: r.sku,
@@ -740,4 +764,115 @@ export async function getDashboardAlertasMeli(f: FiltrosMeli): Promise<Dashboard
     recortada: filas.length === TOPE_ALERTAS,
     generadoEn: new Date().toISOString(),
   };
+}
+
+// --- Cancelaciones -----------------------------------------------------------
+
+/**
+ * Las órdenes CANCELADAS del recorte.
+ *
+ * No salen de `gold.fact_ventas` sino de `bronze.ml_ventas`, y eso es a
+ * propósito: una cancelación no es una venta, así que no tiene que estar en la
+ * tabla de ventas. Meterla ahí con una marquita obligaría a que cada consulta
+ * del sistema se acuerde de excluirla, y el día que una se olvide el número
+ * queda mal sin que nadie lo note.
+ *
+ * El precio es el de la orden (`unit_price`), no hay costo ni margen: la
+ * pregunta acá no es cuánto se ganó sino QUÉ se cancela y cuánto pesa.
+ *
+ * `proveedor` y `marca` salen de cruzar contra `bronze.sigma_articulos`, que es
+ * de donde los toma `modelo.py`. Un SKU que no está en el catálogo queda sin
+ * proveedor en vez de quedar afuera: la cancelación existió igual.
+ */
+export async function getCancelacionesMeli(f: FiltrosMeli): Promise<CancelacionesMeli> {
+  const params: unknown[] = [];
+  const clauses: string[] = [];
+
+  // El rango se compara sobre la fecha YA CONVERTIDA a hora argentina, igual
+  // que en el resto de la sección: ML manda el offset -04:00 y sin convertir
+  // las ventas de la noche caerían en el día equivocado.
+  if (f.desde) {
+    params.push(f.desde);
+    clauses.push(`l.fecha >= $${params.length}::date`);
+  }
+  if (f.hasta) {
+    params.push(f.hasta);
+    clauses.push(`l.fecha <= $${params.length}::date`);
+  }
+  agregarFiltro(clauses, params, "l.sku", f.sku);
+  agregarFiltro(clauses, params, 'a."proveedorNombre"', f.proveedor);
+  agregarFiltro(clauses, params, 'a."attributes.marca"', f.marca);
+
+  const where = clauses.length ? `where ${clauses.join("\n     and ")}` : "";
+
+  const filas = await query<Record<string, string | null>>(
+    `with lineas as (
+       select v.id                                                     as nro_orden,
+              (v.date_created::timestamptz
+                 at time zone 'America/Argentina/Buenos_Aires')::date   as fecha,
+              it->'item'->>'seller_sku'                                 as sku,
+              it->'item'->>'title'                                      as producto,
+              (it->>'quantity')::numeric                                as cantidad,
+              (it->>'unit_price')::numeric * (it->>'quantity')::numeric as monto
+       from bronze.ml_ventas v,
+            lateral jsonb_array_elements(v.order_items::jsonb) as it
+       where v.status = 'cancelled'
+     )
+     select l.sku,
+            max(l.producto)             as producto,
+            max(a."proveedorNombre")    as proveedor,
+            max(a."attributes.marca")   as marca,
+            count(distinct l.nro_orden) as ordenes,
+            sum(l.cantidad)             as unidades,
+            sum(l.monto)                as monto
+     from lineas l
+     left join bronze.sigma_articulos a on trim(a.id::text) = trim(l.sku)
+     ${where}
+     group by l.sku
+     order by monto desc
+     limit 100`,
+    params,
+  );
+
+  const mapeadas = filas.map((r) => ({
+    sku: r.sku,
+    producto: r.producto,
+    proveedor: r.proveedor,
+    marca: r.marca,
+    ordenes: num(r.ordenes),
+    unidades: num(r.unidades),
+    monto: num(r.monto),
+  }));
+
+  return {
+    // Las órdenes NO se suman de las filas: una orden cancelada de tres
+    // productos aparece en tres filas, y sumarlas la contaría tres veces.
+    // Por eso el total viene de su propia consulta.
+    ordenes: await contarOrdenesCanceladas(params, where),
+    unidades: mapeadas.reduce((a, r) => a + r.unidades, 0),
+    monto: mapeadas.reduce((a, r) => a + r.monto, 0),
+    filas: mapeadas,
+    recortada: mapeadas.length === 100,
+  };
+}
+
+/** Órdenes canceladas distintas del recorte. Ver por qué en `getCancelacionesMeli`. */
+async function contarOrdenesCanceladas(params: unknown[], where: string): Promise<number> {
+  const fila = await queryOne<{ n: string }>(
+    `with lineas as (
+       select v.id                                                    as nro_orden,
+              (v.date_created::timestamptz
+                 at time zone 'America/Argentina/Buenos_Aires')::date  as fecha,
+              it->'item'->>'seller_sku'                                as sku
+       from bronze.ml_ventas v,
+            lateral jsonb_array_elements(v.order_items::jsonb) as it
+       where v.status = 'cancelled'
+     )
+     select count(distinct l.nro_orden) as n
+     from lineas l
+     left join bronze.sigma_articulos a on trim(a.id::text) = trim(l.sku)
+     ${where}`,
+    params,
+  );
+  return num(fila?.n);
 }

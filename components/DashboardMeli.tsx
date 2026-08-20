@@ -12,7 +12,14 @@ import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { CARGA_IMPOSITIVA } from "@/lib/meli";
 import { PALETA, TEMA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
-import type { ArticuloMeli, DashboardMeli, FiltrosMeli, OpcionesMeli, RankingMeli } from "@/lib/types";
+import type {
+  ArticuloMeli,
+  DashboardMeli,
+  FilaCancelacionMeli,
+  FiltrosMeli,
+  OpcionesMeli,
+  RankingMeli,
+} from "@/lib/types";
 
 type Respuesta = DashboardMeli & { opciones: OpcionesMeli | null };
 
@@ -52,6 +59,33 @@ const COLUMNAS_ARTICULOS: Columna<ArticuloMeli>[] = [
     ),
     numerica: true,
     orden: (a) => a.margenPct,
+  },
+];
+
+/**
+ * Cancelaciones. NO tiene columna de costo ni de margen a propósito: no fue una
+ * venta, así que no hay ganancia que calcular. La pregunta acá es otra — qué se
+ * cancela y cuánto pesa.
+ */
+const COLUMNAS_CANCELACIONES: Columna<FilaCancelacionMeli>[] = [
+  { titulo: "SKU", celda: (c) => c.sku ?? "—", orden: (c) => c.sku },
+  {
+    titulo: "Producto",
+    celda: (c) => <span className="block max-w-[320px] truncate">{c.producto ?? "—"}</span>,
+    orden: (c) => c.producto,
+  },
+  {
+    titulo: "Marca",
+    celda: (c) => <span className="block max-w-[140px] truncate">{c.marca ?? "—"}</span>,
+    orden: (c) => c.marca,
+  },
+  { titulo: "Órdenes", celda: (c) => fmtNumero(c.ordenes), numerica: true, orden: (c) => c.ordenes },
+  { titulo: "Unid.", celda: (c) => fmtNumero(c.unidades), numerica: true, orden: (c) => c.unidades },
+  {
+    titulo: "Monto cancelado",
+    celda: (c) => <span style={{ color: TEMA.negativo }}>{fmtMoneda(c.monto)}</span>,
+    numerica: true,
+    orden: (c) => c.monto,
   },
 ];
 
@@ -353,17 +387,21 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
 
           <div className="grid gap-4 xl:grid-cols-2">
             <Panel
-              titulo="Órdenes por hora del día"
-              nota="Hora argentina · todo el recorte elegido"
+              titulo="Facturación por hora del día"
+              nota="Venta c/IVA · hora argentina · todo el recorte elegido"
             >
-              {/* Órdenes y no facturación: la pregunta es a qué hora COMPRA la
-                  gente, y una sola venta grande movería el pico de lugar. */}
+              {/* Facturación y no cantidad de órdenes. La diferencia importa:
+                  la hora con más órdenes puede no ser la que más factura, y a
+                  la hora de decidir cuándo empujar una publicación lo que pesa
+                  son los pesos. Ojo con el otro lado de la moneda: una sola
+                  venta grande puede mover el pico de lugar, sobre todo en
+                  recortes de un día. */}
               <BarrasCategoria
                 datos={data.porHora.map((h) => ({
                   label: `${h.hora}`,
-                  valor: h.ordenes,
+                  valor: h.venta,
                 }))}
-                formato={fmtNumero}
+                formato={fmtMoneda}
                 horizontal={false}
                 colorUnico={PALETA[4]}
                 alturaMinima={220}
@@ -405,14 +443,39 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
             </Panel>
           </div>
 
-          <Panel titulo="Rentabilidad por marca" nota="Top 12 por venta · click para filtrar">
-            <TablaRanking
-              filas={data.porMarca}
-              titulo="Marca"
-              seleccionados={filtros.marca}
-              onSeleccionar={alternarEn("marca")}
-            />
-          </Panel>
+          {/* Las cancelaciones van al FINAL y en su propio panel, no mezcladas
+              con las ventas. Es una decisión, no una comodidad: una cancelación
+              no es una venta, así que no entra en ningún KPI de arriba ni en
+              gold.fact_ventas. Acá se mira otra cosa —qué se cancela y cuánto
+              pesa— y por eso la tabla no tiene costo ni margen. */}
+          {data.cancelaciones.ordenes > 0 && (
+            <Panel
+              titulo="Canceladas"
+              nota={
+                `${fmtNumero(data.cancelaciones.ordenes)} ${data.cancelaciones.ordenes === 1 ? "orden cancelada" : "órdenes canceladas"}` +
+                ` · ${fmtMoneda(data.cancelaciones.monto)}` +
+                (k && k.ventaCiva + data.cancelaciones.monto > 0
+                  ? ` · ${fmtPct(data.cancelaciones.monto / (k.ventaCiva + data.cancelaciones.monto))} de lo transaccionado`
+                  : "") +
+                (data.cancelaciones.recortada ? " · se muestran los 100 mayores" : "")
+              }
+            >
+              <Tabla
+                filas={data.cancelaciones.filas}
+                columnas={COLUMNAS_CANCELACIONES}
+                clave={(c, i) => `${c.sku ?? "sin-sku"}-${i}`}
+                onClickFila={(c) => c.sku && alternarEn("sku")(c.sku)}
+                activa={(c) => (filtros.sku?.length ? filtros.sku.includes(c.sku ?? "") : false)}
+                vacio="Ninguna orden cancelada en el recorte elegido."
+              />
+              <p className="text-muted mt-3 text-[11px] leading-relaxed">
+                Estas órdenes <strong>no</strong> están en ninguna tarjeta de arriba ni en el
+                resto del tablero: no fueron ventas. El monto es lo que se habría facturado, por
+                eso no hay costo ni margen. El porcentaje se mide sobre todo lo transaccionado
+                (vendido + cancelado).
+              </p>
+            </Panel>
+          )}
 
           <Panel
             titulo="Artículos"
