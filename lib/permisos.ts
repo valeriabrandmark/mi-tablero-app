@@ -131,7 +131,12 @@ function esDeMinorista(pathname: string): boolean {
  * `startsWith("/api/")` genérico, cualquier API que se agregue mañana quedaría
  * abierta al responsable de Meli sin que nadie lo haya decidido.
  */
-const APIS_MINORISTA = ["/api/meli", "/api/tienda-nube", "/api/stock-full"];
+const APIS_MINORISTA = [
+  "/api/meli",
+  "/api/tienda-nube",
+  "/api/stock-full",
+  "/api/elasticidad",
+];
 
 function esApiMinorista(pathname: string): boolean {
   return APIS_MINORISTA.some((r) => pathname === r || pathname.startsWith(`${r}/`));

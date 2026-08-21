@@ -2,8 +2,8 @@ import EncabezadoCanal from "@/components/EncabezadoCanal";
 import PestanasMeli, { type Pestana } from "@/components/PestanasMeli";
 
 /**
- * Las tres pestañas del tablero de Mercado Libre, iguales a las del reporte de
- * Data Studio.
+ * Las pestañas del tablero de Mercado Libre. Las tres primeras son las del
+ * reporte de Data Studio.
  *
  * La de stock estuvo marcada como "pendiente" hasta que el orquestador empezó a
  * cargar `ml_stock_full` y `ml_publicaciones` todos los días: antes se habían
@@ -17,14 +17,20 @@ const PESTANAS: Pestana[] = [
     href: "/venta-minorista/mercado-libre/stock-full",
     label: "Stock Full · días sin venta",
   },
+  // Esta no viene de Data Studio: es el experimento de markup, y es la única
+  // que no describe lo que pasó sino que responde una pregunta que nos hicimos.
+  {
+    href: "/venta-minorista/mercado-libre/elasticidad",
+    label: "Elasticidad de precios",
+  },
 ];
 
 export default function MercadoLibreLayout({
   children,
 }: LayoutProps<"/venta-minorista/mercado-libre">) {
-  // El logo va acá y no en cada página: es el mismo tablero visto de tres
-  // maneras, no tres secciones distintas. Puesto en las pestañas se repetiría
-  // tres veces y parpadearía al cambiar de una a otra.
+  // El logo va acá y no en cada página: es el mismo tablero visto de varias
+  // maneras, no varias secciones distintas. Puesto en las pestañas se repetiría
+  // una vez por pestaña y parpadearía al cambiar de una a otra.
   return (
     <>
       <h1 className="mb-4">
