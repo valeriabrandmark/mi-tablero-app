@@ -141,11 +141,20 @@ async function getBandas(f: FiltrosElasticidad): Promise<ResumenBanda[]> {
  * algún momento del día: al comprador le alcanza con una.
  */
 const DIAS_SIN_STOCK = `
+-- OJO CON LOS PARAMETROS: acá son $1 = desde y $2 = hasta, y NO se pasa el
+-- canal. No es un descuido — este bloque no mira ventas, mira el pulso, que no
+-- tiene canal.
+--
+-- Antes recibía \`[CANAL_MELI, desde, hasta]\` para que la posición coincidiera
+-- con el resto del archivo, y \`$1\` quedaba sin aparecer en el SQL. Postgres no
+-- puede inferir el tipo de un parámetro que no se usa en ningún lado, así que
+-- la consulta moría con "could not determine data type of parameter $1" — un
+-- error que no menciona ni la consulta ni el parámetro de más.
 with dias_mirados as (
   select distinct (c.momento at time zone 'America/Argentina/Buenos_Aires')::date as dia
     from bronze.ml_pulso_corrida c
    where (c.momento at time zone 'America/Argentina/Buenos_Aires')::date
-         between $2::date and $3::date
+         between $1::date and $2::date
 ),
 skus as (
   select distinct sku from bronze.ml_estado_item where sku is not null
@@ -184,7 +193,7 @@ sin_stock as (
 async function getDiasSinStock(f: FiltrosElasticidad): Promise<DiaSinStock[]> {
   if (!f.sku?.length) return [];
 
-  const params: unknown[] = [CANAL_MELI, f.desde, f.hasta];
+  const params: unknown[] = [f.desde, f.hasta];
   const clauses: string[] = [];
   agregarFiltro(clauses, params, "s.sku", f.sku);
 
@@ -203,7 +212,7 @@ async function getDiasSinStock(f: FiltrosElasticidad): Promise<DiaSinStock[]> {
 async function getSkusQuebrados(f: FiltrosElasticidad): Promise<number> {
   const filas = await query<{ n: string }>(
     `${DIAS_SIN_STOCK} select count(distinct sku)::text as n from sin_stock`,
-    [CANAL_MELI, f.desde, f.hasta],
+    [f.desde, f.hasta],
   );
   return num(filas[0]?.n);
 }
@@ -213,7 +222,7 @@ async function getResumenSinStock(f: FiltrosElasticidad): Promise<Map<string, nu
   const filas = await query<Record<string, string>>(
     `${DIAS_SIN_STOCK}
      select sku, count(*) as dias from sin_stock group by sku`,
-    [CANAL_MELI, f.desde, f.hasta],
+    [f.desde, f.hasta],
   );
   return new Map(filas.map((r) => [r.sku, num(r.dias)]));
 }
@@ -222,7 +231,7 @@ async function getResumenSinStock(f: FiltrosElasticidad): Promise<Map<string, nu
 async function getDiasMirados(f: FiltrosElasticidad): Promise<number> {
   const filas = await query<{ dias: string }>(
     `${DIAS_SIN_STOCK} select count(*)::text as dias from dias_mirados`,
-    [CANAL_MELI, f.desde, f.hasta],
+    [f.desde, f.hasta],
   );
   return num(filas[0]?.dias);
 }
@@ -327,7 +336,10 @@ async function getKpis(f: FiltrosElasticidad, bandas: ResumenBanda[]): Promise<K
 }
 
 export async function getOpcionesElasticidad(f: FiltrosElasticidad) {
-  const w = where(f);
+  // Sin los filtros de proveedor/marca puestos: si se filtrara por proveedor,
+  // el desplegable de proveedores mostraría únicamente el ya elegido y no se
+  // podría cambiar sin limpiar antes.
+  const w = where({ desde: f.desde, hasta: f.hasta });
   const [proveedores, marcas] = await Promise.all([
     query<{ v: string }>(
       `select distinct f.proveedor as v from gold.fact_ventas f ${w.sql}
