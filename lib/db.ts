@@ -58,10 +58,40 @@ export function getPool(): Pool {
   return global.__pgPool;
 }
 
+/**
+ * Todo parámetro tiene que aparecer en el SQL. Si alguno sobra, Postgres no
+ * puede inferir su tipo y la consulta muere con:
+ *
+ *     could not determine data type of parameter $1
+ *
+ * Ese mensaje no dice qué consulta fue ni cuál es el parámetro de más, así que
+ * rompió una pantalla entera el 21/08/2026 y hubo que reconstruir a mano cuál
+ * de las cinco consultas era. Chequearlo acá cuesta nada y falla nombrando el
+ * problema.
+ *
+ * No agrega falsos positivos: el caso que detecta es exactamente el que
+ * Postgres ya rechaza. Sólo adelanta el error y lo dice mejor.
+ */
+function verificarParametros(text: string, params: unknown[]): void {
+  const faltantes = params
+    .map((_, i) => i + 1)
+    .filter((n) => !new RegExp(`\\$${n}(?![0-9])`).test(text));
+
+  if (faltantes.length > 0) {
+    throw new Error(
+      `La consulta recibe ${params.length} parámetros pero no usa ` +
+        `${faltantes.map((n) => `$${n}`).join(", ")}. Postgres no puede inferir ` +
+        `el tipo de un parámetro que no aparece en el SQL: sacalo de la lista, ` +
+        `o usalo. SQL: ${text.trim().slice(0, 120)}…`,
+    );
+  }
+}
+
 export async function query<T extends QueryResultRow>(
   text: string,
   params: unknown[] = [],
 ): Promise<T[]> {
+  verificarParametros(text, params);
   const res = await getPool().query<T>(text, params);
   return res.rows;
 }
