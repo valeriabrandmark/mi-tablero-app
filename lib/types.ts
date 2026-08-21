@@ -794,6 +794,8 @@ export type FiltrosElasticidad = {
   proveedor?: string[];
   marca?: string[];
   sku?: string[];
+  /** Bandas elegidas al hacer click en un gráfico. Filtra TODO el tablero. */
+  banda?: string[];
   /** Sólo los artículos con volumen suficiente para leerse solos. */
   soloConfiables?: boolean;
 };
@@ -823,6 +825,16 @@ export type FilaElasticidad = {
   margen: number;
   unidadesPorBanda: Record<string, number>;
   margenPorBanda: Record<string, number>;
+  /** El %margen con el que se vendió en cada banda. */
+  margenPctPorBanda: Record<string, number | null>;
+  /**
+   * Facturación por banda. No se muestra, pero sin ella la fila de totales no
+   * podría promediar los porcentajes como corresponde: el %margen del conjunto
+   * es margen total sobre facturación total, no el promedio de los porcentajes
+   * de cada artículo.
+   */
+  facturacionPorBanda: Record<string, number>;
+  facturacion: number;
   /** La banda que más dejó, o null si vendió en menos de dos. */
   mejor: string | null;
   /** `true` si tiene volumen propio para leerse sin el agregado. */

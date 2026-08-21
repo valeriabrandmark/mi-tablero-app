@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
     proveedor: lista(sp, "proveedor"),
     marca: lista(sp, "marca"),
     sku: lista(sp, "sku"),
+    banda: lista(sp, "banda"),
     soloConfiables: sp.get("soloConfiables") === "1",
   };
 
