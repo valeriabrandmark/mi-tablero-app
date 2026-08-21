@@ -2,166 +2,132 @@
  * Reglas de "Elasticidad de precios" (Mercado Libre).
  *
  * ---------------------------------------------------------------------------
- * QUÉ MIDE
+ * LA BANDA SE DEDUCE DE LA VENTA. NO HAY NINGUNA LISTA.
  *
- * El experimento reparte los artículos en tres grupos. Cada grupo pasa una
- * semana en cada banda de markup sobre el costo y después rota, así que en tres
- * semanas los tres grupos pasaron por las tres bandas. Es un cuadrado latino:
- * cada semana contiene a las tres bandas al mismo tiempo, y por eso el efecto
- * "esta semana se vendió más" —feriados, quincena, campañas de ML— no se puede
- * confundir con el efecto de la banda.
+ * La primera versión de esta pantalla pedía una tabla de asignación —qué
+ * artículo va en qué banda cada semana— y un cuadrado latino que rotara los
+ * grupos. Estaba de más: **cada venta ya trae su precio y su costo**, así que
+ * el margen con el que se vendió se calcula solo, y con el margen se sabe en
+ * qué banda cayó. Quien decide el precio es el sistema de precios; acá sólo se
+ * observa el resultado.
  *
- * ---------------------------------------------------------------------------
- * POR QUÉ ESTA PANTALLA NO MUESTRA UNIDADES
- *
- * Comparar unidades entre semanas no mide elasticidad: mide disponibilidad.
- *
- * Si un SKU quebró stock el martes de la semana de markup 25-35 %, esa semana
- * muestra menos unidades y la lectura ingenua es "con markup alto vende menos"
- * —cuando en realidad no vendió porque no estaba a la venta—. Con más de la
- * mitad del catálogo quebrado en cualquier momento dado, ese sesgo es más
- * grande que el efecto que se busca medir.
- *
- * Por eso todo acá se mide **por día realmente a la venta**, y el quiebre no es
- * un flag sino lo que descuenta el denominador. La historia de disponibilidad
- * la construye `ml_pulso.py` del repo del pipeline.
+ * Eso además arregla un problema que la versión con lista tenía escondido: si
+ * el precio asignado no se cargaba, o se cargaba tarde, o el repricer lo movía,
+ * la lista decía una cosa y la realidad otra — y el tablero le hubiera creído a
+ * la lista.
  *
  * ---------------------------------------------------------------------------
- * Y POR QUÉ LA RESPUESTA ES EL MARGEN Y NO LAS UNIDADES
+ * QUÉ ES EL %MARGEN, EXACTAMENTE
  *
- * "Vender más" no es el objetivo: bajando el markup a cero se vende muchísimo y
- * no queda nada. El número que contesta la pregunta del negocio —cuánto marcar
- * sobre el costo— es el **margen por día a la venta**, que sube cuando el
- * markup sube y baja cuando el markup espanta compradores. Su máximo es el
- * punto de equilibrio que se está buscando.
+ *     (precio bruto − IVA − costo neto − comisión ML neta − envío neto)
+ *     ────────────────────────────────────────────────────────────────
+ *                          precio bruto
  *
- * ---------------------------------------------------------------------------
- * PERO EL MÁXIMO SOLO NO ALCANZA: EL EMPATE SE DESEMPATA HACIA ARRIBA
+ * El denominador es el precio **con IVA**, que es el mismo criterio que usa el
+ * resto de la sección (ver `DENOMINADOR` en `lib/meli.ts`). Que las dos
+ * pantallas midan sobre la misma base no es cosmético: es lo que permite
+ * comparar un número de acá con uno del tablero sin traducir nada.
  *
- * Entre dos bandas que dejan lo mismo por día conviene la de **markup más
- * alto**, porque vende menos unidades para ganar la misma plata. Dicho con el
- * ejemplo del negocio: vender 50 unidades marcando 10 % y vender 20 marcando
- * 30 % no son equivalentes aunque den el mismo total.
- *
- * Importa por dos motivos concretos:
- *
- *   1. El stock dura más. Quemar la mercadería a mitad de semana deja al
- *      artículo sin nada que vender hasta que se repone, y en Full reponer no
- *      es inmediato.
- *   2. Cada unidad movida cuesta trabajo —preparar, despachar, atender— que no
- *      depende de a cuánto se vendió.
- *
- * Por eso `mejorBanda` no devuelve el máximo pelado: entre las bandas que están
- * dentro de `EMPATE_TECNICO` de la mejor, devuelve la de markup más alto.
+ * Verificado contra 9.900 líneas de 30 días: mediana 25,0 %, p10 10,0 % y
+ * p90 34,4 %. O sea que las tres bandas del experimento no son arbitrarias —
+ * están puestas justo donde vive la distribución real.
  */
 
-/** Las tres bandas. Tienen que decir lo mismo que `BANDAS` en experimento.py. */
+/**
+ * Las cinco bandas, ordenadas de menor a mayor margen.
+ *
+ * TRES SON LAS DEL EXPERIMENTO Y DOS SON LOS BORDES, y los bordes están a
+ * propósito: el 17 % de las líneas cae fuera del rango 10-35 % (817 por debajo
+ * y 843 por encima sobre 9.900). Sin estas dos, esas ventas desaparecerían del
+ * tablero y los totales no cerrarían contra el resto de la sección — que es
+ * exactamente el tipo de diferencia que después nadie puede explicar.
+ */
 export const BANDAS = [
-  { clave: "10-18", label: "10 a 18 %", min: 0.1, max: 0.18 },
-  { clave: "18-25", label: "18 a 25 %", min: 0.18, max: 0.25 },
-  { clave: "25-35", label: "25 a 35 %", min: 0.25, max: 0.35 },
+  { clave: "<10", label: "Menos de 10 %", min: -Infinity, max: 0.1, delExperimento: false },
+  { clave: "10-18", label: "10 a 18 %", min: 0.1, max: 0.18, delExperimento: true },
+  { clave: "18-25", label: "18 a 25 %", min: 0.18, max: 0.25, delExperimento: true },
+  { clave: "25-35", label: "25 a 35 %", min: 0.25, max: 0.35, delExperimento: true },
+  { clave: ">35", label: "Más de 35 %", min: 0.35, max: Infinity, delExperimento: false },
 ] as const;
 
 export type ClaveBanda = (typeof BANDAS)[number]["clave"];
+
+/** Las tres que el experimento compara. */
+export const BANDAS_EXPERIMENTO = BANDAS.filter((b) => b.delExperimento);
 
 export function labelBanda(clave: string): string {
   return BANDAS.find((b) => b.clave === clave)?.label ?? clave;
 }
 
 /**
- * Mínimo de horas a la venta para que una semana de un SKU se pueda leer.
- *
- * Un artículo que estuvo doce horas disponibles en toda la semana no aporta
- * nada: su tasa sale de dividir por un número chiquito y cualquier venta suelta
- * la manda a las nubes. Un día entero es el piso razonable.
+ * En qué banda cae un margen. Los cortes son cerrados abajo y abiertos arriba
+ * (18 % entra en "18 a 25", no en "10 a 18"), igual que en el SQL que arma los
+ * totales: si los dos lados cortaran distinto, una venta justo en el borde
+ * aparecería en una banda en el gráfico y en otra en la tabla.
  */
-export const HORAS_MINIMAS = 24;
-
-/**
- * Cuánto de la ventana puede haber quedado sin observar antes de descartarla.
- *
- * `horas_sin_dato` son las horas en que el pulso no corrió. Con el pipeline
- * sano son cero; si un cuarto de la semana no se miró, lo que sobra no alcanza
- * para decir a qué ritmo vendía.
- */
-export const MAX_SIN_DATO = 0.25;
-
-/**
- * Unidades mínimas —sumando las tres semanas— para leer a UN artículo solo.
- *
- * DE DÓNDE SALE, PORQUE ES EL LÍMITE MÁS IMPORTANTE DE TODA LA PANTALLA:
- * la mediana de los 2.282 SKU del experimento es 0,58 unidades por semana, y
- * 1.316 de ellos (58 %) venden menos de una. Con esos números, la diferencia
- * entre markup 10 % y 35 % en un artículo es indistinguible del ruido: entre
- * vender 0 y vender 1 no hay señal, hay azar.
- *
- * 15 unidades en tres semanas son 5 por semana, que es donde arrancan los ~93
- * SKU con volumen propio. Debajo de eso el artículo cuenta para el agregado
- * —que sí tiene miles de unidades— pero no se lee solo.
- */
-export const UDS_MINIMAS_SKU = 15;
-
-/** Si una fila SKU-semana se puede leer, y por qué no si no. */
-export function motivoDescartado(fila: {
-  horasVendible: number;
-  horasSinDato: number;
-  horasVentana: number;
-}): string | null {
-  if (fila.horasVendible < HORAS_MINIMAS) return "Menos de un día a la venta";
-  if (fila.horasVentana > 0 && fila.horasSinDato / fila.horasVentana > MAX_SIN_DATO) {
-    return "El pulso no corrió buena parte de la semana";
-  }
-  return null;
+export function bandaDeMargen(pct: number | null): ClaveBanda | null {
+  if (pct == null || !Number.isFinite(pct)) return null;
+  return (BANDAS.find((b) => pct >= b.min && pct < b.max)?.clave ?? ">35") as ClaveBanda;
 }
 
 /**
- * Cuánto puede estar por debajo del mejor margen por día una banda para que se
- * la siga considerando empatada.
+ * Cuánto puede estar por debajo del mejor margen una banda para que se la siga
+ * considerando empatada.
  *
  * NO ES UN NÚMERO ESTADÍSTICO, es una preferencia del negocio, y por eso está
- * acá arriba y no escondido en una fórmula. Dice: "una banda que deja hasta un
- * 10 % menos por día, pero con markup más alto, me conviene igual" — porque lo
- * que se ahorra en stock quemado y en trabajo por unidad compensa esa
- * diferencia. Subirlo empuja a marcar más caro; bajarlo, a vender más barato.
+ * declarado acá arriba y no escondido en una fórmula.
  *
- * Con 0 el criterio vuelve a ser el máximo pelado.
+ * Entre dos bandas que dejan lo mismo conviene la de **margen más alto**,
+ * porque vende menos unidades para ganar la misma plata: el stock dura más y no
+ * se quiebra tan rápido. Con el ejemplo del negocio: vender 50 unidades al 10 %
+ * y vender 20 al 30 % no son equivalentes aunque den el mismo total.
+ *
+ * Subirlo empuja a vender más caro; bajarlo, a vender más barato. Con 0 el
+ * criterio vuelve a ser el máximo pelado.
  */
 export const EMPATE_TECNICO = 0.1;
 
 /**
- * La banda recomendada, o `null` si no hay al menos dos bandas medidas.
+ * La banda que más dejó, o `null` si hay menos de dos con ventas.
  *
- * Con una sola banda medida no hay comparación posible: el "mejor" sería el
- * único, que no dice nada. Devolver null y que la pantalla muestre "—" es
- * preferible a un ganador que se eligió a sí mismo.
+ * Con una sola banda no hay comparación posible: el "mejor" sería el único.
  *
- * Entre las que quedan dentro de `EMPATE_TECNICO` del mejor margen por día,
- * gana la de **markup más alto** (ver el encabezado del archivo). `BANDAS` está
- * ordenada de menor a mayor markup, así que "la última que empata" es esa.
+ * Entre las que quedan dentro de `EMPATE_TECNICO` del mejor margen, gana la de
+ * margen más alto. `BANDAS` está ordenada de menor a mayor, así que "la última
+ * que empata" es ésa.
  *
- * Ojo con el signo: si el mejor margen por día es NEGATIVO —el artículo pierde
- * plata en las tres bandas—, un umbral multiplicativo se daría vuelta y
- * elegiría la PEOR. Por eso el piso se calcula sobre el valor absoluto.
+ * Ojo con el signo: si el mejor margen es NEGATIVO —el artículo pierde plata en
+ * todas las bandas—, un umbral multiplicativo se daría vuelta y elegiría la
+ * peor. Por eso el piso se calcula sobre el valor absoluto.
  */
 export function mejorBanda(
   porBanda: Partial<Record<string, number | null>>,
 ): ClaveBanda | null {
-  const medidas = BANDAS.filter((b) => porBanda[b.clave] != null);
-  if (medidas.length < 2) return null;
+  const conVentas = BANDAS.filter((b) => porBanda[b.clave] != null);
+  if (conVentas.length < 2) return null;
 
-  const tope = Math.max(...medidas.map((b) => porBanda[b.clave]!));
+  const tope = Math.max(...conVentas.map((b) => porBanda[b.clave]!));
   const piso = tope - Math.abs(tope) * EMPATE_TECNICO;
-
-  // `filter` conserva el orden de BANDAS (markup creciente), así que la última
-  // que pasa el piso es la de markup más alto entre las empatadas.
-  const empatadas = medidas.filter((b) => porBanda[b.clave]! >= piso);
+  const empatadas = conVentas.filter((b) => porBanda[b.clave]! >= piso);
   return empatadas[empatadas.length - 1].clave;
 }
 
 /**
- * Qué le falta al experimento para poder leerse. Lo usa la pantalla cuando
- * todavía no hay nada: sin esto, una pantalla vacía se lee como "no vendimos
- * nada" en vez de "esto todavía no arrancó".
+ * Unidades mínimas —en todo el período— para leer a UN artículo solo.
+ *
+ * DE DÓNDE SALE: la mediana de los artículos con venta es 0,58 unidades por
+ * semana, y el 58 % vende menos de una. Con esos números, la diferencia entre
+ * un margen del 12 % y uno del 30 % en un artículo puntual es indistinguible
+ * del ruido: entre vender 0 y vender 1 no hay señal, hay azar.
+ *
+ * Debajo de este piso el artículo cuenta para el total de su banda —que sí
+ * tiene miles de unidades— pero su "mejor banda" no se puede leer sola.
+ */
+export const UDS_MINIMAS_SKU = 15;
+
+/**
+ * Qué le falta al tablero para tener algo que mostrar. Sin esto, una pantalla
+ * vacía se lee como "no vendimos nada", que es una conclusión falsa y grave.
  */
 export const PASOS_PREVIOS = [
   {
@@ -173,17 +139,10 @@ export const PASOS_PREVIOS = [
       "puede reconstruir hacia atrás: las horas que no se miraron se pierden.",
   },
   {
-    clave: "asignacion",
-    titulo: "Hay que asignar las bandas",
+    clave: "ventas",
+    titulo: "Y tiene que haber ventas en el período elegido",
     detalle:
-      "`experimento.py --asignar --desde AAAA-MM-DD` reparte los SKU en tres " +
-      "grupos y arma el cuadrado latino de tres semanas.",
-  },
-  {
-    clave: "semanas",
-    titulo: "Y esperar a que pasen las semanas",
-    detalle:
-      "Cada grupo necesita haber pasado por al menos dos bandas para que haya " +
-      "algo que comparar. Antes de eso los números existen pero no se pueden leer.",
+      "La banda de cada venta sale de su propio margen, así que sin ventas no " +
+      "hay nada que clasificar. Probá abriendo el rango de fechas.",
   },
 ] as const;
