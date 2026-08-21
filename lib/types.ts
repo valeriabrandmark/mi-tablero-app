@@ -879,6 +879,12 @@ export type BandaEnCurso = {
   margen: number;
   /** Cuántos SKU ya superaron la exposición mínima para poder leerse. */
   skusLegibles: number;
+  /**
+   * Cuántos de esos SKU se pueden comprar AHORA, según el último pulso. No es
+   * acumulado: es el estado en este momento. Es lo único de este panel que se
+   * mueve durante las primeras 24 h.
+   */
+  vendiblesAhora: number;
 };
 
 export type DashboardElasticidad = {

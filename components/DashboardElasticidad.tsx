@@ -219,6 +219,19 @@ function columnasEnCurso(): Columna<BandaEnCurso>[] {
     },
     { titulo: "Artículos", celda: (b) => fmtNumero(b.skus), numerica: true, orden: (b) => b.skus },
     {
+      // Lo único que se mueve el primer día, mientras corre el lavado. Sin esta
+      // columna el panel arranca todo en cero y no se distingue de algo roto.
+      titulo: "Vendibles ahora",
+      celda: (b) => (
+        <span style={{ color: b.vendiblesAhora > 0 ? PALETA[1] : TEMA.negativo }}>
+          {fmtNumero(b.vendiblesAhora)}
+          <span className="text-muted"> de {fmtNumero(b.skus)}</span>
+        </span>
+      ),
+      numerica: true,
+      orden: (b) => b.vendiblesAhora,
+    },
+    {
       titulo: "Días a la venta",
       celda: (b) => fmtTasa(b.horasVendible / 24),
       numerica: true,
@@ -274,7 +287,7 @@ function EnCurso({ filas }: { filas: BandaEnCurso[] }) {
       nota={
         listos > 0
           ? `${fmtNumero(listos)} artículos ya superaron el mínimo de exposición`
-          : "Todavía ninguno llegó al mínimo para leerse — es normal el primer día"
+          : "En las primeras 24 h sólo se mueve «vendibles ahora» — es lo esperado"
       }
     >
       <Tabla

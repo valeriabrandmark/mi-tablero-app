@@ -296,10 +296,24 @@ async function getEnCurso(experimento: string): Promise<BandaEnCurso[]> {
             coalesce(sum(f.unidades), 0)             as unidades,
             coalesce(sum(f.margen), 0)               as margen,
             count(f.sku) filter (where f.horas_vendible >= ${HORAS_MINIMAS})
-                                                     as skus_legibles
+                                                     as skus_legibles,
+            -- Disponibilidad AHORA, del último pulso. No es acumulado: es el
+            -- estado en este momento, y es lo único de este panel que se mueve
+            -- durante el lavado. Sin esto, el primer día se ve el plan con
+            -- todo en cero y no se distingue de una pantalla rota.
+            count(distinct m.sku) filter (where e.vendible_ahora) as vendibles_ahora
        from gold.experimento_markup m
        left join gold.fact_experimento f
          on f.experimento = m.experimento and f.sku = m.sku and f.semana = m.semana
+       left join (
+         -- Un SKU está vendible si CUALQUIERA de sus publicaciones lo está: el
+         -- comprador necesita una sola. Los tramos con hasta en null son los
+         -- abiertos, o sea el estado vigente.
+         select sku, bool_or(vendible) as vendible_ahora
+           from bronze.ml_estado_item
+          where hasta is null and sku is not null
+          group by sku
+       ) e on e.sku = m.sku
       where m.experimento = $1
         and now() >= m.desde and now() < m.hasta
       group by m.banda
@@ -318,6 +332,7 @@ async function getEnCurso(experimento: string): Promise<BandaEnCurso[]> {
     unidades: num(r.unidades),
     margen: num(r.margen),
     skusLegibles: num(r.skus_legibles),
+    vendiblesAhora: num(r.vendibles_ahora),
   }));
 }
 
