@@ -788,42 +788,30 @@ export type DashboardStockFull = {
 // --- Elasticidad de precios (Mercado Libre) ---------------------------------
 
 export type FiltrosElasticidad = {
+  /** El período a mirar. La banda de cada venta sale de la venta misma. */
+  desde: string;
+  hasta: string;
   proveedor?: string[];
   marca?: string[];
-  /** Solo los artículos con volumen suficiente para leerse solos. */
+  sku?: string[];
+  /** Sólo los artículos con volumen suficiente para leerse solos. */
   soloConfiables?: boolean;
 };
 
-/**
- * El resultado de una banda de markup, sumando todos los SKU que pasaron por
- * ella. Es la fila que contesta la pregunta del experimento.
- */
+/** El total de una banda de %margen. */
 export type ResumenBanda = {
   banda: string;
-  /** Cuántos SKU-semana entraron. Un SKU aporta uno por cada semana medida. */
-  skuSemanas: number;
+  /** `false` en los dos bordes (<10 % y >35 %), que no son del experimento. */
+  delExperimento: boolean;
   skus: number;
-  horasVendible: number;
-  horasSinStock: number;
-  horasSinDato: number;
-  horasVentana: number;
+  lineas: number;
   unidades: number;
   facturacion: number;
   margen: number;
-  /** Unidades por día realmente a la venta. El denominador es lo que importa. */
-  udsPorDia: number | null;
-  /** Margen por día a la venta. La medida principal. */
-  margenPorDia: number | null;
-  /**
-   * Margen por unidad vendida. El criterio de desempate: entre dos bandas que
-   * dejan lo mismo por día conviene la de markup más alto, porque quema menos
-   * stock para ganar la misma plata.
-   */
+  /** Margen del conjunto: pesos sobre facturación, no promedio de porcentajes. */
+  margenPct: number | null;
+  /** El criterio de desempate: cuánto dejó cada unidad movida. */
   margenPorUnidad: number | null;
-  /** Markup efectivamente aplicado, ponderado por horas. No es la banda. */
-  markupRealizado: number | null;
-  /** Fracción del tiempo a la venta ganando la caja. Null si no aplica. */
-  ganandoBb: number | null;
 };
 
 export type FilaElasticidad = {
@@ -831,83 +819,60 @@ export type FilaElasticidad = {
   producto: string | null;
   marca: string | null;
   proveedor: string | null;
-  grupo: number | null;
   unidades: number;
-  /** Margen por día a la venta en cada banda. Null = esa semana no se pudo leer. */
-  porBanda: Record<string, number | null>;
-  udsPorBanda: Record<string, number | null>;
-  /** Margen por unidad en cada banda. Es lo que desempata los empates. */
-  margenUnidadPorBanda: Record<string, number | null>;
-  /** La banda recomendada, o null si hay menos de dos medidas. */
+  margen: number;
+  unidadesPorBanda: Record<string, number>;
+  margenPorBanda: Record<string, number>;
+  /** La banda que más dejó, o null si vendió en menos de dos. */
   mejor: string | null;
-  /** `true` si el SKU tiene volumen propio para leerse sin el agregado. */
+  /** `true` si tiene volumen propio para leerse sin el agregado. */
   confiable: boolean;
+  /** Días del período en que no se pudo comprar. Sólo cuenta los días mirados. */
+  diasSinStock: number;
 };
+
+/** Un día en que un artículo no se pudo comprar en ningún momento. */
+export type DiaSinStock = { sku: string; dia: string };
 
 export type KpisElasticidad = {
   skus: number;
-  semanasMedidas: number;
-  /** Fracción de las horas del experimento que el pulso llegó a observar. */
-  cobertura: number | null;
-  /** Fracción del tiempo observado en que los artículos estuvieron a la venta. */
-  disponibilidad: number | null;
-  /** Fracción del tiempo observado perdida por quiebre de stock. */
-  quiebre: number | null;
   unidades: number;
+  facturacion: number;
   margen: number;
-};
+  margenPct: number | null;
+  /** Fracción de las unidades que cayó dentro de las tres bandas del experimento. */
+  dentroDelRango: number | null;
+  /** Días del período en que el pulso corrió al menos una vez. */
+  diasMirados: number;
+  /** Cuántos artículos quebraron stock al menos un día. */
+  skusQuebrados: number;
 
-/**
- * Una banda de la semana que está corriendo AHORA.
- *
- * No es un resultado: es el estado de la medición mientras pasa. Existe porque
- * entre que se asigna el experimento y que hay algo concluyente pasan casi dos
- * días —24 h de lavado más 24 h de exposición mínima— y en ese lapso la
- * pantalla no tenía nada que mostrar. Una pantalla vacía durante dos días se
- * lee como "esto no funciona", cuando en realidad está midiendo.
- */
-export type BandaEnCurso = {
-  banda: string;
-  semana: number;
-  skus: number;
-  /** Cuándo empieza a contar esta semana (ya con el lavado descontado). */
-  desde: string;
-  hasta: string;
-  horasVendible: number;
-  horasSinStock: number;
-  unidades: number;
-  margen: number;
-  /** Cuántos SKU ya superaron la exposición mínima para poder leerse. */
-  skusLegibles: number;
   /**
-   * Cuántos de esos SKU se pueden comprar AHORA, según el último pulso. No es
-   * acumulado: es el estado en este momento. Es lo único de este panel que se
-   * mueve durante las primeras 24 h.
+   * En cuántos ARTÍCULOS ganó cada banda, contando sólo los que vendieron en
+   * dos o más bandas.
+   *
+   * Es el titular bueno, y no el agregado. Comparar el margen total de la banda
+   * 25-35 contra el de la 10-18 mezcla artículos distintos: los que sostienen
+   * un margen alto son otros productos, no los mismos más caros. Esta cuenta
+   * compara a cada artículo CONSIGO MISMO, que es lo único que aísla el efecto
+   * del precio.
    */
-  vendiblesAhora: number;
+  votosPorBanda: Record<string, number>;
+  /** Artículos que vendieron en dos o más bandas (los únicos comparables). */
+  comparables: number;
+  /** De ésos, los que además tienen volumen para leerse solos. */
+  comparablesConVolumen: number;
 };
 
 export type DashboardElasticidad = {
-  experimento: string | null;
-  /**
-   * `false` cuando el experimento todavía no arrancó o no dejó datos legibles.
-   * La pantalla muestra qué falta en vez de un tablero en cero, que se leería
-   * como "no vendimos nada".
-   */
   hayDatos: boolean;
-  /** Qué falta, cuando `hayDatos` es false. Clave de `PASOS_PREVIOS`. */
   falta: string | null;
-  desde: string | null;
-  hasta: string | null;
+  desde: string;
+  hasta: string;
   kpis: KpisElasticidad;
-  /**
-   * La semana en curso, aunque todavía no sea concluyente. Se llena apenas se
-   * asigna el experimento, así que la pantalla deja de estar vacía desde el
-   * primer día en vez de desde el tercero.
-   */
-  enCurso: BandaEnCurso[];
   bandas: ResumenBanda[];
-  filas: FilaElasticidad[];
+  articulos: FilaElasticidad[];
+  diasSinStock: DiaSinStock[];
   recortada: boolean;
   generadoEn: string;
 };

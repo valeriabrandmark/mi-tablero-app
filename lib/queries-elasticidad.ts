@@ -1,15 +1,10 @@
-import { query, queryOne } from "@/lib/db";
+import { query } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
-import {
-  HORAS_MINIMAS,
-  MAX_SIN_DATO,
-  UDS_MINIMAS_SKU,
-  mejorBanda,
-} from "@/lib/elasticidad";
+import { BANDAS, UDS_MINIMAS_SKU, mejorBanda } from "@/lib/elasticidad";
 import { CANAL_MELI } from "@/lib/meli";
 import type {
-  BandaEnCurso,
   DashboardElasticidad,
+  DiaSinStock,
   FilaElasticidad,
   FiltrosElasticidad,
   KpisElasticidad,
@@ -19,424 +14,382 @@ import type {
 /**
  * Consultas de "Elasticidad de precios".
  *
- * Lee `gold.fact_experimento`, que arma `experimento.py --consolidar` en el
- * repo del pipeline. Esta pantalla NO recalcula nada: el reparto de las horas
- * de cada semana entre vendible / quebrada / pausada / sin dato necesita unir
- * intervalos que se solapan entre varias publicaciones del mismo SKU, y eso ya
- * está resuelto allá. Rehacerlo acá en SQL garantizaría que un día los dos
- * lados digan cosas distintas.
- *
  * ---------------------------------------------------------------------------
- * LA REGLA QUE ATRAVIESA TODO EL ARCHIVO: NUNCA DIVIDIR POR LA SEMANA
+ * EL %MARGEN, ESCRITO UNA SOLA VEZ
  *
- * Cada tasa se calcula sobre `horas_vendible`, no sobre las horas del
- * calendario. Un SKU que estuvo quebrado cinco días de siete no vendió menos
- * por caro: no estuvo a la venta. Dividir por la semana entera mezcla las dos
- * cosas y le echa la culpa al precio.
+ * Todo este archivo depende de una fórmula, así que está en una constante y no
+ * repetida en cada consulta:
+ *
+ *     (precio bruto − IVA − costo neto − comisión neta − envío neto) / precio bruto
+ *
+ * OJO CON LOS GRANOS, que es de donde salen todos los errores posibles acá y
+ * está verificado con datos (ver `lib/meli.ts`):
+ *
+ *   precio_unitario  por unidad, CON IVA   -> es el "precio bruto" de la fórmula
+ *   precio_neto      por unidad, sin IVA   -> es "precio bruto − IVA"
+ *   costo_unitario   por unidad
+ *   comision         POR UNIDAD
+ *   envio            POR LÍNEA             -> hay que dividirlo por la cantidad
+ *
+ * Multiplicar el envío por la cantidad, o no dividirlo, mueve el margen lo
+ * suficiente como para cambiar de banda a un artículo.
  */
+const MARGEN_PCT = `
+  (f.precio_neto - f.costo_unitario - f.comision - f.envio / nullif(f.cantidad, 0))
+  / nullif(f.precio_unitario, 0)`;
+
+/** El margen en PESOS de la línea entera, con los mismos granos. */
+const MARGEN_PESOS = `
+  (f.precio_neto - f.costo_unitario - f.comision) * f.cantidad - coalesce(f.envio, 0)`;
 
 /**
- * Filas que no se pueden leer, descartadas antes de cualquier promedio.
- *
- * Se hace en SQL y no en el navegador porque estas condiciones también deciden
- * los KPIs y el agregado por banda: filtrando solo la tabla, el total diría una
- * cosa y las filas otra.
- *
- * Los umbrales viven en `lib/elasticidad.ts` y se interpolan acá para que haya
- * un solo lugar donde cambiarlos.
+ * A qué banda pertenece una línea. Los cortes son cerrados abajo y abiertos
+ * arriba, exactamente igual que `bandaDeMargen` en `lib/elasticidad.ts`.
  */
-const LEGIBLE = `
-  horas_vendible >= ${HORAS_MINIMAS}
-  and (horas_ventana <= 0 or horas_sin_dato / horas_ventana <= ${MAX_SIN_DATO})`;
+const BANDA = `
+  case
+    when ${MARGEN_PCT} < 0.10 then '<10'
+    when ${MARGEN_PCT} < 0.18 then '10-18'
+    when ${MARGEN_PCT} < 0.25 then '18-25'
+    when ${MARGEN_PCT} < 0.35 then '25-35'
+    else '>35'
+  end`;
 
-const BASE = `
-with medido as (
-  select *
-    from gold.fact_experimento
-   where experimento = $1 and ${LEGIBLE}
-),
-etiquetas as (
-  select distinct on (sku) sku, producto, marca, proveedor
-    from gold.fact_ventas
-   where canal = $2
-   order by sku, fecha desc
-),
-base as (
-  select m.*, e.producto, e.marca, e.proveedor
-    from medido m
-    left join etiquetas e on e.sku = m.sku
-)`;
+/**
+ * Las líneas que se pueden clasificar. Sin costo no hay margen, y sin margen no
+ * hay banda: esas líneas se cuentan aparte en vez de caer en un bucket
+ * cualquiera (son 3 sobre 9.900, pero el día que sean 3.000 hay que verlo).
+ */
+const CLASIFICABLE = `f.costo_unitario > 0 and f.precio_unitario > 0 and f.cantidad > 0`;
 
 type Where = { sql: string; params: unknown[] };
 
-function where(experimento: string, f: FiltrosElasticidad): Where {
-  const params: unknown[] = [experimento, CANAL_MELI];
-  const clauses: string[] = [];
-  agregarFiltro(clauses, params, "proveedor", f.proveedor);
-  agregarFiltro(clauses, params, "marca", f.marca);
-  return { sql: clauses.length ? `where ${clauses.join(" and ")}` : "", params };
+function where(f: FiltrosElasticidad): Where {
+  const params: unknown[] = [CANAL_MELI, f.desde, f.hasta];
+  const clauses = [
+    `f.canal = $1`,
+    `f.fecha >= $2::date`,
+    `f.fecha <= $3::date`,
+    CLASIFICABLE,
+  ];
+  agregarFiltro(clauses, params, "f.proveedor", f.proveedor);
+  agregarFiltro(clauses, params, "f.marca", f.marca);
+  agregarFiltro(clauses, params, "f.sku", f.sku);
+  return { sql: `where ${clauses.join(" and ")}`, params };
 }
 
 const num = (v: unknown): number => Number(v ?? 0);
-const opt = (v: unknown): number | null =>
-  v == null || v === "" ? null : Number(v);
-
-/** El experimento con datos más reciente. Hoy hay uno solo, pero no siempre. */
-async function experimentoActivo(): Promise<string | null> {
-  const fila = await queryOne<{ experimento: string }>(
-    `select experimento from gold.experimento_markup
-      order by desde desc limit 1`,
-  );
-  return fila?.experimento ?? null;
-}
+const opt = (v: unknown): number | null => (v == null || v === "" ? null : Number(v));
 
 /**
- * Las tablas del experimento pueden no existir todavía: el pipeline las crea la
- * primera vez que corre `esquema.py`. Sin este chequeo la pantalla mostraría un
- * error de Postgres, que para quien la mira no significa nada.
+ * El total de cada banda. Es la respuesta principal: cuánto se vendió y cuánto
+ * quedó con cada nivel de margen.
  */
-async function tablasListas(): Promise<boolean> {
-  const fila = await queryOne<{ hay: boolean }>(
-    `select to_regclass('gold.fact_experimento') is not null
-        and to_regclass('gold.experimento_markup') is not null as hay`,
-  );
-  return Boolean(fila?.hay);
-}
-
-/**
- * El resumen por banda: LA respuesta del experimento.
- *
- * Las tasas se calculan sobre los TOTALES de la banda y no promediando las
- * tasas de cada SKU-semana, por el mismo motivo por el que el margen del
- * conjunto no es el promedio de los márgenes: un artículo que estuvo dos días a
- * la venta y vendió uno da una tasa de 0,5/día que pesaría igual que la de otro
- * que estuvo la semana entera. Sumando arriba y abajo, cada artículo pesa lo
- * que efectivamente aportó.
- */
-async function getBandas(experimento: string, f: FiltrosElasticidad): Promise<ResumenBanda[]> {
-  const w = where(experimento, f);
+async function getBandas(f: FiltrosElasticidad): Promise<ResumenBanda[]> {
+  const w = where(f);
   const filas = await query<Record<string, string | null>>(
-    `${BASE}
-     select banda,
-            count(*)                            as sku_semanas,
-            count(distinct sku)                 as skus,
-            coalesce(sum(horas_vendible), 0)    as horas_vendible,
-            coalesce(sum(horas_sin_stock), 0)   as horas_sin_stock,
-            coalesce(sum(horas_sin_dato), 0)    as horas_sin_dato,
-            coalesce(sum(horas_ventana), 0)     as horas_ventana,
-            coalesce(sum(unidades), 0)          as unidades,
-            coalesce(sum(facturacion), 0)       as facturacion,
-            coalesce(sum(margen), 0)            as margen,
-            -- Ponderado por horas a la venta y no simple: el markup que
-            -- enfrentaron los compradores es el que estuvo más tiempo puesto.
-            sum(markup_realizado * horas_vendible)
-              / nullif(sum(horas_vendible) filter (where markup_realizado is not null), 0)
-                                                as markup_realizado,
-            sum(horas_ganando_bb) / nullif(sum(horas_vendible)
-              filter (where horas_ganando_bb is not null), 0) as ganando_bb
-     from base ${w.sql}
-     group by banda`,
+    `select ${BANDA} as banda,
+            count(distinct f.sku)                as skus,
+            count(*)                             as lineas,
+            coalesce(sum(f.cantidad), 0)         as unidades,
+            coalesce(sum(f.total_linea), 0)      as facturacion,
+            coalesce(sum(${MARGEN_PESOS}), 0)    as margen,
+            -- El %margen del CONJUNTO: margen total sobre facturación total, y
+            -- no el promedio de los porcentajes. Con un artículo que vendió
+            -- $500.000 al 8 % y otro $1.000 al 80 %, el promedio simple da 44 %
+            -- — un número que no describe a ningún peso que haya entrado.
+            coalesce(sum(${MARGEN_PESOS}), 0)
+              / nullif(sum(f.total_linea), 0)    as margen_pct
+       from gold.fact_ventas f
+       ${w.sql}
+      group by 1`,
     w.params,
   );
 
-  return filas.map((r) => {
-    const horasVendible = num(r.horas_vendible);
-    const dias = horasVendible / 24;
+  const porClave = new Map(filas.map((r) => [r.banda as string, r]));
+  // Se devuelven SIEMPRE las cinco, en orden, aunque alguna no tenga ventas: una
+  // banda que falta del gráfico se lee como "no la probamos", y una en cero se
+  // lee como "la probamos y no vendió". Son cosas distintas.
+  return BANDAS.map((b) => {
+    const r = porClave.get(b.clave);
     return {
-      banda: r.banda as string,
-      skuSemanas: num(r.sku_semanas),
-      skus: num(r.skus),
-      horasVendible,
-      horasSinStock: num(r.horas_sin_stock),
-      horasSinDato: num(r.horas_sin_dato),
-      horasVentana: num(r.horas_ventana),
-      unidades: num(r.unidades),
-      facturacion: num(r.facturacion),
-      margen: num(r.margen),
-      // Null y no cero cuando no hubo exposición: cero ventas sin haber estado
-      // a la venta no es un fracaso comercial, es un dato que no existe.
-      udsPorDia: dias > 0 ? num(r.unidades) / dias : null,
-      margenPorDia: dias > 0 ? num(r.margen) / dias : null,
-      // Sobre las unidades vendidas y no sobre los SKU-semana: es "cuánto me
-      // dejó cada unidad que saqué del depósito", que es la pregunta de la que
-      // sale el desempate.
-      margenPorUnidad: num(r.unidades) > 0 ? num(r.margen) / num(r.unidades) : null,
-      markupRealizado: opt(r.markup_realizado),
-      ganandoBb: opt(r.ganando_bb),
+      banda: b.clave,
+      delExperimento: b.delExperimento,
+      skus: num(r?.skus),
+      lineas: num(r?.lineas),
+      unidades: num(r?.unidades),
+      facturacion: num(r?.facturacion),
+      margen: num(r?.margen),
+      margenPct: opt(r?.margen_pct),
+      margenPorUnidad: num(r?.unidades) > 0 ? num(r?.margen) / num(r?.unidades) : null,
     };
   });
 }
 
-async function getKpis(experimento: string, f: FiltrosElasticidad): Promise<KpisElasticidad> {
-  const w = where(experimento, f);
+/**
+ * Días en que cada SKU no se pudo comprar, uno por fila.
+ *
+ * ---------------------------------------------------------------------------
+ * SÓLO CUENTA LOS DÍAS QUE MIRAMOS
+ *
+ * Un día sin ningún pulso no es un día sin stock: es un día sin dato. Por eso
+ * el `cross join` es contra los días en que hubo al menos una corrida, y no
+ * contra el calendario. Sin ese recorte, cualquier caída del pipeline se
+ * reportaría como quiebre de stock de los 4.360 artículos a la vez.
+ *
+ * Un SKU cuenta como vendible si CUALQUIERA de sus publicaciones lo estuvo en
+ * algún momento del día: al comprador le alcanza con una.
+ */
+const DIAS_SIN_STOCK = `
+with dias_mirados as (
+  select distinct (c.momento at time zone 'America/Argentina/Buenos_Aires')::date as dia
+    from bronze.ml_pulso_corrida c
+   where (c.momento at time zone 'America/Argentina/Buenos_Aires')::date
+         between $2::date and $3::date
+),
+skus as (
+  select distinct sku from bronze.ml_estado_item where sku is not null
+),
+vendible as (
+  select e.sku, d.dia
+    from bronze.ml_estado_item e
+    join dias_mirados d
+      on e.desde < ((d.dia + 1)::text || ' 00:00-03')::timestamptz
+     and coalesce(e.hasta, e.visto_hasta) > (d.dia::text || ' 00:00-03')::timestamptz
+   where e.vendible and e.sku is not null
+   group by 1, 2
+),
+sin_stock as (
+  select s.sku, d.dia
+    from skus s
+    cross join dias_mirados d
+    left join vendible v on v.sku = s.sku and v.dia = d.dia
+   where v.sku is null
+)`;
 
-  // Los KPIs de cobertura salen SIN el filtro de legibilidad: la pregunta es
-  // justamente cuánto del experimento se pudo observar, y filtrando por eso
-  // primero la respuesta siempre daría 100 %.
-  const [legible, todo] = await Promise.all([
-    queryOne<Record<string, string>>(
-      `${BASE}
-       select count(distinct sku) as skus, count(*) as sku_semanas,
-              coalesce(sum(unidades), 0) as unidades,
-              coalesce(sum(margen), 0)   as margen
-       from base ${w.sql}`,
-      w.params,
-    ),
-    queryOne<Record<string, string>>(
-      `select coalesce(sum(horas_ventana), 0)   as ventana,
-              coalesce(sum(horas_vendible), 0)  as vendible,
-              coalesce(sum(horas_sin_stock), 0) as sin_stock,
-              coalesce(sum(horas_sin_dato), 0)  as sin_dato
-         from gold.fact_experimento where experimento = $1`,
-      [experimento],
-    ),
-  ]);
+/**
+ * El detalle por artículo y día, SÓLO para los artículos filtrados.
+ *
+ * POR QUÉ NO SE TRAE SIEMPRE
+ * Sin filtro son 2.359 pares (artículo, día) en UN día medido — el 54 % del
+ * catálogo está quebrado en cualquier momento dado. Sobre 30 días eso son unas
+ * 70.000 filas, que ni viajan bien al navegador ni se leen. Y con un `limit`
+ * pelado se recortarían en silencio, que es peor: la pantalla mostraría una
+ * lista incompleta con cara de completa.
+ *
+ * El conteo por artículo (la columna "Días sin stock" de la tabla) sí está
+ * siempre, y es el que sirve para descontar el resultado falso. El detalle
+ * día por día se pide al hacer click en un artículo, que es cuando importa.
+ */
+async function getDiasSinStock(f: FiltrosElasticidad): Promise<DiaSinStock[]> {
+  if (!f.sku?.length) return [];
 
-  const ventana = num(todo?.ventana);
-  const observado = ventana - num(todo?.sin_dato);
+  const params: unknown[] = [CANAL_MELI, f.desde, f.hasta];
+  const clauses: string[] = [];
+  agregarFiltro(clauses, params, "s.sku", f.sku);
 
-  return {
-    skus: num(legible?.skus),
-    semanasMedidas: num(legible?.sku_semanas),
-    cobertura: ventana > 0 ? observado / ventana : null,
-    disponibilidad: observado > 0 ? num(todo?.vendible) / observado : null,
-    quiebre: observado > 0 ? num(todo?.sin_stock) / observado : null,
-    unidades: num(legible?.unidades),
-    margen: num(legible?.margen),
-  };
+  const filas = await query<Record<string, string>>(
+    `${DIAS_SIN_STOCK}
+     select s.sku, to_char(s.dia, 'YYYY-MM-DD') as dia
+       from sin_stock s
+      where ${clauses.join(" and ")}
+      order by s.dia desc, s.sku`,
+    params,
+  );
+  return filas.map((r) => ({ sku: r.sku, dia: r.dia }));
 }
 
-/** Tope de filas que bajan al navegador. */
+/** Cuántos artículos quebraron al menos un día, sin filtrar por SKU. */
+async function getSkusQuebrados(f: FiltrosElasticidad): Promise<number> {
+  const filas = await query<{ n: string }>(
+    `${DIAS_SIN_STOCK} select count(distinct sku)::text as n from sin_stock`,
+    [CANAL_MELI, f.desde, f.hasta],
+  );
+  return num(filas[0]?.n);
+}
+
+/** Cuántos días estuvo quebrado cada SKU, para pegarlo a la tabla de artículos. */
+async function getResumenSinStock(f: FiltrosElasticidad): Promise<Map<string, number>> {
+  const filas = await query<Record<string, string>>(
+    `${DIAS_SIN_STOCK}
+     select sku, count(*) as dias from sin_stock group by sku`,
+    [CANAL_MELI, f.desde, f.hasta],
+  );
+  return new Map(filas.map((r) => [r.sku, num(r.dias)]));
+}
+
+/** Cuántos días miramos en total, para que el "X de Y días" tenga denominador. */
+async function getDiasMirados(f: FiltrosElasticidad): Promise<number> {
+  const filas = await query<{ dias: string }>(
+    `${DIAS_SIN_STOCK} select count(*)::text as dias from dias_mirados`,
+    [CANAL_MELI, f.desde, f.hasta],
+  );
+  return num(filas[0]?.dias);
+}
+
 const TOPE = 400;
 
 /**
- * Una fila por SKU con las tres bandas al lado, que es la forma en que la
- * pregunta se contesta mirando: "a este artículo, ¿qué markup le rinde más?".
+ * Una fila por artículo con sus cinco bandas al lado. Es la forma en que la
+ * pregunta se contesta mirando: "a este artículo, ¿con qué margen me conviene
+ * venderlo?".
  *
- * Se ordena por unidades y no por la mejora entre bandas: con la mediana en
+ * Se ordena por margen total y no por la mejora entre bandas: con la mediana en
  * 0,58 unidades por semana, ordenar por diferencia porcentual pondría arriba a
  * los artículos que vendieron 0 y 1 unidad —donde la "mejora" es infinita y no
  * significa nada— y dejaría abajo a los que de verdad tienen algo que decir.
  */
-async function getFilas(experimento: string, f: FiltrosElasticidad): Promise<FilaElasticidad[]> {
-  const w = where(experimento, f);
+async function getArticulos(f: FiltrosElasticidad): Promise<FilaElasticidad[]> {
+  const w = where(f);
   const filas = await query<Record<string, string | null>>(
-    `${BASE}
-     select sku, producto, marca, proveedor, banda,
-            max(grupo)                        as grupo,
-            coalesce(sum(unidades), 0)        as unidades,
-            coalesce(sum(margen), 0)          as margen,
-            coalesce(sum(horas_vendible), 0)  as horas_vendible
-     from base ${w.sql}
-     group by sku, producto, marca, proveedor, banda`,
+    `select f.sku,
+            max(f.producto)                   as producto,
+            max(f.marca)                      as marca,
+            max(f.proveedor)                  as proveedor,
+            ${BANDA}                          as banda,
+            coalesce(sum(f.cantidad), 0)      as unidades,
+            coalesce(sum(${MARGEN_PESOS}), 0) as margen
+       from gold.fact_ventas f
+       ${w.sql}
+      group by f.sku, ${BANDA}`,
     w.params,
   );
 
   const mapa = new Map<string, FilaElasticidad>();
   for (const r of filas) {
     const sku = r.sku as string;
-    const actual = mapa.get(sku) ?? {
+    const fila = mapa.get(sku) ?? {
       sku,
       producto: r.producto,
       marca: r.marca,
       proveedor: r.proveedor,
-      grupo: opt(r.grupo),
       unidades: 0,
-      porBanda: {},
-      udsPorBanda: {},
-      margenUnidadPorBanda: {},
+      margen: 0,
+      unidadesPorBanda: {},
+      margenPorBanda: {},
       mejor: null,
       confiable: false,
+      diasSinStock: 0,
     };
-    const dias = num(r.horas_vendible) / 24;
-    actual.unidades += num(r.unidades);
-    actual.porBanda[r.banda as string] = dias > 0 ? num(r.margen) / dias : null;
-    actual.udsPorBanda[r.banda as string] = dias > 0 ? num(r.unidades) / dias : null;
-    actual.margenUnidadPorBanda[r.banda as string] =
-      num(r.unidades) > 0 ? num(r.margen) / num(r.unidades) : null;
-    mapa.set(sku, actual);
+    fila.unidades += num(r.unidades);
+    fila.margen += num(r.margen);
+    fila.unidadesPorBanda[r.banda as string] = num(r.unidades);
+    fila.margenPorBanda[r.banda as string] = num(r.margen);
+    mapa.set(sku, fila);
   }
 
+  const sinStock = await getResumenSinStock(f);
   for (const fila of mapa.values()) {
-    fila.mejor = mejorBanda(fila.porBanda);
+    fila.mejor = mejorBanda(fila.margenPorBanda);
     fila.confiable = fila.unidades >= UDS_MINIMAS_SKU && fila.mejor != null;
+    fila.diasSinStock = sinStock.get(fila.sku) ?? 0;
   }
 
   const todas = [...mapa.values()];
   const visibles = f.soloConfiables ? todas.filter((x) => x.confiable) : todas;
-  return visibles.sort((a, b) => b.unidades - a.unidades).slice(0, TOPE);
+  return visibles.sort((a, b) => b.margen - a.margen).slice(0, TOPE);
 }
 
-/**
- * La semana que está corriendo ahora, con lo que lleva acumulado.
- *
- * SALE DE `experimento_markup` Y NO DE `fact_experimento`, y el orden importa.
- * `fact_experimento` sólo tiene fila para una semana DESPUÉS del lavado: durante
- * las primeras 24 h no existe ninguna. Si esta consulta arrancara de ahí, la
- * pantalla seguiría vacía justo el primer día, que es cuando más se la mira.
- *
- * Arrancando de la asignación —que existe desde el momento en que se corre
- * `--asignar`— se puede mostrar el plan enseguida, y los números se van
- * llenando solos con el `left join` a medida que el consolidado los calcula.
- *
- * ACÁ NO SE FILTRA POR LEGIBILIDAD, a propósito: la pregunta no es "¿qué puedo
- * concluir?" sino "¿esto está midiendo?". `skusLegibles` dice cuántos ya
- * superaron la exposición mínima, así que se ve el progreso sin confundirlo con
- * un resultado.
- */
-async function getEnCurso(experimento: string): Promise<BandaEnCurso[]> {
-  const filas = await query<Record<string, string | null>>(
-    `select m.banda,
-            max(m.semana)                            as semana,
-            count(distinct m.sku)                    as skus,
-            to_char(min(m.desde), 'YYYY-MM-DD')      as desde,
-            to_char(max(m.hasta), 'YYYY-MM-DD')      as hasta,
-            coalesce(sum(f.horas_vendible), 0)       as horas_vendible,
-            coalesce(sum(f.horas_sin_stock), 0)      as horas_sin_stock,
-            coalesce(sum(f.unidades), 0)             as unidades,
-            coalesce(sum(f.margen), 0)               as margen,
-            count(f.sku) filter (where f.horas_vendible >= ${HORAS_MINIMAS})
-                                                     as skus_legibles,
-            -- Disponibilidad AHORA, del último pulso. No es acumulado: es el
-            -- estado en este momento, y es lo único de este panel que se mueve
-            -- durante el lavado. Sin esto, el primer día se ve el plan con
-            -- todo en cero y no se distingue de una pantalla rota.
-            count(distinct m.sku) filter (where e.vendible_ahora) as vendibles_ahora
-       from gold.experimento_markup m
-       left join gold.fact_experimento f
-         on f.experimento = m.experimento and f.sku = m.sku and f.semana = m.semana
-       left join (
-         -- Un SKU está vendible si CUALQUIERA de sus publicaciones lo está: el
-         -- comprador necesita una sola. Los tramos con hasta en null son los
-         -- abiertos, o sea el estado vigente.
-         select sku, bool_or(vendible) as vendible_ahora
-           from bronze.ml_estado_item
-          where hasta is null and sku is not null
-          group by sku
-       ) e on e.sku = m.sku
-      where m.experimento = $1
-        and now() >= m.desde and now() < m.hasta
-      group by m.banda
-      order by m.banda`,
-    [experimento],
-  );
+async function getKpis(f: FiltrosElasticidad, bandas: ResumenBanda[]): Promise<KpisElasticidad> {
+  const w = where(f);
+  const fila = (
+    await query<Record<string, string>>(
+      `select count(distinct f.sku) as skus,
+              coalesce(sum(f.cantidad), 0)      as unidades,
+              coalesce(sum(f.total_linea), 0)   as facturacion,
+              coalesce(sum(${MARGEN_PESOS}), 0) as margen
+         from gold.fact_ventas f ${w.sql}`,
+      w.params,
+    )
+  )[0];
 
-  return filas.map((r) => ({
-    banda: r.banda as string,
-    semana: num(r.semana),
-    skus: num(r.skus),
-    desde: r.desde as string,
-    hasta: r.hasta as string,
-    horasVendible: num(r.horas_vendible),
-    horasSinStock: num(r.horas_sin_stock),
-    unidades: num(r.unidades),
-    margen: num(r.margen),
-    skusLegibles: num(r.skus_legibles),
-    vendiblesAhora: num(r.vendibles_ahora),
-  }));
+  const delExperimento = bandas.filter((b) => b.delExperimento);
+  const unidades = num(fila?.unidades);
+
+  return {
+    skus: num(fila?.skus),
+    unidades,
+    facturacion: num(fila?.facturacion),
+    margen: num(fila?.margen),
+    margenPct: num(fila?.facturacion) > 0 ? num(fila?.margen) / num(fila?.facturacion) : null,
+    // Qué proporción de lo vendido cayó dentro de las tres bandas del
+    // experimento. Si es baja, las conclusiones valen para poca venta.
+    dentroDelRango:
+      unidades > 0
+        ? delExperimento.reduce((a, b) => a + b.unidades, 0) / unidades
+        : null,
+    diasMirados: 0,
+    skusQuebrados: 0,
+    votosPorBanda: {},
+    comparables: 0,
+    comparablesConVolumen: 0,
+  };
 }
 
-
-async function getVentana(experimento: string) {
-  return queryOne<{ desde: string | null; hasta: string | null }>(
-    `select to_char(min(desde), 'YYYY-MM-DD') as desde,
-            to_char(max(hasta), 'YYYY-MM-DD') as hasta
-       from gold.experimento_markup where experimento = $1`,
-    [experimento],
-  );
-}
-
-export async function getOpcionesElasticidad() {
-  if (!(await tablasListas())) return { proveedores: [], marcas: [] };
-  const experimento = await experimentoActivo();
-  if (!experimento) return { proveedores: [], marcas: [] };
-
-  const w = where(experimento, {});
+export async function getOpcionesElasticidad(f: FiltrosElasticidad) {
+  const w = where(f);
   const [proveedores, marcas] = await Promise.all([
     query<{ v: string }>(
-      `${BASE} select distinct proveedor as v from base
-        where proveedor is not null order by 1`,
+      `select distinct f.proveedor as v from gold.fact_ventas f ${w.sql}
+        and f.proveedor is not null order by 1`,
       w.params,
     ),
     query<{ v: string }>(
-      `${BASE} select distinct marca as v from base
-        where marca is not null order by 1`,
+      `select distinct f.marca as v from gold.fact_ventas f ${w.sql}
+        and f.marca is not null order by 1`,
       w.params,
     ),
   ]);
   return { proveedores: proveedores.map((r) => r.v), marcas: marcas.map((r) => r.v) };
 }
 
-const SIN_KPIS: KpisElasticidad = {
-  skus: 0,
-  semanasMedidas: 0,
-  cobertura: null,
-  disponibilidad: null,
-  quiebre: null,
-  unidades: 0,
-  margen: 0,
-};
-
-function vacio(
-  falta: string,
-  experimento: string | null,
-  enCurso: BandaEnCurso[] = [],
-): DashboardElasticidad {
-  return {
-    experimento,
-    hayDatos: false,
-    falta,
-    desde: null,
-    hasta: null,
-    kpis: SIN_KPIS,
-    enCurso,
-    bandas: [],
-    filas: [],
-    recortada: false,
-    generadoEn: new Date().toISOString(),
-  };
-}
-
 export async function getDashboardElasticidad(
   f: FiltrosElasticidad,
 ): Promise<DashboardElasticidad> {
-  // Los tres estados de "todavía no" se distinguen a propósito. Una pantalla en
-  // cero se lee como "no vendimos nada", que es una conclusión de negocio
-  // gravísima y falsa: acá lo que pasa es que el experimento no arrancó.
-  if (!(await tablasListas())) return vacio("pulso", null);
+  const bandas = await getBandas(f);
 
-  const experimento = await experimentoActivo();
-  if (!experimento) return vacio("asignacion", null);
-
-  const [kpis, bandas, filas, ventana, enCurso] = await Promise.all([
-    getKpis(experimento, f),
-    getBandas(experimento, f),
-    getFilas(experimento, f),
-    getVentana(experimento),
-    getEnCurso(experimento),
+  const [kpis, articulos, diasSinStock, diasMirados, skusQuebrados] = await Promise.all([
+    getKpis(f, bandas),
+    getArticulos(f),
+    getDiasSinStock(f),
+    getDiasMirados(f),
+    getSkusQuebrados(f),
   ]);
 
-  // Con una sola banda medida no hay comparación posible, y una pantalla que
-  // muestra una barra sola invita a leer un ganador que se eligió a sí mismo.
-  if (bandas.length < 2) {
-    return {
-      ...vacio("semanas", experimento, enCurso),
-      kpis,
-      desde: ventana?.desde ?? null,
-    };
+  kpis.diasMirados = diasMirados;
+  kpis.skusQuebrados = skusQuebrados;
+
+  // El voto por artículo. Se cuenta sobre `articulos`, que ya trae `mejor`
+  // calculado con la misma función que usa la tabla — así el titular y la
+  // columna "Mejor" no pueden discrepar.
+  //
+  // OJO: `articulos` viene recortada al tope y puede venir filtrada por
+  // "solo confiables", así que este voto es sobre lo que se está mirando, no
+  // sobre el catálogo entero. Es lo correcto: si el usuario filtró por un
+  // proveedor, el titular tiene que hablar de ese proveedor.
+  const comparables = articulos.filter((a) => a.mejor != null);
+  kpis.comparables = comparables.length;
+  kpis.comparablesConVolumen = comparables.filter((a) => a.confiable).length;
+  kpis.votosPorBanda = {};
+  for (const a of comparables) {
+    kpis.votosPorBanda[a.mejor!] = (kpis.votosPorBanda[a.mejor!] ?? 0) + 1;
   }
 
+  const conVentas = bandas.filter((b) => b.unidades > 0);
+
   return {
-    experimento,
-    hayDatos: true,
-    falta: null,
-    desde: ventana?.desde ?? null,
-    hasta: ventana?.hasta ?? null,
+    // `false` sólo cuando no hay NADA que clasificar. Con ventas en una sola
+    // banda igual se muestra: es un dato —"todo se vendió con el mismo margen"—
+    // y esconderlo detrás de "faltan datos" sería mentir.
+    hayDatos: conVentas.length > 0,
+    falta: conVentas.length > 0 ? null : "ventas",
+    desde: f.desde,
+    hasta: f.hasta,
     kpis,
-    enCurso,
     bandas,
-    filas,
-    recortada: filas.length === TOPE,
+    articulos,
+    diasSinStock,
+    recortada: articulos.length === TOPE,
     generadoEn: new Date().toISOString(),
   };
 }

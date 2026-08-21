@@ -3,23 +3,23 @@
 import { useState } from "react";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
-import { Tabla, type Columna } from "@/components/Tabla";
+import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import {
   BANDAS,
+  BANDAS_EXPERIMENTO,
   EMPATE_TECNICO,
-  HORAS_MINIMAS,
   PASOS_PREVIOS,
   UDS_MINIMAS_SKU,
   labelBanda,
   mejorBanda,
 } from "@/lib/elasticidad";
-import { vacio as sinValores } from "@/lib/filtros";
-import { fmtMoneda, fmtMonedaCorta, fmtNumero, fmtPct } from "@/lib/format";
+import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
+import { fmtFechaCorta, fmtMoneda, fmtMonedaCorta, fmtNumero, fmtPct } from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
+import { hoyArgentina, sumarDias } from "@/lib/rangos";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
-  BandaEnCurso,
   DashboardElasticidad,
   FilaElasticidad,
   FiltrosElasticidad,
@@ -29,119 +29,121 @@ import type {
 type Opciones = { proveedores: string[]; marcas: string[] };
 type Respuesta = DashboardElasticidad & { opciones: Opciones | null };
 
-/** Un color fijo por banda, el mismo en los dos gráficos y en la tabla. */
+/**
+ * Un color por banda. Los dos bordes van en gris: no son del experimento, están
+ * para que los totales cierren, y pintarlos igual que las tres invitaría a
+ * compararlos como si fueran una opción más.
+ */
 const COLOR_BANDA: Record<string, string> = {
+  "<10": TEMA.muted,
   "10-18": PALETA[0],
   "18-25": PALETA[1],
   "25-35": PALETA[3],
+  ">35": TEMA.muted,
 };
 
-/** Tasa por día: dos decimales. La mediana del catálogo es 0,58 uds/semana, así
- *  que con cero decimales la mitad de los artículos se mostraría como "0". */
-const fmtTasa = (n: number | null | undefined): string =>
-  n == null || !Number.isFinite(n) ? "—" : n.toFixed(2);
+const ATAJOS = [
+  { label: "7 días", dias: 7 },
+  { label: "30 días", dias: 30 },
+  { label: "90 días", dias: 90 },
+];
 
 /**
- * La banda recomendada del agregado.
+ * La banda que ganó en MÁS ARTÍCULOS, no la que sumó más margen.
  *
- * Usa `mejorBanda`, la MISMA función que la tabla por artículo. Antes acá había
- * un `reduce` con el máximo pelado, y eso hacía que el titular de arriba y la
- * columna "Mejor" de abajo pudieran recomendar bandas distintas sobre los
- * mismos datos — que es la clase de contradicción que hace que nadie le crea al
- * tablero.
+ * ES UNA DISTINCIÓN QUE CAMBIA LA RESPUESTA, no un matiz. Sobre 30 días de
+ * datos reales, la banda 25-35 % suma más margen Y más unidades que la 10-18 %
+ * — que es lo contrario de lo que uno esperaría del precio. No es que subir el
+ * precio venda más: es que los artículos que sostienen un margen del 30 % son
+ * OTROS PRODUCTOS, con más demanda o menos competencia. El agregado compara
+ * artículos distintos entre sí y confunde "qué margen" con "qué producto".
+ *
+ * Contar en cuántos artículos ganó cada banda compara a cada uno CONSIGO MISMO
+ * —el mismo producto vendido a dos márgenes distintos— y eso sí aísla el efecto
+ * del precio. Es la única lectura que contesta la pregunta del experimento.
  */
-function ganadora(bandas: ResumenBanda[]): ResumenBanda | null {
-  const porBanda = Object.fromEntries(bandas.map((b) => [b.banda, b.margenPorDia]));
+function ganadoraPorArticulo(votos: Record<string, number>): string | null {
+  const conVotos = BANDAS_EXPERIMENTO.filter((b) => (votos[b.clave] ?? 0) > 0);
+  if (conVotos.length === 0) return null;
+  return conVotos.reduce((a, b) => ((votos[b.clave] ?? 0) > (votos[a.clave] ?? 0) ? b : a))
+    .clave;
+}
+
+/** La banda que más margen sumó. Se muestra al lado, con su advertencia. */
+function ganadoraPorMargen(bandas: ResumenBanda[]): ResumenBanda | null {
+  const porBanda = Object.fromEntries(
+    bandas.filter((b) => b.delExperimento && b.unidades > 0).map((b) => [b.banda, b.margen]),
+  );
   const clave = mejorBanda(porBanda);
   return clave ? (bandas.find((b) => b.banda === clave) ?? null) : null;
 }
 
-function columnasBanda(): Columna<ResumenBanda>[] {
+function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
   return [
     {
-      titulo: "Banda de markup",
+      titulo: "%margen de la venta",
       celda: (b) => (
-        <span style={{ color: COLOR_BANDA[b.banda] }}>{labelBanda(b.banda)}</span>
+        <span style={{ color: COLOR_BANDA[b.banda] }}>
+          {labelBanda(b.banda)}
+          {!b.delExperimento && <span className="text-muted text-[10px]"> · fuera del rango</span>}
+        </span>
       ),
-      orden: (b) => b.banda,
+      orden: (b) => BANDAS.findIndex((x) => x.clave === b.banda),
     },
     {
-      titulo: "Markup real",
-      // El markup que se APLICÓ, que no es el de la banda: el repricer sigue al
-      // competidor, así que dentro de 25-35 % el número real se mueve. Si esta
-      // columna se aleja mucho de su banda, el experimento no midió lo que dice.
-      celda: (b) => fmtPct(b.markupRealizado),
+      titulo: "Unidades",
+      celda: (b) => fmtNumero(b.unidades),
       numerica: true,
-      orden: (b) => b.markupRealizado,
+      orden: (b) => b.unidades,
+      total: fmtNumero(sumar(bandas, (b) => b.unidades)),
     },
     {
-      titulo: "Margen / día a la venta",
+      titulo: "Margen $",
       celda: (b) => (
-        <strong style={{ color: COLOR_BANDA[b.banda] }}>
-          {b.margenPorDia == null ? "—" : fmtMoneda(b.margenPorDia)}
-        </strong>
+        <strong style={{ color: COLOR_BANDA[b.banda] }}>{fmtMoneda(b.margen)}</strong>
       ),
       numerica: true,
-      orden: (b) => b.margenPorDia,
+      orden: (b) => b.margen,
+      total: fmtMoneda(sumar(bandas, (b) => b.margen)),
     },
     {
-      // El desempate, puesto al lado de la medida principal para que se vea de
-      // dónde sale la recomendación cuando dos bandas dejan casi lo mismo.
-      titulo: "Margen / unidad",
+      // El desempate: entre dos bandas que dejan lo mismo conviene la que mueve
+      // menos mercadería para lograrlo.
+      titulo: "Margen por unidad",
       celda: (b) => (b.margenPorUnidad == null ? "—" : fmtMoneda(b.margenPorUnidad)),
       numerica: true,
       orden: (b) => b.margenPorUnidad,
     },
     {
-      titulo: "Uds / día a la venta",
-      celda: (b) => fmtTasa(b.udsPorDia),
+      titulo: "Facturación",
+      celda: (b) => fmtMoneda(b.facturacion),
       numerica: true,
-      orden: (b) => b.udsPorDia,
+      orden: (b) => b.facturacion,
+      total: fmtMoneda(sumar(bandas, (b) => b.facturacion)),
     },
     {
-      titulo: "Días a la venta",
-      celda: (b) => fmtNumero(Math.round(b.horasVendible / 24)),
+      titulo: "%margen real",
+      // El del conjunto, no el promedio de los porcentajes de cada línea.
+      celda: (b) => fmtPct(b.margenPct),
       numerica: true,
-      orden: (b) => b.horasVendible,
+      orden: (b) => b.margenPct,
     },
     {
-      titulo: "Perdido por quiebre",
-      // Puesto al lado de la tasa a propósito: es el recordatorio de que el
-      // denominador NO es la semana. Si esta columna es alta, la diferencia
-      // entre bandas medida en unidades crudas no significaría nada.
-      celda: (b) => {
-        const obs = b.horasVentana - b.horasSinDato;
-        return (
-          <span style={b.horasSinStock > 0 ? { color: TEMA.negativo } : undefined}>
-            {obs > 0 ? fmtPct(b.horasSinStock / obs) : "—"}
-          </span>
-        );
-      },
+      titulo: "Artículos",
+      celda: (b) => fmtNumero(b.skus),
       numerica: true,
-      orden: (b) => (b.horasVentana > 0 ? b.horasSinStock / b.horasVentana : null),
-    },
-    {
-      titulo: "Ganando la caja",
-      celda: (b) => (b.ganandoBb == null ? "—" : fmtPct(b.ganandoBb)),
-      numerica: true,
-      orden: (b) => b.ganandoBb,
-    },
-    {
-      titulo: "SKU · semanas",
-      celda: (b) => `${fmtNumero(b.skus)} · ${fmtNumero(b.skuSemanas)}`,
-      numerica: true,
-      orden: (b) => b.skuSemanas,
+      orden: (b) => b.skus,
     },
   ];
 }
 
-function columnasSku(): Columna<FilaElasticidad>[] {
-  return [
+function columnasArticulo(filas: FilaElasticidad[]): Columna<FilaElasticidad>[] {
+  const columnas: Columna<FilaElasticidad>[] = [
     { titulo: "SKU", celda: (f) => f.sku, orden: (f) => f.sku },
     {
       titulo: "Producto",
       celda: (f) => (
-        <span className="block max-w-[260px] truncate" title={f.producto ?? undefined}>
+        <span className="block max-w-[240px] truncate" title={f.producto ?? undefined}>
           {f.producto ?? "—"}
         </span>
       ),
@@ -152,32 +154,29 @@ function columnasSku(): Columna<FilaElasticidad>[] {
       celda: (f) => fmtNumero(f.unidades),
       numerica: true,
       orden: (f) => f.unidades,
+      total: fmtNumero(sumar(filas, (f) => f.unidades)),
     },
-    // Una columna por banda, con el margen por día que rindió cada una. Puestas
-    // al lado se lee de un vistazo si el artículo responde al precio o no.
-    ...BANDAS.map(
+    // Una columna por banda del experimento, con el margen que dejó cada una.
+    // Los dos bordes no van acá: la tabla ya tiene siete columnas y la pregunta
+    // de esta tabla es cuál de las TRES conviene.
+    ...BANDAS_EXPERIMENTO.map(
       (banda): Columna<FilaElasticidad> => ({
         titulo: banda.label,
         celda: (f) => {
-          const valor = f.porBanda[banda.clave];
-          if (valor == null) return <span className="text-muted">—</span>;
+          const margen = f.margenPorBanda[banda.clave];
+          if (margen == null) return <span className="text-muted">—</span>;
           const gana = f.mejor === banda.clave;
           return (
             <span
               style={gana ? { color: COLOR_BANDA[banda.clave], fontWeight: 600 } : undefined}
-              title={
-                `${fmtTasa(f.udsPorBanda[banda.clave])} uds/día a la venta` +
-                (f.margenUnidadPorBanda[banda.clave] == null
-                  ? ""
-                  : ` · ${fmtMoneda(f.margenUnidadPorBanda[banda.clave])} por unidad`)
-              }
+              title={`${fmtNumero(f.unidadesPorBanda[banda.clave] ?? 0)} unidades`}
             >
-              {fmtMonedaCorta(valor)}
+              {fmtMonedaCorta(margen)}
             </span>
           );
         },
         numerica: true,
-        orden: (f) => f.porBanda[banda.clave] ?? null,
+        orden: (f) => f.margenPorBanda[banda.clave] ?? null,
       }),
     ),
     {
@@ -191,166 +190,53 @@ function columnasSku(): Columna<FilaElasticidad>[] {
       orden: (f) => f.mejor,
     },
     {
+      // La columna que pediste: cuántos días no se pudo comprar. Es lo que
+      // permite descontar un resultado falso — un artículo que "vendió poco" en
+      // una banda porque estuvo cuatro días sin stock no vendió poco por caro.
+      titulo: "Días sin stock",
+      celda: (f) => (
+        <span style={f.diasSinStock > 0 ? { color: TEMA.negativo } : { color: TEMA.muted }}>
+          {f.diasSinStock === 0 ? "—" : fmtNumero(f.diasSinStock)}
+        </span>
+      ),
+      numerica: true,
+      orden: (f) => f.diasSinStock,
+    },
+    {
       titulo: "Se puede leer solo",
-      // La columna más importante de esta tabla, y la que más incomoda. Con la
-      // mediana del catálogo en 0,58 unidades por semana, para la mayoría de
-      // los artículos la "mejor banda" es el resultado de un tiro de dados.
+      // Con la mediana del catálogo en 0,58 unidades por semana, para la mayoría
+      // de los artículos la "mejor banda" es el resultado de un tiro de dados.
       celda: (f) =>
         f.confiable ? (
           <span style={{ color: PALETA[1] }}>sí</span>
         ) : (
-          <span className="text-muted" title={`Necesita ${UDS_MINIMAS_SKU} unidades y al menos dos bandas medidas`}>
-            no — poco volumen
+          <span
+            className="text-muted"
+            title={`Necesita ${UDS_MINIMAS_SKU} unidades y ventas en al menos dos bandas`}
+          >
+            no
           </span>
         ),
       orden: (f) => (f.confiable ? 1 : 0),
     },
   ];
-}
-
-function columnasEnCurso(): Columna<BandaEnCurso>[] {
-  return [
-    {
-      titulo: "Banda de markup",
-      celda: (b) => (
-        <span style={{ color: COLOR_BANDA[b.banda] }}>{labelBanda(b.banda)}</span>
-      ),
-      orden: (b) => b.banda,
-    },
-    { titulo: "Artículos", celda: (b) => fmtNumero(b.skus), numerica: true, orden: (b) => b.skus },
-    {
-      // Lo único que se mueve el primer día, mientras corre el lavado. Sin esta
-      // columna el panel arranca todo en cero y no se distingue de algo roto.
-      titulo: "Vendibles ahora",
-      celda: (b) => (
-        <span style={{ color: b.vendiblesAhora > 0 ? PALETA[1] : TEMA.negativo }}>
-          {fmtNumero(b.vendiblesAhora)}
-          <span className="text-muted"> de {fmtNumero(b.skus)}</span>
-        </span>
-      ),
-      numerica: true,
-      orden: (b) => b.vendiblesAhora,
-    },
-    {
-      titulo: "Días a la venta",
-      celda: (b) => fmtTasa(b.horasVendible / 24),
-      numerica: true,
-      orden: (b) => b.horasVendible,
-    },
-    {
-      titulo: "Perdido por quiebre",
-      celda: (b) => (
-        <span style={b.horasSinStock > 0 ? { color: TEMA.negativo } : undefined}>
-          {fmtTasa(b.horasSinStock / 24)} días
-        </span>
-      ),
-      numerica: true,
-      orden: (b) => b.horasSinStock,
-    },
-    { titulo: "Unidades", celda: (b) => fmtNumero(b.unidades), numerica: true, orden: (b) => b.unidades },
-    { titulo: "Margen", celda: (b) => fmtMoneda(b.margen), numerica: true, orden: (b) => b.margen },
-    {
-      // El progreso, no un resultado. Mientras esta columna esté en cero, los
-      // números de la izquierda son ciertos pero no significan nada todavía.
-      titulo: "Listos para leer",
-      celda: (b) => (
-        <span style={b.skusLegibles > 0 ? { color: PALETA[1] } : { color: TEMA.muted }}>
-          {fmtNumero(b.skusLegibles)} de {fmtNumero(b.skus)}
-        </span>
-      ),
-      numerica: true,
-      orden: (b) => b.skusLegibles,
-    },
-  ];
-}
-
-/**
- * La semana que está corriendo, con lo que lleva acumulado.
- *
- * POR QUÉ EXISTE ESTE PANEL
- * Entre que se asigna el experimento y que hay algo concluyente pasan casi dos
- * días: 24 h de lavado —el arrastre del precio anterior— más 24 h de exposición
- * mínima. Sin esto, la pantalla se quedaba vacía ese tiempo, y una pantalla
- * vacía durante dos días se lee como "esto no funciona" justo cuando sí está
- * funcionando.
- *
- * Lo que muestra NO son resultados y la pantalla lo dice: son los contadores de
- * la medición en marcha. La columna "Listos para leer" es la que avisa cuándo
- * empiezan a significar algo.
- */
-function EnCurso({ filas }: { filas: BandaEnCurso[] }) {
-  const semana = filas[0]?.semana ?? 1;
-  const listos = filas.reduce((a, b) => a + b.skusLegibles, 0);
-  return (
-    <Panel
-      titulo={`Semana ${semana}, en curso`}
-      nota={
-        listos > 0
-          ? `${fmtNumero(listos)} artículos ya superaron el mínimo de exposición`
-          : "En las primeras 24 h sólo se mueve «vendibles ahora» — es lo esperado"
-      }
-    >
-      <Tabla
-        filas={filas}
-        columnas={columnasEnCurso()}
-        clave={(b) => b.banda}
-        vacio="La semana todavía no empezó a contar."
-      />
-      <p className="text-muted mt-3 text-[11px] leading-tight">
-        Esto <strong>no son conclusiones</strong>: es cómo va la medición. Cada semana
-        descarta sus primeras 24 h —lo que se vendió con el precio anterior todavía
-        arrastra— y después cada artículo necesita {HORAS_MINIMAS} h a la venta para
-        poder leerse. Hasta entonces los números de arriba son ciertos pero no alcanzan
-        para comparar bandas.
-      </p>
-    </Panel>
-  );
-}
-
-/** Lo que hay que hacer antes de que esta pantalla tenga algo que mostrar. */
-function TodaviaNo({ falta }: { falta: string | null }) {
-  const indice = PASOS_PREVIOS.findIndex((p) => p.clave === falta);
-  return (
-    <Aviso tono="info">
-      <p className="font-medium">El experimento todavía no tiene datos que leer.</p>
-      <p className="mt-1">
-        Esta pantalla queda vacía a propósito en vez de mostrar todo en cero: un tablero
-        lleno de ceros se lee como &ldquo;no vendimos nada&rdquo;, que sería una conclusión
-        falsa y bastante grave. Lo que pasa es otra cosa —el experimento no arrancó—, y
-        estos son los pasos:
-      </p>
-      <ol className="mt-3 space-y-2">
-        {PASOS_PREVIOS.map((paso, i) => (
-          <li key={paso.clave} className="flex gap-2">
-            <span
-              className="mt-0.5 shrink-0 tabular-nums"
-              style={{ color: i === indice ? PALETA[2] : undefined }}
-            >
-              {i < indice ? "✓" : `${i + 1}.`}
-            </span>
-            <span>
-              <strong style={{ color: i === indice ? PALETA[2] : undefined }}>
-                {paso.titulo}
-              </strong>
-              <span className="block text-xs opacity-80">{paso.detalle}</span>
-            </span>
-          </li>
-        ))}
-      </ol>
-    </Aviso>
-  );
+  return columnas;
 }
 
 export default function DashboardElasticidadPage() {
-  const inicial: FiltrosElasticidad = {};
+  const hoy = hoyArgentina();
+  const inicial: FiltrosElasticidad = { desde: sumarDias(hoy, -30), hasta: hoy };
   const [filtros, setFiltros] = useState<FiltrosElasticidad>(inicial);
 
   const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
     "/api/elasticidad",
     {
+      desde: filtros.desde,
+      hasta: filtros.hasta,
       proveedor: filtros.proveedor,
       marca: filtros.marca,
-      soloConfiables: filtros.soloConfiables ? ["1"] : undefined,
+      sku: filtros.sku,
+      soloConfiables: filtros.soloConfiables ? "1" : undefined,
     },
     { conOpciones: "1" },
   );
@@ -359,11 +245,19 @@ export default function DashboardElasticidadPage() {
     empezarCarga();
     setFiltros(f);
   };
+  const alternarSku = (sku: string) =>
+    cambiar({ ...filtros, sku: alternarValor(filtros.sku, sku) });
 
   const k = data?.kpis;
-  const mejor = data?.bandas ? ganadora(data.bandas) : null;
+  const mejor = data?.bandas ? ganadoraPorMargen(data.bandas) : null;
+  const mejorPorArticulo = k ? ganadoraPorArticulo(k.votosPorBanda) : null;
   const sinCambios =
-    sinValores(filtros.proveedor) && sinValores(filtros.marca) && !filtros.soloConfiables;
+    filtros.desde === inicial.desde &&
+    filtros.hasta === inicial.hasta &&
+    sinValores(filtros.proveedor) &&
+    sinValores(filtros.marca) &&
+    sinValores(filtros.sku) &&
+    !filtros.soloConfiables;
 
   return (
     <div className="space-y-4">
@@ -372,21 +266,10 @@ export default function DashboardElasticidadPage() {
           {/* h2 y no h1: el h1 de la página es el logo, que vive en el layout. */}
           <h2 className="text-lg font-semibold tracking-tight">
             Elasticidad de precios{" "}
-            <span className="text-muted text-sm font-normal">· experimento de markup</span>
+            <span className="text-muted text-sm font-normal">· margen contra volumen</span>
           </h2>
-          {/* Los TRES estados dichos distinto, y no dos.
-              Antes esto era `data?.desde ? fechas : "Cargando…"`, y con el
-              experimento todavía sin asignar —que es el estado normal hasta que
-              alguien corre `--asignar`— `desde` viene en null: la pantalla se
-              quedaba diciendo "Cargando datos en vivo…" para siempre, con los
-              datos ya cargados. Se lee como una pantalla colgada, que es
-              justamente lo contrario de lo que pasa. */}
           <p className="text-muted mt-1 text-xs">
-            {!data
-              ? "Cargando datos en vivo…"
-              : data.desde
-                ? `${data.desde}${data.hasta ? ` a ${data.hasta}` : ""}${data.experimento ? ` · ${data.experimento}` : ""}`
-                : "Todavía sin experimento asignado"}
+            {data ? `${data.desde} a ${data.hasta}` : "Cargando datos en vivo…"}
           </p>
         </div>
         <button
@@ -400,6 +283,28 @@ export default function DashboardElasticidadPage() {
 
       <div className="border-line bg-panel flex flex-col gap-3 rounded-xl border p-3">
         <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap gap-1">
+            {ATAJOS.map((a) => {
+              const desde = sumarDias(hoy, -a.dias);
+              const activo = filtros.desde === desde && filtros.hasta === hoy;
+              return (
+                <button
+                  key={a.dias}
+                  type="button"
+                  onClick={() => cambiar({ ...filtros, desde, hasta: hoy })}
+                  aria-pressed={activo}
+                  className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+                    activo
+                      ? "border-c1 bg-c1/15 text-c1"
+                      : "border-line text-muted hover:bg-panel-2 hover:text-ink"
+                  }`}
+                >
+                  {a.label}
+                </button>
+              );
+            })}
+          </div>
+
           <SelectorMultiple
             etiqueta="Proveedor"
             valores={filtros.proveedor}
@@ -428,11 +333,26 @@ export default function DashboardElasticidadPage() {
         </div>
 
         <span className="text-muted text-[11px] leading-tight">
-          Todo se mide <strong>por día realmente a la venta</strong>, no por semana de
-          calendario. Un artículo que quebró stock el martes no vendió menos por caro: no
-          estuvo a la venta, y dividir por la semana entera le echaría la culpa al precio.
+          La banda sale de <strong>cada venta</strong>, no de una lista: con su precio y su
+          costo se calcula el %margen con el que se vendió —
+          <em>(precio − IVA − costo − comisión − envío) ÷ precio</em>— y con eso cae en su
+          banda. El mismo artículo puede aparecer en varias.
         </span>
       </div>
+
+      {!sinValores(filtros.sku) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {filtros.sku!.map((s) => (
+            <button
+              key={s}
+              onClick={() => alternarSku(s)}
+              className="border-c1/40 bg-c1/10 text-c1 hover:bg-c1/20 rounded-full border px-3 py-1 text-xs"
+            >
+              SKU {s} ✕
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && (
         <Aviso>
@@ -449,100 +369,97 @@ export default function DashboardElasticidadPage() {
         </div>
       )}
 
-      {/* Va ANTES del panel de "qué falta" y también arriba de los resultados:
-          mientras el experimento corre, lo primero que se quiere ver es que
-          está corriendo. */}
-      {!error && data && data.enCurso.length > 0 && (
-        <div className={`transition-opacity ${cargando ? "opacity-50" : ""}`}>
-          <EnCurso filas={data.enCurso} />
-        </div>
+      {!error && data && !data.hayDatos && (
+        <Aviso tono="info">
+          <p className="font-medium">No hay ventas para clasificar en este período.</p>
+          <p className="mt-1">
+            La banda de cada venta sale de su propio margen, así que sin ventas no hay nada
+            que comparar. Probá con un rango más largo o sacando los filtros.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {PASOS_PREVIOS.map((p) => (
+              <li key={p.clave} className="text-xs opacity-80">
+                <strong>{p.titulo}.</strong> {p.detalle}
+              </li>
+            ))}
+          </ul>
+        </Aviso>
       )}
-
-      {!error && data && !data.hayDatos && <TodaviaNo falta={data.falta} />}
 
       {!error && data?.hayDatos && k && (
         <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {/* La respuesta, arriba de todo y en una sola tarjeta. */}
+            {/* EL TITULAR ES EL VOTO POR ARTÍCULO, no el margen agregado. Ver
+                `ganadoraPorArticulo` para por qué el agregado engaña. */}
             <TarjetaKpi
-              titulo="Mejor banda de markup"
-              valor={mejor ? labelBanda(mejor.banda) : "—"}
+              titulo="Mejor banda, artículo por artículo"
+              valor={mejorPorArticulo ? labelBanda(mejorPorArticulo) : "—"}
               detalle={
-                mejor
-                  ? `${fmtMoneda(mejor.margenPorDia)} por día a la venta · ` +
-                    `${fmtMoneda(mejor.margenPorUnidad)} por unidad · ` +
-                    `markup real ${fmtPct(mejor.markupRealizado)}`
-                  : "Hacen falta al menos dos bandas medidas"
+                mejorPorArticulo
+                  ? `Ganó en ${fmtNumero(k.votosPorBanda[mejorPorArticulo] ?? 0)} de ${fmtNumero(k.comparables)} artículos comparables · ${fmtNumero(k.comparablesConVolumen)} con volumen propio`
+                  : "Hacen falta artículos que hayan vendido en dos bandas distintas"
               }
-              acento={mejor ? COLOR_BANDA[mejor.banda] : undefined}
+              acento={mejorPorArticulo ? COLOR_BANDA[mejorPorArticulo] : undefined}
             />
-            {/* Y al lado, cuánto hay que creerle. */}
             <TarjetaKpi
-              titulo="Cobertura del pulso"
-              valor={fmtPct(k.cobertura)}
-              detalle="Horas del experimento que se llegaron a observar. Lo que falta no es ni venta ni quiebre: es no saber."
+              titulo="Margen del período"
+              valor={fmtMoneda(k.margen)}
+              detalle={`${fmtPct(k.margenPct)} sobre ${fmtMoneda(k.facturacion)} · ${fmtNumero(k.unidades)} unidades`}
+            />
+            <TarjetaKpi
+              titulo="Dentro del rango 10-35 %"
+              valor={fmtPct(k.dentroDelRango)}
+              detalle="Las unidades que caen fuera se venden con márgenes que el experimento no está probando"
               acento={
-                k.cobertura != null && k.cobertura < 0.9 ? TEMA.negativo : undefined
+                k.dentroDelRango != null && k.dentroDelRango < 0.6 ? PALETA[2] : undefined
               }
             />
             <TarjetaKpi
-              titulo="Tiempo a la venta"
-              valor={fmtPct(k.disponibilidad)}
-              detalle={`${fmtPct(k.quiebre)} del tiempo observado se perdió por quiebre de stock`}
-              acento={
-                k.quiebre != null && k.quiebre > 0.3 ? TEMA.negativo : undefined
-              }
-            />
-            <TarjetaKpi
-              titulo="Base de la medición"
-              valor={`${fmtNumero(k.skus)} SKU`}
-              detalle={`${fmtNumero(k.semanasMedidas)} SKU-semana legibles · ${fmtNumero(k.unidades)} unidades`}
+              titulo="Quebraron stock"
+              valor={`${fmtNumero(k.skusQuebrados)} artículos`}
+              detalle={`Sobre ${fmtNumero(k.diasMirados)} días medidos · su resultado por banda está falseado`}
+              acento={k.skusQuebrados > 0 ? TEMA.negativo : undefined}
             />
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Panel
-              titulo="Margen por día a la venta"
-              nota={`La medida principal · empates de hasta ${fmtPct(EMPATE_TECNICO)} van al markup más alto`}
+              titulo="En cuántos artículos ganó cada banda"
+              nota={`Comparando cada artículo consigo mismo · ${fmtNumero(k.comparables)} comparables`}
             >
               <BarrasCategoria
-                datos={data.bandas
-                  .filter((b) => b.margenPorDia != null)
-                  .map((b) => ({ label: labelBanda(b.banda), valor: b.margenPorDia! }))}
+                datos={BANDAS_EXPERIMENTO.map((b) => ({
+                  label: b.label,
+                  valor: k.votosPorBanda[b.clave] ?? 0,
+                }))}
+                formato={fmtNumero}
+                horizontal={false}
+                colorUnico={PALETA[3]}
+                alturaMinima={240}
+                vacio="Ningún artículo vendió todavía en dos bandas distintas."
+              />
+            </Panel>
+            <Panel titulo="Margen $ por banda" nota="Total del período · ojo, mezcla artículos distintos">
+              <BarrasCategoria
+                datos={data.bandas.map((b) => ({ label: labelBanda(b.banda), valor: b.margen }))}
                 formato={fmtMonedaCorta}
                 horizontal={false}
                 colorUnico={PALETA[1]}
                 alturaMinima={240}
-                vacio="Todavía no hay bandas medidas."
-              />
-            </Panel>
-
-            <Panel
-              titulo="Unidades por día a la venta"
-              nota="Sube al bajar el markup · por eso sola no alcanza"
-            >
-              <BarrasCategoria
-                datos={data.bandas
-                  .filter((b) => b.udsPorDia != null)
-                  .map((b) => ({ label: labelBanda(b.banda), valor: b.udsPorDia! }))}
-                formato={fmtTasa}
-                horizontal={false}
-                colorUnico={PALETA[0]}
-                alturaMinima={240}
-                vacio="Todavía no hay bandas medidas."
+                vacio="Sin ventas en el período."
               />
             </Panel>
           </div>
 
           <Panel
-            titulo="Las tres bandas, en detalle"
-            nota="Markup real, no el de la banda · el denominador es el tiempo a la venta"
+            titulo="Las bandas, en detalle"
+            nota="Las dos de los extremos no son del experimento; están para que los totales cierren"
           >
             <Tabla
               filas={data.bandas}
-              columnas={columnasBanda()}
+              columnas={columnasBanda(data.bandas)}
               clave={(b) => b.banda}
-              vacio="Sin bandas medidas todavía."
+              vacio="Sin ventas en el período."
             />
           </Panel>
 
@@ -550,57 +467,84 @@ export default function DashboardElasticidadPage() {
             titulo="Artículo por artículo"
             nota={
               (data.recortada
-                ? `Los ${data.filas.length} de mayor volumen`
-                : `${fmtNumero(data.filas.length)} artículos`) +
-              " · margen por día a la venta en cada banda"
+                ? `Los ${data.articulos.length} de mayor margen`
+                : `${fmtNumero(data.articulos.length)} artículos`) +
+              " · click en una fila para filtrar por ese SKU"
             }
           >
             <Tabla
-              filas={data.filas}
-              columnas={columnasSku()}
+              filas={data.articulos}
+              columnas={columnasArticulo(data.articulos)}
               clave={(f) => f.sku}
-              vacio="Ningún artículo con semanas legibles para el filtro elegido."
+              onClickFila={(f) => alternarSku(f.sku)}
+              activa={(f) => Boolean(filtros.sku?.includes(f.sku))}
+              etiquetaTotal={data.recortada ? "Total (los mostrados)" : "Total"}
+              vacio="Ningún artículo con ventas para el filtro elegido."
             />
           </Panel>
 
-          {/* Lo que este tablero NO puede contestar, dicho en la pantalla y no
-              en un README que nadie abre. Es la diferencia entre una política
-              de markup y una superstición. */}
+          {/* El detalle día por día se pide al filtrar un artículo: sin filtro
+              serían decenas de miles de filas (el 54 % del catálogo está
+              quebrado en cualquier momento dado). El conteo por artículo está
+              siempre, en la columna "Días sin stock" de la tabla de arriba. */}
+          {!sinValores(filtros.sku) && (
+            <Panel
+              titulo="Días sin stock, día por día"
+              nota={
+                data.diasSinStock.length > 0
+                  ? `${fmtNumero(data.diasSinStock.length)} días quebrados · sobre ${fmtNumero(k.diasMirados)} días medidos`
+                  : `Sin quiebres en los ${fmtNumero(k.diasMirados)} días medidos`
+              }
+            >
+              <div className="max-h-[320px] overflow-y-auto">
+                <div className="flex flex-wrap gap-1.5">
+                  {data.diasSinStock.map((d) => (
+                    <button
+                      key={`${d.sku}-${d.dia}`}
+                      onClick={() => alternarSku(d.sku)}
+                      className="border-line hover:bg-panel-2 rounded-md border px-2 py-1 text-[11px] tabular-nums"
+                      title="Click para filtrar por este artículo"
+                    >
+                      <span className="text-ink">{d.sku}</span>{" "}
+                      <span className="text-muted">{fmtFechaCorta(d.dia)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-muted mt-3 text-[11px] leading-tight">
+                Un día cuenta como quebrado cuando <strong>ninguna</strong> de las
+                publicaciones del artículo se pudo comprar en todo el día. Los días en que el
+                pulso no corrió no se cuentan: no saber no es lo mismo que no tener stock.
+              </p>
+            </Panel>
+          )}
+
           <Aviso tono="info">
-            <p className="font-medium">Qué se puede concluir de esto, y qué no.</p>
+            <p className="font-medium">Cómo leer esto.</p>
             <p className="mt-1">
-              <strong>Sí:</strong> cuál es la mejor banda a nivel agregado y por segmento
-              —proveedor, marca, rango de precio—. Ahí hay miles de unidades y el cuadrado
-              latino hace que el efecto de la semana no se confunda con el de la banda.
+              <strong>El total por banda mezcla artículos distintos.</strong> En el período
+              elegido la banda de {mejor ? labelBanda(mejor.banda) : "mayor margen"} suele
+              sumar más margen <em>y</em> más unidades que las de abajo — y eso no significa
+              que subir el precio venda más. Los artículos que sostienen un margen alto son
+              otros productos, con más demanda o menos competencia. Por eso el titular usa el
+              voto artículo por artículo, que compara al mismo producto vendido a dos
+              márgenes distintos.
             </p>
             <p className="mt-1">
-              <strong>Cómo se elige la banda recomendada:</strong> gana la de mayor margen
-              por día a la venta, pero si otra queda dentro de {fmtPct(EMPATE_TECNICO)} y
-              tiene markup más alto, gana ésa. Vender 50 unidades marcando 10 % y vender 20
-              marcando 30 % no son lo mismo aunque dejen igual: con la segunda el stock dura
-              más y se mueve menos mercadería para ganar la misma plata.
+              <strong>La banda gana por margen $</strong>, pero si otra queda dentro de{" "}
+              {fmtPct(EMPATE_TECNICO)} y tiene margen más alto, gana ésa: vender 50 unidades al
+              10 % y 20 al 30 % no es lo mismo aunque dejen igual — con la segunda el stock dura
+              más y se mueve menos mercadería.
             </p>
             <p className="mt-1">
-              <strong>Un sesgo que conviene tener presente:</strong> medir por día a la venta
-              corrige los quiebres que no dependen del precio, pero cuando el quiebre lo
-              causa el precio bajo —se vendió todo el martes— la banda barata queda medida
-              sobre menos horas y sale <em>mejor</em> de lo que fue. Por eso mirá siempre la
-              columna <em>&ldquo;Perdido por quiebre&rdquo;</em> al lado: si una banda quema
-              stock, ahí se ve.
+              <strong>Descontá los quiebres antes de concluir.</strong> Un artículo que vendió
+              poco en una banda pero estuvo días sin stock no vendió poco por caro. La columna
+              &ldquo;Días sin stock&rdquo; y el panel de arriba están para eso.
             </p>
             <p className="mt-1">
-              <strong>No:</strong> &ldquo;el markup exacto de cada producto&rdquo;. La
-              mediana de los artículos del experimento vende <strong>0,58 unidades por
-              semana</strong>, y el 58 % vende menos de una. Para esos, la diferencia entre
-              markup 10 % y 35 % es indistinguible del azar: entre vender 0 y vender 1 no
-              hay señal. Sólo las filas marcadas <em>&ldquo;se puede leer solo&rdquo;</em>
-              —al menos {UDS_MINIMAS_SKU} unidades y dos bandas medidas— tienen evidencia
-              propia.
-            </p>
-            <p className="mt-1">
-              La conclusión útil de tres semanas es una <strong>política de markup por
-              segmento</strong>, más una lista corta de artículos con volumen propio. Para
-              el resto hace falta dejar el experimento corriendo más tiempo.
+              <strong>Y mirá la columna &ldquo;Se puede leer solo&rdquo;.</strong> La mediana de
+              los artículos vende 0,58 unidades por semana; para ésos, la diferencia entre un
+              margen y otro es azar. El total de cada banda sí tiene miles de unidades atrás.
             </p>
           </Aviso>
         </div>
