@@ -857,6 +857,30 @@ export type KpisElasticidad = {
   margen: number;
 };
 
+/**
+ * Una banda de la semana que está corriendo AHORA.
+ *
+ * No es un resultado: es el estado de la medición mientras pasa. Existe porque
+ * entre que se asigna el experimento y que hay algo concluyente pasan casi dos
+ * días —24 h de lavado más 24 h de exposición mínima— y en ese lapso la
+ * pantalla no tenía nada que mostrar. Una pantalla vacía durante dos días se
+ * lee como "esto no funciona", cuando en realidad está midiendo.
+ */
+export type BandaEnCurso = {
+  banda: string;
+  semana: number;
+  skus: number;
+  /** Cuándo empieza a contar esta semana (ya con el lavado descontado). */
+  desde: string;
+  hasta: string;
+  horasVendible: number;
+  horasSinStock: number;
+  unidades: number;
+  margen: number;
+  /** Cuántos SKU ya superaron la exposición mínima para poder leerse. */
+  skusLegibles: number;
+};
+
 export type DashboardElasticidad = {
   experimento: string | null;
   /**
@@ -870,6 +894,12 @@ export type DashboardElasticidad = {
   desde: string | null;
   hasta: string | null;
   kpis: KpisElasticidad;
+  /**
+   * La semana en curso, aunque todavía no sea concluyente. Se llena apenas se
+   * asigna el experimento, así que la pantalla deja de estar vacía desde el
+   * primer día en vez de desde el tercero.
+   */
+  enCurso: BandaEnCurso[];
   bandas: ResumenBanda[];
   filas: FilaElasticidad[];
   recortada: boolean;
