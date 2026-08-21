@@ -1,9 +1,20 @@
 import { query } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
-import { BANDAS, UDS_MINIMAS_SKU, mejorBanda } from "@/lib/elasticidad";
+import {
+  BANDAS,
+  EXPERIMENTO_FIN,
+  EXPERIMENTO_INICIO,
+  SEMANAS,
+  UDS_MINIMAS_SKU,
+  mejorBanda,
+  semanaDe,
+} from "@/lib/elasticidad";
 import { CANAL_MELI } from "@/lib/meli";
 import type {
   DashboardElasticidad,
+  DashboardResultados,
+  FilaResultado,
+  ResumenSemana,
   DiaSinStock,
   FilaElasticidad,
   FiltrosElasticidad,
@@ -414,6 +425,141 @@ export async function getDashboardElasticidad(
     bandas,
     articulos,
     diasSinStock,
+    recortada: articulos.length === TOPE,
+    generadoEn: new Date().toISOString(),
+  };
+}
+
+
+// --- Resultados por semana ---------------------------------------------------
+
+/**
+ * Las ventas del experimento agrupadas por artículo y DÍA.
+ *
+ * POR QUÉ POR DÍA Y NO POR SEMANA
+ * El corte de las semanas vive en `lib/elasticidad.ts` (`SEMANAS`), que es
+ * también el que dibuja las columnas. Si el SQL volviera a decidir dónde
+ * termina cada semana, habría dos definiciones del mismo corte y el día que se
+ * agregue una cuarta semana una de las dos se va a quedar atrás — con la tabla
+ * mostrando una columna que la consulta no llena.
+ *
+ * Traer por día cuesta poco: son ~5.000 filas para las tres semanas, y el
+ * agrupado lo hace `semanaDe`, una sola función, la misma para todos.
+ */
+async function getVentasPorDia(f: FiltrosElasticidad) {
+  const params: unknown[] = [CANAL_MELI, EXPERIMENTO_INICIO, EXPERIMENTO_FIN];
+  const clauses = [
+    `f.canal = $1`,
+    `f.fecha >= $2::date`,
+    `f.fecha < $3::date`,   // exclusivo: el último día ya no es del experimento
+    CLASIFICABLE,
+  ];
+  agregarFiltro(clauses, params, "f.proveedor", f.proveedor);
+  agregarFiltro(clauses, params, "f.marca", f.marca);
+  agregarFiltro(clauses, params, "f.sku", f.sku);
+
+  return query<Record<string, string | null>>(
+    `select f.sku,
+            to_char(f.fecha, 'YYYY-MM-DD')    as fecha,
+            max(f.producto)                   as producto,
+            max(f.marca)                      as marca,
+            max(f.proveedor)                  as proveedor,
+            coalesce(sum(f.cantidad), 0)      as unidades,
+            coalesce(sum(${MARGEN_PESOS}), 0) as margen,
+            coalesce(sum(f.total_linea), 0)   as facturacion
+       from gold.fact_ventas f
+      where ${clauses.join(" and ")}
+      group by f.sku, f.fecha`,
+    params,
+  );
+}
+
+const vacioSemana = () => ({ unidades: 0, margen: 0, facturacion: 0, diasSinStock: 0 });
+
+export async function getDashboardResultados(
+  f: FiltrosElasticidad,
+): Promise<DashboardResultados> {
+  // Los días sin stock y los días mirados se piden por semana, con el rango de
+  // cada una. Es el mismo cálculo que usa la otra pantalla, así que las dos
+  // cuentan un quiebre igual.
+  const porSemana = await Promise.all(
+    SEMANAS.map(async (s) => {
+      const rango = { ...f, desde: s.desde, hasta: s.hasta };
+      const [sinStock, mirados] = await Promise.all([
+        getResumenSinStock(rango),
+        getDiasMirados(rango),
+      ]);
+      return { semana: s, sinStock, mirados };
+    }),
+  );
+
+  const filas = await getVentasPorDia(f);
+
+  const mapa = new Map<string, FilaResultado>();
+  for (const r of filas) {
+    const sku = r.sku as string;
+    const semana = semanaDe(r.fecha as string);
+    if (semana == null) continue;   // no debería pasar: el where ya recorta
+
+    const fila =
+      mapa.get(sku) ??
+      ({
+        sku,
+        producto: r.producto,
+        marca: r.marca,
+        proveedor: r.proveedor,
+        semanas: Object.fromEntries(SEMANAS.map((s) => [s.numero, vacioSemana()])),
+        unidades: 0,
+        margen: 0,
+        facturacion: 0,
+      } as FilaResultado);
+
+    const celda = fila.semanas[semana];
+    celda.unidades += num(r.unidades);
+    celda.margen += num(r.margen);
+    celda.facturacion += num(r.facturacion);
+    fila.unidades += num(r.unidades);
+    fila.margen += num(r.margen);
+    fila.facturacion += num(r.facturacion);
+    mapa.set(sku, fila);
+  }
+
+  // Los días sin stock se pegan a TODOS los artículos del experimento, no sólo
+  // a los que vendieron: un artículo que no vendió nada porque estuvo quebrado
+  // toda la semana es justamente el caso que hay que poder ver.
+  for (const { semana, sinStock } of porSemana) {
+    for (const [sku, dias] of sinStock) {
+      const fila = mapa.get(sku);
+      if (fila) fila.semanas[semana.numero].diasSinStock = dias;
+    }
+  }
+
+  const articulos = [...mapa.values()].sort((a, b) => b.margen - a.margen).slice(0, TOPE);
+
+  const resumen: ResumenSemana[] = porSemana.map(({ semana, mirados }) => {
+    const todas = [...mapa.values()];
+    const c = todas.map((x) => x.semanas[semana.numero]);
+    const unidades = c.reduce((a, x) => a + x.unidades, 0);
+    const facturacion = c.reduce((a, x) => a + x.facturacion, 0);
+    const margen = c.reduce((a, x) => a + x.margen, 0);
+    return {
+      numero: semana.numero,
+      desde: semana.desde,
+      hasta: semana.hasta,
+      label: semana.label,
+      skus: c.filter((x) => x.unidades > 0).length,
+      unidades,
+      facturacion,
+      margen,
+      margenPct: facturacion > 0 ? margen / facturacion : null,
+      diasMirados: mirados,
+      skusQuebrados: c.filter((x) => x.diasSinStock > 0).length,
+    };
+  });
+
+  return {
+    semanas: resumen,
+    articulos,
     recortada: articulos.length === TOPE,
     generadoEn: new Date().toISOString(),
   };
