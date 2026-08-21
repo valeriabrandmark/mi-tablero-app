@@ -812,8 +812,14 @@ export type ResumenBanda = {
   margen: number;
   /** Unidades por día realmente a la venta. El denominador es lo que importa. */
   udsPorDia: number | null;
-  /** Margen por día a la venta. LA respuesta: su máximo es el markup buscado. */
+  /** Margen por día a la venta. La medida principal. */
   margenPorDia: number | null;
+  /**
+   * Margen por unidad vendida. El criterio de desempate: entre dos bandas que
+   * dejan lo mismo por día conviene la de markup más alto, porque quema menos
+   * stock para ganar la misma plata.
+   */
+  margenPorUnidad: number | null;
   /** Markup efectivamente aplicado, ponderado por horas. No es la banda. */
   markupRealizado: number | null;
   /** Fracción del tiempo a la venta ganando la caja. Null si no aplica. */
@@ -830,7 +836,9 @@ export type FilaElasticidad = {
   /** Margen por día a la venta en cada banda. Null = esa semana no se pudo leer. */
   porBanda: Record<string, number | null>;
   udsPorBanda: Record<string, number | null>;
-  /** La banda con mejor margen por día, o null si hay menos de dos medidas. */
+  /** Margen por unidad en cada banda. Es lo que desempata los empates. */
+  margenUnidadPorBanda: Record<string, number | null>;
+  /** La banda recomendada, o null si hay menos de dos medidas. */
   mejor: string | null;
   /** `true` si el SKU tiene volumen propio para leerse sin el agregado. */
   confiable: boolean;
