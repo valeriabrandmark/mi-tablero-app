@@ -810,6 +810,13 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
                 y sumarlas la contaría tres veces. El total son órdenes
                 distintas, y sale de su propia consulta.
               </p>
+              <p className="text-muted mt-1 text-[11px] leading-relaxed">
+                Acá entran solo las ventas que <strong>de verdad se cayeron</strong>: el
+                comprador se arrepintió, hubo un reclamo, no se pudo entregar o fue fraude.
+                Quedan afuera las que Mercado Libre marca como canceladas para partir un
+                carrito y volver a crearlo —dos tercios del total—, porque esa mercadería se
+                despacha y se cobra igual. Mercado Libre tampoco las cuenta como canceladas.
+              </p>
             </Panel>
           )}
 

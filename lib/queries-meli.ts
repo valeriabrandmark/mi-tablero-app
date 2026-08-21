@@ -846,6 +846,33 @@ export async function getDashboardAlertasMeli(f: FiltrosMeli): Promise<Dashboard
  * Se define una sola vez porque la usan la tabla, el conteo de órdenes y el
  * gráfico por hora. Escrita tres veces, el día que cambie el criterio de
  * cancelada quedarían tres números distintos en la misma pantalla.
+ *
+ * ---------------------------------------------------------------------------
+ * `status = 'cancelled'` NO ALCANZA, Y LA DIFERENCIA ES ENORME.
+ *
+ * El 69 % de las órdenes canceladas —3.410 de 4.914, $ 35,2 M— tienen
+ * `cancel_detail.code = 'pack_splitted'`, y esas NO SON VENTAS CAÍDAS. Es
+ * Mercado Libre partiendo un carrito: cancela la orden original y la vuelve a
+ * crear como una orden nueva. La mercadería se despacha y se cobra igual.
+ *
+ * Se ve al mirar las dos órdenes juntas — mismo comprador, mismo SKU, mismo
+ * precio, veinte minutos después:
+ *
+ *   02:16:25  cancelada (pack_splitted)  comprador 103011573  AL09022  $ 3.500
+ *   02:43:28  pagada                     comprador 103011573  AL09022  $ 3.500
+ *
+ * Contarlas como cancelaciones inflaba el tablero: el 19/08 daba $ 810.080 de
+ * "cancelado" cuando lo que de verdad se cayó fueron $ 254.582. Mercado Libre
+ * tampoco las cuenta — su panel de Métricas informa "ventas canceladas: 0" para
+ * ese día, y el reporte de ventas no las lista.
+ *
+ * El corte es por GRUPO y no por código: `internal` junta `pack_splitted`,
+ * `pack_creation_error` y `pack_unknown`, que son todas contabilidad interna de
+ * ML. Enumerando códigos, el día que ML agregue uno nuevo volvería a contarse
+ * como venta perdida sin que nadie se entere.
+ *
+ * Quedan adentro las que sí son ventas que se cayeron: `buyer` (se arrepintió),
+ * `mediations` (reclamo), `shipment` (no se pudo entregar) y `fraud`.
  */
 const LINEAS_CANCELADAS = `
   select v.id                                                     as nro_orden,
@@ -859,7 +886,8 @@ const LINEAS_CANCELADAS = `
          (it->>'unit_price')::numeric * (it->>'quantity')::numeric as monto
   from bronze.ml_ventas v,
        lateral jsonb_array_elements(v.order_items::jsonb) as it
-  where v.status = 'cancelled'`;
+  where v.status = 'cancelled'
+    and coalesce(v."cancel_detail.group", '') <> 'internal'`;
 
 /**
  * Los filtros de la pantalla, aplicados a las canceladas.
