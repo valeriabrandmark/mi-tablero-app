@@ -75,6 +75,10 @@ function where(f: FiltrosElasticidad): Where {
   agregarFiltro(clauses, params, "f.proveedor", f.proveedor);
   agregarFiltro(clauses, params, "f.marca", f.marca);
   agregarFiltro(clauses, params, "f.sku", f.sku);
+  // El filtro cruzado de los gráficos. Se aplica sobre la MISMA expresión que
+  // clasifica: si acá se repitieran los cortes, un click podría traer una banda
+  // distinta de la que se ve en la barra.
+  agregarFiltro(clauses, params, `(${BANDA})`, f.banda);
   return { sql: `where ${clauses.join(" and ")}`, params };
 }
 
@@ -257,7 +261,10 @@ async function getArticulos(f: FiltrosElasticidad): Promise<FilaElasticidad[]> {
             max(f.proveedor)                  as proveedor,
             ${BANDA}                          as banda,
             coalesce(sum(f.cantidad), 0)      as unidades,
-            coalesce(sum(${MARGEN_PESOS}), 0) as margen
+            coalesce(sum(${MARGEN_PESOS}), 0) as margen,
+            coalesce(sum(f.total_linea), 0)   as facturacion,
+            coalesce(sum(${MARGEN_PESOS}), 0)
+              / nullif(sum(f.total_linea), 0) as margen_pct
        from gold.fact_ventas f
        ${w.sql}
       group by f.sku, ${BANDA}`,
@@ -274,16 +281,22 @@ async function getArticulos(f: FiltrosElasticidad): Promise<FilaElasticidad[]> {
       proveedor: r.proveedor,
       unidades: 0,
       margen: 0,
+      facturacion: 0,
       unidadesPorBanda: {},
       margenPorBanda: {},
+      margenPctPorBanda: {},
+      facturacionPorBanda: {},
       mejor: null,
       confiable: false,
       diasSinStock: 0,
     };
     fila.unidades += num(r.unidades);
     fila.margen += num(r.margen);
+    fila.facturacion += num(r.facturacion);
     fila.unidadesPorBanda[r.banda as string] = num(r.unidades);
     fila.margenPorBanda[r.banda as string] = num(r.margen);
+    fila.margenPctPorBanda[r.banda as string] = opt(r.margen_pct);
+    fila.facturacionPorBanda[r.banda as string] = num(r.facturacion);
     mapa.set(sku, fila);
   }
 
@@ -339,7 +352,7 @@ export async function getOpcionesElasticidad(f: FiltrosElasticidad) {
   // Sin los filtros de proveedor/marca puestos: si se filtrara por proveedor,
   // el desplegable de proveedores mostraría únicamente el ya elegido y no se
   // podría cambiar sin limpiar antes.
-  const w = where({ desde: f.desde, hasta: f.hasta });
+  const w = where({ desde: f.desde, hasta: f.hasta });   // sin proveedor, marca ni banda
   const [proveedores, marcas] = await Promise.all([
     query<{ v: string }>(
       `select distinct f.proveedor as v from gold.fact_ventas f ${w.sql}
