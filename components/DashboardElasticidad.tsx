@@ -273,10 +273,19 @@ export default function DashboardElasticidadPage() {
             Elasticidad de precios{" "}
             <span className="text-muted text-sm font-normal">· experimento de markup</span>
           </h2>
+          {/* Los TRES estados dichos distinto, y no dos.
+              Antes esto era `data?.desde ? fechas : "Cargando…"`, y con el
+              experimento todavía sin asignar —que es el estado normal hasta que
+              alguien corre `--asignar`— `desde` viene en null: la pantalla se
+              quedaba diciendo "Cargando datos en vivo…" para siempre, con los
+              datos ya cargados. Se lee como una pantalla colgada, que es
+              justamente lo contrario de lo que pasa. */}
           <p className="text-muted mt-1 text-xs">
-            {data?.desde
-              ? `${data.desde}${data.hasta ? ` a ${data.hasta}` : ""}${data.experimento ? ` · ${data.experimento}` : ""}`
-              : "Cargando datos en vivo…"}
+            {!data
+              ? "Cargando datos en vivo…"
+              : data.desde
+                ? `${data.desde}${data.hasta ? ` a ${data.hasta}` : ""}${data.experimento ? ` · ${data.experimento}` : ""}`
+                : "Todavía sin experimento asignado"}
           </p>
         </div>
         <button
