@@ -136,6 +136,7 @@ const APIS_MINORISTA = [
   "/api/tienda-nube",
   "/api/stock-full",
   "/api/elasticidad",
+  "/api/resultados-elasticidad",
 ];
 
 function esApiMinorista(pathname: string): boolean {

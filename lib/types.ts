@@ -888,3 +888,54 @@ export type DashboardElasticidad = {
   recortada: boolean;
   generadoEn: string;
 };
+
+
+// --- Resultados por semana (elasticidad) ------------------------------------
+
+/** Lo que un artículo hizo en una semana. */
+export type CeldaSemana = {
+  unidades: number;
+  margen: number;
+  /** No se muestra; es el denominador para promediar el %margen. */
+  facturacion: number;
+  /** Días de esa semana en que no se pudo comprar. Sólo cuenta los medidos. */
+  diasSinStock: number;
+};
+
+export type FilaResultado = {
+  sku: string;
+  producto: string | null;
+  marca: string | null;
+  proveedor: string | null;
+  /** Una entrada por semana del experimento, siempre las mismas claves. */
+  semanas: Record<number, CeldaSemana>;
+  unidades: number;
+  margen: number;
+  facturacion: number;
+};
+
+export type ResumenSemana = {
+  numero: number;
+  desde: string;
+  hasta: string;
+  label: string;
+  skus: number;
+  unidades: number;
+  facturacion: number;
+  margen: number;
+  margenPct: number | null;
+  /**
+   * Días de la semana en que el pulso corrió. Es lo que hace legible la
+   * semana 1: la historia de stock arrancó el 21/08, así que sus primeros días
+   * no se midieron y sus quiebres no se pueden conocer.
+   */
+  diasMirados: number;
+  skusQuebrados: number;
+};
+
+export type DashboardResultados = {
+  semanas: ResumenSemana[];
+  articulos: FilaResultado[];
+  recortada: boolean;
+  generadoEn: string;
+};

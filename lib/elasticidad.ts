@@ -146,3 +146,80 @@ export const PASOS_PREVIOS = [
       "hay nada que clasificar. Probá abriendo el rango de fechas.",
   },
 ] as const;
+
+
+// --- Las semanas del experimento --------------------------------------------
+
+/**
+ * Cuándo arrancó el experimento y cuántas semanas dura.
+ *
+ * Los tramos se DERIVAN de estos dos números en vez de estar escritos uno por
+ * uno. Si el experimento se estira a cuatro o cinco semanas, se cambia
+ * `SEMANAS` y no hay que tocar ni el SQL ni las columnas de la tabla — que es
+ * exactamente el tipo de cambio que si no termina hecho a medias en un lado.
+ */
+export const EXPERIMENTO_INICIO = "2026-08-18";
+export const EXPERIMENTO_SEMANAS = 3;
+
+export type SemanaExperimento = {
+  numero: number;
+  /** Inclusive. */
+  desde: string;
+  /**
+   * EXCLUSIVO: el día `hasta` ya pertenece a la semana siguiente.
+   *
+   * Es lo que hace que "del 18-08 al 25-08" y "del 25-08 al 01-09" no cuenten
+   * dos veces las ventas del 25. Cada semana tiene exactamente 7 días y ninguna
+   * venta cae en dos.
+   */
+  hasta: string;
+  label: string;
+};
+
+/** Corre una fecha `YYYY-MM-DD` N días. Igual que `sumarDias` de rangos.ts,
+ *  repetido acá para que este módulo no importe nada (lo usa el navegador). */
+function correr(fecha: string, dias: number): string {
+  const d = new Date(`${fecha}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + dias);
+  return d.toISOString().slice(0, 10);
+}
+
+/** `2026-08-18` -> `18/08` */
+export function diaMes(fecha: string): string {
+  const [, m, d] = fecha.split("-");
+  return `${d}/${m}`;
+}
+
+export const SEMANAS: SemanaExperimento[] = Array.from(
+  { length: EXPERIMENTO_SEMANAS },
+  (_, i) => {
+    const desde = correr(EXPERIMENTO_INICIO, i * 7);
+    const hasta = correr(EXPERIMENTO_INICIO, (i + 1) * 7);
+    return {
+      numero: i + 1,
+      desde,
+      hasta,
+      // El label dice las dos puntas tal como se piensan ("del 18/08 al
+      // 25/08"), aunque el 25 no cuente para esta semana. La tabla explica el
+      // corte una vez, abajo, en vez de inventar una notación que nadie usa.
+      label: `${diaMes(desde)} al ${diaMes(hasta)}`,
+    };
+  },
+);
+
+/** El primer día que ya NO entra en el experimento. */
+export const EXPERIMENTO_FIN = correr(EXPERIMENTO_INICIO, EXPERIMENTO_SEMANAS * 7);
+
+/** En qué semana cae una fecha, o `null` si está fuera del experimento. */
+export function semanaDe(fecha: string): number | null {
+  return SEMANAS.find((s) => fecha >= s.desde && fecha < s.hasta)?.numero ?? null;
+}
+
+/**
+ * Qué semanas ya empezaron. Las que no, se muestran igual pero vacías y
+ * marcadas: una columna que falta se lee como "no la medimos", y una que dice
+ * "todavía no empezó" dice la verdad.
+ */
+export function semanaEmpezada(s: SemanaExperimento, hoy: string): boolean {
+  return hoy >= s.desde;
+}

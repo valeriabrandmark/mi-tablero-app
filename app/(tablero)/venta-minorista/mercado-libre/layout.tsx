@@ -23,6 +23,14 @@ const PESTANAS: Pestana[] = [
     href: "/venta-minorista/mercado-libre/elasticidad",
     label: "Elasticidad de precios",
   },
+  // La misma medición, cortada por las semanas del experimento en vez de por un
+  // rango libre. Va aparte y no como un filtro de la anterior porque contesta
+  // otra pregunta: no "con qué margen conviene vender" sino "cómo viene
+  // evolucionando semana a semana".
+  {
+    href: "/venta-minorista/mercado-libre/resultados",
+    label: "Resultados por semana",
+  },
 ];
 
 export default function MercadoLibreLayout({
