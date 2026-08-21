@@ -7,9 +7,11 @@ import { Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import {
   BANDAS,
+  EMPATE_TECNICO,
   PASOS_PREVIOS,
   UDS_MINIMAS_SKU,
   labelBanda,
+  mejorBanda,
 } from "@/lib/elasticidad";
 import { vacio as sinValores } from "@/lib/filtros";
 import { fmtMoneda, fmtMonedaCorta, fmtNumero, fmtPct } from "@/lib/format";
@@ -38,16 +40,18 @@ const fmtTasa = (n: number | null | undefined): string =>
   n == null || !Number.isFinite(n) ? "—" : n.toFixed(2);
 
 /**
- * La banda ganadora del agregado: la de mayor margen por día a la venta.
+ * La banda recomendada del agregado.
  *
- * Se elige por margen y no por unidades a propósito. Bajando el markup se vende
- * más siempre; la pregunta del negocio no es cuánto se vende sino cuánto queda,
- * y ese máximo es el punto de equilibrio que el experimento busca.
+ * Usa `mejorBanda`, la MISMA función que la tabla por artículo. Antes acá había
+ * un `reduce` con el máximo pelado, y eso hacía que el titular de arriba y la
+ * columna "Mejor" de abajo pudieran recomendar bandas distintas sobre los
+ * mismos datos — que es la clase de contradicción que hace que nadie le crea al
+ * tablero.
  */
 function ganadora(bandas: ResumenBanda[]): ResumenBanda | null {
-  const medidas = bandas.filter((b) => b.margenPorDia != null);
-  if (medidas.length < 2) return null;
-  return medidas.reduce((a, b) => (b.margenPorDia! > a.margenPorDia! ? b : a));
+  const porBanda = Object.fromEntries(bandas.map((b) => [b.banda, b.margenPorDia]));
+  const clave = mejorBanda(porBanda);
+  return clave ? (bandas.find((b) => b.banda === clave) ?? null) : null;
 }
 
 function columnasBanda(): Columna<ResumenBanda>[] {
@@ -77,6 +81,14 @@ function columnasBanda(): Columna<ResumenBanda>[] {
       ),
       numerica: true,
       orden: (b) => b.margenPorDia,
+    },
+    {
+      // El desempate, puesto al lado de la medida principal para que se vea de
+      // dónde sale la recomendación cuando dos bandas dejan casi lo mismo.
+      titulo: "Margen / unidad",
+      celda: (b) => (b.margenPorUnidad == null ? "—" : fmtMoneda(b.margenPorUnidad)),
+      numerica: true,
+      orden: (b) => b.margenPorUnidad,
     },
     {
       titulo: "Uds / día a la venta",
@@ -151,7 +163,12 @@ function columnasSku(): Columna<FilaElasticidad>[] {
           return (
             <span
               style={gana ? { color: COLOR_BANDA[banda.clave], fontWeight: 600 } : undefined}
-              title={`${fmtTasa(f.udsPorBanda[banda.clave])} uds/día a la venta`}
+              title={
+                `${fmtTasa(f.udsPorBanda[banda.clave])} uds/día a la venta` +
+                (f.margenUnidadPorBanda[banda.clave] == null
+                  ? ""
+                  : ` · ${fmtMoneda(f.margenUnidadPorBanda[banda.clave])} por unidad`)
+              }
             >
               {fmtMonedaCorta(valor)}
             </span>
@@ -333,7 +350,9 @@ export default function DashboardElasticidadPage() {
               valor={mejor ? labelBanda(mejor.banda) : "—"}
               detalle={
                 mejor
-                  ? `${fmtMoneda(mejor.margenPorDia)} de margen por día a la venta · markup real ${fmtPct(mejor.markupRealizado)}`
+                  ? `${fmtMoneda(mejor.margenPorDia)} por día a la venta · ` +
+                    `${fmtMoneda(mejor.margenPorUnidad)} por unidad · ` +
+                    `markup real ${fmtPct(mejor.markupRealizado)}`
                   : "Hacen falta al menos dos bandas medidas"
               }
               acento={mejor ? COLOR_BANDA[mejor.banda] : undefined}
@@ -365,7 +384,7 @@ export default function DashboardElasticidadPage() {
           <div className="grid gap-4 lg:grid-cols-2">
             <Panel
               titulo="Margen por día a la venta"
-              nota="La respuesta del experimento · su máximo es el markup buscado"
+              nota={`La medida principal · empates de hasta ${fmtPct(EMPATE_TECNICO)} van al markup más alto`}
             >
               <BarrasCategoria
                 datos={data.bandas
@@ -434,6 +453,21 @@ export default function DashboardElasticidadPage() {
               <strong>Sí:</strong> cuál es la mejor banda a nivel agregado y por segmento
               —proveedor, marca, rango de precio—. Ahí hay miles de unidades y el cuadrado
               latino hace que el efecto de la semana no se confunda con el de la banda.
+            </p>
+            <p className="mt-1">
+              <strong>Cómo se elige la banda recomendada:</strong> gana la de mayor margen
+              por día a la venta, pero si otra queda dentro de {fmtPct(EMPATE_TECNICO)} y
+              tiene markup más alto, gana ésa. Vender 50 unidades marcando 10 % y vender 20
+              marcando 30 % no son lo mismo aunque dejen igual: con la segunda el stock dura
+              más y se mueve menos mercadería para ganar la misma plata.
+            </p>
+            <p className="mt-1">
+              <strong>Un sesgo que conviene tener presente:</strong> medir por día a la venta
+              corrige los quiebres que no dependen del precio, pero cuando el quiebre lo
+              causa el precio bajo —se vendió todo el martes— la banda barata queda medida
+              sobre menos horas y sale <em>mejor</em> de lo que fue. Por eso mirá siempre la
+              columna <em>&ldquo;Perdido por quiebre&rdquo;</em> al lado: si una banda quema
+              stock, ahí se ve.
             </p>
             <p className="mt-1">
               <strong>No:</strong> &ldquo;el markup exacto de cada producto&rdquo;. La

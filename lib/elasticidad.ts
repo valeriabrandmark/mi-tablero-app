@@ -34,6 +34,25 @@
  * sobre el costo— es el **margen por día a la venta**, que sube cuando el
  * markup sube y baja cuando el markup espanta compradores. Su máximo es el
  * punto de equilibrio que se está buscando.
+ *
+ * ---------------------------------------------------------------------------
+ * PERO EL MÁXIMO SOLO NO ALCANZA: EL EMPATE SE DESEMPATA HACIA ARRIBA
+ *
+ * Entre dos bandas que dejan lo mismo por día conviene la de **markup más
+ * alto**, porque vende menos unidades para ganar la misma plata. Dicho con el
+ * ejemplo del negocio: vender 50 unidades marcando 10 % y vender 20 marcando
+ * 30 % no son equivalentes aunque den el mismo total.
+ *
+ * Importa por dos motivos concretos:
+ *
+ *   1. El stock dura más. Quemar la mercadería a mitad de semana deja al
+ *      artículo sin nada que vender hasta que se repone, y en Full reponer no
+ *      es inmediato.
+ *   2. Cada unidad movida cuesta trabajo —preparar, despachar, atender— que no
+ *      depende de a cuánto se vendió.
+ *
+ * Por eso `mejorBanda` no devuelve el máximo pelado: entre las bandas que están
+ * dentro de `EMPATE_TECNICO` de la mejor, devuelve la de markup más alto.
  */
 
 /** Las tres bandas. Tienen que decir lo mismo que `BANDAS` en experimento.py. */
@@ -96,21 +115,47 @@ export function motivoDescartado(fila: {
 }
 
 /**
- * La banda con mejor margen por día a la venta, o `null` si no hay al menos dos
- * bandas medidas.
+ * Cuánto puede estar por debajo del mejor margen por día una banda para que se
+ * la siga considerando empatada.
+ *
+ * NO ES UN NÚMERO ESTADÍSTICO, es una preferencia del negocio, y por eso está
+ * acá arriba y no escondido en una fórmula. Dice: "una banda que deja hasta un
+ * 10 % menos por día, pero con markup más alto, me conviene igual" — porque lo
+ * que se ahorra en stock quemado y en trabajo por unidad compensa esa
+ * diferencia. Subirlo empuja a marcar más caro; bajarlo, a vender más barato.
+ *
+ * Con 0 el criterio vuelve a ser el máximo pelado.
+ */
+export const EMPATE_TECNICO = 0.1;
+
+/**
+ * La banda recomendada, o `null` si no hay al menos dos bandas medidas.
  *
  * Con una sola banda medida no hay comparación posible: el "mejor" sería el
  * único, que no dice nada. Devolver null y que la pantalla muestre "—" es
  * preferible a un ganador que se eligió a sí mismo.
+ *
+ * Entre las que quedan dentro de `EMPATE_TECNICO` del mejor margen por día,
+ * gana la de **markup más alto** (ver el encabezado del archivo). `BANDAS` está
+ * ordenada de menor a mayor markup, así que "la última que empata" es esa.
+ *
+ * Ojo con el signo: si el mejor margen por día es NEGATIVO —el artículo pierde
+ * plata en las tres bandas—, un umbral multiplicativo se daría vuelta y
+ * elegiría la PEOR. Por eso el piso se calcula sobre el valor absoluto.
  */
 export function mejorBanda(
   porBanda: Partial<Record<string, number | null>>,
 ): ClaveBanda | null {
   const medidas = BANDAS.filter((b) => porBanda[b.clave] != null);
   if (medidas.length < 2) return null;
-  return medidas.reduce((mejor, b) =>
-    (porBanda[b.clave] ?? -Infinity) > (porBanda[mejor.clave] ?? -Infinity) ? b : mejor,
-  ).clave;
+
+  const tope = Math.max(...medidas.map((b) => porBanda[b.clave]!));
+  const piso = tope - Math.abs(tope) * EMPATE_TECNICO;
+
+  // `filter` conserva el orden de BANDAS (markup creciente), así que la última
+  // que pasa el piso es la de markup más alto entre las empatadas.
+  const empatadas = medidas.filter((b) => porBanda[b.clave]! >= piso);
+  return empatadas[empatadas.length - 1].clave;
 }
 
 /**

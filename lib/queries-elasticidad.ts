@@ -156,6 +156,10 @@ async function getBandas(experimento: string, f: FiltrosElasticidad): Promise<Re
       // a la venta no es un fracaso comercial, es un dato que no existe.
       udsPorDia: dias > 0 ? num(r.unidades) / dias : null,
       margenPorDia: dias > 0 ? num(r.margen) / dias : null,
+      // Sobre las unidades vendidas y no sobre los SKU-semana: es "cuánto me
+      // dejó cada unidad que saqué del depósito", que es la pregunta de la que
+      // sale el desempate.
+      margenPorUnidad: num(r.unidades) > 0 ? num(r.margen) / num(r.unidades) : null,
       markupRealizado: opt(r.markup_realizado),
       ganandoBb: opt(r.ganando_bb),
     };
@@ -239,6 +243,7 @@ async function getFilas(experimento: string, f: FiltrosElasticidad): Promise<Fil
       unidades: 0,
       porBanda: {},
       udsPorBanda: {},
+      margenUnidadPorBanda: {},
       mejor: null,
       confiable: false,
     };
@@ -246,6 +251,8 @@ async function getFilas(experimento: string, f: FiltrosElasticidad): Promise<Fil
     actual.unidades += num(r.unidades);
     actual.porBanda[r.banda as string] = dias > 0 ? num(r.margen) / dias : null;
     actual.udsPorBanda[r.banda as string] = dias > 0 ? num(r.unidades) / dias : null;
+    actual.margenUnidadPorBanda[r.banda as string] =
+      num(r.unidades) > 0 ? num(r.margen) / num(r.unidades) : null;
     mapa.set(sku, actual);
   }
 
