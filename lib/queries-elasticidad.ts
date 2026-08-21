@@ -8,6 +8,7 @@ import {
 } from "@/lib/elasticidad";
 import { CANAL_MELI } from "@/lib/meli";
 import type {
+  BandaEnCurso,
   DashboardElasticidad,
   FilaElasticidad,
   FiltrosElasticidad,
@@ -266,6 +267,76 @@ async function getFilas(experimento: string, f: FiltrosElasticidad): Promise<Fil
   return visibles.sort((a, b) => b.unidades - a.unidades).slice(0, TOPE);
 }
 
+/**
+ * La semana que está corriendo ahora, con lo que lleva acumulado.
+ *
+ * SALE DE `experimento_markup` Y NO DE `fact_experimento`, y el orden importa.
+ * `fact_experimento` sólo tiene fila para una semana DESPUÉS del lavado: durante
+ * las primeras 24 h no existe ninguna. Si esta consulta arrancara de ahí, la
+ * pantalla seguiría vacía justo el primer día, que es cuando más se la mira.
+ *
+ * Arrancando de la asignación —que existe desde el momento en que se corre
+ * `--asignar`— se puede mostrar el plan enseguida, y los números se van
+ * llenando solos con el `left join` a medida que el consolidado los calcula.
+ *
+ * ACÁ NO SE FILTRA POR LEGIBILIDAD, a propósito: la pregunta no es "¿qué puedo
+ * concluir?" sino "¿esto está midiendo?". `skusLegibles` dice cuántos ya
+ * superaron la exposición mínima, así que se ve el progreso sin confundirlo con
+ * un resultado.
+ */
+async function getEnCurso(experimento: string): Promise<BandaEnCurso[]> {
+  const filas = await query<Record<string, string | null>>(
+    `select m.banda,
+            max(m.semana)                            as semana,
+            count(distinct m.sku)                    as skus,
+            to_char(min(m.desde), 'YYYY-MM-DD')      as desde,
+            to_char(max(m.hasta), 'YYYY-MM-DD')      as hasta,
+            coalesce(sum(f.horas_vendible), 0)       as horas_vendible,
+            coalesce(sum(f.horas_sin_stock), 0)      as horas_sin_stock,
+            coalesce(sum(f.unidades), 0)             as unidades,
+            coalesce(sum(f.margen), 0)               as margen,
+            count(f.sku) filter (where f.horas_vendible >= ${HORAS_MINIMAS})
+                                                     as skus_legibles,
+            -- Disponibilidad AHORA, del último pulso. No es acumulado: es el
+            -- estado en este momento, y es lo único de este panel que se mueve
+            -- durante el lavado. Sin esto, el primer día se ve el plan con
+            -- todo en cero y no se distingue de una pantalla rota.
+            count(distinct m.sku) filter (where e.vendible_ahora) as vendibles_ahora
+       from gold.experimento_markup m
+       left join gold.fact_experimento f
+         on f.experimento = m.experimento and f.sku = m.sku and f.semana = m.semana
+       left join (
+         -- Un SKU está vendible si CUALQUIERA de sus publicaciones lo está: el
+         -- comprador necesita una sola. Los tramos con hasta en null son los
+         -- abiertos, o sea el estado vigente.
+         select sku, bool_or(vendible) as vendible_ahora
+           from bronze.ml_estado_item
+          where hasta is null and sku is not null
+          group by sku
+       ) e on e.sku = m.sku
+      where m.experimento = $1
+        and now() >= m.desde and now() < m.hasta
+      group by m.banda
+      order by m.banda`,
+    [experimento],
+  );
+
+  return filas.map((r) => ({
+    banda: r.banda as string,
+    semana: num(r.semana),
+    skus: num(r.skus),
+    desde: r.desde as string,
+    hasta: r.hasta as string,
+    horasVendible: num(r.horas_vendible),
+    horasSinStock: num(r.horas_sin_stock),
+    unidades: num(r.unidades),
+    margen: num(r.margen),
+    skusLegibles: num(r.skus_legibles),
+    vendiblesAhora: num(r.vendibles_ahora),
+  }));
+}
+
+
 async function getVentana(experimento: string) {
   return queryOne<{ desde: string | null; hasta: string | null }>(
     `select to_char(min(desde), 'YYYY-MM-DD') as desde,
@@ -306,7 +377,11 @@ const SIN_KPIS: KpisElasticidad = {
   margen: 0,
 };
 
-function vacio(falta: string, experimento: string | null): DashboardElasticidad {
+function vacio(
+  falta: string,
+  experimento: string | null,
+  enCurso: BandaEnCurso[] = [],
+): DashboardElasticidad {
   return {
     experimento,
     hayDatos: false,
@@ -314,6 +389,7 @@ function vacio(falta: string, experimento: string | null): DashboardElasticidad 
     desde: null,
     hasta: null,
     kpis: SIN_KPIS,
+    enCurso,
     bandas: [],
     filas: [],
     recortada: false,
@@ -332,17 +408,22 @@ export async function getDashboardElasticidad(
   const experimento = await experimentoActivo();
   if (!experimento) return vacio("asignacion", null);
 
-  const [kpis, bandas, filas, ventana] = await Promise.all([
+  const [kpis, bandas, filas, ventana, enCurso] = await Promise.all([
     getKpis(experimento, f),
     getBandas(experimento, f),
     getFilas(experimento, f),
     getVentana(experimento),
+    getEnCurso(experimento),
   ]);
 
   // Con una sola banda medida no hay comparación posible, y una pantalla que
   // muestra una barra sola invita a leer un ganador que se eligió a sí mismo.
   if (bandas.length < 2) {
-    return { ...vacio("semanas", experimento), kpis, desde: ventana?.desde ?? null };
+    return {
+      ...vacio("semanas", experimento, enCurso),
+      kpis,
+      desde: ventana?.desde ?? null,
+    };
   }
 
   return {
@@ -352,6 +433,7 @@ export async function getDashboardElasticidad(
     desde: ventana?.desde ?? null,
     hasta: ventana?.hasta ?? null,
     kpis,
+    enCurso,
     bandas,
     filas,
     recortada: filas.length === TOPE,

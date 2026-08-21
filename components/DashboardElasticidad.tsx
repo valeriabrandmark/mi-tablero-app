@@ -8,6 +8,7 @@ import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import {
   BANDAS,
   EMPATE_TECNICO,
+  HORAS_MINIMAS,
   PASOS_PREVIOS,
   UDS_MINIMAS_SKU,
   labelBanda,
@@ -18,6 +19,7 @@ import { fmtMoneda, fmtMonedaCorta, fmtNumero, fmtPct } from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
+  BandaEnCurso,
   DashboardElasticidad,
   FilaElasticidad,
   FiltrosElasticidad,
@@ -206,6 +208,105 @@ function columnasSku(): Columna<FilaElasticidad>[] {
   ];
 }
 
+function columnasEnCurso(): Columna<BandaEnCurso>[] {
+  return [
+    {
+      titulo: "Banda de markup",
+      celda: (b) => (
+        <span style={{ color: COLOR_BANDA[b.banda] }}>{labelBanda(b.banda)}</span>
+      ),
+      orden: (b) => b.banda,
+    },
+    { titulo: "Artículos", celda: (b) => fmtNumero(b.skus), numerica: true, orden: (b) => b.skus },
+    {
+      // Lo único que se mueve el primer día, mientras corre el lavado. Sin esta
+      // columna el panel arranca todo en cero y no se distingue de algo roto.
+      titulo: "Vendibles ahora",
+      celda: (b) => (
+        <span style={{ color: b.vendiblesAhora > 0 ? PALETA[1] : TEMA.negativo }}>
+          {fmtNumero(b.vendiblesAhora)}
+          <span className="text-muted"> de {fmtNumero(b.skus)}</span>
+        </span>
+      ),
+      numerica: true,
+      orden: (b) => b.vendiblesAhora,
+    },
+    {
+      titulo: "Días a la venta",
+      celda: (b) => fmtTasa(b.horasVendible / 24),
+      numerica: true,
+      orden: (b) => b.horasVendible,
+    },
+    {
+      titulo: "Perdido por quiebre",
+      celda: (b) => (
+        <span style={b.horasSinStock > 0 ? { color: TEMA.negativo } : undefined}>
+          {fmtTasa(b.horasSinStock / 24)} días
+        </span>
+      ),
+      numerica: true,
+      orden: (b) => b.horasSinStock,
+    },
+    { titulo: "Unidades", celda: (b) => fmtNumero(b.unidades), numerica: true, orden: (b) => b.unidades },
+    { titulo: "Margen", celda: (b) => fmtMoneda(b.margen), numerica: true, orden: (b) => b.margen },
+    {
+      // El progreso, no un resultado. Mientras esta columna esté en cero, los
+      // números de la izquierda son ciertos pero no significan nada todavía.
+      titulo: "Listos para leer",
+      celda: (b) => (
+        <span style={b.skusLegibles > 0 ? { color: PALETA[1] } : { color: TEMA.muted }}>
+          {fmtNumero(b.skusLegibles)} de {fmtNumero(b.skus)}
+        </span>
+      ),
+      numerica: true,
+      orden: (b) => b.skusLegibles,
+    },
+  ];
+}
+
+/**
+ * La semana que está corriendo, con lo que lleva acumulado.
+ *
+ * POR QUÉ EXISTE ESTE PANEL
+ * Entre que se asigna el experimento y que hay algo concluyente pasan casi dos
+ * días: 24 h de lavado —el arrastre del precio anterior— más 24 h de exposición
+ * mínima. Sin esto, la pantalla se quedaba vacía ese tiempo, y una pantalla
+ * vacía durante dos días se lee como "esto no funciona" justo cuando sí está
+ * funcionando.
+ *
+ * Lo que muestra NO son resultados y la pantalla lo dice: son los contadores de
+ * la medición en marcha. La columna "Listos para leer" es la que avisa cuándo
+ * empiezan a significar algo.
+ */
+function EnCurso({ filas }: { filas: BandaEnCurso[] }) {
+  const semana = filas[0]?.semana ?? 1;
+  const listos = filas.reduce((a, b) => a + b.skusLegibles, 0);
+  return (
+    <Panel
+      titulo={`Semana ${semana}, en curso`}
+      nota={
+        listos > 0
+          ? `${fmtNumero(listos)} artículos ya superaron el mínimo de exposición`
+          : "En las primeras 24 h sólo se mueve «vendibles ahora» — es lo esperado"
+      }
+    >
+      <Tabla
+        filas={filas}
+        columnas={columnasEnCurso()}
+        clave={(b) => b.banda}
+        vacio="La semana todavía no empezó a contar."
+      />
+      <p className="text-muted mt-3 text-[11px] leading-tight">
+        Esto <strong>no son conclusiones</strong>: es cómo va la medición. Cada semana
+        descarta sus primeras 24 h —lo que se vendió con el precio anterior todavía
+        arrastra— y después cada artículo necesita {HORAS_MINIMAS} h a la venta para
+        poder leerse. Hasta entonces los números de arriba son ciertos pero no alcanzan
+        para comparar bandas.
+      </p>
+    </Panel>
+  );
+}
+
 /** Lo que hay que hacer antes de que esta pantalla tenga algo que mostrar. */
 function TodaviaNo({ falta }: { falta: string | null }) {
   const indice = PASOS_PREVIOS.findIndex((p) => p.clave === falta);
@@ -345,6 +446,15 @@ export default function DashboardElasticidadPage() {
           {Array.from({ length: 4 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />
           ))}
+        </div>
+      )}
+
+      {/* Va ANTES del panel de "qué falta" y también arriba de los resultados:
+          mientras el experimento corre, lo primero que se quiere ver es que
+          está corriendo. */}
+      {!error && data && data.enCurso.length > 0 && (
+        <div className={`transition-opacity ${cargando ? "opacity-50" : ""}`}>
+          <EnCurso filas={data.enCurso} />
         </div>
       )}
 
