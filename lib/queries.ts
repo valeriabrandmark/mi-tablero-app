@@ -74,6 +74,45 @@ function whereBase(
   return { sql: clauses.join("\n    and "), params };
 }
 
+/**
+ * Flete de venta repartido por renglón de `fact_ventas`.
+ *
+ * `gold.fact_ventas_flete` tiene una fila por (nro_orden, sku), pero
+ * `fact_ventas` puede tener varios renglones para esa combinación: una línea
+ * facturada en dos comprobantes, o una factura más su nota de crédito. Como el
+ * cruce va por (nro_orden, sku), sin dividir el mismo flete entra dos o tres
+ * veces. Medido: $ 612.464 de más sobre $ 12.689.433, un 4,6 %.
+ *
+ * `lineas_venta` lo calcula `prorratear_flete.py`, que es quien junta esos
+ * renglones y por lo tanto sabe cuántos son. El `coalesce(..., 1)` es para el
+ * rato entre que esto se despliega y la primera corrida que llena la columna:
+ * mientras tanto se comporta como hoy en vez de romper.
+ *
+ * Los renglones repetidos comparten proveedor, cliente y SKU, así que repartir
+ * entre ellos no mueve ninguna atribución: solo deja de contar de más.
+ */
+const JOIN_FLETE = `left join gold.fact_ventas_flete fvf
+       on fvf.nro_orden = fv.nro_orden::text and fvf.sku = fv.sku`;
+
+/** El flete que le toca a ESTE renglón. Requiere `JOIN_FLETE`. */
+const FLETE_LINEA = `(coalesce(fvf.flete_prorrateado, 0)
+        / coalesce(fvf.lineas_venta, 1))::float8`;
+
+/**
+ * Margen ajustado de un grupo de renglones.
+ *
+ * Descuenta dos fletes distintos, que no son lo mismo:
+ *  - el de VENTA (`fvf`), lo que cuesta llevarle la mercadería al cliente;
+ *  - el de COMPRA (`fpm`), el % que cuesta traerla del proveedor.
+ *
+ * Ojo con el segundo: `bronze.fletes_proveedores` está VACÍA, así que ese
+ * término hoy da cero y el "margen ajustado" no ajustaba nada. Queda escrito
+ * para cuando se carguen esos datos.
+ */
+const MARGEN_AJUSTADO = `sum(fv.margen_total)
+       - sum(${FLETE_LINEA})
+       - sum(fv.costo_unitario * fv.cantidad * coalesce(fpm.pct_flete, 0))`;
+
 // --- 1. Totales + margen ajustado -------------------------------------------
 
 type FilaTotales = {
@@ -108,15 +147,13 @@ async function getTotales(f: Filtros, hastaFecha?: string) {
             coalesce(sum(fv.costo_unitario * fv.cantidad), 0)::float8 as "costoMercaderia",
             coalesce(sum(fv.cantidad), 0)::float8 as "unidades",
             coalesce(sum(fv.margen_total), 0)::float8 as "margenTotal",
-            coalesce(
-              sum(fv.margen_total) - sum(fv.costo_unitario * fv.cantidad * coalesce(fpm.pct_flete, 0)),
-              0
-            )::float8 as "margenAjustado",
+            coalesce(${MARGEN_AJUSTADO}, 0)::float8 as "margenAjustado",
             count(distinct fv.cliente) as "clientesConCompra",
             count(distinct fv.nro_orden) as "cantidadPedidos"
      from gold.fact_ventas fv
      left join gold.fletes_proveedores_pct_mensual fpm
        on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
+     ${JOIN_FLETE}
      where ${w.sql}`,
     w.params,
   );
@@ -194,13 +231,13 @@ async function getMargenPorProveedor(f: Filtros): Promise<MargenProveedor[]> {
   return query<MargenProveedor>(
     `select fv.proveedor as label,
             case when sum(fv.precio_neto * fv.cantidad) = 0 then 0
-                 else (sum(fv.margen_total) - sum(fv.costo_unitario * fv.cantidad * coalesce(fpm.pct_flete, 0)))
-                      / sum(fv.precio_neto * fv.cantidad)
+                 else (${MARGEN_AJUSTADO}) / sum(fv.precio_neto * fv.cantidad)
             end::float8 as "margenPct",
             coalesce(sum(fv.cantidad), 0)::float8 as unidades
      from gold.fact_ventas fv
      left join gold.fletes_proveedores_pct_mensual fpm
        on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
+     ${JOIN_FLETE}
      where ${w.sql}
      group by fv.proveedor
      -- SIN el piso de unidades y SIN tope. Antes pedia MIN_UNIDADES_MARGEN
@@ -231,13 +268,12 @@ async function getRentabilidadPorCliente(f: Filtros): Promise<RentabilidadClient
        select fv.cliente as label,
               coalesce(sum(fv.precio_neto * fv.cantidad), 0)::float8 as facturacion,
               case when sum(fv.precio_neto * fv.cantidad) = 0 then null
-                   else (sum(fv.margen_total)
-                         - sum(fv.costo_unitario * fv.cantidad * coalesce(fpm.pct_flete, 0)))
-                        / sum(fv.precio_neto * fv.cantidad)
+                   else (${MARGEN_AJUSTADO}) / sum(fv.precio_neto * fv.cantidad)
               end::float8 as valor
        from gold.fact_ventas fv
        left join gold.fletes_proveedores_pct_mensual fpm
          on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
+       ${JOIN_FLETE}
        where ${w.sql}
        group by fv.cliente
        order by facturacion desc nulls last
@@ -278,13 +314,12 @@ async function getArticulos(f: Filtros): Promise<FilaArticulo[]> {
             end::float8 as "costoPromedio",
             coalesce(sum(fv.precio_neto * fv.cantidad), 0)::float8 as facturacion,
             case when sum(fv.precio_neto * fv.cantidad) = 0 then null
-                 else (sum(fv.margen_total)
-                       - sum(fv.costo_unitario * fv.cantidad * coalesce(fpm.pct_flete, 0)))
-                      / sum(fv.precio_neto * fv.cantidad)
+                 else (${MARGEN_AJUSTADO}) / sum(fv.precio_neto * fv.cantidad)
             end::float8 as "rentabilidadPct"
      from gold.fact_ventas fv
      left join gold.fletes_proveedores_pct_mensual fpm
        on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
+     ${JOIN_FLETE}
      -- (sku, mes_comercial) es único en costos_historicos: el join no multiplica
      -- filas. Verificado: 31.446 filas, 31.446 pares distintos.
      left join bronze.costos_historicos ch
@@ -371,11 +406,10 @@ type FilaFlete = { fleteTotalReal: number; fleteEstimadoFiltrado: number };
 async function getFletes(f: Filtros) {
   const w = whereBase(f);
   const fila = await queryOne<FilaFlete>(
-    `select coalesce(sum(fvf.flete_prorrateado) filter (where fvf.tiene_flete_real = true), 0)::float8 as "fleteTotalReal",
-            coalesce(sum(fvf.flete_prorrateado) filter (where coalesce(fvf.tiene_flete_real, false) = false), 0)::float8 as "fleteEstimadoFiltrado"
+    `select coalesce(sum(${FLETE_LINEA}) filter (where fvf.tiene_flete_real = true), 0)::float8 as "fleteTotalReal",
+            coalesce(sum(${FLETE_LINEA}) filter (where coalesce(fvf.tiene_flete_real, false) = false), 0)::float8 as "fleteEstimadoFiltrado"
      from gold.fact_ventas fv
-     left join gold.fact_ventas_flete fvf
-       on fv.nro_orden::text = fvf.nro_orden and fv.sku = fvf.sku
+     ${JOIN_FLETE}
      where ${w.sql}`,
     w.params,
   );

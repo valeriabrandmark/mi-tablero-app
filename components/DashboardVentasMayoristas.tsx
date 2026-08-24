@@ -432,7 +432,12 @@ export default function Dashboard() {
               contra && comp ? (
                 <Delta actual={k.margenAjustado} anterior={comp.margenAjustado} contra={contra} />
               ) : (
-                `Margen sin ajustar ${fmtMoneda(k.margenTotal)}`
+                // Con el flete descontado el número baja bastante, así que la
+                // resta va escrita: si no, el primer reflejo es pensar que se
+                // rompió algo.
+                `${fmtMoneda(k.margenTotal)} de margen − ${fmtMoneda(
+                  k.fleteTotalReal + k.fleteEstimadoFiltrado,
+                )} de flete`
               )
             }
             acento={k.margenAjustado >= 0 ? PALETA[1] : "#f43f5e"}
@@ -449,7 +454,7 @@ export default function Dashboard() {
                   // es "+2 pp"; decir "+20 %" es cierto pero se lee como que la
                   // rentabilidad es del 20.
                   `${comp.rentabilidadAjustadaPct < k.rentabilidadAjustadaPct ? "▲" : "▼"} ${fmtPuntos(k.rentabilidadAjustadaPct - comp.rentabilidadAjustadaPct)} vs ${fmtPct(comp.rentabilidadAjustadaPct)} ${contra}`
-                : "Margen ajustado / facturación neta (s/IVA)"
+                : "(Margen − flete) / facturación neta (s/IVA)"
             }
             acento={PALETA[1]}
           />

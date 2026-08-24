@@ -68,11 +68,23 @@ function whereBase(f: FiltrosLogistica, omitir: (keyof FiltrosLogistica)[] = [])
   return { sql: clauses.join("\n      and "), params };
 }
 
-/** CTE con las líneas que pasan los filtros; la usan casi todas las consultas. */
+/**
+ * CTE con las líneas que pasan los filtros; la usan casi todas las consultas.
+ *
+ * `flete_prorrateado` se divide por `lineas_venta`: `fact_ventas_flete` tiene
+ * una fila por (nro_orden, sku) y `fact_ventas` puede tener varios renglones
+ * para esa combinación —una línea facturada en dos comprobantes, o una factura
+ * más su nota de crédito—, así que este join la repite y sin dividir el mismo
+ * flete se sumaría dos o tres veces. Como todas las consultas de la página leen
+ * el flete de acá, alcanza con arreglarlo en este lugar.
+ *
+ * `lineas_venta` lo calcula `prorratear_flete.py`; el `coalesce(..., 1)` cubre
+ * el rato hasta la primera corrida que llena la columna.
+ */
 function cteLineas(w: Where) {
   return `with lineas as (
     select fvf.clave_fila,
-           fvf.flete_prorrateado,
+           (fvf.flete_prorrateado / coalesce(fvf.lineas_venta, 1))::float8 as flete_prorrateado,
            fvf.tiene_flete_real,
            fv.proveedor, fv.cliente, fv.comprobante, fv.nro_orden, fv.fecha,
            fv.precio_neto, fv.cantidad, fv.margen_total,
