@@ -14,7 +14,7 @@ import {
 import { Aviso, Delta, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
-import { CARGA_IMPOSITIVA } from "@/lib/meli";
+import { CARGA_IMPOSITIVA, TOPE_ARTICULOS } from "@/lib/meli";
 import { PALETA, TEMA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
@@ -23,6 +23,7 @@ import type {
   DashboardMeli,
   FilaCancelacionMeli,
   FiltrosMeli,
+  LineaVentaMeli,
   OpcionesMeli,
   RankingMeli,
   UltimaCargaMeli,
@@ -38,8 +39,27 @@ type Respuesta = DashboardMeli & { opciones: OpcionesMeli | null };
  * en Tabla.tsx — el promedio simple de los porcentajes deja que un artículo de
  * una unidad pese lo mismo que uno de mil.
  */
-function columnasArticulos(filas: ArticuloMeli[]): Columna<ArticuloMeli>[] {
+/**
+ * El número de orden de Mercado Libre.
+ *
+ * Va en monoespaciada porque es un identificador que se copia y se pega en el
+ * buscador de ML: con la tipografía del resto, un 0 y una O se confunden.
+ */
+function celdaOrden(nroOrden: string | null) {
+  return nroOrden ? (
+    <span className="font-mono text-[11px] tracking-tight">{nroOrden}</span>
+  ) : (
+    "—"
+  );
+}
+
+function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
   return [
+    {
+      titulo: "N° orden",
+      celda: (a) => celdaOrden(a.nroOrden),
+      orden: (a) => a.nroOrden,
+    },
     { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
     {
       titulo: "Producto",
@@ -155,12 +175,14 @@ function columnasCancelaciones(
     // porque una orden de tres productos ocupa tres filas y sumarlas la contaría
     // tres veces; los otros dos porque la tabla está recortada al top 100 y la
     // suma de lo que se ve sería menos de lo que se canceló de verdad.
+    // Antes acá iba la CANTIDAD de órdenes de ese SKU. Desde que hay una fila por
+    // orden y SKU esa cuenta valdría siempre 1, así que la columna pasa a ser el
+    // número. El total de abajo sigue siendo las órdenes DISTINTAS del recorte.
     {
-      titulo: "Órdenes",
-      celda: (c) => fmtNumero(c.ordenes),
-      numerica: true,
-      orden: (c) => c.ordenes,
-      total: fmtNumero(totales.ordenes),
+      titulo: "N° orden",
+      celda: (c) => celdaOrden(c.nroOrden),
+      orden: (c) => c.nroOrden,
+      total: `${fmtNumero(totales.ordenes)} órdenes`,
     },
     {
       titulo: "Unid.",
@@ -186,6 +208,7 @@ function columnasCancelaciones(
 /** El top por rentabilidad va con menos columnas: se lee de un vistazo. */
 function columnasTop(filas: ArticuloMeli[]): Columna<ArticuloMeli>[] {
   return [
+    { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
     {
       titulo: "Producto",
       celda: (a) => (
@@ -827,11 +850,13 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
             <Tabla
               filas={data.articulos}
               columnas={columnasArticulos(data.articulos)}
-              // La consulta trae hasta 300 SKUs por venta. Si llegó al tope, el
+              // La consulta trae hasta TOPE_ARTICULOS líneas. Si llegó al tope, el
               // total es el de lo que se ve y NO el del recorte entero, así que
               // la etiqueta lo dice en vez de dejar creer que es todo.
               etiquetaTotal={
-                data.articulos.length === 300 ? "Total (top 300)" : "Total"
+                data.articulos.length === TOPE_ARTICULOS
+                  ? `Total (top ${TOPE_ARTICULOS})`
+                  : "Total"
               }
               clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
               onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}

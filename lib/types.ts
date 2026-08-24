@@ -461,6 +461,18 @@ export type ArticuloMeli = {
   margenPct: number | null;
 };
 
+/**
+ * Una LÍNEA de venta: el mismo artículo, pero de una orden concreta.
+ *
+ * Es lo que muestra la tabla de artículos. `ArticuloMeli` a secas —sin número de
+ * orden— sigue siendo lo que muestra el top por rentabilidad, que agrupa todas
+ * las ventas de un SKU y por lo tanto no tiene UNA orden que mostrar.
+ */
+export type LineaVentaMeli = ArticuloMeli & {
+  /** El número de orden de Mercado Libre, para ir a buscarla allá. */
+  nroOrden: string | null;
+};
+
 export type OpcionesMeli = {
   proveedores: string[];
   marcas: string[];
@@ -482,7 +494,7 @@ export type DashboardMeli = {
   // sigue estando como FILTRO y como columna de la tabla de artículos.
   /** Los SKUs que más plata dejaron, que no son los que más vendieron. */
   topRentabilidad: ArticuloMeli[];
-  articulos: ArticuloMeli[];
+  articulos: LineaVentaMeli[];
   /** Denominador de la torta: venta de TODOS los proveedores, sin filtro cruzado. */
   ventaTotalProveedores: number;
   /** La última orden cargada: es la medida real del atraso del tablero. */
@@ -498,7 +510,12 @@ export type FilaCancelacionMeli = {
   producto: string | null;
   proveedor: string | null;
   marca: string | null;
-  ordenes: number;
+  /**
+   * El número de orden. Antes acá iba `ordenes` (cuántas órdenes tenía ese SKU),
+   * pero desde que hay una fila por orden y SKU esa cuenta valdría siempre 1.
+   * El total de órdenes distintas sigue estando en `CancelacionesMeli.ordenes`.
+   */
+  nroOrden: string | null;
   unidades: number;
   /** Monto c/IVA que se habría facturado. No hay costo ni margen: no fue venta. */
   monto: number;
