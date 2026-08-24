@@ -25,7 +25,6 @@ const ETIQUETA_CRUZADO: Record<(typeof CRUZADOS)[number], string> = {
   sku: "SKU",
   comprobante: "Comprobante",
 };
-import { MIN_UNIDADES_MARGEN } from "@/lib/constantes";
 import { aQueryString } from "@/lib/filtros";
 import { PALETA } from "@/lib/paleta";
 import type { DashboardVentasMayoristas, Filtros, OpcionesFiltro } from "@/lib/types";
@@ -38,6 +37,21 @@ import type { DashboardVentasMayoristas, Filtros, OpcionesFiltro } from "@/lib/t
  * facturación. Sumar promedios no significa nada, y promediarlos sin ponderar
  * deja que un SKU de una unidad pese lo mismo que uno de mil.
  */
+/**
+ * La diferencia entre dos porcentajes, en PUNTOS porcentuales.
+ *
+ * `fmtPct` no sirve para esto: mostraría "2,00 %" para una diferencia de dos
+ * puntos, y eso se confunde con una variación del 2 %. Son cosas distintas y en
+ * una reunión se repite la equivocada.
+ */
+function fmtPuntos(diferencia: number): string {
+  const signo = diferencia >= 0 ? "+" : "−";
+  return `${signo}${Math.abs(diferencia * 100).toLocaleString("es-AR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} pp`;
+}
+
 function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
   return [
     { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
@@ -58,7 +72,10 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
       total: fmtNumero(sumar(filas, (a) => a.cantidad)),
     },
     {
-      titulo: "Oferta %",
+      // Se llamaba "Oferta %" y confundía con las dos de al lado. Este es el
+      // descuento que se le hizo al cliente en la venta; los otros dos salen
+      // del Excel de costos y son del proveedor y nuestro.
+      titulo: "Dto. venta %",
       celda: (a) => (a.ofertaPct == null ? "—" : fmtPct(a.ofertaPct / 100)),
       numerica: true,
       orden: (a) => a.ofertaPct,
@@ -69,6 +86,37 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
         promedioPonderado(
           filas.filter((a) => a.ofertaPct != null),
           (a) => ((a.ofertaPct ?? 0) / 100) * a.cantidad,
+          (a) => a.cantidad,
+        ),
+      ),
+    },
+    {
+      titulo: "Oferta prov. %",
+      celda: (a) =>
+        a.ofertaProveedorPct == null ? "—" : fmtPct(a.ofertaProveedorPct / 100),
+      numerica: true,
+      orden: (a) => a.ofertaProveedorPct,
+      // Acá el cero SÍ entra: la oferta del proveedor está cargada para casi
+      // todos los SKUs y "0 %" quiere decir que ese mes no hubo oferta, que es
+      // un dato. Solo quedan afuera los que no tienen el costo cargado.
+      total: fmtPct(
+        promedioPonderado(
+          filas.filter((a) => a.ofertaProveedorPct != null),
+          (a) => ((a.ofertaProveedorPct ?? 0) / 100) * a.cantidad,
+          (a) => a.cantidad,
+        ),
+      ),
+    },
+    {
+      titulo: "Oferta propia %",
+      celda: (a) =>
+        a.ofertaPropiaPct == null ? "—" : fmtPct(a.ofertaPropiaPct / 100),
+      numerica: true,
+      orden: (a) => a.ofertaPropiaPct,
+      total: fmtPct(
+        promedioPonderado(
+          filas.filter((a) => a.ofertaPropiaPct != null),
+          (a) => ((a.ofertaPropiaPct ?? 0) / 100) * a.cantidad,
           (a) => a.cantidad,
         ),
       ),
@@ -340,7 +388,19 @@ export default function Dashboard() {
             }
             acento={PALETA[0]}
           />
-          <TarjetaKpi titulo="Costo Mercadería" valor={fmtMoneda(k.costoMercaderia)} />
+          <TarjetaKpi
+            titulo="Costo Mercadería"
+            valor={fmtMoneda(k.costoMercaderia)}
+            detalle={
+              contra && comp ? (
+                <Delta
+                  actual={k.costoMercaderia}
+                  anterior={comp.costoMercaderia}
+                  contra={contra}
+                />
+              ) : undefined
+            }
+          />
           <TarjetaKpi
             titulo="Unidades"
             valor={fmtNumero(k.unidades)}
@@ -353,7 +413,17 @@ export default function Dashboard() {
           <TarjetaKpi
             titulo="Clientes con Compra"
             valor={fmtNumero(k.clientesConCompra)}
-            detalle={`${fmtNumero(k.cantidadPedidos)} pedidos`}
+            detalle={
+              contra && comp ? (
+                <Delta
+                  actual={k.clientesConCompra}
+                  anterior={comp.clientesConCompra}
+                  contra={contra}
+                />
+              ) : (
+                `${fmtNumero(k.cantidadPedidos)} pedidos`
+              )
+            }
           />
           <TarjetaKpi
             titulo="Margen Ajustado"
@@ -371,8 +441,14 @@ export default function Dashboard() {
             titulo="% Rentabilidad Ajustada"
             valor={fmtPct(k.rentabilidadAjustadaPct)}
             detalle={
-              contra && comp && comp.rentabilidadAjustadaPct != null && k.rentabilidadAjustadaPct != null
-                ? `${comp.rentabilidadAjustadaPct < k.rentabilidadAjustadaPct ? "▲" : "▼"} era ${fmtPct(comp.rentabilidadAjustadaPct)} ${contra}`
+              contra &&
+              comp &&
+              comp.rentabilidadAjustadaPct != null &&
+              k.rentabilidadAjustadaPct != null
+                ? // En PUNTOS y no en variación porcentual. Pasar de 10 % a 12 %
+                  // es "+2 pp"; decir "+20 %" es cierto pero se lee como que la
+                  // rentabilidad es del 20.
+                  `${comp.rentabilidadAjustadaPct < k.rentabilidadAjustadaPct ? "▲" : "▼"} ${fmtPuntos(k.rentabilidadAjustadaPct - comp.rentabilidadAjustadaPct)} vs ${fmtPct(comp.rentabilidadAjustadaPct)} ${contra}`
                 : "Margen ajustado / facturación neta (s/IVA)"
             }
             acento={PALETA[1]}
@@ -426,7 +502,10 @@ export default function Dashboard() {
           </Panel>
 
           <div className="grid gap-4 xl:grid-cols-2">
-            <Panel titulo="Facturación Neta por proveedor" nota="Top 12">
+            <Panel
+              titulo="Facturación Neta por proveedor"
+              nota={`${data.facturacionPorProveedor.length} proveedores`}
+            >
               <TortaProveedores
                 datos={data.facturacionPorProveedor}
                 totalGeneral={data.facturacionTotalProveedores}
@@ -437,46 +516,61 @@ export default function Dashboard() {
 
             <Panel
               titulo="Margen % por proveedor"
-              nota={`Sobre facturación s/IVA · ajustado por flete · mín. ${MIN_UNIDADES_MARGEN} unidades`}
+              nota={`${data.margenPorProveedor.length} proveedores · sobre facturación s/IVA`}
             >
-              <BarrasMargen
-                datos={data.margenPorProveedor}
-                seleccionados={filtros.proveedor}
-                onSeleccionar={alternarProveedor}
-              />
+              {/* Alto acotado con scroll propio: sin el piso de unidades entran
+                  todos los proveedores y el panel se estiraría metros. */}
+              <div className="max-h-[420px] overflow-y-auto pr-1">
+                <BarrasMargen
+                  datos={data.margenPorProveedor}
+                  seleccionados={filtros.proveedor}
+                  onSeleccionar={alternarProveedor}
+                />
+              </div>
             </Panel>
           </div>
 
           <Panel
             titulo="% Rentabilidad Ajustada por cliente"
-            nota="Los 15 clientes más grandes · rentabilidad sobre facturación s/IVA"
+            nota={`${data.rentabilidadPorCliente.length} clientes · sobre facturación s/IVA`}
           >
-            <BarrasCategoria
-              datos={data.rentabilidadPorCliente}
-              formato={(n) => fmtPct(n)}
-              colorUnico={PALETA[3]}
-              seleccionados={filtros.cliente}
-              onSeleccionar={(c) => alternar("cliente", c)}
-            />
+            {/* Igual que el de proveedores: están todos y el panel scrollea. */}
+            <div className="max-h-[420px] overflow-y-auto pr-1">
+              <BarrasCategoria
+                datos={data.rentabilidadPorCliente}
+                formato={(n) => fmtPct(n)}
+                colorUnico={PALETA[3]}
+                seleccionados={filtros.cliente}
+                onSeleccionar={(c) => alternar("cliente", c)}
+              />
+            </div>
           </Panel>
 
+          {/* Comprobantes va PRIMERO: se mira "que se facturo" antes que "de que
+              articulos se compuso". */}
           <div className="grid gap-4 xl:grid-cols-2">
-            <Panel titulo="Artículos incluídos" nota={`${data.articulos.length} SKUs`}>
-              <Tabla
-                filas={data.articulos}
-                columnas={colArticulos(data.articulos)}
-                clave={(a, i) => `${a.sku}-${i}`}
-                onClickFila={(a) => a.sku && alternar("sku", a.sku)}
-                activa={(a) => !!a.sku && !!filtros.sku?.includes(a.sku)}
-              />
-            </Panel>
-            <Panel titulo="Comprobantes" nota={`${data.comprobantes.length} por facturación`}>
+            <Panel
+              titulo="Comprobantes"
+              nota={`${data.comprobantes.length} por facturación`}
+            >
               <Tabla
                 filas={data.comprobantes}
                 columnas={colComprobantes(data.comprobantes)}
                 clave={(c, i) => `${c.comprobante}-${i}`}
                 onClickFila={(c) => c.comprobante && alternar("comprobante", c.comprobante)}
                 activa={(c) => !!c.comprobante && !!filtros.comprobante?.includes(c.comprobante)}
+              />
+            </Panel>
+            <Panel
+              titulo="Artículos incluídos"
+              nota={`${data.articulos.length} SKUs`}
+            >
+              <Tabla
+                filas={data.articulos}
+                columnas={colArticulos(data.articulos)}
+                clave={(a, i) => `${a.sku}-${i}`}
+                onClickFila={(a) => a.sku && alternar("sku", a.sku)}
+                activa={(a) => !!a.sku && !!filtros.sku?.includes(a.sku)}
               />
             </Panel>
           </div>
