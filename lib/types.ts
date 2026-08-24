@@ -24,7 +24,17 @@ export type FilaArticulo = {
   sku: string | null;
   producto: string | null;
   cantidad: number;
+  /**
+   * El descuento que se le hizo AL CLIENTE en la venta (línea + general +
+   * financiero, combinados por `modelo.py`). No tiene nada que ver con las dos
+   * ofertas de abajo, que son del Excel de costos; los nombres se parecen y son
+   * tres cosas distintas.
+   */
   ofertaPct: number | null;
+  /** Columna J del Excel de costos: el descuento que da el proveedor. */
+  ofertaProveedorPct: number | null;
+  /** Columna K del Excel de costos: el descuento que ponemos nosotros. */
+  ofertaPropiaPct: number | null;
   precioPromedio: number | null;
   costoPromedio: number | null;
   facturacion: number;

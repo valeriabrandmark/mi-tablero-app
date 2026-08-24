@@ -257,6 +257,17 @@ async function getArticulos(f: Filtros): Promise<FilaArticulo[]> {
             max(fv.producto) as producto,
             coalesce(sum(fv.cantidad), 0)::float8 as cantidad,
             avg(nullif(fv.oferta_pct, 0))::float8 as "ofertaPct",
+            -- Las dos ofertas del Excel de costos. Son por (sku, mes), no por
+            -- línea, así que se promedian ponderadas por unidades vendidas
+            -- igual que el precio. El divisor solo cuenta las líneas que
+            -- encontraron costo cargado (hoy el 99,6 %): meter las otras como
+            -- cero diría "sin oferta" donde en realidad es "sin dato".
+            (sum(ch.oferta_pct * fv.cantidad)
+             / nullif(sum(fv.cantidad) filter (where ch.oferta_pct is not null), 0)
+            )::float8 as "ofertaProveedorPct",
+            (sum(ch.desc_propio_pct * fv.cantidad)
+             / nullif(sum(fv.cantidad) filter (where ch.desc_propio_pct is not null), 0)
+            )::float8 as "ofertaPropiaPct",
             -- Promedios ponderados por cantidad; sumar precios unitarios no
             -- significaría nada (en el .pbit están como Sum, es un error).
             case when sum(fv.cantidad) = 0 then null
@@ -274,6 +285,10 @@ async function getArticulos(f: Filtros): Promise<FilaArticulo[]> {
      from gold.fact_ventas fv
      left join gold.fletes_proveedores_pct_mensual fpm
        on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
+     -- (sku, mes_comercial) es único en costos_historicos: el join no multiplica
+     -- filas. Verificado: 31.446 filas, 31.446 pares distintos.
+     left join bronze.costos_historicos ch
+       on ch.sku = fv.sku and ch.mes_comercial = fv.mes_comercial
      where ${w.sql}
      group by fv.sku
      order by facturacion desc nulls last

@@ -72,7 +72,10 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
       total: fmtNumero(sumar(filas, (a) => a.cantidad)),
     },
     {
-      titulo: "Oferta %",
+      // Se llamaba "Oferta %" y confundía con las dos de al lado. Este es el
+      // descuento que se le hizo al cliente en la venta; los otros dos salen
+      // del Excel de costos y son del proveedor y nuestro.
+      titulo: "Dto. venta %",
       celda: (a) => (a.ofertaPct == null ? "—" : fmtPct(a.ofertaPct / 100)),
       numerica: true,
       orden: (a) => a.ofertaPct,
@@ -83,6 +86,37 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
         promedioPonderado(
           filas.filter((a) => a.ofertaPct != null),
           (a) => ((a.ofertaPct ?? 0) / 100) * a.cantidad,
+          (a) => a.cantidad,
+        ),
+      ),
+    },
+    {
+      titulo: "Oferta prov. %",
+      celda: (a) =>
+        a.ofertaProveedorPct == null ? "—" : fmtPct(a.ofertaProveedorPct / 100),
+      numerica: true,
+      orden: (a) => a.ofertaProveedorPct,
+      // Acá el cero SÍ entra: la oferta del proveedor está cargada para casi
+      // todos los SKUs y "0 %" quiere decir que ese mes no hubo oferta, que es
+      // un dato. Solo quedan afuera los que no tienen el costo cargado.
+      total: fmtPct(
+        promedioPonderado(
+          filas.filter((a) => a.ofertaProveedorPct != null),
+          (a) => ((a.ofertaProveedorPct ?? 0) / 100) * a.cantidad,
+          (a) => a.cantidad,
+        ),
+      ),
+    },
+    {
+      titulo: "Oferta propia %",
+      celda: (a) =>
+        a.ofertaPropiaPct == null ? "—" : fmtPct(a.ofertaPropiaPct / 100),
+      numerica: true,
+      orden: (a) => a.ofertaPropiaPct,
+      total: fmtPct(
+        promedioPonderado(
+          filas.filter((a) => a.ofertaPropiaPct != null),
+          (a) => ((a.ofertaPropiaPct ?? 0) / 100) * a.cantidad,
           (a) => a.cantidad,
         ),
       ),
