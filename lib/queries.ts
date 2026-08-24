@@ -3,7 +3,6 @@ import {
   CANAL_MAYORISTA,
   DIA_INICIO_MES_COMERCIAL,
   mesComercialActual,
-  MIN_UNIDADES_MARGEN,
   VENDEDORES_INCLUIDOS,
 } from "@/lib/constantes";
 import { hoyArgentina } from "@/lib/rangos";
@@ -174,7 +173,7 @@ async function getFacturacionPorProveedor(f: Filtros) {
        where ${w.sql}
        group by fv.proveedor
        order by total desc nulls last
-       limit 12`,
+       -- Sin tope: la pantalla los muestra a todos. Antes era el top 12.`,
       w.params,
     ),
     queryOne<{ total: number }>(
@@ -204,9 +203,12 @@ async function getMargenPorProveedor(f: Filtros): Promise<MargenProveedor[]> {
        on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
      where ${w.sql}
      group by fv.proveedor
-     having sum(fv.cantidad) >= ${MIN_UNIDADES_MARGEN}
-     order by "margenPct" desc
-     limit 15`,
+     -- SIN el piso de unidades y SIN tope. Antes pedia MIN_UNIDADES_MARGEN
+     -- unidades y se quedaba con 15 proveedores; el piso estaba para que un
+     -- proveedor de dos unidades no encabezara el ranking con un margen
+     -- irreal. Ahora estan todos y el grafico scrollea: la columna de unidades
+     -- queda en el tooltip para poder desconfiar de los de muestra chica.
+     order by "margenPct" desc`,
     w.params,
   );
 }
@@ -214,11 +216,13 @@ async function getMargenPorProveedor(f: Filtros): Promise<MargenProveedor[]> {
 // --- Rentabilidad por cliente (barras) ---------------------------------------
 
 /**
- * Barras de % rentabilidad ajustada por cliente.
- * Se toman los 15 clientes más grandes por facturación y se los ordena por
- * rentabilidad: rankear directo por el porcentaje llenaría el gráfico de
- * clientes chicos con márgenes irreales, el mismo problema que el corte de
- * unidades en el ranking de proveedores.
+ * Barras de % rentabilidad ajustada por cliente: TODOS los clientes.
+ *
+ * Se ordenan por rentabilidad y el gráfico scrollea. Antes se recortaba a los
+ * 15 más grandes por facturación, para que un cliente de una compra chica no
+ * encabezara el ranking con un porcentaje irreal. Ese riesgo sigue existiendo
+ * -- ahora se ve entero y hay que mirarlo sabiendo que arriba de todo puede
+ * haber una venta de $ 3.000.
  */
 async function getRentabilidadPorCliente(f: Filtros): Promise<RentabilidadCliente[]> {
   const w = whereBase(f, ["fv.cliente is not null"], "fv", ["cliente"]);
@@ -237,7 +241,7 @@ async function getRentabilidadPorCliente(f: Filtros): Promise<RentabilidadClient
        where ${w.sql}
        group by fv.cliente
        order by facturacion desc nulls last
-       limit 15
+       -- Sin tope: estan todos los clientes y el grafico scrollea.
      )
      select * from por_cliente order by valor desc nulls last`,
     w.params,
@@ -253,6 +257,17 @@ async function getArticulos(f: Filtros): Promise<FilaArticulo[]> {
             max(fv.producto) as producto,
             coalesce(sum(fv.cantidad), 0)::float8 as cantidad,
             avg(nullif(fv.oferta_pct, 0))::float8 as "ofertaPct",
+            -- Las dos ofertas del Excel de costos. Son por (sku, mes), no por
+            -- línea, así que se promedian ponderadas por unidades vendidas
+            -- igual que el precio. El divisor solo cuenta las líneas que
+            -- encontraron costo cargado (hoy el 99,6 %): meter las otras como
+            -- cero diría "sin oferta" donde en realidad es "sin dato".
+            (sum(ch.oferta_pct * fv.cantidad)
+             / nullif(sum(fv.cantidad) filter (where ch.oferta_pct is not null), 0)
+            )::float8 as "ofertaProveedorPct",
+            (sum(ch.desc_propio_pct * fv.cantidad)
+             / nullif(sum(fv.cantidad) filter (where ch.desc_propio_pct is not null), 0)
+            )::float8 as "ofertaPropiaPct",
             -- Promedios ponderados por cantidad; sumar precios unitarios no
             -- significaría nada (en el .pbit están como Sum, es un error).
             case when sum(fv.cantidad) = 0 then null
@@ -270,6 +285,10 @@ async function getArticulos(f: Filtros): Promise<FilaArticulo[]> {
      from gold.fact_ventas fv
      left join gold.fletes_proveedores_pct_mensual fpm
        on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
+     -- (sku, mes_comercial) es único en costos_historicos: el join no multiplica
+     -- filas. Verificado: 31.446 filas, 31.446 pares distintos.
+     left join bronze.costos_historicos ch
+       on ch.sku = fv.sku and ch.mes_comercial = fv.mes_comercial
      where ${w.sql}
      group by fv.sku
      order by facturacion desc nulls last
@@ -497,7 +516,9 @@ export async function getDashboardVentasMayoristas(
             mes: comparar.mes,
             hasta: comparar.hasta,
             facturacionNeta: totalesAnterior.facturacionNeta,
+            costoMercaderia: totalesAnterior.costoMercaderia,
             unidades: totalesAnterior.unidades,
+            clientesConCompra: totalesAnterior.clientesConCompra,
             cantidadPedidos: totalesAnterior.cantidadPedidos,
             margenAjustado: totalesAnterior.margenAjustado,
             rentabilidadAjustadaPct:
