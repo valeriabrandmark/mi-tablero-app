@@ -1,6 +1,7 @@
+import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro, vacio } from "@/lib/filtros";
-import { hoyArgentina } from "@/lib/rangos";
+import { hoyArgentina, sumarDias } from "@/lib/rangos";
 import {
   CANAL_MELI,
   CARGA_IMPOSITIVA,
@@ -84,6 +85,53 @@ const OPCIONALES: [keyof FiltrosMeli, string][] = [
  * porque un reemplazo de texto sobre el where terminaría tocando también los
  * valores de los parámetros.
  */
+/**
+ * El recorte que hay que ponerle a `bronze.ml_ventas.date_created` para que las
+ * consultas usen el indice `ml_ventas_date_created_idx` en vez de recorrer la
+ * tabla entera (116 MB, 44.000 filas).
+ *
+ * POR QUE HACE FALTA UN MARGEN DE UN DIA
+ * `date_created` es texto con el offset que manda ML (-04:00), y las pantallas
+ * filtran por la fecha YA CONVERTIDA a hora argentina (-03:00). Al convertir,
+ * una venta puede pasarse al dia siguiente: 20/08 23:30 en -04:00 es 21/08
+ * 00:30 en Argentina. Nunca al reves. O sea que la fecha argentina es la cruda
+ * o la cruda mas uno, y para no perder ninguna hay que pedirle a la base desde
+ * un dia antes.
+ *
+ * El techo va con `<` y dos dias de mas por la razon simetrica, mas un dia de
+ * colchon por si algun dia ML manda otro offset. Traer un dia de mas no cuesta
+ * casi nada; perder una venta de las 23 si.
+ *
+ * ESTO NO CAMBIA QUE FILAS ENTRAN. El filtro exacto lo sigue haciendo la
+ * comparacion sobre la fecha convertida, que queda igual. Esto solo evita que
+ * la base lea lo que despues va a descartar.
+ *
+ * Medido con EXPLAIN (ANALYZE, BUFFERS) sobre el filtro por hora:
+ *   sin recorte   Seq Scan     13.844 bloques (108 MB)   147,8 ms
+ *   con recorte   Index Scan       19 bloques (152 kB)     6,7 ms
+ */
+function recorteBronze(f: FiltrosMeli) {
+  return {
+    piso: f.desde ? sumarDias(f.desde, -1) : null,
+    techo: f.hasta ? sumarDias(f.hasta, 2) : null,
+  };
+}
+
+/** Las condiciones sobre `date_created` de un alias dado, agregando params. */
+function condicionesRecorte(f: FiltrosMeli, alias: string, params: unknown[]): string[] {
+  const { piso, techo } = recorteBronze(f);
+  const cond: string[] = [];
+  if (piso) {
+    params.push(piso);
+    cond.push(`${alias}.date_created >= $${params.length}`);
+  }
+  if (techo) {
+    params.push(techo);
+    cond.push(`${alias}.date_created < $${params.length}`);
+  }
+  return cond;
+}
+
 function whereBase(
   f: FiltrosMeli,
   omitir: (keyof FiltrosMeli)[] = [],
@@ -125,11 +173,16 @@ function whereBase(
   // de Argentina. Sin convertir, filtrar "las 14" traería las ventas de las 13.
   if (!omitir.includes("hora") && !vacio(f.hora)) {
     params.push(f.hora);
+    const iHora = params.length;
+    // El recorte por `date_created` va ADENTRO de la subconsulta: sin el, esta
+    // recorre las 44.000 filas de bronze aunque estes mirando un solo dia, y
+    // encima se agrega a las ocho consultas de la pantalla. Ver recorteBronze.
+    const recorte = condicionesRecorte(f, "v", params);
     clauses.push(`${col("nro_orden")}::bigint in (
        select v.id::bigint from bronze.ml_ventas v
         where extract(hour from (v.date_created::timestamptz
                 at time zone 'America/Argentina/Buenos_Aires'))::text
-              = any($${params.length}::text[]))`);
+              = any($${iHora}::text[])${recorte.length ? "\n          and " + recorte.join("\n          and ") : ""})`);
   }
 
   return { sql: clauses.join("\n     and "), params };
@@ -507,7 +560,7 @@ async function getUltimaCarga(): Promise<UltimaCargaMeli | null> {
 
 // --- Opciones de los filtros -------------------------------------------------
 
-export async function getOpcionesMeli(): Promise<OpcionesMeli> {
+async function getOpcionesMeliDirecto(): Promise<OpcionesMeli> {
   const [proveedores, marcas, bordes] = await Promise.all([
     query<{ v: string }>(
       `select distinct proveedor as v from gold.fact_ventas
@@ -586,7 +639,7 @@ function completarHoras(
   }));
 }
 
-export async function getDashboardMeli(f: FiltrosMeli): Promise<DashboardMeli> {
+async function getDashboardMeliDirecto(f: FiltrosMeli): Promise<DashboardMeli> {
   // El rango siempre está resuelto para cuando llega acá (lo fija la ruta de
   // API), pero el tipo lo permite vacío: sin este piso, `periodoAnterior` haría
   // cuentas con undefined y devolvería fechas inválidas.
@@ -808,7 +861,7 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
   });
 }
 
-export async function getDashboardAlertasMeli(f: FiltrosMeli): Promise<DashboardAlertasMeli> {
+async function getDashboardAlertasMeliDirecto(f: FiltrosMeli): Promise<DashboardAlertasMeli> {
   const [resumen, filas] = await Promise.all([getResumenAlertas(f), getFilasAlertas(f)]);
 
   const lineasTotales = resumen.reduce((a, r) => a + r.lineas, 0);
@@ -874,7 +927,7 @@ export async function getDashboardAlertasMeli(f: FiltrosMeli): Promise<Dashboard
  * Quedan adentro las que sí son ventas que se cayeron: `buyer` (se arrepintió),
  * `mediations` (reclamo), `shipment` (no se pudo entregar) y `fraud`.
  */
-const LINEAS_CANCELADAS = `
+const LINEAS_CANCELADAS_BASE = `
   select v.id                                                     as nro_orden,
          (v.date_created::timestamptz
             at time zone 'America/Argentina/Buenos_Aires')::date   as fecha,
@@ -890,6 +943,26 @@ const LINEAS_CANCELADAS = `
     and coalesce(v."cancel_detail.group", '') <> 'internal'`;
 
 /**
+ * El CTE de canceladas, recortado por `date_created`.
+ *
+ * Sin el recorte, Postgres igual empuja el filtro de fecha adentro del CTE
+ * (esta inlineado), pero lo resuelve sobre la fecha CONVERTIDA, que no puede
+ * usar indice: recorre las 5.100 canceladas de la historia para quedarse con
+ * las 33 del rango. Con el recorte combina los dos indices y toca doce veces
+ * menos.
+ *
+ * Medido con EXPLAIN (ANALYZE, BUFFERS) sobre un rango de dos dias:
+ *   sin recorte   4.447 bloques   16,5 ms
+ *   con recorte     382 bloques    3,9 ms
+ */
+function lineasCanceladas(f: FiltrosMeli, params: unknown[]): string {
+  const cond = condicionesRecorte(f, "v", params);
+  return cond.length
+    ? `${LINEAS_CANCELADAS_BASE}\n    and ${cond.join("\n    and ")}`
+    : LINEAS_CANCELADAS_BASE;
+}
+
+/**
  * Los filtros de la pantalla, aplicados a las canceladas.
  *
  * Son los mismos de `whereBase` pero contra otras columnas: las canceladas
@@ -901,8 +974,12 @@ const LINEAS_CANCELADAS = `
 function whereCanceladas(
   f: FiltrosMeli,
   omitir: (keyof FiltrosMeli)[] = [],
-): Where {
+): Where & { cte: string } {
+  // Los params del CTE van PRIMERO en el arreglo: el CTE se escribe antes que
+  // el where en el SQL, y aunque la numeracion es explicita, mantener el orden
+  // hace que los `$n` del texto suban de a uno y se pueda leer.
   const params: unknown[] = [];
+  const cte = lineasCanceladas(f, params);
   const clauses: string[] = [];
 
   if (f.desde) {
@@ -922,6 +999,7 @@ function whereCanceladas(
   agregarFiltro(clauses, params, 'a."attributes.marca"', f.marca);
 
   return {
+    cte,
     sql: clauses.length ? `where ${clauses.join("\n     and ")}` : "",
     params,
   };
@@ -933,7 +1011,7 @@ export async function getCancelacionesMeli(
   const w = whereCanceladas(f);
 
   const filas = await query<Record<string, string | null>>(
-    `with lineas as (${LINEAS_CANCELADAS})
+    `with lineas as (${w.cte})
      select l.sku,
             max(l.producto)             as producto,
             max(a."proveedorNombre")    as proveedor,
@@ -969,7 +1047,7 @@ export async function getCancelacionesMeli(
   //
   // Por eso los tres totales salen de su propia consulta, sin recorte.
   const totales = await queryOne<Record<string, string>>(
-    `with lineas as (${LINEAS_CANCELADAS})
+    `with lineas as (${w.cte})
      select count(distinct l.nro_orden)     as ordenes,
             coalesce(sum(l.cantidad), 0)    as unidades,
             coalesce(sum(l.monto), 0)       as monto
@@ -1000,7 +1078,7 @@ async function getCanceladasPorHora(
   const w = whereCanceladas(f, ["hora"]);
 
   return query<Record<string, number>>(
-    `with lineas as (${LINEAS_CANCELADAS})
+    `with lineas as (${w.cte})
      select l.hora                      as hora,
             count(distinct l.nro_orden) as ordenes,
             coalesce(sum(l.monto), 0)   as monto
@@ -1012,3 +1090,19 @@ async function getCanceladasPorHora(
     w.params,
   );
 }
+
+/**
+ * Las tres entradas que consume `app/api/meli/route.ts`, cacheadas.
+ *
+ * Se envuelven acá al final y no en la ruta para que cualquier otro consumidor
+ * futuro herede el caché sin acordarse de pedirlo. La version sin cachear
+ * queda como `...Directo` por si alguna vez hace falta saltearlo.
+ *
+ * Ver lib/cache.ts para por que esto es seguro (y cuando dejaria de serlo).
+ */
+export const getOpcionesMeli = cacheado("meli:opciones", getOpcionesMeliDirecto);
+export const getDashboardMeli = cacheado("meli:dashboard", getDashboardMeliDirecto);
+export const getDashboardAlertasMeli = cacheado(
+  "meli:alertas",
+  getDashboardAlertasMeliDirecto,
+);
