@@ -215,7 +215,9 @@ export type ComparacionMayorista = {
   mes: string;
   hasta: string | null;
   facturacionNeta: number;
+  costoMercaderia: number;
   unidades: number;
+  clientesConCompra: number;
   cantidadPedidos: number;
   margenAjustado: number;
   rentabilidadAjustadaPct: number | null;
