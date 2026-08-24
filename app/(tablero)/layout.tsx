@@ -62,6 +62,7 @@ const NOMBRE_ROL: Record<Rol, string> = {
   supervisor: "Supervisor",
   vendedor: "Vendedor",
   responsable_meli: "Responsable Mercado Libre",
+  mercado_libre: "Mercado Libre",
 };
 
 /**

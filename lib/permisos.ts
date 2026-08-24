@@ -22,6 +22,7 @@ import { slugVendedor, VENDEDORES_OBJETIVOS, type VendedorObjetivos } from "@/li
  * | `supervisor`       | Las páginas de objetivos de los cuatro vendedores |
  * | `vendedor`         | Únicamente su propia página de objetivos          |
  * | `responsable_meli` | Únicamente la sección Venta minorista             |
+ * | `mercado_libre`    | Únicamente Mercado Libre (sin Tienda Nube)        |
  *
  * OJO con `admin`: hoy el tablero **no tiene nada editable**, así que en la
  * práctica ve lo mismo que `superadmin`. El rol existe para que la diferencia
@@ -42,6 +43,7 @@ export const ROLES = [
   "supervisor",
   "vendedor",
   "responsable_meli",
+  "mercado_libre",
 ] as const;
 export type Rol = (typeof ROLES)[number];
 
@@ -63,6 +65,7 @@ export type Permiso =
   | { rol: "admin" }
   | { rol: "supervisor" }
   | { rol: "responsable_meli" }
+  | { rol: "mercado_libre" }
   | { rol: "vendedor"; vendedor: VendedorObjetivos };
 
 /** Forma mínima del usuario de Supabase que hace falta acá. */
@@ -97,7 +100,7 @@ export function permisoDelUsuario(usuario: UsuarioConClaim): Permiso | null {
   if (rol === "vendedor") {
     return vendedor ? { rol, vendedor } : null;
   }
-  return { rol };   // superadmin | admin | supervisor | responsable_meli
+  return { rol };   // superadmin | admin | supervisor | responsable_meli | mercado_libre
 }
 
 const PAGINAS_OBJETIVOS = VENDEDORES_OBJETIVOS.map((v) => `/objetivos/${slugVendedor(v)}`);
@@ -122,6 +125,42 @@ export const INICIO_MINORISTA = `${RAIZ_MINORISTA}/mercado-libre`;
  */
 function esDeMinorista(pathname: string): boolean {
   return pathname === RAIZ_MINORISTA || pathname.startsWith(`${RAIZ_MINORISTA}/`);
+}
+
+/**
+ * Mercado Libre solo: la página y sus pestañas (Alertas, Stock Full,
+ * Elasticidad, Resultados), sin Tienda Nube.
+ *
+ * `startsWith` igual que en minorista, y por lo mismo: las pestañas cuelgan de
+ * esta URL y quien ve Mercado Libre las ve todas.
+ *
+ * `/venta-minorista` a secas entra también porque esa página no muestra nada:
+ * redirige a INICIO_MINORISTA. Dejarla afuera solo lograría que a alguien se le
+ * rompa un favorito.
+ */
+function esDeMercadoLibre(pathname: string): boolean {
+  return (
+    pathname === RAIZ_MINORISTA ||
+    pathname === INICIO_MINORISTA ||
+    pathname.startsWith(`${INICIO_MINORISTA}/`)
+  );
+}
+
+/**
+ * Las APIs de Mercado Libre. Es la lista de minorista MENOS `/api/tienda-nube`,
+ * escrita aparte y no derivada con un `filter`: si mañana se agrega una API a
+ * minorista, tiene que entrar acá A MANO y con la decisión tomada. Derivarla
+ * haría que cualquier ruta nueva quedara abierta sola.
+ */
+const APIS_MERCADO_LIBRE = [
+  "/api/meli",
+  "/api/stock-full",
+  "/api/elasticidad",
+  "/api/resultados-elasticidad",
+];
+
+function esApiMercadoLibre(pathname: string): boolean {
+  return APIS_MERCADO_LIBRE.some((r) => pathname === r || pathname.startsWith(`${r}/`));
 }
 
 /**
@@ -161,6 +200,10 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
     return esDeMinorista(pathname) || esApiMinorista(pathname);
   }
 
+  if (permiso.rol === "mercado_libre") {
+    return esDeMercadoLibre(pathname) || esApiMercadoLibre(pathname);
+  }
+
   if (permiso.rol === "supervisor") {
     return esDeObjetivos || pathname === "/api/objetivos";
   }
@@ -175,7 +218,9 @@ export function paginaInicial(permiso: Permiso | null): string {
   if (!permiso) return "/login";
   if (permiso.rol === "vendedor") return `/objetivos/${slugVendedor(permiso.vendedor)}`;
   if (permiso.rol === "supervisor") return PAGINAS_OBJETIVOS[0];
-  if (permiso.rol === "responsable_meli") return INICIO_MINORISTA;
+  if (permiso.rol === "responsable_meli" || permiso.rol === "mercado_libre") {
+    return INICIO_MINORISTA;
+  }
   return "/ventas-mayoristas";
 }
 
