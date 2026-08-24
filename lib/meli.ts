@@ -125,3 +125,17 @@ export {
   sumarDias,
   type Rango,
 } from "@/lib/rangos";
+
+/**
+ * Tope de filas de la tabla de artículos.
+ *
+ * Subió de 300 a 600 cuando la tabla pasó a mostrar una fila por ORDEN y SKU en
+ * vez de una por SKU: el mismo recorte de días ocupa unas dos veces más filas
+ * (medido: 468 SKUs son 868 líneas en dos días), así que con 300 se recortaba
+ * mucho antes que antes.
+ *
+ * Vive acá y no en queries-meli.ts porque la pantalla lo necesita para saber si
+ * la tabla quedó recortada, y ese módulo importa `pg`: no puede llegar al
+ * browser.
+ */
+export const TOPE_ARTICULOS = 600;

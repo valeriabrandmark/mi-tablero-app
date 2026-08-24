@@ -5,6 +5,7 @@ import { hoyArgentina, sumarDias } from "@/lib/rangos";
 import {
   CANAL_MELI,
   CARGA_IMPOSITIVA,
+  TOPE_ARTICULOS,
   IMPUESTOS,
   UMBRAL_BAJO,
   UMBRAL_MUY_BAJO,
@@ -19,6 +20,7 @@ import type {
   FilaAlertaMeli,
   FiltrosMeli,
   KpisMeli,
+  LineaVentaMeli,
   OpcionesMeli,
   PuntoDiaMeli,
   PuntoHora,
@@ -497,11 +499,27 @@ async function getVentaTotalProveedores(f: FiltrosMeli): Promise<number> {
   return num(fila?.total);
 }
 
-async function getArticulos(f: FiltrosMeli): Promise<ArticuloMeli[]> {
+/**
+ * Las líneas de venta del recorte: UNA FILA POR ORDEN Y SKU.
+ *
+ * Antes agrupaba solo por `sku`, o sea que una fila juntaba todas las ventas de
+ * ese artículo —cuatro órdenes en promedio, hasta 22 en el peor caso— y por eso
+ * no podía mostrar un número de orden. Ahora cada fila es una venta concreta y
+ * se puede ir a buscarla a Mercado Libre.
+ *
+ * El costo de esto es que la tabla ocupa unas dos veces más filas para el mismo
+ * recorte de días; por eso el tope subió a TOPE_ARTICULOS.
+ *
+ * Sigue habiendo `group by` y no un select pelado porque una misma orden puede
+ * traer el mismo SKU en dos renglones (pasa cuando Sigma parte la línea), y esas
+ * dos se suman en una.
+ */
+async function getArticulos(f: FiltrosMeli): Promise<LineaVentaMeli[]> {
   const w = whereBase(f);
 
   const filas = await query<Record<string, string>>(
     `select sku,
+            nro_orden,
             max(producto)                     as producto,
             max(proveedor)                    as proveedor,
             max(marca)                        as marca,
@@ -514,13 +532,26 @@ async function getArticulos(f: FiltrosMeli): Promise<ArticuloMeli[]> {
             coalesce(sum(${RENTABILIDAD}), 0) as rentabilidad
      from gold.fact_ventas
      where ${w.sql}
-     group by sku
+     group by sku, nro_orden
      order by venta_civa desc
-     limit 300`,
+     limit ${TOPE_ARTICULOS}`,
     w.params,
   );
 
-  return filas.map(aArticulo);
+  return filas.map((r) => ({
+    ...aArticulo(r),
+    // `nro_orden` es un double en gold (viene de un id gigante de ML). Se pasa a
+    // texto SIN notacion cientifica para que se pueda copiar y pegar en el
+    // buscador de Mercado Libre.
+    //
+    // El double aguanta: verificado que las 39.939 lineas de ML coinciden al
+    // digito con `bronze.ml_ventas.id`, cero diferencias. El id mas grande hoy
+    // es 2.000.018.092.135.338 contra el limite de enteros exactos del double,
+    // 9.007.199.254.740.992 -- 4,5 veces de margen. Si algun dia ML pasa ese
+    // numero, esto empieza a mostrar ordenes que no existen, y el lugar para
+    // arreglarlo es el tipo de la columna en modelo.py, no aca.
+    nroOrden: r.nro_orden == null ? null : String(BigInt(Math.trunc(Number(r.nro_orden)))),
+  }));
 }
 
 /**
@@ -1013,16 +1044,16 @@ export async function getCancelacionesMeli(
   const filas = await query<Record<string, string | null>>(
     `with lineas as (${w.cte})
      select l.sku,
+            l.nro_orden,
             max(l.producto)             as producto,
             max(a."proveedorNombre")    as proveedor,
             max(a."attributes.marca")   as marca,
-            count(distinct l.nro_orden) as ordenes,
             sum(l.cantidad)             as unidades,
             sum(l.monto)                as monto
      from lineas l
      left join bronze.sigma_articulos a on trim(a.id::text) = trim(l.sku)
      ${w.sql}
-     group by l.sku
+     group by l.sku, l.nro_orden
      order by monto desc
      limit 100`,
     w.params,
@@ -1033,7 +1064,7 @@ export async function getCancelacionesMeli(
     producto: r.producto,
     proveedor: r.proveedor,
     marca: r.marca,
-    ordenes: num(r.ordenes),
+    nroOrden: r.nro_orden,
     unidades: num(r.unidades),
     monto: num(r.monto),
   }));
@@ -1041,7 +1072,9 @@ export async function getCancelacionesMeli(
   // Los totales NO se suman de las filas. Dos razones distintas:
   //
   //   - Las ÓRDENES se contarían de más. Una orden cancelada de tres productos
-  //     ocupa tres filas, y sumarlas la cuenta tres veces.
+  //     ocupa tres filas —una por SKU—, y contar filas la contaría tres veces.
+  //     Por eso el total sigue siendo un count(distinct) del servidor aunque
+  //     ahora cada fila muestre su número de orden.
   //   - La tabla está recortada al top 100 por monto. Con más de 100 SKUs
   //     cancelados, sumar lo que se ve daría menos que el total real.
   //
