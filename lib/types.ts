@@ -51,7 +51,8 @@ export type FilaComprobanteVenta = {
 
 export type RentabilidadCliente = {
   label: string;
-  valor: number;
+  /** Null cuando la facturación del cliente neteó a cero: no hay % que calcular. */
+  valor: number | null;
   facturacion: number;
 };
 
@@ -74,7 +75,8 @@ export type PuntoProveedor = { label: string; total: number };
 
 export type MargenProveedor = {
   label: string;
-  margenPct: number;
+  /** Null cuando la facturación del proveedor neteó a cero. */
+  margenPct: number | null;
   unidades: number;
 };
 
