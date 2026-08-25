@@ -75,6 +75,40 @@ function whereBase(
 }
 
 /**
+ * Un importe de dinero, redondeado al centavo.
+ *
+ * POR QUE HACE FALTA
+ *
+ * `precio_neto` y `costo_unitario` son `double precision`. Sumar decenas de
+ * renglones deja un resto en la undécima cifra decimal, y una factura con su
+ * nota de crédito NO da cero exacto sino algo como -0,0000000000728.
+ *
+ * Eso se veía de dos formas, las dos feas:
+ *
+ *  - las tarjetas mostraban `-$ 0`, con el signo menos, en vez de `$ 0`;
+ *  - y peor: el % de rentabilidad dividía un resto por otro resto. El 25/08,
+ *    filtrando la factura F-B93-00001415 con su nota de crédito
+ *    C-CA9-00000110, el gráfico por cliente marcaba -13,75 % sobre una venta
+ *    de cero. El número salía de 1,00e-11 / -7,28e-11: basura pura, que con
+ *    otro redondeo habría dado -75 % o +200 %.
+ *
+ * `numeric` es decimal exacto, así que redondear al centavo hace desaparecer
+ * el resto: la factura y la nota de crédito se netean a 0,00 de verdad. Y el
+ * dinero no tiene fracciones de centavo, así que no se pierde nada real.
+ */
+function pesos(expr: string): string {
+  return `round((${expr})::numeric, 2)::float8`;
+}
+
+/**
+ * Facturación del recorte, al centavo. Es el denominador de todos los
+ * porcentajes de rentabilidad, y por eso vive en un solo lugar: si se
+ * calculara distinto en cada consulta, dos paneles podrían discrepar sobre si
+ * una venta es cero o no.
+ */
+const FACTURACION = pesos("sum(fv.precio_neto * fv.cantidad)");
+
+/**
  * Flete de venta repartido por renglón de `fact_ventas`.
  *
  * `gold.fact_ventas_flete` tiene una fila por (nro_orden, sku), pero
@@ -143,11 +177,11 @@ async function getTotales(f: Filtros, hastaFecha?: string) {
   }
   const w = whereBase(f, hastaFecha ? [`fv.fecha <= '${hastaFecha}'::date`] : []);
   const fila = await queryOne<FilaTotales>(
-    `select coalesce(sum(fv.precio_neto * fv.cantidad), 0)::float8 as "facturacionNeta",
-            coalesce(sum(fv.costo_unitario * fv.cantidad), 0)::float8 as "costoMercaderia",
+    `select coalesce(${FACTURACION}, 0) as "facturacionNeta",
+            coalesce(${pesos("sum(fv.costo_unitario * fv.cantidad)")}, 0) as "costoMercaderia",
             coalesce(sum(fv.cantidad), 0)::float8 as "unidades",
-            coalesce(sum(fv.margen_total), 0)::float8 as "margenTotal",
-            coalesce(${MARGEN_AJUSTADO}, 0)::float8 as "margenAjustado",
+            coalesce(${pesos("sum(fv.margen_total)")}, 0) as "margenTotal",
+            coalesce(${pesos(MARGEN_AJUSTADO)}, 0) as "margenAjustado",
             count(distinct fv.cliente) as "clientesConCompra",
             count(distinct fv.nro_orden) as "cantidadPedidos"
      from gold.fact_ventas fv
@@ -230,8 +264,8 @@ async function getMargenPorProveedor(f: Filtros): Promise<MargenProveedor[]> {
   const w = whereBase(f, ["fv.proveedor is not null"], "fv", ["proveedor"]);
   return query<MargenProveedor>(
     `select fv.proveedor as label,
-            case when sum(fv.precio_neto * fv.cantidad) = 0 then 0
-                 else (${MARGEN_AJUSTADO}) / sum(fv.precio_neto * fv.cantidad)
+            case when coalesce(${FACTURACION}, 0) = 0 then null
+                 else ${pesos(MARGEN_AJUSTADO)} / ${FACTURACION}
             end::float8 as "margenPct",
             coalesce(sum(fv.cantidad), 0)::float8 as unidades
      from gold.fact_ventas fv
@@ -245,7 +279,9 @@ async function getMargenPorProveedor(f: Filtros): Promise<MargenProveedor[]> {
      -- proveedor de dos unidades no encabezara el ranking con un margen
      -- irreal. Ahora estan todos y el grafico scrollea: la columna de unidades
      -- queda en el tooltip para poder desconfiar de los de muestra chica.
-     order by "margenPct" desc`,
+     -- nulls last: en DESC Postgres pone los NULL PRIMERO, y encabezarian el
+     -- grafico justo las filas que no tienen porcentaje que mostrar.
+     order by "margenPct" desc nulls last`,
     w.params,
   );
 }
@@ -266,9 +302,9 @@ async function getRentabilidadPorCliente(f: Filtros): Promise<RentabilidadClient
   return query<RentabilidadCliente>(
     `with por_cliente as (
        select fv.cliente as label,
-              coalesce(sum(fv.precio_neto * fv.cantidad), 0)::float8 as facturacion,
-              case when sum(fv.precio_neto * fv.cantidad) = 0 then null
-                   else (${MARGEN_AJUSTADO}) / sum(fv.precio_neto * fv.cantidad)
+              coalesce(${FACTURACION}, 0) as facturacion,
+              case when coalesce(${FACTURACION}, 0) = 0 then null
+                   else ${pesos(MARGEN_AJUSTADO)} / ${FACTURACION}
               end::float8 as valor
        from gold.fact_ventas fv
        left join gold.fletes_proveedores_pct_mensual fpm
@@ -312,9 +348,9 @@ async function getArticulos(f: Filtros): Promise<FilaArticulo[]> {
             case when sum(fv.cantidad) = 0 then null
                  else sum(fv.costo_unitario * fv.cantidad) / sum(fv.cantidad)
             end::float8 as "costoPromedio",
-            coalesce(sum(fv.precio_neto * fv.cantidad), 0)::float8 as facturacion,
-            case when sum(fv.precio_neto * fv.cantidad) = 0 then null
-                 else (${MARGEN_AJUSTADO}) / sum(fv.precio_neto * fv.cantidad)
+            coalesce(${FACTURACION}, 0) as facturacion,
+            case when coalesce(${FACTURACION}, 0) = 0 then null
+                 else ${pesos(MARGEN_AJUSTADO)} / ${FACTURACION}
             end::float8 as "rentabilidadPct"
      from gold.fact_ventas fv
      left join gold.fletes_proveedores_pct_mensual fpm
@@ -406,8 +442,8 @@ type FilaFlete = { fleteTotalReal: number; fleteEstimadoFiltrado: number };
 async function getFletes(f: Filtros) {
   const w = whereBase(f);
   const fila = await queryOne<FilaFlete>(
-    `select coalesce(sum(${FLETE_LINEA}) filter (where fvf.tiene_flete_real = true), 0)::float8 as "fleteTotalReal",
-            coalesce(sum(${FLETE_LINEA}) filter (where coalesce(fvf.tiene_flete_real, false) = false), 0)::float8 as "fleteEstimadoFiltrado"
+    `select coalesce(${pesos(`sum(${FLETE_LINEA}) filter (where fvf.tiene_flete_real = true)`)}, 0) as "fleteTotalReal",
+            coalesce(${pesos(`sum(${FLETE_LINEA}) filter (where coalesce(fvf.tiene_flete_real, false) = false)`)}, 0) as "fleteEstimadoFiltrado"
      from gold.fact_ventas fv
      ${JOIN_FLETE}
      where ${w.sql}`,

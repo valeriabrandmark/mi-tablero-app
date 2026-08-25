@@ -23,7 +23,7 @@ function Contenido({ active, payload }: { active?: boolean; payload?: ItemToolti
   return (
     <CajaTooltip>
       <FilaTooltip
-        color={item.margenPct >= 0 ? PALETA[1] : TEMA.negativo}
+        color={(item.margenPct ?? 0) >= 0 ? PALETA[1] : TEMA.negativo}
         label={item.label}
         valor={fmtPct(item.margenPct)}
       />
@@ -45,7 +45,7 @@ export default function BarrasMargen({
   if (datos.length === 0) {
     return (
       <p className="text-muted py-16 text-center text-sm">
-        Ningún proveedor alcanza el mínimo de unidades para el filtro elegido.
+        Ningún proveedor tiene ventas para el filtro elegido.
       </p>
     );
   }
@@ -90,7 +90,7 @@ export default function BarrasMargen({
           {datos.map((d) => (
             <Cell
               key={d.label}
-              fill={d.margenPct >= 0 ? PALETA[1] : TEMA.negativo}
+              fill={(d.margenPct ?? 0) >= 0 ? PALETA[1] : TEMA.negativo}
               fillOpacity={!seleccionados?.length || seleccionados.includes(d.label) ? 1 : 0.25}
             />
           ))}

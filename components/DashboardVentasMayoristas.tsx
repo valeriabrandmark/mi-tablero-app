@@ -17,7 +17,12 @@ import {
 import { Aviso, Delta, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { alternar as alternarValor } from "@/lib/filtros";
-import { CRUZADOS, type FilaArticulo, type FilaComprobanteVenta } from "@/lib/types";
+import {
+  CRUZADOS,
+  type FilaArticulo,
+  type FilaComprobanteVenta,
+  type RentabilidadCliente,
+} from "@/lib/types";
 
 const ETIQUETA_CRUZADO: Record<(typeof CRUZADOS)[number], string> = {
   proveedor: "Proveedor",
@@ -50,6 +55,27 @@ function fmtPuntos(diferencia: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })} pp`;
+}
+
+/**
+ * Clientes que tienen un porcentaje que mostrar.
+ *
+ * Un cliente cuya facturación neteó a cero -- una factura anulada por su nota
+ * de crédito dentro del mismo filtro -- no tiene rentabilidad que calcular, y
+ * su barra sería un número inventado. Quedan afuera del gráfico y se cuentan
+ * en la nota del panel, para que no desaparezcan en silencio.
+ */
+function clientesMedibles(
+  filas: RentabilidadCliente[],
+): (RentabilidadCliente & { valor: number })[] {
+  return filas.filter((c): c is RentabilidadCliente & { valor: number } => c.valor != null);
+}
+
+function notaClientes(filas: RentabilidadCliente[]): string {
+  const medibles = clientesMedibles(filas).length;
+  const sinDato = filas.length - medibles;
+  const base = `${medibles} clientes · sobre facturación s/IVA`;
+  return sinDato > 0 ? `${base} · ${sinDato} sin venta neta` : base;
 }
 
 function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
@@ -537,12 +563,12 @@ export default function Dashboard() {
 
           <Panel
             titulo="% Rentabilidad Ajustada por cliente"
-            nota={`${data.rentabilidadPorCliente.length} clientes · sobre facturación s/IVA`}
+            nota={notaClientes(data.rentabilidadPorCliente)}
           >
             {/* Igual que el de proveedores: están todos y el panel scrollea. */}
             <div className="max-h-[420px] overflow-y-auto pr-1">
               <BarrasCategoria
-                datos={data.rentabilidadPorCliente}
+                datos={clientesMedibles(data.rentabilidadPorCliente)}
                 formato={(n) => fmtPct(n)}
                 colorUnico={PALETA[3]}
                 seleccionados={filtros.cliente}
