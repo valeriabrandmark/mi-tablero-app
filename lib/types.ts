@@ -374,6 +374,14 @@ export type FiltrosMeli = {
   hora?: string[];
   /** Solo en la pestaña Alertas: nivel de alerta (ver `NIVELES_ALERTA`). */
   alerta?: string[];
+  /**
+   * Texto libre del buscador. Va contra número de orden, número de venta
+   * (el del paquete), SKU y descripción del artículo, todo a la vez.
+   *
+   * No es una lista como el resto: es UN término, y el usuario no elige contra
+   * qué columna busca — pega lo que tiene a mano y el buscador se arregla.
+   */
+  buscar?: string;
 };
 
 /**

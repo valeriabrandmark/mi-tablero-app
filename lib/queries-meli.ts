@@ -187,6 +187,51 @@ function whereBase(
               = any($${iHora}::text[])${recorte.length ? "\n          and " + recorte.join("\n          and ") : ""})`);
   }
 
+  // BUSCADOR DE TEXTO LIBRE.
+  //
+  // Un solo campo contra cuatro cosas, porque quien busca no sabe (ni tiene
+  // por qué saber) cuál de los dos números tiene en la mano:
+  //
+  //   - NÚMERO DE ORDEN  (2000018...) es el id de la orden. Es lo que guarda
+  //     `gold.fact_ventas.nro_orden`.
+  //   - NÚMERO DE VENTA  (2000014...) es el id del PAQUETE, y es el que
+  //     muestran el reporte y la pantalla de Mercado Libre. NO está en gold,
+  //     así que se resuelve contra `bronze.ml_ventas.pack_id`.
+  //   - SKU y DESCRIPCIÓN, por si lo que se tiene es el producto.
+  //
+  // Los dos números se parecen y se confunden fácil: son numeraciones
+  // distintas de ML para la misma compra. Buscando por los dos, da igual cuál
+  // te hayan pasado.
+  //
+  // La comparación es por CONTENIDO y no exacta: es común pegar los últimos
+  // dígitos, o que el número venga con un espacio de más.
+  if (!omitir.includes("buscar") && f.buscar && f.buscar.trim() !== "") {
+    const termino = f.buscar.trim();
+    params.push(`%${termino}%`);
+    const iLike = params.length;
+
+    const partes = [
+      `${col("sku")} ilike $${iLike}`,
+      `${col("producto")} ilike $${iLike}`,
+    ];
+
+    // Los dos numéricos solo si el término tiene dígitos: sin esto, buscar
+    // "shampoo" haría un `like` sobre 44.000 ids de bronze para nada.
+    if (/\d/.test(termino)) {
+      partes.push(`${col("nro_orden")}::bigint::text like $${iLike}`);
+      // Mismo recorte por fecha que el filtro por hora, y por lo mismo: sin él
+      // esta subconsulta recorre bronze entera. Ver recorteBronze.
+      const recorte = condicionesRecorte(f, "b", params);
+      partes.push(`${col("nro_orden")}::bigint in (
+         select b.id::bigint from bronze.ml_ventas b
+          where b.pack_id::bigint::text like $${iLike}${
+            recorte.length ? "\n            and " + recorte.join("\n            and ") : ""
+          })`);
+    }
+
+    clauses.push(`(${partes.join("\n       or ")})`);
+  }
+
   return { sql: clauses.join("\n     and "), params };
 }
 

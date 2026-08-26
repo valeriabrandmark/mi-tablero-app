@@ -47,7 +47,11 @@ function Etiqueta({ nivel }: { nivel: string }) {
   return (
     <span
       className="rounded-full border px-2 py-0.5 text-[10px] whitespace-nowrap"
-      style={{ color, borderColor: `${color}66`, backgroundColor: `${color}1a` }}
+      style={{
+        color,
+        borderColor: `${color}66`,
+        backgroundColor: `${color}1a`,
+      }}
     >
       {texto}
     </span>
@@ -282,7 +286,11 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
   ];
 }
 
-export default function AlertasMeliPage({ diaInicial }: { diaInicial: string }) {
+export default function AlertasMeliPage({
+  diaInicial,
+}: {
+  diaInicial: string;
+}) {
   // Abre en EL DÍA, igual que el Tablero. `diaInicial` lo resuelve el servidor:
   // es hoy, o el último día con ventas si hoy todavía no cargó.
   //
@@ -295,11 +303,12 @@ export default function AlertasMeliPage({ diaInicial }: { diaInicial: string }) 
   const inicial: FiltrosMeli = { ...rangoInicial, alerta: ["muy-bajo"] };
   const [filtros, setFiltros] = useState<FiltrosMeli>(inicial);
 
-  const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
-    "/api/meli",
-    filtros as unknown as Record<string, string[] | undefined>,
-    { vista: "alertas", conOpciones: "1" },
-  );
+  const { data, cargando, error, recargar, empezarCarga } =
+    useDatosTablero<Respuesta>(
+      "/api/meli",
+      filtros as unknown as Record<string, string[] | undefined>,
+      { vista: "alertas", conOpciones: "1" },
+    );
 
   const cambiar = (f: FiltrosMeli) => {
     empezarCarga();
@@ -313,7 +322,8 @@ export default function AlertasMeliPage({ diaInicial }: { diaInicial: string }) 
     filtros.alerta[0] === "muy-bajo" &&
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
-    sinValores(filtros.sku);
+    sinValores(filtros.sku) &&
+    !filtros.buscar;
 
   // El resumen viene solo con los niveles que existen en el recorte; se
   // completan los tres para que la fila de tarjetas no cambie de tamaño al
@@ -335,9 +345,12 @@ export default function AlertasMeliPage({ diaInicial }: { diaInicial: string }) 
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
           {/* h2 y no h1: el h1 de la página es el logo, que vive en el layout. */}
-          <h2 className="text-lg font-semibold tracking-tight">Alertas de margen</h2>
+          <h2 className="text-lg font-semibold tracking-tight">
+            Alertas de margen
+          </h2>
           <p className="text-muted mt-1 text-xs">
-            Ventas individuales ordenadas por margen neto, de la peor a la mejor.
+            Ventas individuales ordenadas por margen neto, de la peor a la
+            mejor.
           </p>
         </div>
         <button
@@ -362,7 +375,9 @@ export default function AlertasMeliPage({ diaInicial }: { diaInicial: string }) 
       {error && (
         <Aviso>
           <p className="font-medium">No se pudieron leer los datos.</p>
-          <p className="mt-1 font-mono text-xs break-words opacity-80">{error}</p>
+          <p className="mt-1 font-mono text-xs break-words opacity-80">
+            {error}
+          </p>
         </Aviso>
       )}
 
@@ -373,7 +388,9 @@ export default function AlertasMeliPage({ diaInicial }: { diaInicial: string }) 
           ))}
         </div>
       ) : (
-        <div className={`grid gap-3 transition-opacity sm:grid-cols-3 ${cargando ? "opacity-50" : ""}`}>
+        <div
+          className={`grid gap-3 transition-opacity sm:grid-cols-3 ${cargando ? "opacity-50" : ""}`}
+        >
           {resumen.map((r) => (
             <TarjetaKpi
               key={r.nivel}
@@ -405,17 +422,22 @@ export default function AlertasMeliPage({ diaInicial }: { diaInicial: string }) 
               clave={(f, i) => `${f.nroOrden ?? "s"}-${f.sku ?? "s"}-${i}`}
               vacio="Ninguna venta cae en los niveles elegidos. Buena noticia."
               onClickFila={(f) =>
-                f.sku && cambiar({ ...filtros, sku: alternarValor(filtros.sku, f.sku) })
+                f.sku &&
+                cambiar({ ...filtros, sku: alternarValor(filtros.sku, f.sku) })
               }
-              activa={(f) => (filtros.sku?.length ? filtros.sku.includes(f.sku ?? "") : false)}
+              activa={(f) =>
+                filtros.sku?.length ? filtros.sku.includes(f.sku ?? "") : false
+              }
             />
           </Panel>
 
           <p className="text-muted mt-3 text-[11px] leading-relaxed">
-            Rentabilidad bruta = venta s/IVA − costo (ya con descuento de proveedor) − comisión
-            de Mercado Libre − costo de envío. Rentabilidad neta = bruta − {fmtPct(CARGA_IMPOSITIVA)}{" "}
-            de impuestos sobre la venta s/IVA. Los dos <strong>porcentajes</strong> se calculan
-            sobre la venta <strong>c/IVA</strong>, igual que en el Tablero.
+            Rentabilidad bruta = venta s/IVA − costo (ya con descuento de
+            proveedor) − comisión de Mercado Libre − costo de envío.
+            Rentabilidad neta = bruta − {fmtPct(CARGA_IMPOSITIVA)} de impuestos
+            sobre la venta s/IVA. Los dos <strong>porcentajes</strong> se
+            calculan sobre la venta <strong>c/IVA</strong>, igual que en el
+            Tablero.
           </p>
         </div>
       )}
