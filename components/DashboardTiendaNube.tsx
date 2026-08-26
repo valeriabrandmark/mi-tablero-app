@@ -11,11 +11,22 @@ import {
   Tabla,
   type Columna,
 } from "@/components/Tabla";
-import { Aviso, Delta, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
+import {
+  Aviso,
+  ConAlarmaMargen,
+  Delta,
+  Esqueleto,
+  Panel,
+  TarjetaKpi,
+} from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
-import { CARGA_IMPOSITIVA, CRITERIO_VENTA, mesComercialComoRango } from "@/lib/tiendanube";
+import {
+  CARGA_IMPOSITIVA,
+  CRITERIO_VENTA,
+  mesComercialComoRango,
+} from "@/lib/tiendanube";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
   ArticuloTiendaNube,
@@ -40,7 +51,9 @@ function Importe({ valor }: { valor: number | null }) {
 
 function Porcentaje({ valor }: { valor: number | null }) {
   return (
-    <span style={(valor ?? 0) < 0 ? { color: TEMA.negativo } : undefined}>{fmtPct(valor)}</span>
+    <span style={(valor ?? 0) < 0 ? { color: TEMA.negativo } : undefined}>
+      {fmtPct(valor)}
+    </span>
   );
 }
 
@@ -357,7 +370,9 @@ function TablaRanking({
   const columnas: Columna<RankingTiendaNube>[] = [
     {
       titulo,
-      celda: (r) => <span className="block max-w-[220px] truncate">{r.label}</span>,
+      celda: (r) => (
+        <span className="block max-w-[220px] truncate">{r.label}</span>
+      ),
       orden: (r) => r.label,
     },
     {
@@ -404,13 +419,19 @@ function TablaRanking({
       columnas={columnas}
       clave={(r) => r.label}
       onClickFila={(r) => onSeleccionar(r.label)}
-      activa={(r) => (seleccionados?.length ? seleccionados.includes(r.label) : false)}
+      activa={(r) =>
+        seleccionados?.length ? seleccionados.includes(r.label) : false
+      }
       vacio="Sin ventas en el recorte elegido."
     />
   );
 }
 
-export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: string }) {
+export default function DashboardTiendaNubePage({
+  diaInicial,
+}: {
+  diaInicial: string;
+}) {
   // Abre en el MES COMERCIAL y no en el día, al revés que Mercado Libre: acá
   // entran unos ocho pedidos por mes, así que abrir en "hoy" daría vacío tres
   // de cada cuatro días y se leería como que no vendimos.
@@ -418,19 +439,21 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
   const inicial: FiltrosTiendaNube = { ...rangoInicial };
   const [filtros, setFiltros] = useState<FiltrosTiendaNube>(inicial);
 
-  const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
-    "/api/tienda-nube",
-    filtros as unknown as Record<string, string[] | undefined>,
-    { conOpciones: "1" },
-  );
+  const { data, cargando, error, recargar, empezarCarga } =
+    useDatosTablero<Respuesta>(
+      "/api/tienda-nube",
+      filtros as unknown as Record<string, string[] | undefined>,
+      { conOpciones: "1" },
+    );
 
   const cambiar = (f: FiltrosTiendaNube) => {
     empezarCarga();
     setFiltros(f);
   };
 
-  const alternarEn = (clave: "proveedor" | "marca" | "sku" | "cliente") => (valor: string) =>
-    cambiar({ ...filtros, [clave]: alternarValor(filtros[clave], valor) });
+  const alternarEn =
+    (clave: "proveedor" | "marca" | "sku" | "cliente") => (valor: string) =>
+      cambiar({ ...filtros, [clave]: alternarValor(filtros[clave], valor) });
 
   const k = data?.kpis;
   const comp = data?.comparacion ?? null;
@@ -459,7 +482,9 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
           <p className="text-muted mt-1 text-xs">
             {data
               ? `Actualizado ${new Date(data.generadoEn).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}` +
-                (data.ultimaVenta ? ` · última venta cargada ${fmtFechaCorta(data.ultimaVenta)}` : "")
+                (data.ultimaVenta
+                  ? ` · última venta cargada ${fmtFechaCorta(data.ultimaVenta)}`
+                  : "")
               : "Cargando datos en vivo…"}
           </p>
         </div>
@@ -510,7 +535,9 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
       {error && (
         <Aviso>
           <p className="font-medium">No se pudieron leer los datos.</p>
-          <p className="mt-1 font-mono text-xs break-words opacity-80">{error}</p>
+          <p className="mt-1 font-mono text-xs break-words opacity-80">
+            {error}
+          </p>
         </Aviso>
       )}
 
@@ -522,12 +549,15 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
           vendimos", que es exactamente lo contrario de lo que pasó. */}
       {k && k.lineas > 0 && k.pedidos === 0 && (
         <Aviso tono="info">
-          <p className="font-medium">Los pedidos todavía no están reconstruidos.</p>
+          <p className="font-medium">
+            Los pedidos todavía no están reconstruidos.
+          </p>
           <p className="mt-1">
-            Hay {fmtNumero(k.lineas)} líneas de venta cargadas, pero ninguna trae número de
-            pedido, así que el panel de pedidos y el conteo aparecen vacíos. Los importes de
-            arriba sí son correctos. Se arregla corriendo el orquestador:{" "}
-            <code>python tiendanube.py</code> y después <code>python modelo.py --todo</code>.
+            Hay {fmtNumero(k.lineas)} líneas de venta cargadas, pero ninguna
+            trae número de pedido, así que el panel de pedidos y el conteo
+            aparecen vacíos. Los importes de arriba sí son correctos. Se arregla
+            corriendo el orquestador: <code>python tiendanube.py</code> y
+            después <code>python modelo.py --todo</code>.
           </p>
         </Aviso>
       )}
@@ -539,108 +569,124 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
           ))}
         </div>
       ) : (
-        <div
-          className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
-        >
-          <TarjetaKpi
-            titulo="Venta c/IVA"
-            valor={fmtMoneda(k.ventaCiva)}
-            detalle={
-              contra && comp ? (
-                <Delta actual={k.ventaCiva} anterior={comp.ventaCiva} contra={contra} />
-              ) : (
-                `${fmtMoneda(k.ventaSiva)} sin IVA`
-              )
-            }
-          />
-          <TarjetaKpi
-            titulo="Rentabilidad bruta"
-            valor={fmtMoneda(k.rentabilidad)}
-            detalle={
-              contra && comp ? (
-                <Delta actual={k.rentabilidad} anterior={comp.rentabilidad} contra={contra} />
-              ) : (
-                "Venta s/IVA − costo − envío"
-              )
-            }
-            acento={k.rentabilidad < 0 ? TEMA.negativo : PALETA[1]}
-          />
-          <TarjetaKpi
-            titulo="Margen bruto"
-            valor={fmtPct(k.margenPct)}
-            detalle={
-              contra && comp && comp.margenPct != null && k.margenPct != null
-                ? `${comp.margenPct < k.margenPct ? "▲" : "▼"} era ${fmtPct(comp.margenPct)} ${contra}`
-                : "Rentabilidad sobre venta c/IVA"
-            }
-            acento={(k.margenPct ?? 0) < 0 ? TEMA.negativo : undefined}
-          />
-          {/* La neta al lado de la bruta a propósito: la diferencia entre las dos
+        <ConAlarmaMargen activa={k.rentabilidadNeta < 0}>
+          <div
+            className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
+          >
+            <TarjetaKpi
+              titulo="Venta c/IVA"
+              valor={fmtMoneda(k.ventaCiva)}
+              detalle={
+                contra && comp ? (
+                  <Delta
+                    actual={k.ventaCiva}
+                    anterior={comp.ventaCiva}
+                    contra={contra}
+                  />
+                ) : (
+                  `${fmtMoneda(k.ventaSiva)} sin IVA`
+                )
+              }
+            />
+            <TarjetaKpi
+              titulo="Rentabilidad bruta"
+              valor={fmtMoneda(k.rentabilidad)}
+              detalle={
+                contra && comp ? (
+                  <Delta
+                    actual={k.rentabilidad}
+                    anterior={comp.rentabilidad}
+                    contra={contra}
+                  />
+                ) : (
+                  "Venta s/IVA − costo − envío"
+                )
+              }
+              acento={k.rentabilidad < 0 ? TEMA.negativo : PALETA[1]}
+            />
+            <TarjetaKpi
+              titulo="Margen bruto"
+              valor={fmtPct(k.margenPct)}
+              detalle={
+                contra && comp && comp.margenPct != null && k.margenPct != null
+                  ? `${comp.margenPct < k.margenPct ? "▲" : "▼"} era ${fmtPct(comp.margenPct)} ${contra}`
+                  : "Rentabilidad sobre venta c/IVA"
+              }
+              acento={(k.margenPct ?? 0) < 0 ? TEMA.negativo : undefined}
+            />
+            {/* La neta al lado de la bruta a propósito: la diferencia entre las dos
               es el 7,4 % de impuestos, y verlas separadas es lo que hace que una
               venta "con margen" se lea como lo que es. */}
-          <TarjetaKpi
-            titulo="Rentabilidad neta"
-            valor={fmtMoneda(k.rentabilidadNeta)}
-            detalle={`${fmtPct(k.margenNetoPct)} sobre venta c/IVA · ${fmtMoneda(k.impuestos)} de impuestos`}
-            acento={k.rentabilidadNeta < 0 ? TEMA.negativo : undefined}
-          />
+            <TarjetaKpi
+              titulo="Rentabilidad neta"
+              valor={fmtMoneda(k.rentabilidadNeta)}
+              detalle={`${fmtPct(k.margenNetoPct)} sobre venta c/IVA · ${fmtMoneda(k.impuestos)} de impuestos`}
+              acento={k.rentabilidadNeta < 0 ? TEMA.negativo : undefined}
+            />
 
-          <TarjetaKpi
-            titulo="Pedidos"
-            valor={fmtNumero(k.pedidos)}
-            detalle={
-              contra && comp ? (
-                <Delta actual={k.pedidos} anterior={comp.pedidos} contra={contra} />
-              ) : (
-                `${fmtNumero(k.unidades)} unidades en ${fmtNumero(k.lineas)} líneas`
-              )
-            }
-          />
-          <TarjetaKpi
-            titulo="Clientes"
-            valor={fmtNumero(k.clientes)}
-            detalle={
-              // El orden de los casos importa: sin pedidos no se puede decir
-              // nada sobre repetición, y decir "nadie compró dos veces" cuando
-              // en realidad falta el dato sería inventar una conclusión.
-              k.pedidos === 0
-                ? `${fmtNumero(k.lineas)} líneas sin pedido asociado`
-                : k.pedidos > k.clientes
-                  ? `${fmtNumero(k.pedidos - k.clientes)} ${k.pedidos - k.clientes === 1 ? "pedido repetido" : "pedidos repetidos"} · ${(k.pedidos / k.clientes).toFixed(2)} por cliente`
-                  : "Uno por pedido: nadie compró dos veces en el recorte"
-            }
-          />
-          <TarjetaKpi
-            titulo="Ticket promedio"
-            valor={fmtMoneda(k.ticketPromedio)}
-            detalle={
-              contra && comp && comp.pedidos > 0 ? (
-                <Delta
-                  actual={k.ticketPromedio ?? 0}
-                  anterior={comp.ventaCiva / comp.pedidos}
-                  contra={contra}
-                />
-              ) : (
-                `${fmtMoneda(k.costo)} de costo de mercadería`
-              )
-            }
-          />
-          {/* El envío que absorbe LA TIENDA, no el que paga el comprador. Son dos
+            <TarjetaKpi
+              titulo="Pedidos"
+              valor={fmtNumero(k.pedidos)}
+              detalle={
+                contra && comp ? (
+                  <Delta
+                    actual={k.pedidos}
+                    anterior={comp.pedidos}
+                    contra={contra}
+                  />
+                ) : (
+                  `${fmtNumero(k.unidades)} unidades en ${fmtNumero(k.lineas)} líneas`
+                )
+              }
+            />
+            <TarjetaKpi
+              titulo="Clientes"
+              valor={fmtNumero(k.clientes)}
+              detalle={
+                // El orden de los casos importa: sin pedidos no se puede decir
+                // nada sobre repetición, y decir "nadie compró dos veces" cuando
+                // en realidad falta el dato sería inventar una conclusión.
+                k.pedidos === 0
+                  ? `${fmtNumero(k.lineas)} líneas sin pedido asociado`
+                  : k.pedidos > k.clientes
+                    ? `${fmtNumero(k.pedidos - k.clientes)} ${k.pedidos - k.clientes === 1 ? "pedido repetido" : "pedidos repetidos"} · ${(k.pedidos / k.clientes).toFixed(2)} por cliente`
+                    : "Uno por pedido: nadie compró dos veces en el recorte"
+              }
+            />
+            <TarjetaKpi
+              titulo="Ticket promedio"
+              valor={fmtMoneda(k.ticketPromedio)}
+              detalle={
+                contra && comp && comp.pedidos > 0 ? (
+                  <Delta
+                    actual={k.ticketPromedio ?? 0}
+                    anterior={comp.ventaCiva / comp.pedidos}
+                    contra={contra}
+                  />
+                ) : (
+                  `${fmtMoneda(k.costo)} de costo de mercadería`
+                )
+              }
+            />
+            {/* El envío que absorbe LA TIENDA, no el que paga el comprador. Son dos
               campos distintos en Tienda Nube y solo este es un costo. */}
-          <TarjetaKpi
-            titulo="Envío a cargo nuestro"
-            valor={fmtMoneda(k.envio)}
-            detalle={
-              k.envio === 0
-                ? "Sin envíos con costo en este recorte"
-                : `${fmtPct(k.envio / k.ventaCiva)} de la venta c/IVA`
-            }
-          />
-        </div>
+            <TarjetaKpi
+              titulo="Envío a cargo nuestro"
+              valor={fmtMoneda(k.envio)}
+              detalle={
+                k.envio === 0
+                  ? "Sin envíos con costo en este recorte"
+                  : `${fmtPct(k.envio / k.ventaCiva)} de la venta c/IVA`
+              }
+            />
+          </div>
+        </ConAlarmaMargen>
       )}
 
       {data && (
-        <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
+        <div
+          className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
+        >
           {/* El panel de pedidos va PRIMERO, antes que cualquier ranking: en un
               canal de treinta pedidos la venta individual es la unidad de
               análisis, no un detalle al que se baja después. */}
@@ -658,14 +704,19 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
               clave={(p, i) => `${p.nroOrden ?? "s"}-${i}`}
               onClickFila={(p) => p.cliente && alternarEn("cliente")(p.cliente)}
               activa={(p) =>
-                filtros.cliente?.length ? filtros.cliente.includes(p.cliente ?? "") : false
+                filtros.cliente?.length
+                  ? filtros.cliente.includes(p.cliente ?? "")
+                  : false
               }
               vacio="Ningún pedido pagado en el recorte elegido."
             />
           </Panel>
 
           {data.rango.dias > 1 && (
-            <Panel titulo="Venta y rentabilidad por día" nota="Venta c/IVA contra rentabilidad bruta">
+            <Panel
+              titulo="Venta y rentabilidad por día"
+              nota="Venta c/IVA contra rentabilidad bruta"
+            >
               <VentaRentabilidad datos={data.porDia} />
             </Panel>
           )}
@@ -681,7 +732,9 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
                 clave={(c) => c.cliente}
                 onClickFila={(c) => alternarEn("cliente")(c.cliente)}
                 activa={(c) =>
-                  filtros.cliente?.length ? filtros.cliente.includes(c.cliente) : false
+                  filtros.cliente?.length
+                    ? filtros.cliente.includes(c.cliente)
+                    : false
                 }
                 vacio="Sin ventas en el recorte elegido."
               />
@@ -696,22 +749,35 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
                 columnas={columnasTop(data.topRentabilidad)}
                 clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
                 onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
-                activa={(a) => (filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false)}
+                activa={(a) =>
+                  filtros.sku?.length
+                    ? filtros.sku.includes(a.sku ?? "")
+                    : false
+                }
                 vacio="Sin ventas en el recorte elegido."
               />
             </Panel>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
-            <Panel titulo="Venta por proveedor" nota="Top 12 · click para filtrar">
+            <Panel
+              titulo="Venta por proveedor"
+              nota="Top 12 · click para filtrar"
+            >
               <TortaProveedores
-                datos={data.porProveedor.map((p) => ({ label: p.label, total: p.venta }))}
+                datos={data.porProveedor.map((p) => ({
+                  label: p.label,
+                  total: p.venta,
+                }))}
                 totalGeneral={data.ventaTotalProveedores}
                 seleccionados={filtros.proveedor}
                 onSeleccionar={alternarEn("proveedor")}
               />
             </Panel>
-            <Panel titulo="Rentabilidad por proveedor" nota="Top 12 por venta · click para filtrar">
+            <Panel
+              titulo="Rentabilidad por proveedor"
+              nota="Top 12 por venta · click para filtrar"
+            >
               <TablaRanking
                 filas={data.porProveedor}
                 titulo="Proveedor"
@@ -730,7 +796,9 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
               columnas={columnasArticulos(data.articulos)}
               clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
               onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
-              activa={(a) => (filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false)}
+              activa={(a) =>
+                filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false
+              }
               vacio="Sin ventas en el recorte elegido."
             />
           </Panel>
@@ -739,15 +807,16 @@ export default function DashboardTiendaNubePage({ diaInicial }: { diaInicial: st
               código: un margen que se lee sin esta aclaración es un margen
               equivocado, y quien lo mire no tiene por qué saberlo. */}
           <p className="text-muted mt-3 text-[11px] leading-relaxed">
-            Rentabilidad bruta = venta s/IVA − costo (ya con descuento de proveedor) − envío a
-            cargo nuestro. Rentabilidad neta = bruta − {fmtPct(CARGA_IMPOSITIVA)} de impuestos
-            sobre la venta s/IVA.{" "}
+            Rentabilidad bruta = venta s/IVA − costo (ya con descuento de
+            proveedor) − envío a cargo nuestro. Rentabilidad neta = bruta −{" "}
+            {fmtPct(CARGA_IMPOSITIVA)} de impuestos sobre la venta s/IVA.{" "}
             <strong>
-              No se descuenta la comisión de la pasarela de pago: Tienda Nube no la informa en
-              ningún campo de su API
+              No se descuenta la comisión de la pasarela de pago: Tienda Nube no
+              la informa en ningún campo de su API
             </strong>
-            , así que el margen de este canal está algo sobreestimado. En Mercado Libre sí se
-            descuenta, y por eso los dos no son estrictamente comparables.
+            , así que el margen de este canal está algo sobreestimado. En
+            Mercado Libre sí se descuenta, y por eso los dos no son
+            estrictamente comparables.
           </p>
         </div>
       )}

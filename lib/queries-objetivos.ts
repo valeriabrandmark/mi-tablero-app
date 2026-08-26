@@ -119,6 +119,11 @@ function cteAvance(w: Where): string {
 
 // --- Totales por métrica -----------------------------------------------------
 
+/**
+ * OJO al comentar el SQL de acá abajo: va adentro de un template literal, así
+ * que un backtick corta la cadena y rompe el archivo entero. Sin comillas
+ * invertidas, ni siquiera para nombrar una columna.
+ */
 function getResumen(f: FiltrosObjetivos): Promise<ResumenMetrica[]> {
   const w = whereObjetivos(f);
   return query<ResumenMetrica>(
@@ -126,8 +131,19 @@ function getResumen(f: FiltrosObjetivos): Promise<ResumenMetrica[]> {
      select metrica,
             coalesce(sum(objetivo), 0)::float8 as objetivo,
             coalesce(sum(vendido), 0)::float8 as vendido,
+            -- EL EXCEDENTE DE UN OBJETIVO NO TAPA EL FALTANTE DE OTRO.
+            --
+            -- Sumar el vendido a secas deja que pasarse en un grupo compense a
+            -- otro en cero, y el avance total miente. SILVIO en 2026-08 daba
+            -- 115,3 % con 2 de 5 objetivos cumplidos: se pasó tanto en AVENO
+            -- que tapaba los tres que no arrancaron. Con el tope da 65,6 %.
+            --
+            -- Adentro de un grupo el excedente SÍ cuenta, y tiene que contar:
+            -- un grupo puede ser un mix de varios SKUs y la meta está puesta
+            -- sobre el total del grupo, no sobre cada SKU.
+            coalesce(sum(least(vendido, objetivo)), 0)::float8 as "vendidoComputable",
             case when sum(objetivo) = 0 then null
-                 else sum(vendido)::float8 / sum(objetivo)
+                 else sum(least(vendido, objetivo))::float8 / sum(objetivo)
             end::float8 as "avancePct",
             count(*) filter (where vendido >= objetivo)::float8 as cumplidos,
             count(*)::float8 as pares

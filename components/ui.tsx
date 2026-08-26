@@ -1,6 +1,31 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { createContext, useContext, type ReactNode } from "react";
 import { fmtPct } from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
+
+/**
+ * Alarma de margen negativo.
+ *
+ * Cuando el recorte que se está mirando pierde plata, TODAS las tarjetas del
+ * tablero se ponen en rojo, no solo la del margen. Es a propósito: la señal
+ * tiene que verse de un vistazo, sin buscar cuál de las diez tarjetas es la que
+ * está mal. Un cliente filtrado con margen negativo prende la fila entera.
+ *
+ * Va por contexto y no por prop para no tocar los ~70 usos de `TarjetaKpi`:
+ * cada tablero envuelve sus tarjetas y adentro no se cambia nada.
+ */
+const AlarmaMargen = createContext(false);
+
+export function ConAlarmaMargen({
+  activa,
+  children,
+}: {
+  activa: boolean;
+  children: ReactNode;
+}) {
+  return <AlarmaMargen.Provider value={activa}>{children}</AlarmaMargen.Provider>;
+}
 
 export function Panel({
   titulo,
@@ -36,12 +61,22 @@ export function TarjetaKpi({
   detalle?: ReactNode;
   acento?: string;
 }) {
+  // Con el margen en negativo la alarma pisa el acento propio de la tarjeta:
+  // si no, quedaba una fila mitad roja y mitad de colores, que es justo lo que
+  // hace que no se note.
+  const alarma = useContext(AlarmaMargen);
+  const color = alarma ? TEMA.negativo : acento;
+
   return (
-    <div className="border-line bg-panel rounded-xl border p-4">
+    <div
+      className={`bg-panel rounded-xl border p-4 ${
+        alarma ? "border-rose-500/40" : "border-line"
+      }`}
+    >
       <p className="text-muted text-xs leading-tight">{titulo}</p>
       <p
         className="mt-2 text-xl font-semibold tabular-nums tracking-tight"
-        style={acento ? { color: acento } : undefined}
+        style={color ? { color } : undefined}
       >
         {valor}
       </p>

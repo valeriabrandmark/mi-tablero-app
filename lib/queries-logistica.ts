@@ -215,7 +215,13 @@ async function getComprobantes(f: FiltrosLogistica): Promise<FilaComprobante[]> 
             coalesce(sum(flete_prorrateado), 0)::float8 as flete,
             case when sum(precio_neto * cantidad) = 0 then null
                  else sum(flete_prorrateado) / sum(precio_neto * cantidad)
-            end::float8 as "pctFlete"
+            end::float8 as "pctFlete",
+            -- Un comprobante puede mezclar: tiene varios SKUs y el flete se
+            -- resuelve por preparacion, asi que algunos renglones pueden tener
+            -- la factura del transportista cargada y otros no. Por eso van las
+            -- dos cuentas y no un booleano, que obligaria a elegir un lado.
+            count(*) filter (where tiene_flete_real) as "lineasReales",
+            count(*) as "lineasTotales"
      from lineas
      where comprobante is not null
      group by comprobante

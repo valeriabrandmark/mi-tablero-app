@@ -3,8 +3,19 @@
 import { useState } from "react";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
-import { promedioPonderado, sumar, Tabla, type Columna } from "@/components/Tabla";
-import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
+import {
+  promedioPonderado,
+  sumar,
+  Tabla,
+  type Columna,
+} from "@/components/Tabla";
+import {
+  Aviso,
+  ConAlarmaMargen,
+  Esqueleto,
+  Panel,
+  TarjetaKpi,
+} from "@/components/ui";
 import {
   BANDAS,
   BANDAS_EXPERIMENTO,
@@ -15,7 +26,13 @@ import {
   mejorBanda,
 } from "@/lib/elasticidad";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
-import { fmtFechaCorta, fmtMoneda, fmtMonedaCorta, fmtNumero, fmtPct } from "@/lib/format";
+import {
+  fmtFechaCorta,
+  fmtMoneda,
+  fmtMonedaCorta,
+  fmtNumero,
+  fmtPct,
+} from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
 import { hoyArgentina, sumarDias } from "@/lib/rangos";
 import { useDatosTablero } from "@/lib/useDatosTablero";
@@ -65,14 +82,17 @@ const ATAJOS = [
 function ganadoraPorArticulo(votos: Record<string, number>): string | null {
   const conVotos = BANDAS_EXPERIMENTO.filter((b) => (votos[b.clave] ?? 0) > 0);
   if (conVotos.length === 0) return null;
-  return conVotos.reduce((a, b) => ((votos[b.clave] ?? 0) > (votos[a.clave] ?? 0) ? b : a))
-    .clave;
+  return conVotos.reduce((a, b) =>
+    (votos[b.clave] ?? 0) > (votos[a.clave] ?? 0) ? b : a,
+  ).clave;
 }
 
 /** La banda que más margen sumó. Se muestra al lado, con su advertencia. */
 function ganadoraPorMargen(bandas: ResumenBanda[]): ResumenBanda | null {
   const porBanda = Object.fromEntries(
-    bandas.filter((b) => b.delExperimento && b.unidades > 0).map((b) => [b.banda, b.margen]),
+    bandas
+      .filter((b) => b.delExperimento && b.unidades > 0)
+      .map((b) => [b.banda, b.margen]),
   );
   const clave = mejorBanda(porBanda);
   return clave ? (bandas.find((b) => b.banda === clave) ?? null) : null;
@@ -85,7 +105,9 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
       celda: (b) => (
         <span style={{ color: COLOR_BANDA[b.banda] }}>
           {labelBanda(b.banda)}
-          {!b.delExperimento && <span className="text-muted text-[10px]"> · fuera del rango</span>}
+          {!b.delExperimento && (
+            <span className="text-muted text-[10px]"> · fuera del rango</span>
+          )}
         </span>
       ),
       orden: (b) => BANDAS.findIndex((x) => x.clave === b.banda),
@@ -100,7 +122,9 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
     {
       titulo: "Margen $",
       celda: (b) => (
-        <strong style={{ color: COLOR_BANDA[b.banda] }}>{fmtMoneda(b.margen)}</strong>
+        <strong style={{ color: COLOR_BANDA[b.banda] }}>
+          {fmtMoneda(b.margen)}
+        </strong>
       ),
       numerica: true,
       orden: (b) => b.margen,
@@ -110,7 +134,8 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
       // El desempate: entre dos bandas que dejan lo mismo conviene la que mueve
       // menos mercadería para lograrlo.
       titulo: "Margen por unidad",
-      celda: (b) => (b.margenPorUnidad == null ? "—" : fmtMoneda(b.margenPorUnidad)),
+      celda: (b) =>
+        b.margenPorUnidad == null ? "—" : fmtMoneda(b.margenPorUnidad),
       numerica: true,
       orden: (b) => b.margenPorUnidad,
     },
@@ -130,7 +155,13 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
       // PONDERADO, que es la única forma correcta de totalizar un porcentaje:
       // margen total sobre facturación total. El promedio simple dejaría que
       // una banda de tres ventas pese lo mismo que una de tres mil.
-      total: fmtPct(promedioPonderado(bandas, (b) => b.margen, (b) => b.facturacion)),
+      total: fmtPct(
+        promedioPonderado(
+          bandas,
+          (b) => b.margen,
+          (b) => b.facturacion,
+        ),
+      ),
     },
     {
       titulo: "Artículos",
@@ -154,7 +185,10 @@ function columnasArticulo(
     {
       titulo: "Producto",
       celda: (f) => (
-        <span className="block max-w-[240px] truncate" title={f.producto ?? undefined}>
+        <span
+          className="block max-w-[240px] truncate"
+          title={f.producto ?? undefined}
+        >
           {f.producto ?? "—"}
         </span>
       ),
@@ -179,7 +213,13 @@ function columnasArticulo(
       celda: (f) => fmtPct(f.facturacion > 0 ? f.margen / f.facturacion : null),
       numerica: true,
       orden: (f) => (f.facturacion > 0 ? f.margen / f.facturacion : null),
-      total: fmtPct(promedioPonderado(filas, (f) => f.margen, (f) => f.facturacion)),
+      total: fmtPct(
+        promedioPonderado(
+          filas,
+          (f) => f.margen,
+          (f) => f.facturacion,
+        ),
+      ),
     },
     // TRES COLUMNAS POR BANDA: unidades, margen y %margen. Es ancho a
     // propósito — la tabla scrollea sola — porque la decisión no se puede tomar
@@ -188,7 +228,9 @@ function columnasArticulo(
     ...BANDAS_EXPERIMENTO.flatMap((banda): Columna<FilaElasticidad>[] => {
       const gana = (f: FilaElasticidad) => f.mejor === banda.clave;
       const resalte = (f: FilaElasticidad) =>
-        gana(f) ? { color: COLOR_BANDA[banda.clave], fontWeight: 600 } : undefined;
+        gana(f)
+          ? { color: COLOR_BANDA[banda.clave], fontWeight: 600 }
+          : undefined;
       return [
         {
           titulo: `${banda.label} · uds`,
@@ -196,11 +238,15 @@ function columnasArticulo(
             f.unidadesPorBanda[banda.clave] == null ? (
               <span className="text-muted">—</span>
             ) : (
-              <span style={resalte(f)}>{fmtNumero(f.unidadesPorBanda[banda.clave])}</span>
+              <span style={resalte(f)}>
+                {fmtNumero(f.unidadesPorBanda[banda.clave])}
+              </span>
             ),
           numerica: true,
           orden: (f) => f.unidadesPorBanda[banda.clave] ?? null,
-          total: fmtNumero(sumar(filas, (f) => f.unidadesPorBanda[banda.clave])),
+          total: fmtNumero(
+            sumar(filas, (f) => f.unidadesPorBanda[banda.clave]),
+          ),
         },
         {
           titulo: `${banda.label} · margen`,
@@ -208,7 +254,9 @@ function columnasArticulo(
             f.margenPorBanda[banda.clave] == null ? (
               <span className="text-muted">—</span>
             ) : (
-              <span style={resalte(f)}>{fmtMonedaCorta(f.margenPorBanda[banda.clave])}</span>
+              <span style={resalte(f)}>
+                {fmtMonedaCorta(f.margenPorBanda[banda.clave])}
+              </span>
             ),
           numerica: true,
           orden: (f) => f.margenPorBanda[banda.clave] ?? null,
@@ -217,7 +265,9 @@ function columnasArticulo(
         {
           titulo: `${banda.label} · %`,
           celda: (f) => (
-            <span style={resalte(f)}>{fmtPct(f.margenPctPorBanda[banda.clave])}</span>
+            <span style={resalte(f)}>
+              {fmtPct(f.margenPctPorBanda[banda.clave])}
+            </span>
           ),
           numerica: true,
           orden: (f) => f.margenPctPorBanda[banda.clave] ?? null,
@@ -237,7 +287,9 @@ function columnasArticulo(
         f.mejor == null ? (
           <span className="text-muted">sin comparar</span>
         ) : (
-          <span style={{ color: COLOR_BANDA[f.mejor] }}>{labelBanda(f.mejor)}</span>
+          <span style={{ color: COLOR_BANDA[f.mejor] }}>
+            {labelBanda(f.mejor)}
+          </span>
         ),
       orden: (f) => f.mejor,
       total: (
@@ -257,7 +309,13 @@ function columnasArticulo(
       // significa "no lo miramos". Con el denominador a la vista, la diferencia
       // se ve sin tener que acordarse.
       celda: (f) => (
-        <span style={f.diasSinStock > 0 ? { color: TEMA.negativo } : { color: TEMA.muted }}>
+        <span
+          style={
+            f.diasSinStock > 0
+              ? { color: TEMA.negativo }
+              : { color: TEMA.muted }
+          }
+        >
           {f.diasSinStock === 0 ? "—" : fmtNumero(f.diasSinStock)}
         </span>
       ),
@@ -309,22 +367,26 @@ function columnasArticulo(
 
 export default function DashboardElasticidadPage() {
   const hoy = hoyArgentina();
-  const inicial: FiltrosElasticidad = { desde: sumarDias(hoy, -30), hasta: hoy };
+  const inicial: FiltrosElasticidad = {
+    desde: sumarDias(hoy, -30),
+    hasta: hoy,
+  };
   const [filtros, setFiltros] = useState<FiltrosElasticidad>(inicial);
 
-  const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
-    "/api/elasticidad",
-    {
-      desde: filtros.desde,
-      hasta: filtros.hasta,
-      proveedor: filtros.proveedor,
-      marca: filtros.marca,
-      sku: filtros.sku,
-      banda: filtros.banda,
-      soloConfiables: filtros.soloConfiables ? "1" : undefined,
-    },
-    { conOpciones: "1" },
-  );
+  const { data, cargando, error, recargar, empezarCarga } =
+    useDatosTablero<Respuesta>(
+      "/api/elasticidad",
+      {
+        desde: filtros.desde,
+        hasta: filtros.hasta,
+        proveedor: filtros.proveedor,
+        marca: filtros.marca,
+        sku: filtros.sku,
+        banda: filtros.banda,
+        soloConfiables: filtros.soloConfiables ? "1" : undefined,
+      },
+      { conOpciones: "1" },
+    );
 
   const [buscado, setBuscado] = useState("");
 
@@ -343,7 +405,8 @@ export default function DashboardElasticidadPage() {
    */
   const alternarBanda = (label: string) => {
     const banda = BANDAS.find((b) => b.label === label);
-    if (banda) cambiar({ ...filtros, banda: alternarValor(filtros.banda, banda.clave) });
+    if (banda)
+      cambiar({ ...filtros, banda: alternarValor(filtros.banda, banda.clave) });
   };
 
   /** Los labels de las bandas elegidas, que es lo que el gráfico resalta. */
@@ -352,9 +415,17 @@ export default function DashboardElasticidadPage() {
   // Mover una punta más allá de la otra deja un rango vacío y la página se ve
   // rota sin motivo. Se arrastra la otra punta en vez de permitirlo.
   const cambiarDesde = (v: string) =>
-    cambiar({ ...filtros, desde: v, hasta: filtros.hasta < v ? v : filtros.hasta });
+    cambiar({
+      ...filtros,
+      desde: v,
+      hasta: filtros.hasta < v ? v : filtros.hasta,
+    });
   const cambiarHasta = (v: string) =>
-    cambiar({ ...filtros, hasta: v, desde: filtros.desde > v ? v : filtros.desde });
+    cambiar({
+      ...filtros,
+      hasta: v,
+      desde: filtros.desde > v ? v : filtros.desde,
+    });
 
   const buscar = () => {
     const sku = buscado.trim().toUpperCase();
@@ -382,7 +453,9 @@ export default function DashboardElasticidadPage() {
           {/* h2 y no h1: el h1 de la página es el logo, que vive en el layout. */}
           <h2 className="text-lg font-semibold tracking-tight">
             Elasticidad de precios{" "}
-            <span className="text-muted text-sm font-normal">· margen contra volumen</span>
+            <span className="text-muted text-sm font-normal">
+              · margen contra volumen
+            </span>
           </h2>
           <p className="text-muted mt-1 text-xs">
             {data ? `${data.desde} a ${data.hasta}` : "Cargando datos en vivo…"}
@@ -471,7 +544,9 @@ export default function DashboardElasticidadPage() {
           />
           <button
             type="button"
-            onClick={() => cambiar({ ...filtros, soloConfiables: !filtros.soloConfiables })}
+            onClick={() =>
+              cambiar({ ...filtros, soloConfiables: !filtros.soloConfiables })
+            }
             aria-pressed={Boolean(filtros.soloConfiables)}
             className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
               filtros.soloConfiables
@@ -481,14 +556,17 @@ export default function DashboardElasticidadPage() {
           >
             Solo los que se pueden leer solos
           </button>
-          <BotonLimpiar onClick={() => cambiar(inicial)} deshabilitado={sinCambios} />
+          <BotonLimpiar
+            onClick={() => cambiar(inicial)}
+            deshabilitado={sinCambios}
+          />
         </div>
 
         <span className="text-muted text-[11px] leading-tight">
-          La banda sale de <strong>cada venta</strong>, no de una lista: con su precio y su
-          costo se calcula el %margen con el que se vendió —
-          <em>(precio − IVA − costo − comisión − envío) ÷ precio</em>— y con eso cae en su
-          banda. El mismo artículo puede aparecer en varias.
+          La banda sale de <strong>cada venta</strong>, no de una lista: con su
+          precio y su costo se calcula el %margen con el que se vendió —
+          <em>(precio − IVA − costo − comisión − envío) ÷ precio</em>— y con eso
+          cae en su banda. El mismo artículo puede aparecer en varias.
         </span>
       </div>
 
@@ -523,7 +601,9 @@ export default function DashboardElasticidadPage() {
       {error && (
         <Aviso>
           <p className="font-medium">No se pudieron leer los datos.</p>
-          <p className="mt-1 font-mono text-xs break-words opacity-80">{error}</p>
+          <p className="mt-1 font-mono text-xs break-words opacity-80">
+            {error}
+          </p>
         </Aviso>
       )}
 
@@ -537,10 +617,13 @@ export default function DashboardElasticidadPage() {
 
       {!error && data && !data.hayDatos && (
         <Aviso tono="info">
-          <p className="font-medium">No hay ventas para clasificar en este período.</p>
+          <p className="font-medium">
+            No hay ventas para clasificar en este período.
+          </p>
           <p className="mt-1">
-            La banda de cada venta sale de su propio margen, así que sin ventas no hay nada
-            que comparar. Probá con un rango más largo o sacando los filtros.
+            La banda de cada venta sale de su propio margen, así que sin ventas
+            no hay nada que comparar. Probá con un rango más largo o sacando los
+            filtros.
           </p>
           <ul className="mt-2 space-y-1">
             {PASOS_PREVIOS.map((p) => (
@@ -553,40 +636,48 @@ export default function DashboardElasticidadPage() {
       )}
 
       {!error && data?.hayDatos && k && (
-        <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {/* EL TITULAR ES EL VOTO POR ARTÍCULO, no el margen agregado. Ver
+        <div
+          className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
+        >
+          <ConAlarmaMargen activa={k.margen < 0}>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {/* EL TITULAR ES EL VOTO POR ARTÍCULO, no el margen agregado. Ver
                 `ganadoraPorArticulo` para por qué el agregado engaña. */}
-            <TarjetaKpi
-              titulo="Mejor banda, artículo por artículo"
-              valor={mejorPorArticulo ? labelBanda(mejorPorArticulo) : "—"}
-              detalle={
-                mejorPorArticulo
-                  ? `Ganó en ${fmtNumero(k.votosPorBanda[mejorPorArticulo] ?? 0)} de ${fmtNumero(k.comparables)} artículos comparables · ${fmtNumero(k.comparablesConVolumen)} con volumen propio`
-                  : "Hacen falta artículos que hayan vendido en dos bandas distintas"
-              }
-              acento={mejorPorArticulo ? COLOR_BANDA[mejorPorArticulo] : undefined}
-            />
-            <TarjetaKpi
-              titulo="Margen del período"
-              valor={fmtMoneda(k.margen)}
-              detalle={`${fmtPct(k.margenPct)} sobre ${fmtMoneda(k.facturacion)} · ${fmtNumero(k.unidades)} unidades`}
-            />
-            <TarjetaKpi
-              titulo="Dentro del rango 10-35 %"
-              valor={fmtPct(k.dentroDelRango)}
-              detalle="Las unidades que caen fuera se venden con márgenes que el experimento no está probando"
-              acento={
-                k.dentroDelRango != null && k.dentroDelRango < 0.6 ? PALETA[2] : undefined
-              }
-            />
-            <TarjetaKpi
-              titulo="Quebraron stock"
-              valor={`${fmtNumero(k.skusQuebrados)} artículos`}
-              detalle={`Sobre ${fmtNumero(k.diasMirados)} días medidos · su resultado por banda está falseado`}
-              acento={k.skusQuebrados > 0 ? TEMA.negativo : undefined}
-            />
-          </div>
+              <TarjetaKpi
+                titulo="Mejor banda, artículo por artículo"
+                valor={mejorPorArticulo ? labelBanda(mejorPorArticulo) : "—"}
+                detalle={
+                  mejorPorArticulo
+                    ? `Ganó en ${fmtNumero(k.votosPorBanda[mejorPorArticulo] ?? 0)} de ${fmtNumero(k.comparables)} artículos comparables · ${fmtNumero(k.comparablesConVolumen)} con volumen propio`
+                    : "Hacen falta artículos que hayan vendido en dos bandas distintas"
+                }
+                acento={
+                  mejorPorArticulo ? COLOR_BANDA[mejorPorArticulo] : undefined
+                }
+              />
+              <TarjetaKpi
+                titulo="Margen del período"
+                valor={fmtMoneda(k.margen)}
+                detalle={`${fmtPct(k.margenPct)} sobre ${fmtMoneda(k.facturacion)} · ${fmtNumero(k.unidades)} unidades`}
+              />
+              <TarjetaKpi
+                titulo="Dentro del rango 10-35 %"
+                valor={fmtPct(k.dentroDelRango)}
+                detalle="Las unidades que caen fuera se venden con márgenes que el experimento no está probando"
+                acento={
+                  k.dentroDelRango != null && k.dentroDelRango < 0.6
+                    ? PALETA[2]
+                    : undefined
+                }
+              />
+              <TarjetaKpi
+                titulo="Quebraron stock"
+                valor={`${fmtNumero(k.skusQuebrados)} artículos`}
+                detalle={`Sobre ${fmtNumero(k.diasMirados)} días medidos · su resultado por banda está falseado`}
+                acento={k.skusQuebrados > 0 ? TEMA.negativo : undefined}
+              />
+            </div>
+          </ConAlarmaMargen>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Panel
@@ -612,7 +703,10 @@ export default function DashboardElasticidadPage() {
               nota="Total del período · ojo, mezcla artículos distintos"
             >
               <BarrasCategoria
-                datos={data.bandas.map((b) => ({ label: labelBanda(b.banda), valor: b.margen }))}
+                datos={data.bandas.map((b) => ({
+                  label: labelBanda(b.banda),
+                  valor: b.margen,
+                }))}
                 formato={fmtMonedaCorta}
                 horizontal={false}
                 colorUnico={PALETA[1]}
@@ -628,7 +722,10 @@ export default function DashboardElasticidadPage() {
               nota="Sube al bajar el margen · por eso sola no alcanza"
             >
               <BarrasCategoria
-                datos={data.bandas.map((b) => ({ label: labelBanda(b.banda), valor: b.unidades }))}
+                datos={data.bandas.map((b) => ({
+                  label: labelBanda(b.banda),
+                  valor: b.unidades,
+                }))}
                 formato={fmtNumero}
                 horizontal={false}
                 colorUnico={PALETA[0]}
@@ -701,9 +798,10 @@ export default function DashboardElasticidadPage() {
                 </div>
               </div>
               <p className="text-muted mt-3 text-[11px] leading-tight">
-                Un día cuenta como quebrado cuando <strong>ninguna</strong> de las
-                publicaciones del artículo se pudo comprar en todo el día. Los días en que el
-                pulso no corrió no se cuentan: no saber no es lo mismo que no tener stock.
+                Un día cuenta como quebrado cuando <strong>ninguna</strong> de
+                las publicaciones del artículo se pudo comprar en todo el día.
+                Los días en que el pulso no corrió no se cuentan: no saber no es
+                lo mismo que no tener stock.
               </p>
             </Panel>
           )}
@@ -711,29 +809,36 @@ export default function DashboardElasticidadPage() {
           <Aviso tono="info">
             <p className="font-medium">Cómo leer esto.</p>
             <p className="mt-1">
-              <strong>El total por banda mezcla artículos distintos.</strong> En el período
-              elegido la banda de {mejor ? labelBanda(mejor.banda) : "mayor margen"} suele
-              sumar más margen <em>y</em> más unidades que las de abajo — y eso no significa
-              que subir el precio venda más. Los artículos que sostienen un margen alto son
-              otros productos, con más demanda o menos competencia. Por eso el titular usa el
-              voto artículo por artículo, que compara al mismo producto vendido a dos
-              márgenes distintos.
+              <strong>El total por banda mezcla artículos distintos.</strong> En
+              el período elegido la banda de{" "}
+              {mejor ? labelBanda(mejor.banda) : "mayor margen"} suele sumar más
+              margen <em>y</em> más unidades que las de abajo — y eso no
+              significa que subir el precio venda más. Los artículos que
+              sostienen un margen alto son otros productos, con más demanda o
+              menos competencia. Por eso el titular usa el voto artículo por
+              artículo, que compara al mismo producto vendido a dos márgenes
+              distintos.
             </p>
             <p className="mt-1">
-              <strong>La banda gana por margen $</strong>, pero si otra queda dentro de{" "}
-              {fmtPct(EMPATE_TECNICO)} y tiene margen más alto, gana ésa: vender 50 unidades al
-              10 % y 20 al 30 % no es lo mismo aunque dejen igual — con la segunda el stock dura
-              más y se mueve menos mercadería.
+              <strong>La banda gana por margen $</strong>, pero si otra queda
+              dentro de {fmtPct(EMPATE_TECNICO)} y tiene margen más alto, gana
+              ésa: vender 50 unidades al 10 % y 20 al 30 % no es lo mismo aunque
+              dejen igual — con la segunda el stock dura más y se mueve menos
+              mercadería.
             </p>
             <p className="mt-1">
-              <strong>Descontá los quiebres antes de concluir.</strong> Un artículo que vendió
-              poco en una banda pero estuvo días sin stock no vendió poco por caro. La columna
-              &ldquo;Días sin stock&rdquo; y el panel de arriba están para eso.
+              <strong>Descontá los quiebres antes de concluir.</strong> Un
+              artículo que vendió poco en una banda pero estuvo días sin stock
+              no vendió poco por caro. La columna &ldquo;Días sin stock&rdquo; y
+              el panel de arriba están para eso.
             </p>
             <p className="mt-1">
-              <strong>Y mirá la columna &ldquo;Se puede leer solo&rdquo;.</strong> La mediana de
-              los artículos vende 0,58 unidades por semana; para ésos, la diferencia entre un
-              margen y otro es azar. El total de cada banda sí tiene miles de unidades atrás.
+              <strong>
+                Y mirá la columna &ldquo;Se puede leer solo&rdquo;.
+              </strong>{" "}
+              La mediana de los artículos vende 0,58 unidades por semana; para
+              ésos, la diferencia entre un margen y otro es azar. El total de
+              cada banda sí tiene miles de unidades atrás.
             </p>
           </Aviso>
         </div>

@@ -7,10 +7,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const filtros = desdeSearchParams(request.nextUrl.searchParams);
+  const sp = request.nextUrl.searchParams;
+  const filtros = desdeSearchParams(sp);
+  // Modo de cálculo, no filtro: por defecto va CON flete, que es como venía
+  // el tablero. Solo se apaga cuando el switch lo pide explícitamente.
+  const conFlete = sp.get("conFlete") !== "0";
 
   try {
-    const data = await getDashboardVentasMayoristas(filtros);
+    const data = await getDashboardVentasMayoristas(filtros, conFlete);
     return NextResponse.json(data);
   } catch (error) {
     const mensaje = error instanceof Error ? error.message : "Error desconocido";

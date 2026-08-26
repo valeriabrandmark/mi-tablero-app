@@ -11,7 +11,14 @@ import {
   Tabla,
   type Columna,
 } from "@/components/Tabla";
-import { Aviso, Delta, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
+import {
+  Aviso,
+  ConAlarmaMargen,
+  Delta,
+  Esqueleto,
+  Panel,
+  TarjetaKpi,
+} from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { CARGA_IMPOSITIVA, TOPE_ARTICULOS } from "@/lib/meli";
@@ -334,7 +341,9 @@ function TablaRanking({
   const columnas: Columna<RankingMeli>[] = [
     {
       titulo,
-      celda: (r) => <span className="block max-w-[220px] truncate">{r.label}</span>,
+      celda: (r) => (
+        <span className="block max-w-[220px] truncate">{r.label}</span>
+      ),
       orden: (r) => r.label,
     },
     {
@@ -365,7 +374,9 @@ function TablaRanking({
     {
       titulo: "Margen",
       celda: (r) => (
-        <span style={(r.margenPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}>
+        <span
+          style={(r.margenPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}
+        >
           {fmtPct(r.margenPct)}
         </span>
       ),
@@ -387,22 +398,29 @@ function TablaRanking({
       columnas={columnas}
       clave={(r) => r.label}
       onClickFila={(r) => onSeleccionar(r.label)}
-      activa={(r) => (seleccionados?.length ? seleccionados.includes(r.label) : false)}
+      activa={(r) =>
+        seleccionados?.length ? seleccionados.includes(r.label) : false
+      }
     />
   );
 }
 
-export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }) {
+export default function DashboardMeliPage({
+  diaInicial,
+}: {
+  diaInicial: string;
+}) {
   // Abre en un solo día, como el reporte de Data Studio. `diaInicial` lo resuelve
   // el servidor: es hoy, o el último día con ventas si hoy todavía no cargó.
   const inicial: FiltrosMeli = { desde: diaInicial, hasta: diaInicial };
   const [filtros, setFiltros] = useState<FiltrosMeli>(inicial);
 
-  const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
-    "/api/meli",
-    filtros as unknown as Record<string, string[] | undefined>,
-    { conOpciones: "1" },
-  );
+  const { data, cargando, error, recargar, empezarCarga } =
+    useDatosTablero<Respuesta>(
+      "/api/meli",
+      filtros as unknown as Record<string, string[] | undefined>,
+      { conOpciones: "1" },
+    );
 
   /**
    * Qué se cuenta como "venta". No es un filtro: los dos números vienen
@@ -416,8 +434,9 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
     setFiltros(f);
   };
 
-  const alternarEn = (clave: "proveedor" | "marca" | "sku" | "hora") => (valor: string) =>
-    cambiar({ ...filtros, [clave]: alternarValor(filtros[clave], valor) });
+  const alternarEn =
+    (clave: "proveedor" | "marca" | "sku" | "hora") => (valor: string) =>
+      cambiar({ ...filtros, [clave]: alternarValor(filtros[clave], valor) });
 
   const k = data?.kpis;
   const comp = data?.comparacion ?? null;
@@ -541,7 +560,9 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
       {error && (
         <Aviso>
           <p className="font-medium">No se pudieron leer los datos.</p>
-          <p className="mt-1 font-mono text-xs break-words opacity-80">{error}</p>
+          <p className="mt-1 font-mono text-xs break-words opacity-80">
+            {error}
+          </p>
         </Aviso>
       )}
 
@@ -552,164 +573,168 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
           ))}
         </div>
       ) : (
-        <div
-          className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 ${cargando ? "opacity-50" : ""}`}
-        >
-          <TarjetaKpi
-            titulo={conCanceladas ? "Transaccionado c/IVA" : "Venta c/IVA"}
-            valor={fmtMoneda(ventaMostrada)}
-            // Con canceladas NO se compara contra el período anterior. El
-            // período anterior se mide solo sobre ventas efectivas, así que un
-            // "−12 % vs ayer" estaría restando dos cosas distintas. En su lugar
-            // se muestra de qué se compone el número.
-            detalle={
-              conCanceladas ? (
-                `${fmtMoneda(k.ventaCiva)} vendido + ${fmtMoneda(extra.monto)} cancelado`
-              ) : contra && comp ? (
-                <Delta
-                  actual={k.ventaCiva}
-                  anterior={comp.ventaCiva}
-                  contra={contra}
-                />
-              ) : (
-                `${fmtMoneda(k.ventaSiva)} sin IVA`
-              )
-            }
-          />
-          <TarjetaKpi
-            titulo="Rentabilidad bruta"
-            valor={fmtMoneda(k.rentabilidad)}
-            detalle={
-              conCanceladas ? (
-                "Solo de las órdenes pagadas"
-              ) : contra && comp ? (
-                <Delta
-                  actual={k.rentabilidad}
-                  anterior={comp.rentabilidad}
-                  contra={contra}
-                />
-              ) : (
-                "Venta s/IVA − costo − comisión − envío"
-              )
-            }
-            acento={k.rentabilidad < 0 ? TEMA.negativo : PALETA[1]}
-          />
-          <TarjetaKpi
-            titulo="Margen bruto"
-            valor={fmtPct(k.margenPct)}
-            detalle={
-              conCanceladas
-                ? "Sobre venta efectiva: lo cancelado no deja margen"
-                : contra &&
-                    comp &&
-                    comp.margenPct != null &&
-                    k.margenPct != null
-                  ? `${comp.margenPct < k.margenPct ? "▲" : "▼"} era ${fmtPct(comp.margenPct)} ${contra}`
-                  : "Rentabilidad sobre venta c/IVA"
-            }
-            acento={(k.margenPct ?? 0) < 0 ? TEMA.negativo : undefined}
-          />
-          {/* La neta va al lado de la bruta a propósito: la diferencia entre las
+        <ConAlarmaMargen activa={k.rentabilidadNeta < 0}>
+          <div
+            className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 ${cargando ? "opacity-50" : ""}`}
+          >
+            <TarjetaKpi
+              titulo={conCanceladas ? "Transaccionado c/IVA" : "Venta c/IVA"}
+              valor={fmtMoneda(ventaMostrada)}
+              // Con canceladas NO se compara contra el período anterior. El
+              // período anterior se mide solo sobre ventas efectivas, así que un
+              // "−12 % vs ayer" estaría restando dos cosas distintas. En su lugar
+              // se muestra de qué se compone el número.
+              detalle={
+                conCanceladas ? (
+                  `${fmtMoneda(k.ventaCiva)} vendido + ${fmtMoneda(extra.monto)} cancelado`
+                ) : contra && comp ? (
+                  <Delta
+                    actual={k.ventaCiva}
+                    anterior={comp.ventaCiva}
+                    contra={contra}
+                  />
+                ) : (
+                  `${fmtMoneda(k.ventaSiva)} sin IVA`
+                )
+              }
+            />
+            <TarjetaKpi
+              titulo="Rentabilidad bruta"
+              valor={fmtMoneda(k.rentabilidad)}
+              detalle={
+                conCanceladas ? (
+                  "Solo de las órdenes pagadas"
+                ) : contra && comp ? (
+                  <Delta
+                    actual={k.rentabilidad}
+                    anterior={comp.rentabilidad}
+                    contra={contra}
+                  />
+                ) : (
+                  "Venta s/IVA − costo − comisión − envío"
+                )
+              }
+              acento={k.rentabilidad < 0 ? TEMA.negativo : PALETA[1]}
+            />
+            <TarjetaKpi
+              titulo="Margen bruto"
+              valor={fmtPct(k.margenPct)}
+              detalle={
+                conCanceladas
+                  ? "Sobre venta efectiva: lo cancelado no deja margen"
+                  : contra &&
+                      comp &&
+                      comp.margenPct != null &&
+                      k.margenPct != null
+                    ? `${comp.margenPct < k.margenPct ? "▲" : "▼"} era ${fmtPct(comp.margenPct)} ${contra}`
+                    : "Rentabilidad sobre venta c/IVA"
+              }
+              acento={(k.margenPct ?? 0) < 0 ? TEMA.negativo : undefined}
+            />
+            {/* La neta va al lado de la bruta a propósito: la diferencia entre las
               dos es el 7,4 % de impuestos, y verlas separadas es lo que hace
               que una venta "con margen" se lea como lo que es. */}
-          <TarjetaKpi
-            titulo="Rentabilidad neta"
-            valor={fmtMoneda(k.rentabilidadNeta)}
-            detalle={`${fmtPct(k.margenNetoPct)} sobre venta c/IVA · ${fmtMoneda(k.impuestos)} de impuestos`}
-            acento={k.rentabilidadNeta < 0 ? TEMA.negativo : undefined}
-          />
+            <TarjetaKpi
+              titulo="Rentabilidad neta"
+              valor={fmtMoneda(k.rentabilidadNeta)}
+              detalle={`${fmtPct(k.margenNetoPct)} sobre venta c/IVA · ${fmtMoneda(k.impuestos)} de impuestos`}
+              acento={k.rentabilidadNeta < 0 ? TEMA.negativo : undefined}
+            />
 
-          <TarjetaKpi
-            titulo="Órdenes"
-            valor={fmtNumero(ordenesMostradas)}
-            detalle={
-              conCanceladas ? (
-                `${fmtNumero(k.ordenes)} pagadas + ${fmtNumero(extra.ordenes)} canceladas`
-              ) : contra && comp ? (
-                <Delta
-                  actual={k.ordenes}
-                  anterior={comp.ordenes}
-                  contra={contra}
-                />
-              ) : (
-                `${fmtNumero(k.lineas)} líneas · ${fmtNumero(k.unidades)} unidades`
-              )
-            }
-          />
-          <TarjetaKpi
-            titulo={conCanceladas ? "Unidades" : "Unidades vendidas"}
-            valor={fmtNumero(unidadesMostradas)}
-            detalle={
-              conCanceladas ? (
-                `${fmtNumero(k.unidades)} vendidas + ${fmtNumero(extra.unidades)} canceladas`
-              ) : contra && comp ? (
-                <Delta
-                  actual={k.unidades}
-                  anterior={comp.unidades}
-                  contra={contra}
-                />
-              ) : (
-                `${fmtNumero(k.lineas)} líneas de venta`
-              )
-            }
-          />
-          <TarjetaKpi
-            titulo="Ticket promedio"
-            valor={fmtMoneda(ticketMostrado)}
-            detalle={
-              conCanceladas ? (
-                "Transaccionado c/IVA por orden"
-              ) : contra && comp && comp.ordenes > 0 ? (
-                <Delta
-                  actual={k.ticketPromedio ?? 0}
-                  anterior={comp.ventaCiva / comp.ordenes}
-                  contra={contra}
-                />
-              ) : (
-                "Venta c/IVA por orden"
-              )
-            }
-          />
-          {/* La tarjeta que pidió el switch: cuánto de lo transaccionado se
+            <TarjetaKpi
+              titulo="Órdenes"
+              valor={fmtNumero(ordenesMostradas)}
+              detalle={
+                conCanceladas ? (
+                  `${fmtNumero(k.ordenes)} pagadas + ${fmtNumero(extra.ordenes)} canceladas`
+                ) : contra && comp ? (
+                  <Delta
+                    actual={k.ordenes}
+                    anterior={comp.ordenes}
+                    contra={contra}
+                  />
+                ) : (
+                  `${fmtNumero(k.lineas)} líneas · ${fmtNumero(k.unidades)} unidades`
+                )
+              }
+            />
+            <TarjetaKpi
+              titulo={conCanceladas ? "Unidades" : "Unidades vendidas"}
+              valor={fmtNumero(unidadesMostradas)}
+              detalle={
+                conCanceladas ? (
+                  `${fmtNumero(k.unidades)} vendidas + ${fmtNumero(extra.unidades)} canceladas`
+                ) : contra && comp ? (
+                  <Delta
+                    actual={k.unidades}
+                    anterior={comp.unidades}
+                    contra={contra}
+                  />
+                ) : (
+                  `${fmtNumero(k.lineas)} líneas de venta`
+                )
+              }
+            />
+            <TarjetaKpi
+              titulo="Ticket promedio"
+              valor={fmtMoneda(ticketMostrado)}
+              detalle={
+                conCanceladas ? (
+                  "Transaccionado c/IVA por orden"
+                ) : contra && comp && comp.ordenes > 0 ? (
+                  <Delta
+                    actual={k.ticketPromedio ?? 0}
+                    anterior={comp.ventaCiva / comp.ordenes}
+                    contra={contra}
+                  />
+                ) : (
+                  "Venta c/IVA por orden"
+                )
+              }
+            />
+            {/* La tarjeta que pidió el switch: cuánto de lo transaccionado se
               cayó. Solo aparece con el switch prendido — en modo "ventas
               efectivas" lo cancelado no forma parte de ningún número de arriba,
               y una tarjeta suelta ahí daría a entender que sí. */}
-          {conCanceladas && (
+            {conCanceladas && (
+              <TarjetaKpi
+                titulo="Cancelado"
+                valor={fmtMoneda(extra.monto)}
+                detalle={
+                  ventaMostrada > 0
+                    ? `${fmtPct(extra.monto / ventaMostrada)} de lo transaccionado · ${fmtNumero(extra.ordenes)} ${extra.ordenes === 1 ? "orden" : "órdenes"}`
+                    : `${fmtNumero(extra.ordenes)} ${extra.ordenes === 1 ? "orden" : "órdenes"}`
+                }
+                acento={TEMA.negativo}
+              />
+            )}
             <TarjetaKpi
-              titulo="Cancelado"
-              valor={fmtMoneda(extra.monto)}
-              detalle={
-                ventaMostrada > 0
-                  ? `${fmtPct(extra.monto / ventaMostrada)} de lo transaccionado · ${fmtNumero(extra.ordenes)} ${extra.ordenes === 1 ? "orden" : "órdenes"}`
-                  : `${fmtNumero(extra.ordenes)} ${extra.ordenes === 1 ? "orden" : "órdenes"}`
-              }
-              acento={TEMA.negativo}
+              titulo="Costo mercadería"
+              valor={fmtMoneda(k.costo)}
+              detalle="Sin IVA, ya con el descuento del proveedor"
             />
-          )}
-          <TarjetaKpi
-            titulo="Costo mercadería"
-            valor={fmtMoneda(k.costo)}
-            detalle="Sin IVA, ya con el descuento del proveedor"
-          />
-          <TarjetaKpi
-            titulo="Comisión Mercado Libre"
-            valor={fmtMoneda(k.comision)}
-            detalle={`${fmtPct(k.pctComision)} de la venta c/IVA`}
-          />
-          <TarjetaKpi
-            titulo="Costo de envío"
-            valor={fmtMoneda(k.envio)}
-            detalle={
-              k.envio === 0
-                ? "Sin envíos cargados en este recorte"
-                : `${fmtPct(k.envio / k.ventaCiva)} de la venta c/IVA`
-            }
-          />
-        </div>
+            <TarjetaKpi
+              titulo="Comisión Mercado Libre"
+              valor={fmtMoneda(k.comision)}
+              detalle={`${fmtPct(k.pctComision)} de la venta c/IVA`}
+            />
+            <TarjetaKpi
+              titulo="Costo de envío"
+              valor={fmtMoneda(k.envio)}
+              detalle={
+                k.envio === 0
+                  ? "Sin envíos cargados en este recorte"
+                  : `${fmtPct(k.envio / k.ventaCiva)} de la venta c/IVA`
+              }
+            />
+          </div>
+        </ConAlarmaMargen>
       )}
 
       {data && (
-        <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
+        <div
+          className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
+        >
           {data.rango.dias > 1 && (
             <Panel
               titulo="Venta y rentabilidad por día"
@@ -769,22 +794,35 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
                 columnas={columnasTop(data.topRentabilidad)}
                 clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
                 onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
-                activa={(a) => (filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false)}
+                activa={(a) =>
+                  filtros.sku?.length
+                    ? filtros.sku.includes(a.sku ?? "")
+                    : false
+                }
                 vacio="Sin ventas en el recorte elegido."
               />
             </Panel>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
-            <Panel titulo="Venta por proveedor" nota="Top 12 · click para filtrar">
+            <Panel
+              titulo="Venta por proveedor"
+              nota="Top 12 · click para filtrar"
+            >
               <TortaProveedores
-                datos={data.porProveedor.map((p) => ({ label: p.label, total: p.venta }))}
+                datos={data.porProveedor.map((p) => ({
+                  label: p.label,
+                  total: p.venta,
+                }))}
                 totalGeneral={data.ventaTotalProveedores}
                 seleccionados={filtros.proveedor}
                 onSeleccionar={alternarEn("proveedor")}
               />
             </Panel>
-            <Panel titulo="Rentabilidad por proveedor" nota="Top 12 por venta · click para filtrar">
+            <Panel
+              titulo="Rentabilidad por proveedor"
+              nota="Top 12 por venta · click para filtrar"
+            >
               <TablaRanking
                 filas={data.porProveedor}
                 titulo="Proveedor"
@@ -808,7 +846,9 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
                 (k && k.ventaCiva + data.cancelaciones.monto > 0
                   ? ` · ${fmtPct(data.cancelaciones.monto / (k.ventaCiva + data.cancelaciones.monto))} de lo transaccionado`
                   : "") +
-                (data.cancelaciones.recortada ? " · se muestran los 100 mayores" : "")
+                (data.cancelaciones.recortada
+                  ? " · se muestran los 100 mayores"
+                  : "")
               }
             >
               <Tabla
@@ -819,7 +859,11 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
                 }
                 clave={(c, i) => `${c.sku ?? "sin-sku"}-${i}`}
                 onClickFila={(c) => c.sku && alternarEn("sku")(c.sku)}
-                activa={(c) => (filtros.sku?.length ? filtros.sku.includes(c.sku ?? "") : false)}
+                activa={(c) =>
+                  filtros.sku?.length
+                    ? filtros.sku.includes(c.sku ?? "")
+                    : false
+                }
                 vacio="Ninguna orden cancelada en el recorte elegido."
               />
               <p className="text-muted mt-3 text-[11px] leading-relaxed">
@@ -834,11 +878,13 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
                 distintas, y sale de su propia consulta.
               </p>
               <p className="text-muted mt-1 text-[11px] leading-relaxed">
-                Acá entran solo las ventas que <strong>de verdad se cayeron</strong>: el
-                comprador se arrepintió, hubo un reclamo, no se pudo entregar o fue fraude.
-                Quedan afuera las que Mercado Libre marca como canceladas para partir un
-                carrito y volver a crearlo —dos tercios del total—, porque esa mercadería se
-                despacha y se cobra igual. Mercado Libre tampoco las cuenta como canceladas.
+                Acá entran solo las ventas que{" "}
+                <strong>de verdad se cayeron</strong>: el comprador se
+                arrepintió, hubo un reclamo, no se pudo entregar o fue fraude.
+                Quedan afuera las que Mercado Libre marca como canceladas para
+                partir un carrito y volver a crearlo —dos tercios del total—,
+                porque esa mercadería se despacha y se cobra igual. Mercado
+                Libre tampoco las cuenta como canceladas.
               </p>
             </Panel>
           )}
@@ -860,7 +906,9 @@ export default function DashboardMeliPage({ diaInicial }: { diaInicial: string }
               }
               clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
               onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
-              activa={(a) => (filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false)}
+              activa={(a) =>
+                filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false
+              }
             />
           </Panel>
         </div>

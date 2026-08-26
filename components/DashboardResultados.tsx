@@ -2,8 +2,19 @@
 
 import { useState } from "react";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
-import { promedioPonderado, sumar, Tabla, type Columna } from "@/components/Tabla";
-import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
+import {
+  promedioPonderado,
+  sumar,
+  Tabla,
+  type Columna,
+} from "@/components/Tabla";
+import {
+  Aviso,
+  ConAlarmaMargen,
+  Esqueleto,
+  Panel,
+  TarjetaKpi,
+} from "@/components/ui";
 import {
   BANDAS,
   EXPERIMENTO_FIN,
@@ -106,7 +117,13 @@ function columnasResumen(semanas: ResumenSemana[]): Columna<ResumenSemana>[] {
       orden: (s) => s.margenPct,
       // Ponderado: margen total sobre facturación total. El promedio simple
       // dejaría que una semana a medio correr pese lo mismo que una completa.
-      total: fmtPct(promedioPonderado(semanas, (s) => s.margen, (s) => s.facturacion)),
+      total: fmtPct(
+        promedioPonderado(
+          semanas,
+          (s) => s.margen,
+          (s) => s.facturacion,
+        ),
+      ),
     },
     {
       titulo: "Días medidos",
@@ -124,7 +141,9 @@ function columnasResumen(semanas: ResumenSemana[]): Columna<ResumenSemana>[] {
     {
       titulo: "Quebraron stock",
       celda: (s) => (
-        <span style={s.skusQuebrados > 0 ? { color: TEMA.negativo } : undefined}>
+        <span
+          style={s.skusQuebrados > 0 ? { color: TEMA.negativo } : undefined}
+        >
           {s.skusQuebrados === 0 ? "—" : fmtNumero(s.skusQuebrados)}
         </span>
       ),
@@ -135,7 +154,10 @@ function columnasResumen(semanas: ResumenSemana[]): Columna<ResumenSemana>[] {
   ];
 }
 
-function columnasArticulo(filas: FilaResultado[], hoy: string): Columna<FilaResultado>[] {
+function columnasArticulo(
+  filas: FilaResultado[],
+  hoy: string,
+): Columna<FilaResultado>[] {
   const pct = (f: FilaResultado, n: number) => {
     const c = f.semanas[n];
     return c && c.facturacion > 0 ? c.margen / c.facturacion : null;
@@ -146,7 +168,10 @@ function columnasArticulo(filas: FilaResultado[], hoy: string): Columna<FilaResu
     {
       titulo: "Producto",
       celda: (f) => (
-        <span className="block max-w-[230px] truncate" title={f.producto ?? undefined}>
+        <span
+          className="block max-w-[230px] truncate"
+          title={f.producto ?? undefined}
+        >
           {f.producto ?? "—"}
         </span>
       ),
@@ -161,7 +186,11 @@ function columnasArticulo(filas: FilaResultado[], hoy: string): Columna<FilaResu
       return [
         {
           titulo: `S${s.numero} · uds`,
-          celda: (f) => <span style={apagado}>{fmtNumero(f.semanas[s.numero]?.unidades)}</span>,
+          celda: (f) => (
+            <span style={apagado}>
+              {fmtNumero(f.semanas[s.numero]?.unidades)}
+            </span>
+          ),
           numerica: true,
           orden: (f) => f.semanas[s.numero]?.unidades ?? null,
           total: fmtNumero(sumar(filas, (f) => f.semanas[s.numero]?.unidades)),
@@ -169,7 +198,9 @@ function columnasArticulo(filas: FilaResultado[], hoy: string): Columna<FilaResu
         {
           titulo: `S${s.numero} · margen`,
           celda: (f) => (
-            <span style={apagado}>{fmtMonedaCorta(f.semanas[s.numero]?.margen)}</span>
+            <span style={apagado}>
+              {fmtMonedaCorta(f.semanas[s.numero]?.margen)}
+            </span>
           ),
           numerica: true,
           orden: (f) => f.semanas[s.numero]?.margen ?? null,
@@ -197,7 +228,9 @@ function columnasArticulo(filas: FilaResultado[], hoy: string): Columna<FilaResu
           celda: (f) => {
             const d = f.semanas[s.numero]?.diasSinStock ?? 0;
             return (
-              <span style={d > 0 ? { color: TEMA.negativo } : { color: TEMA.muted }}>
+              <span
+                style={d > 0 ? { color: TEMA.negativo } : { color: TEMA.muted }}
+              >
                 {d === 0 ? "—" : `${fmtNumero(d)} d`}
               </span>
             );
@@ -206,7 +239,11 @@ function columnasArticulo(filas: FilaResultado[], hoy: string): Columna<FilaResu
           orden: (f) => f.semanas[s.numero]?.diasSinStock ?? null,
           total: (
             <span className="text-muted">
-              {fmtNumero(filas.filter((f) => (f.semanas[s.numero]?.diasSinStock ?? 0) > 0).length)}
+              {fmtNumero(
+                filas.filter(
+                  (f) => (f.semanas[s.numero]?.diasSinStock ?? 0) > 0,
+                ).length,
+              )}
             </span>
           ),
         },
@@ -231,19 +268,23 @@ function columnasArticulo(filas: FilaResultado[], hoy: string): Columna<FilaResu
 
 export default function DashboardResultadosPage() {
   const hoy = hoyArgentina();
-  const inicial: FiltrosElasticidad = { desde: EXPERIMENTO_INICIO, hasta: EXPERIMENTO_FIN };
+  const inicial: FiltrosElasticidad = {
+    desde: EXPERIMENTO_INICIO,
+    hasta: EXPERIMENTO_FIN,
+  };
   const [filtros, setFiltros] = useState<FiltrosElasticidad>(inicial);
   const [buscado, setBuscado] = useState("");
 
-  const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
-    "/api/resultados-elasticidad",
-    {
-      proveedor: filtros.proveedor,
-      marca: filtros.marca,
-      sku: filtros.sku,
-    },
-    { conOpciones: "1" },
-  );
+  const { data, cargando, error, recargar, empezarCarga } =
+    useDatosTablero<Respuesta>(
+      "/api/resultados-elasticidad",
+      {
+        proveedor: filtros.proveedor,
+        marca: filtros.marca,
+        sku: filtros.sku,
+      },
+      { conOpciones: "1" },
+    );
 
   const cambiar = (f: FiltrosElasticidad) => {
     empezarCarga();
@@ -260,7 +301,9 @@ export default function DashboardResultadosPage() {
   };
 
   const sinCambios =
-    sinValores(filtros.proveedor) && sinValores(filtros.marca) && sinValores(filtros.sku);
+    sinValores(filtros.proveedor) &&
+    sinValores(filtros.marca) &&
+    sinValores(filtros.sku);
   const enCurso = SEMANAS.find((s) => hoy >= s.desde && hoy < s.hasta);
 
   return (
@@ -270,11 +313,15 @@ export default function DashboardResultadosPage() {
           {/* h2 y no h1: el h1 de la página es el logo, que vive en el layout. */}
           <h2 className="text-lg font-semibold tracking-tight">
             Resultados por semana{" "}
-            <span className="text-muted text-sm font-normal">· experimento de margen</span>
+            <span className="text-muted text-sm font-normal">
+              · experimento de margen
+            </span>
           </h2>
           <p className="text-muted mt-1 text-xs">
             {diaMes(EXPERIMENTO_INICIO)} al {diaMes(EXPERIMENTO_FIN)}
-            {enCurso ? ` · corriendo la semana ${enCurso.numero}` : " · experimento terminado"}
+            {enCurso
+              ? ` · corriendo la semana ${enCurso.numero}`
+              : " · experimento terminado"}
           </p>
         </div>
         <button
@@ -312,16 +359,20 @@ export default function DashboardResultadosPage() {
             opciones={data?.opciones?.marcas ?? []}
             onChange={(v) => cambiar({ ...filtros, marca: v })}
           />
-          <BotonLimpiar onClick={() => cambiar(inicial)} deshabilitado={sinCambios} />
+          <BotonLimpiar
+            onClick={() => cambiar(inicial)}
+            deshabilitado={sinCambios}
+          />
         </div>
 
         {/* El período NO se puede mover, y hay que decir por qué: si se pudiera,
             las columnas "semana 1, 2 y 3" pasarían a ser una etiqueta que no
             corresponde con lo que muestran. */}
         <span className="text-muted text-[11px] leading-tight">
-          Las tres semanas son fijas y de 7 días cada una. El día de corte pertenece a la
-          semana siguiente: lo vendido el {diaMes(SEMANAS[1].desde)} entra en la semana 2, no
-          en la 1, así que ninguna venta se cuenta dos veces. Para mirar otro período está la
+          Las tres semanas son fijas y de 7 días cada una. El día de corte
+          pertenece a la semana siguiente: lo vendido el{" "}
+          {diaMes(SEMANAS[1].desde)} entra en la semana 2, no en la 1, así que
+          ninguna venta se cuenta dos veces. Para mirar otro período está la
           pestaña <em>Elasticidad de precios</em>.
         </span>
       </div>
@@ -343,7 +394,9 @@ export default function DashboardResultadosPage() {
       {error && (
         <Aviso>
           <p className="font-medium">No se pudieron leer los datos.</p>
-          <p className="mt-1 font-mono text-xs break-words opacity-80">{error}</p>
+          <p className="mt-1 font-mono text-xs break-words opacity-80">
+            {error}
+          </p>
         </Aviso>
       )}
 
@@ -356,26 +409,32 @@ export default function DashboardResultadosPage() {
       )}
 
       {!error && data && (
-        <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
-          <div className="grid gap-3 sm:grid-cols-3">
-            {data.semanas.map((s) => {
-              const futura = !semanaEmpezada(SEMANAS[s.numero - 1], hoy);
-              const corriendo = enCurso?.numero === s.numero;
-              return (
-                <TarjetaKpi
-                  key={s.numero}
-                  titulo={`Semana ${s.numero} · ${s.label}${corriendo ? " · en curso" : ""}`}
-                  valor={futura ? "—" : fmtMoneda(s.margen)}
-                  detalle={
-                    futura
-                      ? "Todavía no empezó"
-                      : `${fmtNumero(s.unidades)} unidades · ${fmtPct(s.margenPct)} de margen · ${fmtNumero(s.skusQuebrados)} quebraron stock`
-                  }
-                  acento={corriendo ? PALETA[1] : undefined}
-                />
-              );
-            })}
-          </div>
+        <div
+          className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
+        >
+          <ConAlarmaMargen
+            activa={data.semanas.reduce((t, s) => t + s.margen, 0) < 0}
+          >
+            <div className="grid gap-3 sm:grid-cols-3">
+              {data.semanas.map((s) => {
+                const futura = !semanaEmpezada(SEMANAS[s.numero - 1], hoy);
+                const corriendo = enCurso?.numero === s.numero;
+                return (
+                  <TarjetaKpi
+                    key={s.numero}
+                    titulo={`Semana ${s.numero} · ${s.label}${corriendo ? " · en curso" : ""}`}
+                    valor={futura ? "—" : fmtMoneda(s.margen)}
+                    detalle={
+                      futura
+                        ? "Todavía no empezó"
+                        : `${fmtNumero(s.unidades)} unidades · ${fmtPct(s.margenPct)} de margen · ${fmtNumero(s.skusQuebrados)} quebraron stock`
+                    }
+                    acento={corriendo ? PALETA[1] : undefined}
+                  />
+                );
+              })}
+            </div>
+          </ConAlarmaMargen>
 
           <Panel
             titulo="Las tres semanas"
@@ -411,29 +470,34 @@ export default function DashboardResultadosPage() {
           </Panel>
 
           <Aviso tono="info">
-            <p className="font-medium">La semana 1 se lee distinto que las otras dos.</p>
+            <p className="font-medium">
+              La semana 1 se lee distinto que las otras dos.
+            </p>
             <p className="mt-1">
               Las ventas de la semana 1 están completas —salen de{" "}
-              <code>gold.fact_ventas</code>, que tiene la historia desde mayo—, pero{" "}
-              <strong>sus quiebres de stock no</strong>. La medición de disponibilidad empezó
-              el 21/08, así que de los 7 días de esa semana sólo se miraron los últimos. Un
-              &ldquo;—&rdquo; en <em>S1 · s/stock</em> no quiere decir &ldquo;nunca
-              quebró&rdquo;: quiere decir que no lo estábamos mirando.
+              <code>gold.fact_ventas</code>, que tiene la historia desde mayo—,
+              pero <strong>sus quiebres de stock no</strong>. La medición de
+              disponibilidad empezó el 21/08, así que de los 7 días de esa
+              semana sólo se miraron los últimos. Un &ldquo;—&rdquo; en{" "}
+              <em>S1 · s/stock</em> no quiere decir &ldquo;nunca quebró&rdquo;:
+              quiere decir que no lo estábamos mirando.
             </p>
             <p className="mt-1">
-              La columna <em>Días medidos</em> de la tabla de arriba dice exactamente cuántos
-              días de cada semana se llegaron a observar. De la semana 2 en adelante son los 7.
+              La columna <em>Días medidos</em> de la tabla de arriba dice
+              exactamente cuántos días de cada semana se llegaron a observar. De
+              la semana 2 en adelante son los 7.
             </p>
             <p className="mt-1">
-              <strong>El color del porcentaje</strong> es la banda en la que cayó esa semana:{" "}
+              <strong>El color del porcentaje</strong> es la banda en la que
+              cayó esa semana:{" "}
               {BANDAS.filter((b) => b.delExperimento).map((b, i) => (
                 <span key={b.clave}>
                   {i > 0 && " · "}
                   <span style={{ color: COLOR_BANDA[b.clave] }}>{b.label}</span>
                 </span>
               ))}
-              . Si un artículo cambia de color entre semanas, es que se le movió el margen — y
-              al lado están las unidades que hizo con cada uno.
+              . Si un artículo cambia de color entre semanas, es que se le movió
+              el margen — y al lado están las unidades que hizo con cada uno.
             </p>
           </Aviso>
         </div>
