@@ -516,6 +516,12 @@ export default function Dashboard() {
                     anterior={comp.costoMercaderia}
                     contra={contra}
                   />
+                ) : k.costoMercaderia < 0 ? (
+                  // Un costo NEGATIVO no es un costo: es mercadería que volvió
+                  // al depósito, casi siempre por una nota de crédito. Dicho
+                  // como "costo" a secas se lee como un error de signo, y no lo
+                  // es. Ver también la nota de Unidades acá abajo.
+                  `Se recuperó ${fmtMoneda(-k.costoMercaderia)} de mercadería devuelta`
                 ) : undefined
               }
             />
@@ -529,6 +535,8 @@ export default function Dashboard() {
                     anterior={comp.unidades}
                     contra={contra}
                   />
+                ) : k.unidades < 0 ? (
+                  `${fmtNumero(-k.unidades)} unidades devueltas`
                 ) : undefined
               }
             />
