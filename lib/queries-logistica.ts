@@ -29,8 +29,7 @@ import { agregarFiltro, vacio } from "@/lib/filtros";
 
 type Where = { sql: string; params: unknown[] };
 
-// `modoFlete` queda afuera: es un modo de cálculo, no una lista de valores.
-type ClaveLista = Exclude<keyof FiltrosLogistica, "modoFlete" | "estadoFlete">;
+type ClaveLista = Exclude<keyof FiltrosLogistica, "estadoFlete">;
 
 const OPCIONALES: [ClaveLista, string][] = [
   ["vendedor", "fv.vendedor"],
@@ -46,7 +45,10 @@ const OPCIONALES: [ClaveLista, string][] = [
  * desglosan por proveedor (o por provincia) tienen que seguir mostrando el
  * ranking completo aunque haya uno seleccionado, si no quedan con una sola barra.
  */
-function whereBase(f: FiltrosLogistica, omitir: (keyof FiltrosLogistica)[] = []): Where {
+function whereBase(
+  f: FiltrosLogistica,
+  omitir: (keyof FiltrosLogistica)[] = [],
+): Where {
   const params: unknown[] = [];
   const clauses = ["coalesce(rl.provincia, '') <> ''"];
 
@@ -144,12 +146,19 @@ async function getEnvios(f: FiltrosLogistica) {
      where rl.clave_fila in (select clave_fila from lineas)`,
     w.params,
   );
-  return { cantidadEnvios: Number(fila?.envios ?? 0), kgTotales: fila?.kg ?? 0 };
+  return {
+    cantidadEnvios: Number(fila?.envios ?? 0),
+    kgTotales: fila?.kg ?? 0,
+  };
 }
 
 // --- Gráficos ----------------------------------------------------------------
 
-function porProveedor(expr: string, orden = "valor desc nulls last", limite = 12) {
+function porProveedor(
+  expr: string,
+  orden = "valor desc nulls last",
+  limite = 12,
+) {
   return `select coalesce(proveedor, '—') as label, ${expr} as valor
           from lineas group by proveedor order by ${orden} limit ${limite}`;
 }
@@ -202,7 +211,9 @@ async function getGraficos(f: FiltrosLogistica) {
 }
 
 /** Tabla "Comprobantes Asociados". */
-async function getComprobantes(f: FiltrosLogistica): Promise<FilaComprobante[]> {
+async function getComprobantes(
+  f: FiltrosLogistica,
+): Promise<FilaComprobante[]> {
   const w = whereBase(f);
   return query<FilaComprobante>(
     `${cteLineas(w)}
@@ -245,25 +256,26 @@ export async function getOpcionesLogistica(): Promise<OpcionesLogistica> {
     );
 
   // `transporte` no está en el CTE (es del envío), va por separado.
-  const [vendedores, empresas, meses, provincias, transportes] = await Promise.all([
-    query<{ valor: string }>(
-      `select distinct fv.vendedor as valor from gold.fact_ventas fv
+  const [vendedores, empresas, meses, provincias, transportes] =
+    await Promise.all([
+      query<{ valor: string }>(
+        `select distinct fv.vendedor as valor from gold.fact_ventas fv
        where fv.vendedor is not null and fv.vendedor <> '' order by valor`,
-    ),
-    query<{ valor: string }>(
-      `select distinct fv.empresa as valor from gold.fact_ventas fv
+      ),
+      query<{ valor: string }>(
+        `select distinct fv.empresa as valor from gold.fact_ventas fv
        where fv.empresa is not null and fv.empresa <> '' order by valor`,
-    ),
-    query<{ valor: string }>(
-      `select distinct fv.mes_comercial as valor from gold.fact_ventas fv
+      ),
+      query<{ valor: string }>(
+        `select distinct fv.mes_comercial as valor from gold.fact_ventas fv
        where fv.mes_comercial is not null and fv.mes_comercial <> '' order by valor desc`,
-    ),
-    columna("provincia", "asc"),
-    query<{ valor: string }>(
-      `select distinct rl.transporte as valor from gold.reporte_logistica rl
+      ),
+      columna("provincia", "asc"),
+      query<{ valor: string }>(
+        `select distinct rl.transporte as valor from gold.reporte_logistica rl
        where rl.transporte is not null and rl.transporte <> '' order by valor`,
-    ),
-  ]);
+      ),
+    ]);
 
   return {
     vendedores: vendedores.map((r) => r.valor),
@@ -276,7 +288,9 @@ export async function getOpcionesLogistica(): Promise<OpcionesLogistica> {
 
 // --- Dashboard completo ------------------------------------------------------
 
-export async function getDashboardLogistica(f: FiltrosLogistica): Promise<DashboardLogistica> {
+export async function getDashboardLogistica(
+  f: FiltrosLogistica,
+): Promise<DashboardLogistica> {
   const [totales, envios, graficos, comprobantes] = await Promise.all([
     getTotales(f),
     getEnvios(f),
@@ -284,14 +298,16 @@ export async function getDashboardLogistica(f: FiltrosLogistica): Promise<Dashbo
     getComprobantes(f),
   ]);
 
-  // Espeja `ParamFlete[Modo]` del modelo: cuánto flete se le descuenta al margen.
-  const fleteAplicado =
-    f.modoFlete === "real"
-      ? totales.fleteRealFiltrado
-      : f.modoFlete === "real-estimado"
-        ? totales.fleteRealFiltrado + totales.fleteEstimadoFiltrado
-        : 0;
-  const margenAjustado = totales.margen - fleteAplicado;
+  // EL MARGEN AJUSTADO DESCUENTA TODO EL FLETE, SIEMPRE.
+  //
+  // Antes esto dependía del selector "Flete a descontar del margen", que venía
+  // por defecto en "sin": o sea que la tarjeta decía "% Rentabilidad Ajustada"
+  // y no ajustaba nada salvo que alguien tocara el desplegable. Sacado el
+  // selector, queda la única definición que hace honor al nombre, y además es
+  // la misma que usa Ventas Mayoristas: margen menos flete real menos flete
+  // estimado.
+  const margenAjustado =
+    totales.margen - totales.fleteRealFiltrado - totales.fleteEstimadoFiltrado;
 
   return {
     kpis: {
@@ -300,13 +316,19 @@ export async function getDashboardLogistica(f: FiltrosLogistica): Promise<Dashbo
       fleteRealFiltrado: totales.fleteRealFiltrado,
       fleteEstimadoFiltrado: totales.fleteEstimadoFiltrado,
       facturacionNeta: totales.facturacionNeta,
-      pctLineasFleteReal: totales.lineas > 0 ? totales.lineasReales / totales.lineas : null,
+      pctLineasFleteReal:
+        totales.lineas > 0 ? totales.lineasReales / totales.lineas : null,
       pctFleteSobreFacturacion:
-        totales.facturacionNeta > 0 ? totales.fleteTotal / totales.facturacionNeta : null,
-      costoPorKg: envios.kgTotales > 0 ? totales.fleteTotal / envios.kgTotales : null,
+        totales.facturacionNeta > 0
+          ? totales.fleteTotal / totales.facturacionNeta
+          : null,
+      costoPorKg:
+        envios.kgTotales > 0 ? totales.fleteTotal / envios.kgTotales : null,
       margenAjustado,
       rentabilidadAjustadaPct:
-        totales.facturacionNeta > 0 ? margenAjustado / totales.facturacionNeta : null,
+        totales.facturacionNeta > 0
+          ? margenAjustado / totales.facturacionNeta
+          : null,
     },
     unidadesPorProveedor: graficos.unidades,
     margenPorProveedor: graficos.margen,

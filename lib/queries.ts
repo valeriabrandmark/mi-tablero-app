@@ -133,6 +133,63 @@ const FLETE_LINEA = `(coalesce(fvf.flete_prorrateado, 0)
         / coalesce(fvf.lineas_venta, 1))::float8`;
 
 /**
+ * NOTAS DE CRÉDITO QUE NO SE PUEDEN COSTEAR.
+ *
+ * Una NC revierte una venta, así que su margen es el de la factura original
+ * dado vuelta. Para eso hace falta el costo con el que salió la mercadería —
+ * y hay notas donde ese costo no existe en ningún lado:
+ *
+ *   - no traen `ajustaComprobanteId`, o sea que Sigma no sabe qué factura
+ *     ajustan;
+ *   - y su cliente no tiene NINGUNA factura en la ventana de datos.
+ *
+ * El caso testigo es C-CB93-00000102 (ROMANO MOLINA): la venta es de 2023 y de
+ * otro sistema, así que no se puede rastrear. Sin factura de referencia,
+ * `modelo.py` cae al costo del mes de la NOTA — junio 2026 — y calcula el
+ * margen de una venta de hace tres años contra un costo de este mes. El
+ * resultado no es "ganamos $ 8.164" ni "perdimos $ 8.164": no mide nada.
+ *
+ * Por eso estas líneas quedan fuera del margen. La facturación y el costo se
+ * siguen mostrando enteros: la venta perdida y la mercadería recuperada son
+ * reales y hay que verlas. Lo único que se saca es un número inventado.
+ *
+ * OJO CON LO ANGOSTO DEL CRITERIO. Hay otras 23 notas sin `ajustaComprobanteId`
+ * cuyo cliente SÍ tiene facturas: esas son devoluciones normales donde nadie
+ * completó el campo, y su costo sí es el correcto. Piden las dos condiciones
+ * juntas a propósito.
+ *
+ * Hoy son 7 notas: -$ 1.419.395 de facturación y -$ 97.835 de margen, sobre
+ * una base de $ 256 M. Si alguna vez conviene resolverlo en el origen, el
+ * lugar es `modelo.py`; acá queda `gold.fact_ventas` intacta y el recorte se
+ * hace al leer.
+ */
+const JOIN_HUERFANAS = `left join (
+         select distinct c.comprobante
+         from gold.fact_ventas c
+         where c.comprobante like 'C-%'
+           and not exists (
+             select 1 from bronze.sigma_ventas sv
+             where sv."comprobanteTipo" || '-' || sv."comprobanteCodigo"
+                   || '-' || sv."comprobanteNumero" = c.comprobante
+               and coalesce(sv."ajustaComprobanteId", 0) <> 0
+           )
+           and not exists (
+             select 1 from gold.fact_ventas f
+             where f.cliente = c.cliente
+               and f.cantidad > 0
+               and f.comprobante like 'F-%'
+           )
+       ) hue on hue.comprobante = fv.comprobante`;
+
+/**
+ * Filtro que aplica a TODA suma de margen. Requiere `JOIN_HUERFANAS`.
+ *
+ * El `is null` de la izquierda es por los canales que no tienen comprobante
+ * (Mercado Libre, Tienda Nube): sin eso el filtro los dejaría afuera a todos.
+ */
+const SIN_HUERFANAS = `filter (where hue.comprobante is null)`;
+
+/**
  * Margen ajustado de un grupo de renglones.
  *
  * Descuenta dos fletes distintos, que no son lo mismo:
@@ -148,9 +205,11 @@ function margenAjustado(conFlete: boolean): string {
     // Margen de mercadería a secas: precio neto menos el costo con la oferta
     // del proveedor ya aplicada. `fv.margen_total` ya es eso, porque
     // `costo_real` sale de `costo_teorico * (1 - oferta del proveedor)`.
-    return `sum(fv.margen_total)`;
+    return `sum(fv.margen_total) ${SIN_HUERFANAS}`;
   }
-  return `sum(fv.margen_total)
+  // El flete NO lleva el filtro: el transporte de una nota huérfana se pagó
+  // igual, y ese dato sí es de la ventana.
+  return `sum(fv.margen_total) ${SIN_HUERFANAS}
        - sum(${FLETE_LINEA})
        - sum(fv.costo_unitario * fv.cantidad * coalesce(fpm.pct_flete, 0))`;
 }
@@ -188,7 +247,7 @@ async function getTotales(f: Filtros, conFlete: boolean, hastaFecha?: string) {
     `select coalesce(${FACTURACION}, 0) as "facturacionNeta",
             coalesce(${pesos("sum(fv.costo_unitario * fv.cantidad)")}, 0) as "costoMercaderia",
             coalesce(sum(fv.cantidad), 0)::float8 as "unidades",
-            coalesce(${pesos("sum(fv.margen_total)")}, 0) as "margenTotal",
+            coalesce(${pesos(`sum(fv.margen_total) ${SIN_HUERFANAS}`)}, 0) as "margenTotal",
             coalesce(${pesos(margenAjustado(conFlete))}, 0) as "margenAjustado",
             count(distinct fv.cliente) as "clientesConCompra",
             count(distinct fv.nro_orden) as "cantidadPedidos"
@@ -196,6 +255,7 @@ async function getTotales(f: Filtros, conFlete: boolean, hastaFecha?: string) {
      left join gold.fletes_proveedores_pct_mensual fpm
        on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
      ${JOIN_FLETE}
+     ${JOIN_HUERFANAS}
      where ${w.sql}`,
     w.params,
   );
@@ -280,6 +340,7 @@ async function getMargenPorProveedor(f: Filtros, conFlete: boolean): Promise<Mar
      left join gold.fletes_proveedores_pct_mensual fpm
        on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
      ${JOIN_FLETE}
+     ${JOIN_HUERFANAS}
      where ${w.sql}
      group by fv.proveedor
      -- SIN el piso de unidades y SIN tope. Antes pedia MIN_UNIDADES_MARGEN
@@ -318,6 +379,7 @@ async function getRentabilidadPorCliente(f: Filtros, conFlete: boolean): Promise
        left join gold.fletes_proveedores_pct_mensual fpm
          on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
        ${JOIN_FLETE}
+       ${JOIN_HUERFANAS}
        where ${w.sql}
        group by fv.cliente
        order by facturacion desc nulls last
@@ -364,6 +426,7 @@ async function getArticulos(f: Filtros, conFlete: boolean): Promise<FilaArticulo
      left join gold.fletes_proveedores_pct_mensual fpm
        on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
      ${JOIN_FLETE}
+     ${JOIN_HUERFANAS}
      -- (sku, mes_comercial) es único en costos_historicos: el join no multiplica
      -- filas. Verificado: 31.446 filas, 31.446 pares distintos.
      left join bronze.costos_historicos ch

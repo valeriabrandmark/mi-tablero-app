@@ -81,7 +81,10 @@ export type MargenProveedor = {
 };
 
 /** Fila lista para recharts: `{ fecha, "Juan": 12345, "Ana": 6789 }` */
-export type PuntoDiaVendedor = { fecha: string } & Record<string, number | string>;
+export type PuntoDiaVendedor = { fecha: string } & Record<
+  string,
+  number | string
+>;
 
 export type SerieDiaria = {
   vendedores: string[];
@@ -98,8 +101,6 @@ export type OpcionesFiltro = {
 // --- Logística --------------------------------------------------------------
 
 /** Espeja el parámetro `ParamFlete[Modo]` del modelo de Power BI. */
-export type ModoFlete = "sin" | "real" | "real-estimado";
-
 export type FiltrosLogistica = {
   vendedor?: string[];
   empresa?: string[];
@@ -114,7 +115,6 @@ export type FiltrosLogistica = {
    * NO es un filtro sino un modo de cálculo: elige qué flete se descuenta del
    * margen. Por eso sigue siendo de opción única.
    */
-  modoFlete?: ModoFlete;
 };
 
 export type KpisLogistica = {
@@ -326,7 +326,6 @@ export type PuntoFacturacion = { fecha: string; total: number };
 
 export type OpcionesObjetivos = {
   meses: string[];
-  grupos: string[];
 };
 
 /**
@@ -460,7 +459,11 @@ export type KpisMeli = {
 };
 
 /** Un punto del timeline: venta y rentabilidad del día, para leerlas juntas. */
-export type PuntoDiaMeli = { fecha: string; venta: number; rentabilidad: number };
+export type PuntoDiaMeli = {
+  fecha: string;
+  venta: number;
+  rentabilidad: number;
+};
 
 /** Una fila de cualquier ranking (proveedor, marca). */
 export type RankingMeli = {
@@ -674,7 +677,11 @@ export type ComparacionTiendaNube = {
   margenPct: number | null;
 };
 
-export type PuntoDiaTiendaNube = { fecha: string; venta: number; rentabilidad: number };
+export type PuntoDiaTiendaNube = {
+  fecha: string;
+  venta: number;
+  rentabilidad: number;
+};
 
 /** Una fila de cualquier ranking por dimensión (proveedor, marca). */
 export type RankingTiendaNube = {
@@ -931,7 +938,6 @@ export type DashboardElasticidad = {
   recortada: boolean;
   generadoEn: string;
 };
-
 
 // --- Resultados por semana (elasticidad) ------------------------------------
 

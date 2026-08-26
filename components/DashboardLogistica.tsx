@@ -4,11 +4,7 @@ import { useState } from "react";
 import EncabezadoPagina from "@/components/EncabezadoPagina";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import TortaProveedores from "@/components/charts/TortaProveedores";
-import {
-  BotonLimpiar,
-  SelectorFiltro,
-  SelectorMultiple,
-} from "@/components/SelectorFiltro";
+import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import {
   promedioPonderado,
@@ -36,17 +32,10 @@ import type {
   DashboardLogistica,
   FilaComprobante,
   FiltrosLogistica,
-  ModoFlete,
   OpcionesLogistica,
 } from "@/lib/types";
 
 type Respuesta = DashboardLogistica & { opciones: OpcionesLogistica | null };
-
-const MODOS: [ModoFlete, string][] = [
-  ["sin", "Sin flete"],
-  ["real", "Solo flete real"],
-  ["real-estimado", "Real + estimado"],
-];
 
 /**
  * De dónde sale el flete del comprobante.
@@ -166,9 +155,7 @@ function columnas(filas: FilaComprobante[]): Columna<FilaComprobante>[] {
 }
 
 export default function DashboardLogisticaPage() {
-  const [filtros, setFiltros] = useState<FiltrosLogistica>({
-    modoFlete: "sin",
-  });
+  const [filtros, setFiltros] = useState<FiltrosLogistica>({});
 
   const { data, cargando, error, recargar, empezarCarga } =
     useDatosTablero<Respuesta>(
@@ -198,8 +185,7 @@ export default function DashboardLogisticaPage() {
     sinValores(filtros.transporte) &&
     sinValores(filtros.provincia) &&
     sinValores(filtros.estadoFlete) &&
-    sinValores(filtros.proveedor) &&
-    (filtros.modoFlete ?? "sin") === "sin";
+    sinValores(filtros.proveedor);
 
   return (
     <div className="space-y-4">
@@ -261,19 +247,7 @@ export default function DashboardLogisticaPage() {
           ]}
           onChange={(v) => cambiar({ ...filtros, estadoFlete: v })}
         />
-        <SelectorFiltro
-          etiqueta="Flete a descontar del margen"
-          valor={filtros.modoFlete}
-          opciones={MODOS}
-          onChange={(v) =>
-            cambiar({ ...filtros, modoFlete: (v as ModoFlete) ?? "sin" })
-          }
-          conTodos={false}
-        />
-        <BotonLimpiar
-          onClick={() => cambiar({ modoFlete: "sin" })}
-          deshabilitado={vacio}
-        />
+        <BotonLimpiar onClick={() => cambiar({})} deshabilitado={vacio} />
 
         <span className="text-muted ml-auto max-w-sm text-[11px] leading-tight">
           Solo envíos con provincia cargada, igual que el filtro de página del

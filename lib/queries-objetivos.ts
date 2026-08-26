@@ -9,7 +9,11 @@ import type {
   ResumenMetrica,
   VencidoVendedor,
 } from "@/lib/types";
-import { CANAL_MAYORISTA, codigoSigmaDe, mesComercialActual } from "@/lib/constantes";
+import {
+  CANAL_MAYORISTA,
+  codigoSigmaDe,
+  mesComercialActual,
+} from "@/lib/constantes";
 import { agregarFiltro, vacio } from "@/lib/filtros";
 
 /**
@@ -50,13 +54,19 @@ type Where = { sql: string; params: unknown[] };
  * siga apareciendo con su objetivo y 0 de avance, en vez de desaparecer de la
  * tabla — que es justo la fila que hay que mirar, y el caso de RICARDO hoy.
  */
-function whereObjetivos(f: FiltrosObjetivos, omitir: (keyof FiltrosObjetivos)[] = []): Where {
+function whereObjetivos(
+  f: FiltrosObjetivos,
+  omitir: (keyof FiltrosObjetivos)[] = [],
+): Where {
   const params: unknown[] = [f.vendedor];
   const clauses = ["o.vendedor = $1"];
 
   // El vendedor va aparte (lo fija la ruta y es uno solo), así que acá solo
   // entran los filtros que son listas.
-  const opcionales: [Extract<keyof FiltrosObjetivos, "mes" | "grupo">, string][] = [
+  const opcionales: [
+    Extract<keyof FiltrosObjetivos, "mes" | "grupo">,
+    string,
+  ][] = [
     ["mes", "o.mes_comercial"],
     ["grupo", "o.grupo"],
   ];
@@ -239,7 +249,9 @@ function getSerieFacturacion(f: FiltrosObjetivos): Promise<PuntoFacturacion[]> {
 }
 
 /** Listado de comprobantes involucrados. */
-function getComprobantes(f: FiltrosObjetivos): Promise<FilaComprobanteObjetivo[]> {
+function getComprobantes(
+  f: FiltrosObjetivos,
+): Promise<FilaComprobanteObjetivo[]> {
   const l = cteLineas(f);
   return query<FilaComprobanteObjetivo>(
     `${l.sql}
@@ -275,7 +287,9 @@ function getComprobantes(f: FiltrosObjetivos): Promise<FilaComprobanteObjetivo[]
  *    que NO se filtra por mes: cambiar el selector de mes no la mueve. La
  *    `fechaCarga` viaja con el dato para poder decirlo en pantalla.
  */
-async function getVencido(f: FiltrosObjetivos): Promise<VencidoVendedor | null> {
+async function getVencido(
+  f: FiltrosObjetivos,
+): Promise<VencidoVendedor | null> {
   const codigo = codigoSigmaDe(f.vendedor);
   if (!codigo) return null;
 
@@ -298,17 +312,14 @@ async function getVencido(f: FiltrosObjetivos): Promise<VencidoVendedor | null> 
 // --- Opciones de los selectores ----------------------------------------------
 
 export async function getOpcionesObjetivos(): Promise<OpcionesObjetivos> {
-  const [meses, grupos] = await Promise.all([
-    query<{ valor: string }>(
-      `select distinct mes_comercial as valor from gold.objetivos order by valor desc`,
-    ),
-    query<{ valor: string }>(`select grupo as valor from gold.objetivos_grupo order by orden`),
-  ]);
+  // Solo los meses. La lista de grupos se fue con el selector de Grupo: los
+  // grupos se siguen filtrando haciendo click en su barra, que es donde se los
+  // está mirando, así que la consulta no tenía a quién servir.
+  const meses = await query<{ valor: string }>(
+    `select distinct mes_comercial as valor from gold.objetivos order by valor desc`,
+  );
 
-  return {
-    meses: meses.map((r) => r.valor),
-    grupos: grupos.map((r) => r.valor),
-  };
+  return { meses: meses.map((r) => r.valor) };
 }
 
 /**
@@ -322,7 +333,9 @@ export async function getOpcionesObjetivos(): Promise<OpcionesObjetivos> {
  * Si la base no responde devuelve el mes vigente igual, así el error lo muestra
  * el dashboard con su propio cartel en vez de romper la página entera.
  */
-export async function getMesInicialObjetivos(vendedor: string): Promise<string> {
+export async function getMesInicialObjetivos(
+  vendedor: string,
+): Promise<string> {
   const vigente = mesComercialActual();
   try {
     const filas = await query<{ valor: string }>(
@@ -342,14 +355,17 @@ export async function getMesInicialObjetivos(vendedor: string): Promise<string> 
 
 // --- Dashboard completo ------------------------------------------------------
 
-export async function getDashboardObjetivos(f: FiltrosObjetivos): Promise<DashboardObjetivos> {
-  const [resumen, porGrupo, serieFacturacion, comprobantes, vencido] = await Promise.all([
-    getResumen(f),
-    getPorGrupo(f),
-    getSerieFacturacion(f),
-    getComprobantes(f),
-    getVencido(f),
-  ]);
+export async function getDashboardObjetivos(
+  f: FiltrosObjetivos,
+): Promise<DashboardObjetivos> {
+  const [resumen, porGrupo, serieFacturacion, comprobantes, vencido] =
+    await Promise.all([
+      getResumen(f),
+      getPorGrupo(f),
+      getSerieFacturacion(f),
+      getComprobantes(f),
+      getVencido(f),
+    ]);
 
   return {
     resumen,
