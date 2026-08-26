@@ -5,6 +5,7 @@ import EncabezadoPagina from "@/components/EncabezadoPagina";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
+import { nombreEmpresa } from "@/lib/constantes";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
@@ -134,6 +135,7 @@ export default function DashboardCuentasPage() {
           etiqueta="Empresa"
           valores={filtros.empresa}
           opciones={opciones?.empresas ?? []}
+          formato={nombreEmpresa}
           onChange={(v) => cambiar({ ...filtros, empresa: v })}
         />
         <SelectorMultiple

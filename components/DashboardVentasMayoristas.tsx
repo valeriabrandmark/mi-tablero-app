@@ -14,7 +14,14 @@ import {
   Tabla,
   type Columna,
 } from "@/components/Tabla";
-import { Aviso, Delta, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
+import {
+  Aviso,
+  ConAlarmaMargen,
+  Delta,
+  Esqueleto,
+  Panel,
+  TarjetaKpi,
+} from "@/components/ui";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { alternar as alternarValor } from "@/lib/filtros";
 import {
@@ -32,7 +39,11 @@ const ETIQUETA_CRUZADO: Record<(typeof CRUZADOS)[number], string> = {
 };
 import { aQueryString } from "@/lib/filtros";
 import { PALETA } from "@/lib/paleta";
-import type { DashboardVentasMayoristas, Filtros, OpcionesFiltro } from "@/lib/types";
+import type {
+  DashboardVentasMayoristas,
+  Filtros,
+  OpcionesFiltro,
+} from "@/lib/types";
 
 /**
  * Totales de la tabla de artículos.
@@ -68,7 +79,9 @@ function fmtPuntos(diferencia: number): string {
 function clientesMedibles(
   filas: RentabilidadCliente[],
 ): (RentabilidadCliente & { valor: number })[] {
-  return filas.filter((c): c is RentabilidadCliente & { valor: number } => c.valor != null);
+  return filas.filter(
+    (c): c is RentabilidadCliente & { valor: number } => c.valor != null,
+  );
 }
 
 function notaClientes(filas: RentabilidadCliente[]): string {
@@ -233,7 +246,6 @@ function colComprobantes(
   ];
 }
 
-
 async function traer<T>(url: string, signal: AbortSignal): Promise<T> {
   const res = await fetch(url, { signal, cache: "no-store" });
   if (res.status === 401) throw new Error("401");
@@ -244,9 +256,66 @@ async function traer<T>(url: string, signal: AbortSignal): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/**
+ * Interruptor entre las dos formas de mirar la rentabilidad.
+ *
+ * CON flete es el margen ajustado de siempre: lo que queda después de pagar el
+ * transporte. SIN flete queda el margen de mercadería solo — precio neto menos
+ * costo con la oferta del proveedor.
+ *
+ * Las dos hacen falta y responden preguntas distintas: si un cliente rinde poco
+ * con flete pero bien sin flete, el problema es el envío (una provincia lejana,
+ * pedidos chicos y frecuentes) y no el precio al que se le vende. Apagarlo
+ * recalcula TODO — tarjetas, proveedores, clientes y artículos — porque si no
+ * quedarían dos criterios mezclados en la misma pantalla.
+ */
+function InterruptorFlete({
+  conFlete,
+  onChange,
+}: {
+  conFlete: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={conFlete}
+      onClick={() => onChange(!conFlete)}
+      title={
+        conFlete
+          ? "El margen descuenta el flete de venta. Click para ver solo el margen de mercadería."
+          : "El margen NO descuenta el flete: es precio neto menos costo con la oferta del proveedor."
+      }
+      className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+        conFlete
+          ? "border-c1/40 bg-c1/15 text-c1"
+          : "border-line text-muted hover:text-ink hover:bg-panel-2"
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`relative h-3.5 w-7 shrink-0 rounded-full transition-colors ${
+          conFlete ? "bg-c1/60" : "bg-panel-2 border-line border"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 size-2.5 rounded-full bg-white transition-all ${
+            conFlete ? "left-3.5" : "left-0.5"
+          }`}
+        />
+      </span>
+      {conFlete ? "Rentabilidad con flete" : "Rentabilidad sin flete"}
+    </button>
+  );
+}
+
 export default function Dashboard() {
   const router = useRouter();
   const [filtros, setFiltros] = useState<Filtros>({});
+  // MODO DE CÁLCULO, no filtro: no recorta filas, cambia la fórmula del margen.
+  // Por eso vive en su propio estado y no adentro de `filtros`.
+  const [conFlete, setConFlete] = useState(true);
   const [opciones, setOpciones] = useState<OpcionesFiltro | null>(null);
   const [data, setData] = useState<DashboardVentasMayoristas | null>(null);
   const [cargando, setCargando] = useState(true);
@@ -267,7 +336,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     const ac = new AbortController();
-    traer<OpcionesFiltro>("/api/filtros", ac.signal).then(setOpciones).catch(manejarError);
+    traer<OpcionesFiltro>("/api/filtros", ac.signal)
+      .then(setOpciones)
+      .catch(manejarError);
     return () => ac.abort();
   }, [manejarError]);
 
@@ -300,7 +371,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     const ac = new AbortController();
-    const qs = aQueryString(filtros);
+    const sp = new URLSearchParams(aQueryString(filtros));
+    if (!conFlete) sp.set("conFlete", "0");
+    const qs = sp.toString();
     traer<DashboardVentasMayoristas>(
       `/api/ventas-mayoristas${qs ? `?${qs}` : ""}`,
       ac.signal,
@@ -311,11 +384,12 @@ export default function Dashboard() {
       })
       .catch((e) => {
         manejarError(e);
-        if (!(e instanceof DOMException && e.name === "AbortError")) setCargando(false);
+        if (!(e instanceof DOMException && e.name === "AbortError"))
+          setCargando(false);
       });
 
     return () => ac.abort();
-  }, [filtros, recargas, manejarError]);
+  }, [filtros, conFlete, recargas, manejarError]);
 
   const k = data?.kpis;
   const comp = data?.comparacion ?? null;
@@ -336,23 +410,33 @@ export default function Dashboard() {
         <EncabezadoPagina pagina="ventas">
           <p className="text-muted mt-1 text-xs">
             {data
-              ? `Actualizado ${new Date(data.generadoEn).toLocaleTimeString("es-AR", {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}`
+              ? `Actualizado ${new Date(data.generadoEn).toLocaleTimeString(
+                  "es-AR",
+                  {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  },
+                )}`
               : "Cargando datos en vivo…"}
           </p>
         </EncabezadoPagina>
-        <button
-          onClick={recargar}
-          disabled={cargando}
-          className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40"
-        >
-          {cargando ? "Actualizando…" : "Actualizar"}
-        </button>
+        <div className="flex items-center gap-2">
+          <InterruptorFlete conFlete={conFlete} onChange={setConFlete} />
+          <button
+            onClick={recargar}
+            disabled={cargando}
+            className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40"
+          >
+            {cargando ? "Actualizando…" : "Actualizar"}
+          </button>
+        </div>
       </div>
 
-      <BarraFiltros filtros={filtros} opciones={opciones} onChange={cambiarFiltros} />
+      <BarraFiltros
+        filtros={filtros}
+        opciones={opciones}
+        onChange={cambiarFiltros}
+      />
 
       {CRUZADOS.some((c) => filtros[c]?.length) && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -361,22 +445,22 @@ export default function Dashboard() {
               solo chip por campo escondería cuántos valores hay puestos. */}
           {CRUZADOS.flatMap((campo) =>
             (filtros[campo] ?? []).map((valor) => (
-            <button
-              key={`${campo}-${valor}`}
-              onClick={() => alternar(campo, valor)}
-              className="border-c1/40 bg-c1/15 text-c1 hover:bg-c1/25 flex items-center gap-1.5 rounded-full border px-3 py-1 font-medium"
-            >
-              <span className="opacity-70">{ETIQUETA_CRUZADO[campo]}</span>
-              {valor}
-              <span aria-hidden className="text-sm leading-none">
-                ×
-              </span>
-            </button>
+              <button
+                key={`${campo}-${valor}`}
+                onClick={() => alternar(campo, valor)}
+                className="border-c1/40 bg-c1/15 text-c1 hover:bg-c1/25 flex items-center gap-1.5 rounded-full border px-3 py-1 font-medium"
+              >
+                <span className="opacity-70">{ETIQUETA_CRUZADO[campo]}</span>
+                {valor}
+                <span aria-hidden className="text-sm leading-none">
+                  ×
+                </span>
+              </button>
             )),
           )}
           <span className="text-muted max-w-md">
-            Todo se filtra por lo elegido, salvo el propio gráfico o tabla de donde salió,
-            que mantiene su lista completa con el resto atenuado.
+            Todo se filtra por lo elegido, salvo el propio gráfico o tabla de
+            donde salió, que mantiene su lista completa con el resto atenuado.
           </span>
         </div>
       )}
@@ -384,10 +468,13 @@ export default function Dashboard() {
       {error && (
         <Aviso>
           <p className="font-medium">No se pudieron leer los datos.</p>
-          <p className="mt-1 font-mono text-xs break-words opacity-80">{error}</p>
+          <p className="mt-1 font-mono text-xs break-words opacity-80">
+            {error}
+          </p>
           <p className="mt-2 text-xs opacity-80">
-            Revisá que <code>DB_HOST</code>, <code>DB_PORT</code>, <code>DB_USER</code>,{" "}
-            <code>DB_PASS</code> y <code>DB_NAME</code> estén cargadas.
+            Revisá que <code>DB_HOST</code>, <code>DB_PORT</code>,{" "}
+            <code>DB_USER</code>, <code>DB_PASS</code> y <code>DB_NAME</code>{" "}
+            estén cargadas.
           </p>
         </Aviso>
       )}
@@ -399,136 +486,167 @@ export default function Dashboard() {
           ))}
         </div>
       ) : k ? (
-        <div
-          className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 ${
-            cargando ? "opacity-50" : ""
-          }`}
-        >
-          <TarjetaKpi
-            titulo="Facturación Neta (sin IVA)"
-            valor={fmtMoneda(k.facturacionNeta)}
-            detalle={
-              contra && comp ? (
-                <Delta actual={k.facturacionNeta} anterior={comp.facturacionNeta} contra={contra} />
-              ) : undefined
-            }
-            acento={PALETA[0]}
-          />
-          <TarjetaKpi
-            titulo="Costo Mercadería"
-            valor={fmtMoneda(k.costoMercaderia)}
-            detalle={
-              contra && comp ? (
-                <Delta
-                  actual={k.costoMercaderia}
-                  anterior={comp.costoMercaderia}
-                  contra={contra}
-                />
-              ) : undefined
-            }
-          />
-          <TarjetaKpi
-            titulo="Unidades"
-            valor={fmtNumero(k.unidades)}
-            detalle={
-              contra && comp ? (
-                <Delta actual={k.unidades} anterior={comp.unidades} contra={contra} />
-              ) : undefined
-            }
-          />
-          <TarjetaKpi
-            titulo="Clientes con Compra"
-            valor={fmtNumero(k.clientesConCompra)}
-            detalle={
-              contra && comp ? (
-                <Delta
-                  actual={k.clientesConCompra}
-                  anterior={comp.clientesConCompra}
-                  contra={contra}
-                />
-              ) : (
-                `${fmtNumero(k.cantidadPedidos)} pedidos`
-              )
-            }
-          />
-          <TarjetaKpi
-            titulo="Margen Ajustado"
-            valor={fmtMoneda(k.margenAjustado)}
-            detalle={
-              contra && comp ? (
-                <Delta actual={k.margenAjustado} anterior={comp.margenAjustado} contra={contra} />
-              ) : (
-                // Con el flete descontado el número baja bastante, así que la
-                // resta va escrita: si no, el primer reflejo es pensar que se
-                // rompió algo.
-                `${fmtMoneda(k.margenTotal)} de margen − ${fmtMoneda(
-                  k.fleteTotalReal + k.fleteEstimadoFiltrado,
-                )} de flete`
-              )
-            }
-            acento={k.margenAjustado >= 0 ? PALETA[1] : "#f43f5e"}
-          />
-          <TarjetaKpi
-            titulo="% Rentabilidad Ajustada"
-            valor={fmtPct(k.rentabilidadAjustadaPct)}
-            detalle={
-              contra &&
-              comp &&
-              comp.rentabilidadAjustadaPct != null &&
-              k.rentabilidadAjustadaPct != null
-                ? // En PUNTOS y no en variación porcentual. Pasar de 10 % a 12 %
-                  // es "+2 pp"; decir "+20 %" es cierto pero se lee como que la
-                  // rentabilidad es del 20.
-                  `${comp.rentabilidadAjustadaPct < k.rentabilidadAjustadaPct ? "▲" : "▼"} ${fmtPuntos(k.rentabilidadAjustadaPct - comp.rentabilidadAjustadaPct)} vs ${fmtPct(comp.rentabilidadAjustadaPct)} ${contra}`
-                : "(Margen − flete) / facturación neta (s/IVA)"
-            }
-            acento={PALETA[1]}
-          />
-          <TarjetaKpi
-            titulo="Ticket Promedio"
-            valor={fmtMoneda(k.ticketPromedio)}
-            detalle={
-              contra && comp && comp.cantidadPedidos > 0 ? (
-                <Delta
-                  actual={k.ticketPromedio ?? 0}
-                  anterior={comp.facturacionNeta / comp.cantidadPedidos}
-                  contra={contra}
-                />
-              ) : (
-                "Facturación / pedidos distintos"
-              )
-            }
-          />
-          <TarjetaKpi
-            titulo="% Facturación Top 10 Clientes"
-            valor={fmtPct(k.pctTop10Clientes)}
-            detalle="Concentración de cartera"
-            acento={PALETA[3]}
-          />
-          <TarjetaKpi
-            titulo="Flete Total (real)"
-            valor={fmtMoneda(k.fleteTotalReal)}
-            detalle="Factura del transportista ya cargada"
-            acento={PALETA[4]}
-          />
-          <TarjetaKpi
-            titulo="Flete Estimado (filtrado)"
-            valor={fmtMoneda(k.fleteEstimadoFiltrado)}
-            detalle="Prorrateo, todavía sin factura real"
-            acento={PALETA[2]}
-          />
-        </div>
+        <ConAlarmaMargen activa={k.margenAjustado < 0}>
+          <div
+            className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 ${
+              cargando ? "opacity-50" : ""
+            }`}
+          >
+            <TarjetaKpi
+              titulo="Facturación Neta (sin IVA)"
+              valor={fmtMoneda(k.facturacionNeta)}
+              detalle={
+                contra && comp ? (
+                  <Delta
+                    actual={k.facturacionNeta}
+                    anterior={comp.facturacionNeta}
+                    contra={contra}
+                  />
+                ) : undefined
+              }
+              acento={PALETA[0]}
+            />
+            <TarjetaKpi
+              titulo="Costo Mercadería"
+              valor={fmtMoneda(k.costoMercaderia)}
+              detalle={
+                contra && comp ? (
+                  <Delta
+                    actual={k.costoMercaderia}
+                    anterior={comp.costoMercaderia}
+                    contra={contra}
+                  />
+                ) : undefined
+              }
+            />
+            <TarjetaKpi
+              titulo="Unidades"
+              valor={fmtNumero(k.unidades)}
+              detalle={
+                contra && comp ? (
+                  <Delta
+                    actual={k.unidades}
+                    anterior={comp.unidades}
+                    contra={contra}
+                  />
+                ) : undefined
+              }
+            />
+            <TarjetaKpi
+              titulo="Clientes con Compra"
+              valor={fmtNumero(k.clientesConCompra)}
+              detalle={
+                contra && comp ? (
+                  <Delta
+                    actual={k.clientesConCompra}
+                    anterior={comp.clientesConCompra}
+                    contra={contra}
+                  />
+                ) : (
+                  `${fmtNumero(k.cantidadPedidos)} pedidos`
+                )
+              }
+            />
+            <TarjetaKpi
+              // El título sigue al modo: llamar "ajustado" a un número que no
+              // descuenta nada sería mentir sobre lo que se está mirando.
+              titulo={conFlete ? "Margen Ajustado" : "Margen Mercadería"}
+              valor={fmtMoneda(k.margenAjustado)}
+              detalle={
+                contra && comp ? (
+                  <Delta
+                    actual={k.margenAjustado}
+                    anterior={comp.margenAjustado}
+                    contra={contra}
+                  />
+                ) : conFlete ? (
+                  // Con el flete descontado el número baja bastante, así que la
+                  // resta va escrita: si no, el primer reflejo es pensar que se
+                  // rompió algo.
+                  `${fmtMoneda(k.margenTotal)} de margen − ${fmtMoneda(
+                    k.fleteTotalReal + k.fleteEstimadoFiltrado,
+                  )} de flete`
+                ) : (
+                  `Sin descontar ${fmtMoneda(
+                    k.fleteTotalReal + k.fleteEstimadoFiltrado,
+                  )} de flete`
+                )
+              }
+              acento={k.margenAjustado >= 0 ? PALETA[1] : "#f43f5e"}
+            />
+            <TarjetaKpi
+              titulo={
+                conFlete ? "% Rentabilidad Ajustada" : "% Rentabilidad s/ flete"
+              }
+              valor={fmtPct(k.rentabilidadAjustadaPct)}
+              detalle={
+                contra &&
+                comp &&
+                comp.rentabilidadAjustadaPct != null &&
+                k.rentabilidadAjustadaPct != null
+                  ? // En PUNTOS y no en variación porcentual. Pasar de 10 % a 12 %
+                    // es "+2 pp"; decir "+20 %" es cierto pero se lee como que la
+                    // rentabilidad es del 20.
+                    `${comp.rentabilidadAjustadaPct < k.rentabilidadAjustadaPct ? "▲" : "▼"} ${fmtPuntos(k.rentabilidadAjustadaPct - comp.rentabilidadAjustadaPct)} vs ${fmtPct(comp.rentabilidadAjustadaPct)} ${contra}`
+                  : conFlete
+                    ? "(Margen − flete) / facturación neta (s/IVA)"
+                    : "Margen de mercadería / facturación neta (s/IVA)"
+              }
+              acento={PALETA[1]}
+            />
+            <TarjetaKpi
+              titulo="Ticket Promedio"
+              valor={fmtMoneda(k.ticketPromedio)}
+              detalle={
+                contra && comp && comp.cantidadPedidos > 0 ? (
+                  <Delta
+                    actual={k.ticketPromedio ?? 0}
+                    anterior={comp.facturacionNeta / comp.cantidadPedidos}
+                    contra={contra}
+                  />
+                ) : (
+                  "Facturación / pedidos distintos"
+                )
+              }
+            />
+            <TarjetaKpi
+              titulo="% Facturación Top 10 Clientes"
+              valor={fmtPct(k.pctTop10Clientes)}
+              detalle="Concentración de cartera"
+              acento={PALETA[3]}
+            />
+            <TarjetaKpi
+              titulo="Flete Total (real)"
+              valor={fmtMoneda(k.fleteTotalReal)}
+              detalle="Factura del transportista ya cargada"
+              acento={PALETA[4]}
+            />
+            <TarjetaKpi
+              titulo="Flete Estimado (filtrado)"
+              valor={fmtMoneda(k.fleteEstimadoFiltrado)}
+              detalle="Prorrateo, todavía sin factura real"
+              acento={PALETA[2]}
+            />
+          </div>
+        </ConAlarmaMargen>
       ) : null}
 
       {data && (
-        <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
+        <div
+          className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
+        >
           <Panel
             titulo="Facturación Neta por Día y Vendedor"
             nota={`${data.serieDiaria.vendedores.length} vendedores`}
           >
             <LineasPorVendedor
               serie={data.serieDiaria}
-              onSeleccionar={(v) => cambiarFiltros({ ...filtros, vendedor: alternarValor(filtros.vendedor, v) })}
+              onSeleccionar={(v) =>
+                cambiarFiltros({
+                  ...filtros,
+                  vendedor: alternarValor(filtros.vendedor, v),
+                })
+              }
             />
           </Panel>
 
@@ -588,8 +706,13 @@ export default function Dashboard() {
                 filas={data.comprobantes}
                 columnas={colComprobantes(data.comprobantes)}
                 clave={(c, i) => `${c.comprobante}-${i}`}
-                onClickFila={(c) => c.comprobante && alternar("comprobante", c.comprobante)}
-                activa={(c) => !!c.comprobante && !!filtros.comprobante?.includes(c.comprobante)}
+                onClickFila={(c) =>
+                  c.comprobante && alternar("comprobante", c.comprobante)
+                }
+                activa={(c) =>
+                  !!c.comprobante &&
+                  !!filtros.comprobante?.includes(c.comprobante)
+                }
               />
             </Panel>
             <Panel

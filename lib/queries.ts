@@ -143,9 +143,17 @@ const FLETE_LINEA = `(coalesce(fvf.flete_prorrateado, 0)
  * término hoy da cero y el "margen ajustado" no ajustaba nada. Queda escrito
  * para cuando se carguen esos datos.
  */
-const MARGEN_AJUSTADO = `sum(fv.margen_total)
+function margenAjustado(conFlete: boolean): string {
+  if (!conFlete) {
+    // Margen de mercadería a secas: precio neto menos el costo con la oferta
+    // del proveedor ya aplicada. `fv.margen_total` ya es eso, porque
+    // `costo_real` sale de `costo_teorico * (1 - oferta del proveedor)`.
+    return `sum(fv.margen_total)`;
+  }
+  return `sum(fv.margen_total)
        - sum(${FLETE_LINEA})
        - sum(fv.costo_unitario * fv.cantidad * coalesce(fpm.pct_flete, 0))`;
+}
 
 // --- 1. Totales + margen ajustado -------------------------------------------
 
@@ -167,7 +175,7 @@ type FilaTotales = {
  * 31 --, asi que compararlo contra el mes anterior COMPLETO da una caida que no
  * existe. Con el corte, el mes anterior se mide tambien hasta su dia 14.
  */
-async function getTotales(f: Filtros, hastaFecha?: string) {
+async function getTotales(f: Filtros, conFlete: boolean, hastaFecha?: string) {
   // `extra` va como texto crudo al SQL (no acepta parámetros), así que la fecha
   // se valida antes de interpolarla. Hoy siempre la calcula el servidor y nunca
   // llega del navegador, pero eso es una propiedad de QUIEN LLAMA, y quien
@@ -181,7 +189,7 @@ async function getTotales(f: Filtros, hastaFecha?: string) {
             coalesce(${pesos("sum(fv.costo_unitario * fv.cantidad)")}, 0) as "costoMercaderia",
             coalesce(sum(fv.cantidad), 0)::float8 as "unidades",
             coalesce(${pesos("sum(fv.margen_total)")}, 0) as "margenTotal",
-            coalesce(${pesos(MARGEN_AJUSTADO)}, 0) as "margenAjustado",
+            coalesce(${pesos(margenAjustado(conFlete))}, 0) as "margenAjustado",
             count(distinct fv.cliente) as "clientesConCompra",
             count(distinct fv.nro_orden) as "cantidadPedidos"
      from gold.fact_ventas fv
@@ -260,12 +268,12 @@ async function getFacturacionPorProveedor(f: Filtros) {
 
 // --- 4. Margen % por proveedor (barras horizontales) -------------------------
 
-async function getMargenPorProveedor(f: Filtros): Promise<MargenProveedor[]> {
+async function getMargenPorProveedor(f: Filtros, conFlete: boolean): Promise<MargenProveedor[]> {
   const w = whereBase(f, ["fv.proveedor is not null"], "fv", ["proveedor"]);
   return query<MargenProveedor>(
     `select fv.proveedor as label,
             case when coalesce(${FACTURACION}, 0) = 0 then null
-                 else ${pesos(MARGEN_AJUSTADO)} / ${FACTURACION}
+                 else ${pesos(margenAjustado(conFlete))} / ${FACTURACION}
             end::float8 as "margenPct",
             coalesce(sum(fv.cantidad), 0)::float8 as unidades
      from gold.fact_ventas fv
@@ -297,14 +305,14 @@ async function getMargenPorProveedor(f: Filtros): Promise<MargenProveedor[]> {
  * -- ahora se ve entero y hay que mirarlo sabiendo que arriba de todo puede
  * haber una venta de $ 3.000.
  */
-async function getRentabilidadPorCliente(f: Filtros): Promise<RentabilidadCliente[]> {
+async function getRentabilidadPorCliente(f: Filtros, conFlete: boolean): Promise<RentabilidadCliente[]> {
   const w = whereBase(f, ["fv.cliente is not null"], "fv", ["cliente"]);
   return query<RentabilidadCliente>(
     `with por_cliente as (
        select fv.cliente as label,
               coalesce(${FACTURACION}, 0) as facturacion,
               case when coalesce(${FACTURACION}, 0) = 0 then null
-                   else ${pesos(MARGEN_AJUSTADO)} / ${FACTURACION}
+                   else ${pesos(margenAjustado(conFlete))} / ${FACTURACION}
               end::float8 as valor
        from gold.fact_ventas fv
        left join gold.fletes_proveedores_pct_mensual fpm
@@ -322,7 +330,7 @@ async function getRentabilidadPorCliente(f: Filtros): Promise<RentabilidadClient
 
 // --- Tabla "Articulos incluídos" ---------------------------------------------
 
-async function getArticulos(f: Filtros): Promise<FilaArticulo[]> {
+async function getArticulos(f: Filtros, conFlete: boolean): Promise<FilaArticulo[]> {
   const w = whereBase(f, [], "fv", ["sku"]);
   return query<FilaArticulo>(
     `select fv.sku,
@@ -350,7 +358,7 @@ async function getArticulos(f: Filtros): Promise<FilaArticulo[]> {
             end::float8 as "costoPromedio",
             coalesce(${FACTURACION}, 0) as facturacion,
             case when coalesce(${FACTURACION}, 0) = 0 then null
-                 else ${pesos(MARGEN_AJUSTADO)} / ${FACTURACION}
+                 else ${pesos(margenAjustado(conFlete))} / ${FACTURACION}
             end::float8 as "rentabilidadPct"
      from gold.fact_ventas fv
      left join gold.fletes_proveedores_pct_mensual fpm
@@ -530,8 +538,19 @@ function mesDeComparacion(f: Filtros): { mes: string; hasta: string | null } | n
   return { mes: anterior, hasta: corte.toISOString().slice(0, 10) };
 }
 
+/**
+ * @param conFlete  Si el margen descuenta el flete. Es un MODO DE CÁLCULO y no
+ *   un filtro: no recorta filas, cambia la fórmula. Por eso viaja aparte de
+ *   `Filtros` y no entra en `CLAVES_FILTRO`.
+ *
+ *   Con flete (por defecto) es el margen ajustado de siempre. Sin flete queda
+ *   el margen de mercadería solo: precio neto menos costo con la oferta del
+ *   proveedor. Sirve para separar "vendemos barato" de "el envío se come el
+ *   margen", que son dos problemas con dos soluciones distintas.
+ */
 export async function getDashboardVentasMayoristas(
   f: Filtros,
+  conFlete = true,
 ): Promise<DashboardVentasMayoristas> {
   const comparar = mesDeComparacion(f);
 
@@ -547,23 +566,24 @@ export async function getDashboardVentasMayoristas(
     comprobantes,
     totalesAnterior,
   ] = await Promise.all([
-    getTotales(f),
+    getTotales(f, conFlete),
     getTop10Clientes(f),
     getFacturacionPorProveedor(f),
-    getMargenPorProveedor(f),
+    getMargenPorProveedor(f, conFlete),
     getSerieDiaria(f),
     getFletes(f),
-    getRentabilidadPorCliente(f),
-    getArticulos(f),
+    getRentabilidadPorCliente(f, conFlete),
+    getArticulos(f, conFlete),
     getComprobantesVenta(f),
     // El mes anterior mantiene TODOS los otros filtros: comparar "agosto de
     // ALGABO" contra "julio de todo" no diría nada.
     comparar
-      ? getTotales({ ...f, mes: [comparar.mes] }, comparar.hasta ?? undefined)
+      ? getTotales({ ...f, mes: [comparar.mes] }, conFlete, comparar.hasta ?? undefined)
       : Promise.resolve(null),
   ]);
 
   return {
+    conFlete,
     facturacionPorProveedor: facturacionPorProveedor.datos,
     facturacionTotalProveedores: facturacionPorProveedor.total,
     kpis: {

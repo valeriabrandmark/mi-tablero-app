@@ -119,3 +119,25 @@ export function codigoSigmaDe(vendedor: string): string | null {
   const clave = VENDEDORES_OBJETIVOS.find((v) => v === vendedor);
   return clave ? CODIGO_SIGMA[clave] : null;
 }
+
+/**
+ * Nombre de cada empresa de SIGMA.
+ *
+ * Las tablas de cuentas corrientes guardan el CÓDIGO ('0001'), mientras que
+ * `gold.fact_ventas` ya trae el nombre resuelto desde `modelo.py`. Sin este
+ * mapeo el filtro de Cuentas Corrientes mostraba cuatro números sin nombre.
+ *
+ * La grafía es la misma que usa `gold.fact_ventas`, para que la misma empresa
+ * se lea igual en todos los tableros.
+ */
+export const EMPRESAS: Record<string, string> = {
+  "0001": "Quo Marketing SRL",
+  "0002": "Noa Comercial SRL",
+  "0003": "Presupuesto QUO",
+  "0004": "Presupuesto Noa",
+};
+
+/** `'0001'` -> `'Quo Marketing SRL'`. Devuelve el código si no está mapeado. */
+export function nombreEmpresa(codigo: string): string {
+  return EMPRESAS[codigo] ?? codigo;
+}

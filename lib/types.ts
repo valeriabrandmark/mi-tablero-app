@@ -151,6 +151,10 @@ export type FilaComprobante = {
   facturacion: number;
   flete: number;
   pctFlete: number | null;
+  /** Renglones con la factura del transportista ya cargada. */
+  lineasReales: string;
+  /** Renglones del comprobante. Si no coincide con `lineasReales`, hay mezcla. */
+  lineasTotales: string;
 };
 
 export type OpcionesLogistica = {
@@ -236,6 +240,8 @@ export type ComparacionMayorista = {
 };
 
 export type DashboardVentasMayoristas = {
+  /** En qué modo se calculó el margen de esta respuesta. */
+  conFlete: boolean;
   kpis: Kpis;
   facturacionPorProveedor: PuntoProveedor[];
   /** Denominador de la torta: total de TODOS los proveedores, sin el filtro cruzado. */
@@ -280,7 +286,13 @@ export type FiltrosObjetivos = {
 export type ResumenMetrica = {
   metrica: Metrica;
   objetivo: number;
+  /** Todo lo vendido, excedentes incluidos. */
   vendido: number;
+  /**
+   * Lo vendido que cuenta para el objetivo: cada grupo topeado en su meta.
+   * Es el numerador de `avancePct` — pasarse en un grupo no compensa otro.
+   */
+  vendidoComputable: number;
   /** Fracción (0.13 = 13 %). Null si el objetivo del recorte es 0. */
   avancePct: number | null;
   /** Cuántos pares vendedor×grupo llegaron al objetivo, sobre el total. */

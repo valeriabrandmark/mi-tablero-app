@@ -26,6 +26,7 @@ export function SelectorFiltro({
   onChange,
   formato,
   todos = "Todos",
+  conTodos = true,
 }: {
   etiqueta: string;
   valor: string | undefined;
@@ -33,6 +34,14 @@ export function SelectorFiltro({
   onChange: (v: string | undefined) => void;
   formato?: (v: string) => string;
   todos?: string;
+  /**
+   * Si la lista ya cubre todos los casos, no va la opción vacía.
+   *
+   * El modo de flete de Logística tiene su propio "Sin flete" en la lista, y
+   * con la opción vacía encima el desplegable mostraba "Sin flete" DOS VECES,
+   * las dos haciendo lo mismo.
+   */
+  conTodos?: boolean;
 }) {
   const pares = aPares(opciones, formato);
 
@@ -45,7 +54,7 @@ export function SelectorFiltro({
         onChange={(e) => onChange(e.target.value || undefined)}
         disabled={pares.length === 0}
       >
-        <option value="">{todos}</option>
+        {conTodos && <option value="">{todos}</option>}
         {pares.map(([v, txt]) => (
           <option key={v} value={v}>
             {txt}
