@@ -96,69 +96,112 @@ function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
 /**
  * Cómo se arma el estado de cada cliente.
  *
- * No es una escala de un solo eje: cruza CUÁNTO del saldo está vencido con
- * CUÁNTO HACE que está vencida la factura más vieja. Por eso los rangos de
- * atraso se pisan entre estados — un cliente con 3 días de atraso puede ser
- * RIESGOSO si tiene el 70 % del saldo vencido, y uno con 40 días puede ser
- * BUENO si solo debe el 10 %.
+ * La regla la calcula el Apps Script de Cuentas Corrientes al escribir
+ * `bronze.cuentas_corrientes_scoring`; acá solo se explica. Si allá cambia el
+ * criterio, esto queda mintiendo — ya pasó una vez.
  *
- * Va como grilla y no como lista porque la lista no deja ver eso: son dos ejes
- * y el estado sale del cruce.
+ * Son DOS pasos y después una grilla, y ese orden importa: la tolerancia de 15
+ * días se evalúa ANTES que la exposición, así que un cliente con pocos días de
+ * atraso queda "al día" aunque deba el 100 % del saldo.
  *
- * Verificado contra los 122 clientes cargados: 118 caen exactamente donde dice
- * la grilla. Los otros 4 tienen saldo vencido NEGATIVO (pagaron de más, o una
- * nota de crédito) pero facturas vencidas igual, y quedan afuera de "al día"
- * — que se cuenta por cantidad de facturas, no por importe.
+ * Ojo con los dos nombres, que se leen al revés de lo que parece: BUENO es el
+ * mejor estado (no debe nada vencido) y AL DÍA es el que SÍ debe, pero dentro
+ * de la tolerancia.
+ *
+ * Verificado contra los 122 clientes cargados: coinciden los 122.
  */
-const COLUMNAS_LEYENDA = ["Hasta 30 %", "30 % – 60 %", "Más de 60 %"] as const;
+const PASOS_LEYENDA: {
+  pregunta: string;
+  detalle: string;
+  estado: string;
+  tono: keyof typeof TONO_ESTADO;
+}[] = [
+  {
+    pregunta: "¿Sin facturas vencidas?",
+    detalle: "no debe nada atrasado",
+    estado: "Bueno",
+    tono: "bueno",
+  },
+  {
+    pregunta: "¿Atraso de 15 días o menos?",
+    detalle: "tolerancia interna",
+    estado: "Al día",
+    tono: "aldia",
+  },
+];
+
+const COLUMNAS_LEYENDA = ["Exposición ≤ 60 %", "Exposición > 60 %"] as const;
 
 const FILAS_LEYENDA: {
   atraso: string;
   estados: [string, keyof typeof TONO_ESTADO][];
 }[] = [
   {
-    atraso: "Atraso > 45 días",
+    atraso: "Atraso 16 a 30 días",
     estados: [
       ["Observación", "observacion"],
       ["Riesgoso", "riesgoso"],
-      ["Crítico", "critico"],
     ],
   },
   {
-    atraso: "Atraso ≤ 45 días",
+    atraso: "Atraso de más de 30 días",
     estados: [
-      ["Bueno", "bueno"],
-      ["Observación", "observacion"],
       ["Riesgoso", "riesgoso"],
+      ["Crítico", "critico"],
     ],
   },
 ];
 
 const TONO_ESTADO = {
   bueno: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  aldia: "border-sky-500/40 bg-sky-500/10 text-sky-300",
   observacion: "border-amber-500/40 bg-amber-500/10 text-amber-300",
   riesgoso: "border-rose-500/30 bg-rose-500/10 text-rose-300",
   critico: "border-rose-500/60 bg-rose-500/20 text-rose-200",
-  aldia: "border-sky-500/40 bg-sky-500/10 text-sky-300",
 } as const;
 
 function LeyendaEstados() {
   return (
     <div className="border-line mt-4 border-t pt-4">
       <p className="text-muted mb-3 text-[11px] leading-tight">
-        El estado sale de cruzar <strong>cuánto</strong> del saldo está vencido
-        con <strong>hace cuánto</strong> venció la factura más vieja. Por eso un
-        cliente con pocos días de atraso puede ser riesgoso, y uno con muchos
-        días puede estar bueno.
+        Se pregunta en este orden. Los dos primeros cortan solos; recién si el
+        cliente no entra en ninguno pesa <strong>cuánto</strong> del saldo tiene
+        vencido.
+      </p>
+
+      <div className="mb-3 flex flex-col gap-1.5">
+        {PASOS_LEYENDA.map((paso, i) => (
+          <div
+            key={paso.estado}
+            className="flex items-center gap-2 text-[11px]"
+          >
+            <span className="text-muted w-4 shrink-0 tabular-nums">
+              {i + 1}.
+            </span>
+            <span className="flex-1">
+              {paso.pregunta}{" "}
+              <span className="text-muted">— {paso.detalle}</span>
+            </span>
+            <span className="text-muted shrink-0">→</span>
+            <span
+              className={`w-28 shrink-0 rounded-lg border px-2 py-1 text-center font-medium ${TONO_ESTADO[paso.tono]}`}
+            >
+              {paso.estado}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <p className="text-muted mb-2 text-[11px] leading-tight">
+        Si el atraso pasa los 15 días, el estado sale de cruzar la antigüedad
+        con la exposición:
       </p>
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] border-separate border-spacing-1 text-[11px]">
+        <table className="w-full min-w-[440px] border-separate border-spacing-1 text-[11px]">
           <thead>
             <tr>
-              <th className="text-muted w-32 text-left font-normal">
-                % del saldo vencido →
-              </th>
+              <th className="w-40" />
               {COLUMNAS_LEYENDA.map((c) => (
                 <th key={c} className="text-muted text-center font-normal">
                   {c}
@@ -183,21 +226,16 @@ function LeyendaEstados() {
                 ))}
               </tr>
             ))}
-            <tr>
-              <td colSpan={4} className="p-0 pt-1">
-                <div
-                  className={`rounded-lg border px-2 py-2 text-center ${TONO_ESTADO.aldia}`}
-                >
-                  <span className="font-medium">Al día</span>
-                  <span className="ml-2 opacity-80">
-                    sin facturas vencidas — no entra en la grilla
-                  </span>
-                </div>
-              </td>
-            </tr>
           </tbody>
         </table>
       </div>
+
+      <p className="text-muted mt-3 text-[11px] leading-tight">
+        La <strong>exposición</strong> es qué parte del saldo del cliente está
+        vencida. Y ojo con los nombres: <strong>Bueno</strong> es el mejor
+        estado — no debe nada vencido —, mientras que <strong>Al día</strong> sí
+        debe, pero dentro de los 15 días de tolerancia.
+      </p>
     </div>
   );
 }
