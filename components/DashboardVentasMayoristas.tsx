@@ -550,7 +550,9 @@ export default function Dashboard() {
             <TarjetaKpi
               // El título sigue al modo: llamar "ajustado" a un número que no
               // descuenta nada sería mentir sobre lo que se está mirando.
-              titulo={conFlete ? "Margen Ajustado" : "Margen Mercadería"}
+              titulo={
+                conFlete ? "Margen Ajustado" : "Margen sin considerar flete"
+              }
               valor={fmtMoneda(k.margenAjustado)}
               detalle={
                 contra && comp ? (

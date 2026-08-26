@@ -168,12 +168,6 @@ export default function DashboardObjetivosPage({
           formato={fmtMes}
           todos="Todos los meses"
         />
-        <SelectorMultiple
-          etiqueta="Grupo"
-          valores={filtros.grupo}
-          opciones={opciones?.grupos ?? []}
-          onChange={(v) => cambiar({ ...filtros, grupo: v })}
-        />
         <BotonLimpiar
           onClick={() => cambiar({ vendedor, mes: [mesInicial] })}
           deshabilitado={sinCambios}

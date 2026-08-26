@@ -284,6 +284,32 @@ export default function DashboardCuentasPage() {
         </button>
       </div>
 
+      {/* Va arriba de todo y no como nota al pie de un panel a propósito: la
+          hora que muestra el encabezado es la de ESTA consulta, no la de los
+          datos. Sin esta aclaración se lee que la deuda está al minuto, y no
+          lo está — la planilla de cuentas corrientes se refresca una vez por
+          día, y adentro de ese día lo que manda es cuándo se asentó cada
+          cobranza. */}
+      <div className="border-line bg-panel-2 text-muted flex items-start gap-2 rounded-xl border p-3 text-xs leading-tight">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          className="mt-px size-4 shrink-0"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 8h.01M11 12h1v4h1" />
+        </svg>
+        <span>
+          El estado de los datos depende de cuándo se hayan asentado las
+          cobranzas. La información se actualiza{" "}
+          <strong>una vez al día, a primera hora</strong>.
+        </span>
+      </div>
+
       <div className="border-line bg-panel flex flex-wrap items-end gap-3 rounded-xl border p-3">
         <SelectorMultiple
           etiqueta="Vendedor"
