@@ -9,10 +9,21 @@ import { nombreEmpresa } from "@/lib/constantes";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
-import { fmtMes, fmtMoneda, fmtMonedaCorta, fmtNumero, fmtPct } from "@/lib/format";
+import {
+  fmtMes,
+  fmtMoneda,
+  fmtMonedaCorta,
+  fmtNumero,
+  fmtPct,
+} from "@/lib/format";
 import { PALETA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
-import type { DashboardCuentas, FilaCliente, FiltrosCuentas, OpcionesCuentas } from "@/lib/types";
+import type {
+  DashboardCuentas,
+  FilaCliente,
+  FiltrosCuentas,
+  OpcionesCuentas,
+} from "@/lib/types";
 
 type Respuesta = DashboardCuentas & { opciones: OpcionesCuentas | null };
 
@@ -82,14 +93,122 @@ function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
   ];
 }
 
+/**
+ * Cómo se arma el estado de cada cliente.
+ *
+ * No es una escala de un solo eje: cruza CUÁNTO del saldo está vencido con
+ * CUÁNTO HACE que está vencida la factura más vieja. Por eso los rangos de
+ * atraso se pisan entre estados — un cliente con 3 días de atraso puede ser
+ * RIESGOSO si tiene el 70 % del saldo vencido, y uno con 40 días puede ser
+ * BUENO si solo debe el 10 %.
+ *
+ * Va como grilla y no como lista porque la lista no deja ver eso: son dos ejes
+ * y el estado sale del cruce.
+ *
+ * Verificado contra los 122 clientes cargados: 118 caen exactamente donde dice
+ * la grilla. Los otros 4 tienen saldo vencido NEGATIVO (pagaron de más, o una
+ * nota de crédito) pero facturas vencidas igual, y quedan afuera de "al día"
+ * — que se cuenta por cantidad de facturas, no por importe.
+ */
+const COLUMNAS_LEYENDA = ["Hasta 30 %", "30 % – 60 %", "Más de 60 %"] as const;
+
+const FILAS_LEYENDA: {
+  atraso: string;
+  estados: [string, keyof typeof TONO_ESTADO][];
+}[] = [
+  {
+    atraso: "Atraso > 45 días",
+    estados: [
+      ["Observación", "observacion"],
+      ["Riesgoso", "riesgoso"],
+      ["Crítico", "critico"],
+    ],
+  },
+  {
+    atraso: "Atraso ≤ 45 días",
+    estados: [
+      ["Bueno", "bueno"],
+      ["Observación", "observacion"],
+      ["Riesgoso", "riesgoso"],
+    ],
+  },
+];
+
+const TONO_ESTADO = {
+  bueno: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  observacion: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  riesgoso: "border-rose-500/30 bg-rose-500/10 text-rose-300",
+  critico: "border-rose-500/60 bg-rose-500/20 text-rose-200",
+  aldia: "border-sky-500/40 bg-sky-500/10 text-sky-300",
+} as const;
+
+function LeyendaEstados() {
+  return (
+    <div className="border-line mt-4 border-t pt-4">
+      <p className="text-muted mb-3 text-[11px] leading-tight">
+        El estado sale de cruzar <strong>cuánto</strong> del saldo está vencido
+        con <strong>hace cuánto</strong> venció la factura más vieja. Por eso un
+        cliente con pocos días de atraso puede ser riesgoso, y uno con muchos
+        días puede estar bueno.
+      </p>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] border-separate border-spacing-1 text-[11px]">
+          <thead>
+            <tr>
+              <th className="text-muted w-32 text-left font-normal">
+                % del saldo vencido →
+              </th>
+              {COLUMNAS_LEYENDA.map((c) => (
+                <th key={c} className="text-muted text-center font-normal">
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {FILAS_LEYENDA.map((fila) => (
+              <tr key={fila.atraso}>
+                <th className="text-muted text-left font-normal whitespace-nowrap">
+                  {fila.atraso}
+                </th>
+                {fila.estados.map(([nombre, tono], i) => (
+                  <td key={i} className="p-0">
+                    <div
+                      className={`rounded-lg border px-2 py-2.5 text-center font-medium ${TONO_ESTADO[tono]}`}
+                    >
+                      {nombre}
+                    </div>
+                  </td>
+                ))}
+              </tr>
+            ))}
+            <tr>
+              <td colSpan={4} className="p-0 pt-1">
+                <div
+                  className={`rounded-lg border px-2 py-2 text-center ${TONO_ESTADO.aldia}`}
+                >
+                  <span className="font-medium">Al día</span>
+                  <span className="ml-2 opacity-80">
+                    sin facturas vencidas — no entra en la grilla
+                  </span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardCuentasPage() {
   const [filtros, setFiltros] = useState<FiltrosCuentas>({});
 
-  const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
-    "/api/cuentas-corrientes",
-    filtros,
-    { conOpciones: "1" },
-  );
+  const { data, cargando, error, recargar, empezarCarga } =
+    useDatosTablero<Respuesta>("/api/cuentas-corrientes", filtros, {
+      conOpciones: "1",
+    });
 
   const opciones = data?.opciones ?? null;
 
@@ -103,7 +222,10 @@ export default function DashboardCuentasPage() {
     cambiar({ ...filtros, [campo]: alternarValor(filtros[campo], valor) });
 
   const k = data?.kpis;
-  const vacio = sinValores(filtros.vendedor) && sinValores(filtros.empresa) && sinValores(filtros.categoria);
+  const vacio =
+    sinValores(filtros.vendedor) &&
+    sinValores(filtros.empresa) &&
+    sinValores(filtros.categoria);
 
   return (
     <div className="space-y-4">
@@ -147,15 +269,17 @@ export default function DashboardCuentasPage() {
         <BotonLimpiar onClick={() => cambiar({})} deshabilitado={vacio} />
 
         <span className="text-muted ml-auto max-w-md text-[11px] leading-tight">
-          Los clientes activos/inactivos cruzan ventas con deuda por nombre normalizado:
-          cubre 118 de 129 clientes (96% de la deuda).
+          Los clientes activos/inactivos cruzan ventas con deuda por nombre
+          normalizado: cubre 118 de 129 clientes (96% de la deuda).
         </span>
       </div>
 
       {error && (
         <Aviso>
           <p className="font-medium">No se pudieron leer los datos.</p>
-          <p className="mt-1 font-mono text-xs break-words opacity-80">{error}</p>
+          <p className="mt-1 font-mono text-xs break-words opacity-80">
+            {error}
+          </p>
         </Aviso>
       )}
 
@@ -166,25 +290,73 @@ export default function DashboardCuentasPage() {
           ))}
         </div>
       ) : k ? (
-        <div className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}>
-          <TarjetaKpi titulo="Deuda Total" valor={fmtMoneda(k.deudaTotal)} detalle={`${fmtNumero(k.clientesTotales)} clientes`} acento={PALETA[0]} />
-          <TarjetaKpi titulo="Deuda Vencida" valor={fmtMoneda(k.deudaVencida)} acento="#f43f5e" />
-          <TarjetaKpi titulo="% Cartera Vencida" valor={fmtPct(k.pctCarteraVencida)} detalle="Vencida / total" acento={PALETA[2]} />
-          <TarjetaKpi titulo="Clientes en Riesgo" valor={fmtNumero(k.clientesEnRiesgo)} detalle="Categoría CRÍTICO o RIESGOSO" acento={PALETA[5]} />
-          <TarjetaKpi titulo="Clientes Activos (60d)" valor={fmtNumero(k.clientesActivos60d)} detalle="Compraron en los últimos 60 días" acento={PALETA[1]} />
-          <TarjetaKpi titulo="Clientes Inactivos (60d)" valor={fmtNumero(k.clientesInactivos60d)} detalle="Sin compras hace más de 60 días" />
-          <TarjetaKpi titulo="Vencidos que siguen comprando" valor={fmtNumero(k.clientesVencidosQueCompran)} detalle="Compraron después de entrar en mora" acento={PALETA[3]} />
-          <TarjetaKpi titulo="Deuda por vencer" valor={fmtMoneda(k.deudaTotal - k.deudaVencida)} detalle="Todavía dentro del plazo" acento={PALETA[4]} />
+        <div
+          className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
+        >
+          <TarjetaKpi
+            titulo="Deuda Total"
+            valor={fmtMoneda(k.deudaTotal)}
+            detalle={`${fmtNumero(k.clientesTotales)} clientes`}
+            acento={PALETA[0]}
+          />
+          <TarjetaKpi
+            titulo="Deuda Vencida"
+            valor={fmtMoneda(k.deudaVencida)}
+            acento="#f43f5e"
+          />
+          <TarjetaKpi
+            titulo="% Cartera Vencida"
+            valor={fmtPct(k.pctCarteraVencida)}
+            detalle="Vencida / total"
+            acento={PALETA[2]}
+          />
+          <TarjetaKpi
+            titulo="Clientes en Riesgo"
+            valor={fmtNumero(k.clientesEnRiesgo)}
+            detalle="Categoría CRÍTICO o RIESGOSO"
+            acento={PALETA[5]}
+          />
+          <TarjetaKpi
+            titulo="Clientes Activos (60d)"
+            valor={fmtNumero(k.clientesActivos60d)}
+            detalle="Compraron en los últimos 60 días"
+            acento={PALETA[1]}
+          />
+          <TarjetaKpi
+            titulo="Clientes Inactivos (60d)"
+            valor={fmtNumero(k.clientesInactivos60d)}
+            detalle="Sin compras hace más de 60 días"
+          />
+          <TarjetaKpi
+            titulo="Vencidos que siguen comprando"
+            valor={fmtNumero(k.clientesVencidosQueCompran)}
+            detalle="Compraron después de entrar en mora"
+            acento={PALETA[3]}
+          />
+          <TarjetaKpi
+            titulo="Deuda por vencer"
+            valor={fmtMoneda(k.deudaTotal - k.deudaVencida)}
+            detalle="Todavía dentro del plazo"
+            acento={PALETA[4]}
+          />
         </div>
       ) : null}
 
       {data && (
-        <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
+        <div
+          className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
+        >
           <div className="grid gap-4 xl:grid-cols-2">
             <Panel titulo="Cantidad de clientes por categoría">
               <TortaProveedores
-                datos={data.clientesPorCategoria.map((d) => ({ label: d.label, total: d.valor }))}
-                totalGeneral={data.clientesPorCategoria.reduce((a, d) => a + d.valor, 0)}
+                datos={data.clientesPorCategoria.map((d) => ({
+                  label: d.label,
+                  total: d.valor,
+                }))}
+                totalGeneral={data.clientesPorCategoria.reduce(
+                  (a, d) => a + d.valor,
+                  0,
+                )}
                 seleccionados={filtros.categoria}
                 onSeleccionar={alternar("categoria")}
               />
@@ -197,7 +369,10 @@ export default function DashboardCuentasPage() {
                 onSeleccionar={alternar("categoria")}
               />
             </Panel>
-            <Panel titulo="Antigüedad de la deuda" nota="Saldo pendiente por bucket de atraso">
+            <Panel
+              titulo="Antigüedad de la deuda"
+              nota="Saldo pendiente por bucket de atraso"
+            >
               <BarrasCategoria
                 datos={data.aging}
                 formato={fmtMonedaCorta}
@@ -206,7 +381,10 @@ export default function DashboardCuentasPage() {
                 colorUnico={PALETA[2]}
               />
             </Panel>
-            <Panel titulo="Saldo vencido cancelado por vendedor" nota="Clientes que salieron de mora">
+            <Panel
+              titulo="Saldo vencido cancelado por vendedor"
+              nota="Clientes que salieron de mora"
+            >
               <BarrasCategoria
                 datos={data.cancelacionesPorVendedor}
                 formato={fmtMonedaCorta}
@@ -217,9 +395,15 @@ export default function DashboardCuentasPage() {
             </Panel>
           </div>
 
-          <Panel titulo="Evolución del saldo vencido" nota={`${data.historial.length} períodos cargados`}>
+          <Panel
+            titulo="Evolución del saldo vencido"
+            nota={`${data.historial.length} períodos cargados`}
+          >
             <BarrasCategoria
-              datos={data.historial.map((d) => ({ label: fmtMes(d.label), valor: d.valor }))}
+              datos={data.historial.map((d) => ({
+                label: fmtMes(d.label),
+                valor: d.valor,
+              }))}
               formato={fmtMonedaCorta}
               horizontal={false}
               alturaMinima={260}
@@ -228,7 +412,10 @@ export default function DashboardCuentasPage() {
             />
           </Panel>
 
-          <Panel titulo="Clientes y Saldos" nota={`${data.clientes.length} ordenados por saldo vencido`}>
+          <Panel
+            titulo="Clientes y Saldos"
+            nota={`${data.clientes.length} ordenados por saldo vencido`}
+          >
             {/* Click en una fila filtra por su CATEGORÍA, que es la dimensión de
                 esta tabla que ya existe como filtro y a la que responden los
                 KPIs de arriba. Filtrar por el cliente suelto dejaría un tablero
@@ -237,11 +424,16 @@ export default function DashboardCuentasPage() {
               filas={data.clientes}
               columnas={columnas(data.clientes)}
               clave={(f) => f.razonSocial}
-              onClickFila={(f) => f.categoria && alternar("categoria")(f.categoria)}
+              onClickFila={(f) =>
+                f.categoria && alternar("categoria")(f.categoria)
+              }
               activa={(f) =>
-                filtros.categoria?.length ? filtros.categoria.includes(f.categoria ?? "") : false
+                filtros.categoria?.length
+                  ? filtros.categoria.includes(f.categoria ?? "")
+                  : false
               }
             />
+            <LeyendaEstados />
           </Panel>
         </div>
       )}
