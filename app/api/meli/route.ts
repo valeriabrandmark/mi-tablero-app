@@ -65,6 +65,9 @@ export async function GET(request: NextRequest) {
     marca: lista(sp, "marca"),
     sku: lista(sp, "sku"),
     alerta: alerta && alerta.length > 0 ? alerta : undefined,
+    // Se recorta a 80 caracteres: mas que eso no es una busqueda, y el termino
+    // entra en un `like` que conviene mantener corto.
+    buscar: (sp.get("buscar") ?? "").trim().slice(0, 80) || undefined,
   };
 
   try {

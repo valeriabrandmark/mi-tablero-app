@@ -463,7 +463,8 @@ export default function DashboardMeliPage({
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
     sinValores(filtros.sku) &&
-    sinValores(filtros.hora);
+    sinValores(filtros.hora) &&
+    !filtros.buscar;
 
   /** Texto del período anterior para las tarjetas, o null si no hay con qué comparar. */
   // Si el período anterior se midió hasta una hora, la etiqueta LO DICE. Un
