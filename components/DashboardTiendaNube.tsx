@@ -25,6 +25,7 @@ import { PALETA, TEMA } from "@/lib/paleta";
 import {
   CARGA_IMPOSITIVA,
   CRITERIO_VENTA,
+  medioDePago,
   mesComercialComoRango,
 } from "@/lib/tiendanube";
 import { useDatosTablero } from "@/lib/useDatosTablero";
@@ -142,6 +143,27 @@ function columnasPedidos(
       numerica: true,
       orden: (p) => p.envio,
       total: fmtMoneda(sumar(filas, (p) => p.envio)),
+    },
+    {
+      titulo: "Comisión",
+      // Al lado del monto va DE QUIÉN es, igual que el cupón al lado del
+      // descuento: la comisión no viene de la API, se calcula con el arancel de
+      // esa pasarela y ese medio, y sin verlos el número no se puede auditar.
+      // Dos pedidos del mismo importe pagan distinto según cómo se cobraron.
+      celda: (p) => {
+        const medio = medioDePago(p.pasarela, p.metodoPago);
+        return (
+          <span title={medio ?? undefined}>
+            {fmtMoneda(p.comision)}
+            {medio && (
+              <span className="text-muted ml-1 text-[10px]">{medio}</span>
+            )}
+          </span>
+        );
+      },
+      numerica: true,
+      orden: (p) => p.comision,
+      total: fmtMoneda(sumar(filas, (p) => p.comision)),
     },
     {
       titulo: "Rent. bruta",
@@ -827,15 +849,15 @@ export default function DashboardTiendaNubePage({
               equivocado, y quien lo mire no tiene por qué saberlo. */}
           <p className="text-muted mt-3 text-[11px] leading-relaxed">
             Rentabilidad bruta = venta s/IVA − costo (ya con descuento de
-            proveedor) − envío a cargo nuestro. Rentabilidad neta = bruta −{" "}
-            {fmtPct(CARGA_IMPOSITIVA)} de impuestos sobre la venta s/IVA.{" "}
+            proveedor) − envío a cargo nuestro − comisión de la pasarela.
+            Rentabilidad neta = bruta − {fmtPct(CARGA_IMPOSITIVA)} de impuestos
+            sobre la venta s/IVA.{" "}
             <strong>
-              No se descuenta la comisión de la pasarela de pago: Tienda Nube no
-              la informa en ningún campo de su API
+              La comisión no viene en la API: se calcula con el arancel de cada
+              pasarela y medio de pago, tomado del panel de la tienda
             </strong>
-            , así que el margen de este canal está algo sobreestimado. En
-            Mercado Libre sí se descuenta, y por eso los dos no son
-            estrictamente comparables.
+            . Las tasas van con IVA incluido. El débito se cobra como crédito
+            porque la API manda el mismo valor para los dos.
           </p>
         </div>
       )}

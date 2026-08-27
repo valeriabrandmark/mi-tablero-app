@@ -16,11 +16,15 @@
  *
  * Se diferencia en tres cosas, y las tres se ven en pantalla:
  *
- * 1. NO HAY COMISIÓN. Lo que cobra la pasarela de pago (Pago Nube, Mercado
- *    Pago) por procesar el cobro no viene en ningún campo de la API de Tienda
- *    Nube, así que `comision` queda en 0. NO se inventa un porcentaje: el
- *    margen de este canal está por eso algo sobreestimado, y el tablero lo dice
- *    en vez de dar un número lindo y falso.
+ * 1. LA COMISIÓN SE CALCULA, NO VIENE. Tienda Nube no informa en el pedido lo
+ *    que cobra la pasarela: no hay campo con el monto ni con el neto
+ *    liquidado. Pero sí manda QUÉ pasarela y con QUÉ medio se pagó, y con eso
+ *    `modelo.py` la resuelve contra `bronze.comisiones_pasarela`, que tiene los
+ *    aranceles reales del panel de la tienda. No es un porcentaje inventado.
+ *
+ *    Se cobra sobre lo que el cliente pagó de verdad (`total`), no sobre el
+ *    valor de la mercadería: a la pasarela le da igual si esa plata era
+ *    producto o flete.
  *
  * 2. EL ENVÍO ES EL QUE PAGA LA TIENDA. Tienda Nube informa dos costos de envío
  *    distintos: `shipping_cost_customer` (lo que paga el comprador, que es
@@ -75,3 +79,44 @@ export const DENOMINADOR = "venta c/IVA";
 export const CRITERIO_VENTA =
   "Cuenta como venta el pedido pagado y no cancelado. No se usa el estado del " +
   "pedido porque en Tienda Nube las ventas no pasan solas a cerrada.";
+
+/**
+ * Nombre legible de la pasarela y del medio de pago.
+ *
+ * Los dos valores se guardan CRUDOS, tal como los manda la API, y se traducen
+ * acá y no en el orquestador: así un medio nuevo entra a la base sin migración
+ * y, mientras nadie lo agregue a esta tabla, se muestra tal cual en vez de
+ * desaparecer. Por eso el fallback devuelve el valor crudo y no un "otro".
+ *
+ * `free` es la pasarela de los pedidos que no pasaron por ninguna —el sorteo
+ * con cupón del 100 %, una transferencia acordada aparte—: no cobra nada, y la
+ * comisión en $ 0 de esa fila es correcta, no un dato que falta.
+ */
+const PASARELAS: Record<string, string> = {
+  "pago-nube": "Pago Nube",
+  nave: "Nave",
+  free: "Sin pasarela",
+};
+
+const MEDIOS: Record<string, string> = {
+  credit_card: "tarjeta",
+  debit_card: "débito",
+  wallet: "billetera",
+  wire_transfer: "transferencia",
+  ticket: "efectivo",
+  redirect: "MODO",
+};
+
+/**
+ * `"Pago Nube · tarjeta"`, o `null` si no hay con qué armarlo — los pedidos
+ * viejos, cargados antes de que se guardara el medio de pago.
+ */
+export function medioDePago(
+  pasarela: string | null,
+  medio: string | null,
+): string | null {
+  const p = pasarela ? (PASARELAS[pasarela] ?? pasarela) : null;
+  const m = medio ? (MEDIOS[medio] ?? medio) : null;
+  if (p && m) return `${p} · ${m}`;
+  return p ?? m;
+}

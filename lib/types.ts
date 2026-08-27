@@ -757,12 +757,22 @@ export type PedidoTiendaNube = {
    * de nuevo.
    */
   descuento: number;
+  /** Lo que se llevó la pasarela de pago en este pedido. Ya está restado de la rentabilidad. */
+  comision: number;
   /**
    * Código del cupón que explica el descuento (`GANADOR100K`, el premio de un
    * sorteo). `null` cuando no hubo cupón — el descuento puede venir de una
    * promoción sin código.
    */
   cupon: string | null;
+  /**
+   * Pasarela cruda de la API (`pago-nube`, `nave`, `free`) y medio de pago
+   * crudo (`credit_card`, `wallet`, `wire_transfer`). Explican de dónde sale
+   * `comision`: el arancel se cobra por la combinación de las dos. `null` en
+   * los pedidos viejos, cargados antes de que se guardara el medio de pago.
+   */
+  pasarela: string | null;
+  metodoPago: string | null;
   ventaCiva: number;
   ventaSiva: number;
   costo: number;
