@@ -1,6 +1,6 @@
 "use client";
 
-import { SelectorMultiple } from "@/components/SelectorFiltro";
+import { CampoBusqueda, SelectorMultiple } from "@/components/SelectorFiltro";
 import { fmtMes } from "@/lib/format";
 import { vacio as sinValores } from "@/lib/filtros";
 import type { Filtros, OpcionesFiltro } from "@/lib/types";
@@ -16,7 +16,7 @@ export default function BarraFiltros({
 }) {
   const vacio =
     sinValores(filtros.vendedor) && sinValores(filtros.empresa) && sinValores(filtros.mes) &&
-    sinValores(filtros.proveedor) && sinValores(filtros.provincia);
+    sinValores(filtros.proveedor) && sinValores(filtros.provincia) && !filtros.buscar;
 
   return (
     <div className="border-line bg-panel flex flex-wrap items-end gap-3 rounded-xl border p-3">
@@ -44,6 +44,12 @@ export default function BarraFiltros({
         valores={filtros.provincia}
         opciones={opciones?.provincias ?? []}
         onChange={(v) => onChange({ ...filtros, provincia: v })}
+      />
+
+      <CampoBusqueda
+        valor={filtros.buscar ?? ""}
+        placeholder="Cliente, SKU o artículo"
+        onChange={(v) => onChange({ ...filtros, buscar: v || undefined })}
       />
 
       <button

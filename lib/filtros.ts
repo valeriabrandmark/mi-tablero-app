@@ -20,13 +20,36 @@ export const CLAVES_FILTRO = [
 ] as const satisfies readonly (keyof Filtros)[];
 
 /**
- * Red de seguridad: si se agrega un filtro a `Filtros` y no se lo suma a
- * `CLAVES_FILTRO`, esto rompe el build en vez de fallar silenciosamente en
- * runtime (que fue exactamente lo que pasó con cliente/sku/comprobante).
+ * Los filtros que NO son listas y por eso viajan aparte. Hoy es solo `buscar`,
+ * que es un término suelto.
  */
-type ClavesFaltantes = Exclude<keyof Filtros, (typeof CLAVES_FILTRO)[number]>;
+const CLAVES_SUELTAS = ["buscar"] as const satisfies readonly (keyof Filtros)[];
+
+/**
+ * Los filtros que SÍ son listas de valores. Lo usan el `alternar` del filtro
+ * cruzado y la tabla de columnas de `whereBase`, que solo tienen sentido sobre
+ * una lista: `buscar` no se puede "alternar" ni comparar con `= any(...)`.
+ */
+export type ClaveLista = (typeof CLAVES_FILTRO)[number];
+
+/**
+ * Red de seguridad: si se agrega un filtro a `Filtros` y no se lo suma a
+ * `CLAVES_FILTRO` ni a `CLAVES_SUELTAS`, esto rompe el build en vez de fallar
+ * silenciosamente en runtime (que fue exactamente lo que pasó con
+ * cliente/sku/comprobante).
+ */
+type ClavesFaltantes = Exclude<
+  keyof Filtros,
+  (typeof CLAVES_FILTRO)[number] | (typeof CLAVES_SUELTAS)[number]
+>;
 const _todasLasClavesCubiertas: ClavesFaltantes extends never ? true : never = true;
 void _todasLasClavesCubiertas;
+
+/**
+ * Tope del término de búsqueda. No es por la base —un `ilike` con 500
+ * caracteres no la mata— sino para que nadie use la URL como campo libre.
+ */
+export const LARGO_MAX_BUSQUEDA = 80;
 
 /**
  * Cada valor va como un parámetro repetido (`?sku=A&sku=B`) y no separado por
@@ -40,6 +63,10 @@ export function aQueryString(f: Filtros): string {
       if (valor) sp.append(clave, valor);
     }
   }
+  for (const clave of CLAVES_SUELTAS) {
+    const valor = f[clave]?.trim();
+    if (valor) sp.set(clave, valor);
+  }
   return sp.toString();
 }
 
@@ -48,6 +75,10 @@ export function desdeSearchParams(sp: URLSearchParams): Filtros {
   for (const clave of CLAVES_FILTRO) {
     const valores = sp.getAll(clave).filter(Boolean);
     if (valores.length > 0) f[clave] = valores;
+  }
+  for (const clave of CLAVES_SUELTAS) {
+    const valor = (sp.get(clave) ?? "").trim().slice(0, LARGO_MAX_BUSQUEDA);
+    if (valor) f[clave] = valor;
   }
   return f;
 }

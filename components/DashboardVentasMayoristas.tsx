@@ -23,7 +23,7 @@ import {
   TarjetaKpi,
 } from "@/components/ui";
 import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
-import { alternar as alternarValor } from "@/lib/filtros";
+import { alternar as alternarValor, type ClaveLista } from "@/lib/filtros";
 import {
   CRUZADOS,
   type FilaArticulo,
@@ -352,7 +352,7 @@ export default function Dashboard() {
 
   /** Click en un gráfico o en una tabla: filtra el resto del tablero.
    *  Volver a clickear lo mismo (o el chip) limpia la selección. */
-  const alternar = useCallback((campo: keyof Filtros, valor: string) => {
+  const alternar = useCallback((campo: ClaveLista, valor: string) => {
     setCargando(true);
     setError(null);
     setFiltros((f) => ({ ...f, [campo]: alternarValor(f[campo], valor) }));

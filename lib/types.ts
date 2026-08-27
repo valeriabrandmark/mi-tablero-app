@@ -14,6 +14,17 @@ export type Filtros = {
   cliente?: string[];
   sku?: string[];
   comprobante?: string[];
+  /**
+   * Texto libre del buscador. Va contra nombre de cliente, SKU y descripción
+   * del artículo, todo a la vez.
+   *
+   * No es una lista como el resto: es UN término, y el usuario no elige contra
+   * qué columna busca — pega lo que tiene a mano y el buscador se arregla.
+   *
+   * OJO que no es lo mismo que los filtros `cliente` y `sku`, que son cruzados
+   * (salen de un click) y comparan por valor EXACTO. Este compara por contenido.
+   */
+  buscar?: string;
 };
 
 /** Dimensiones que solo existen como filtro cruzado (sin selector arriba). */

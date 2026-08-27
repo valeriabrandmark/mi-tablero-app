@@ -213,3 +213,86 @@ export function BotonLimpiar({
     </button>
   );
 }
+
+/**
+ * Buscador de texto libre. Lo comparten Mercado Libre y Ventas Mayoristas.
+ *
+ * UN campo contra varias columnas a la vez, en vez de varios campos o un
+ * selector de "buscar por…". Quien está controlando una venta tiene UN dato en
+ * la mano —un número, un SKU, el nombre de un cliente— y no tiene por qué
+ * decidir de antemano contra qué columna buscarlo. Se pega y listo. Contra qué
+ * busca cada tablero lo decide su consulta; acá solo va el `placeholder`.
+ *
+ * NO busca mientras se tipea: espera al Enter o a que el campo pierda el foco.
+ * Cada búsqueda son varias consultas contra la base, y dispararlas por cada
+ * tecla sería castigar al servidor para mostrar resultados de términos a medio
+ * escribir. Escape limpia.
+ */
+export function CampoBusqueda({
+  valor,
+  onChange,
+  placeholder,
+  ancho = "w-60",
+}: {
+  valor: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  ancho?: string;
+}) {
+  const [texto, setTexto] = useState(valor);
+  const [valorPrevio, setValorPrevio] = useState(valor);
+
+  // Si el término se limpia desde afuera (el botón Limpiar), el campo tiene que
+  // seguirlo: sin esto queda con el texto viejo sobre datos sin filtrar.
+  //
+  // Va durante el render y no en un `useEffect`. Es el patrón que documenta
+  // React para ajustar estado cuando cambia una prop: el efecto haría un render
+  // de más con el valor viejo pintado en pantalla.
+  if (valor !== valorPrevio) {
+    setValorPrevio(valor);
+    setTexto(valor);
+  }
+
+  const aplicar = () => {
+    if (texto.trim() !== valor) onChange(texto.trim());
+  };
+
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-muted text-[11px]">Buscar</span>
+      <div className="relative">
+        <input
+          type="search"
+          value={texto}
+          placeholder={placeholder}
+          onChange={(e) => setTexto(e.target.value)}
+          onBlur={aplicar}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              aplicar();
+            }
+            if (e.key === "Escape") {
+              setTexto("");
+              onChange("");
+            }
+          }}
+          className={`${CLASE_SELECT} ${ancho} pr-7`}
+        />
+        {texto && (
+          <button
+            type="button"
+            aria-label="Borrar la búsqueda"
+            onClick={() => {
+              setTexto("");
+              onChange("");
+            }}
+            className="text-muted hover:text-ink absolute top-1/2 right-2 -translate-y-1/2 text-sm leading-none"
+          >
+            ×
+          </button>
+        )}
+      </div>
+    </label>
+  );
+}
