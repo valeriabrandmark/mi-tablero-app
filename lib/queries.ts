@@ -18,11 +18,11 @@ import type {
   PuntoProveedor,
   SerieDiaria,
 } from "@/lib/types";
-import { agregarFiltro, vacio } from "@/lib/filtros";
+import { agregarFiltro, vacio, type ClaveLista } from "@/lib/filtros";
 
 type Where = { sql: string; params: unknown[] };
 
-const OPCIONALES: [keyof Filtros, string][] = [
+const OPCIONALES: [ClaveLista, string][] = [
   ["vendedor", "vendedor"],
   ["empresa", "empresa"],
   ["mes", "mes_comercial"],
@@ -55,6 +55,29 @@ function whereBase(
 
   for (const [key, columna] of OPCIONALES) {
     if (!omitir.includes(key)) agregarFiltro(clauses, params, `${alias}.${columna}`, f[key]);
+  }
+
+  // BUSCADOR DE TEXTO LIBRE.
+  //
+  // Un solo campo contra tres columnas, porque quien busca tiene UN dato en la
+  // mano —el nombre del cliente, un SKU, parte de la descripción— y no tiene
+  // por qué elegir de antemano contra cuál va.
+  //
+  // Es por CONTENIDO y no exacto: los nombres de cliente en Sigma vienen con
+  // formatos distintos ("QUISPE ANGEL BENITO" y no "Angel Quispe"), así que
+  // buscar el apellido solo tiene que encontrarlo igual.
+  //
+  // OJO que esto NO reemplaza a los filtros `cliente` y `sku`: esos son
+  // cruzados, salen de un click y comparan por valor exacto. Los dos pueden
+  // estar puestos a la vez y se aplican en AND, que es lo que se espera.
+  if (!omitir.includes("buscar") && f.buscar && f.buscar.trim() !== "") {
+    params.push(`%${f.buscar.trim()}%`);
+    const i = params.length;
+    clauses.push(
+      `(${alias}.cliente ilike $${i}
+       or ${alias}.sku ilike $${i}
+       or ${alias}.producto ilike $${i})`,
+    );
   }
 
   // La provincia no está en fact_ventas: se llega por el envío. Va como EXISTS
