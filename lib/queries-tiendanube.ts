@@ -392,6 +392,10 @@ async function getPedidos(f: FiltrosTiendaNube): Promise<PedidoTiendaNube[]> {
             -- Un pedido tiene UN cupón, pero se agrupa por orden: max() saca el
             -- único valor no nulo sin tener que agregarlo al group by.
             max(cupon)                         as cupon,
+            -- Mismo caso que el cupón: la pasarela es del pedido, no de la
+            -- línea. Van crudas y el tablero las traduce.
+            max(pasarela)                      as pasarela,
+            max(metodo_pago)                   as metodo_pago,
             coalesce(sum(${RENTABILIDAD}), 0)  as rentabilidad,
             coalesce(sum(${RENT_NETA}), 0)     as rent_neta
      from gold.fact_ventas
@@ -415,6 +419,8 @@ async function getPedidos(f: FiltrosTiendaNube): Promise<PedidoTiendaNube[]> {
       descuento: num(r.descuento),
       comision: num(r.comision),
       cupon: r.cupon,
+      pasarela: r.pasarela,
+      metodoPago: r.metodo_pago,
       ventaCiva,
       ventaSiva: num(r.venta_siva),
       costo: num(r.costo),

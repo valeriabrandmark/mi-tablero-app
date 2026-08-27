@@ -25,6 +25,7 @@ import { PALETA, TEMA } from "@/lib/paleta";
 import {
   CARGA_IMPOSITIVA,
   CRITERIO_VENTA,
+  medioDePago,
   mesComercialComoRango,
 } from "@/lib/tiendanube";
 import { useDatosTablero } from "@/lib/useDatosTablero";
@@ -145,7 +146,21 @@ function columnasPedidos(
     },
     {
       titulo: "Comisión",
-      celda: (p) => fmtMoneda(p.comision),
+      // Al lado del monto va DE QUIÉN es, igual que el cupón al lado del
+      // descuento: la comisión no viene de la API, se calcula con el arancel de
+      // esa pasarela y ese medio, y sin verlos el número no se puede auditar.
+      // Dos pedidos del mismo importe pagan distinto según cómo se cobraron.
+      celda: (p) => {
+        const medio = medioDePago(p.pasarela, p.metodoPago);
+        return (
+          <span title={medio ?? undefined}>
+            {fmtMoneda(p.comision)}
+            {medio && (
+              <span className="text-muted ml-1 text-[10px]">{medio}</span>
+            )}
+          </span>
+        );
+      },
       numerica: true,
       orden: (p) => p.comision,
       total: fmtMoneda(sumar(filas, (p) => p.comision)),

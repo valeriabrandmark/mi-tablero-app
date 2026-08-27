@@ -79,3 +79,44 @@ export const DENOMINADOR = "venta c/IVA";
 export const CRITERIO_VENTA =
   "Cuenta como venta el pedido pagado y no cancelado. No se usa el estado del " +
   "pedido porque en Tienda Nube las ventas no pasan solas a cerrada.";
+
+/**
+ * Nombre legible de la pasarela y del medio de pago.
+ *
+ * Los dos valores se guardan CRUDOS, tal como los manda la API, y se traducen
+ * acá y no en el orquestador: así un medio nuevo entra a la base sin migración
+ * y, mientras nadie lo agregue a esta tabla, se muestra tal cual en vez de
+ * desaparecer. Por eso el fallback devuelve el valor crudo y no un "otro".
+ *
+ * `free` es la pasarela de los pedidos que no pasaron por ninguna —el sorteo
+ * con cupón del 100 %, una transferencia acordada aparte—: no cobra nada, y la
+ * comisión en $ 0 de esa fila es correcta, no un dato que falta.
+ */
+const PASARELAS: Record<string, string> = {
+  "pago-nube": "Pago Nube",
+  nave: "Nave",
+  free: "Sin pasarela",
+};
+
+const MEDIOS: Record<string, string> = {
+  credit_card: "tarjeta",
+  debit_card: "débito",
+  wallet: "billetera",
+  wire_transfer: "transferencia",
+  ticket: "efectivo",
+  redirect: "MODO",
+};
+
+/**
+ * `"Pago Nube · tarjeta"`, o `null` si no hay con qué armarlo — los pedidos
+ * viejos, cargados antes de que se guardara el medio de pago.
+ */
+export function medioDePago(
+  pasarela: string | null,
+  medio: string | null,
+): string | null {
+  const p = pasarela ? (PASARELAS[pasarela] ?? pasarela) : null;
+  const m = medio ? (MEDIOS[medio] ?? medio) : null;
+  if (p && m) return `${p} · ${m}`;
+  return p ?? m;
+}
