@@ -751,6 +751,18 @@ export type PedidoTiendaNube = {
   cliente: string | null;
   lineas: number;
   unidades: number;
+  /**
+   * Lo que se resignó en este pedido, CON IVA. Ya viene descontado de
+   * `ventaCiva`: está acá para poder ver cuánto se bonificó, no para restarlo
+   * de nuevo.
+   */
+  descuento: number;
+  /**
+   * Código del cupón que explica el descuento (`GANADOR100K`, el premio de un
+   * sorteo). `null` cuando no hubo cupón — el descuento puede venir de una
+   * promoción sin código.
+   */
+  cupon: string | null;
   ventaCiva: number;
   ventaSiva: number;
   costo: number;

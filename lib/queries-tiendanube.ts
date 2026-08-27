@@ -39,6 +39,8 @@ const VENTA_CIVA = "coalesce(total_linea, 0)";
 const VENTA_SIVA = "coalesce(precio_neto, 0) * cantidad";
 const COSTO = "coalesce(costo_unitario, 0) * cantidad";
 const ENVIO = "coalesce(envio, 0)";
+/** Lo resignado en la línea, CON IVA. Ya está descontado de `total_linea`. */
+const DESCUENTO = "coalesce(descuento, 0)";
 const RENTABILIDAD = `(${VENTA_SIVA}) - (${COSTO}) - (${ENVIO})`;
 
 /** Rentabilidad neta de la línea: la bruta menos los impuestos sobre venta s/IVA. */
@@ -375,6 +377,10 @@ async function getPedidos(f: FiltrosTiendaNube): Promise<PedidoTiendaNube[]> {
             coalesce(sum(${VENTA_SIVA}), 0)    as venta_siva,
             coalesce(sum(${COSTO}), 0)         as costo,
             coalesce(sum(${ENVIO}), 0)         as envio,
+            coalesce(sum(${DESCUENTO}), 0)     as descuento,
+            -- Un pedido tiene UN cupón, pero se agrupa por orden: max() saca el
+            -- único valor no nulo sin tener que agregarlo al group by.
+            max(cupon)                         as cupon,
             coalesce(sum(${RENTABILIDAD}), 0)  as rentabilidad,
             coalesce(sum(${RENT_NETA}), 0)     as rent_neta
      from gold.fact_ventas
@@ -395,6 +401,8 @@ async function getPedidos(f: FiltrosTiendaNube): Promise<PedidoTiendaNube[]> {
       cliente: r.cliente,
       lineas: num(r.lineas),
       unidades: num(r.unidades),
+      descuento: num(r.descuento),
+      cupon: r.cupon,
       ventaCiva,
       ventaSiva: num(r.venta_siva),
       costo: num(r.costo),
