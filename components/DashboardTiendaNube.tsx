@@ -104,6 +104,25 @@ function columnasPedidos(
       total: fmtNumero(sumar(filas, (p) => p.unidades)),
     },
     {
+      // Va ANTES de la venta y no después: se lee "se bonificó tanto, quedó
+      // tanto". Al revés obliga a volver sobre la fila para entender el número.
+      titulo: "Descuento",
+      celda: (p) =>
+        p.descuento > 0 ? (
+          <span className="text-c1" title={p.cupon ? `Cupón ${p.cupon}` : undefined}>
+            −{fmtMoneda(p.descuento)}
+            {p.cupon && (
+              <span className="text-muted ml-1 font-mono text-[10px]">{p.cupon}</span>
+            )}
+          </span>
+        ) : (
+          <span className="text-muted">—</span>
+        ),
+      numerica: true,
+      orden: (p) => p.descuento,
+      total: fmtMoneda(sumar(filas, (p) => p.descuento)),
+    },
+    {
       titulo: "Venta c/IVA",
       celda: (p) => fmtMoneda(p.ventaCiva),
       numerica: true,
