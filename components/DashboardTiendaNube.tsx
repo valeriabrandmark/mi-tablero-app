@@ -144,6 +144,13 @@ function columnasPedidos(
       total: fmtMoneda(sumar(filas, (p) => p.envio)),
     },
     {
+      titulo: "Comisión",
+      celda: (p) => fmtMoneda(p.comision),
+      numerica: true,
+      orden: (p) => p.comision,
+      total: fmtMoneda(sumar(filas, (p) => p.comision)),
+    },
+    {
       titulo: "Rent. bruta",
       celda: (p) => <Importe valor={p.rentabilidad} />,
       numerica: true,
@@ -827,15 +834,15 @@ export default function DashboardTiendaNubePage({
               equivocado, y quien lo mire no tiene por qué saberlo. */}
           <p className="text-muted mt-3 text-[11px] leading-relaxed">
             Rentabilidad bruta = venta s/IVA − costo (ya con descuento de
-            proveedor) − envío a cargo nuestro. Rentabilidad neta = bruta −{" "}
-            {fmtPct(CARGA_IMPOSITIVA)} de impuestos sobre la venta s/IVA.{" "}
+            proveedor) − envío a cargo nuestro − comisión de la pasarela.
+            Rentabilidad neta = bruta − {fmtPct(CARGA_IMPOSITIVA)} de impuestos
+            sobre la venta s/IVA.{" "}
             <strong>
-              No se descuenta la comisión de la pasarela de pago: Tienda Nube no
-              la informa en ningún campo de su API
+              La comisión no viene en la API: se calcula con el arancel de cada
+              pasarela y medio de pago, tomado del panel de la tienda
             </strong>
-            , así que el margen de este canal está algo sobreestimado. En
-            Mercado Libre sí se descuenta, y por eso los dos no son
-            estrictamente comparables.
+            . Las tasas van con IVA incluido. El débito se cobra como crédito
+            porque la API manda el mismo valor para los dos.
           </p>
         </div>
       )}

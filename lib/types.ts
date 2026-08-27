@@ -757,6 +757,8 @@ export type PedidoTiendaNube = {
    * de nuevo.
    */
   descuento: number;
+  /** Lo que se llevó la pasarela de pago en este pedido. Ya está restado de la rentabilidad. */
+  comision: number;
   /**
    * Código del cupón que explica el descuento (`GANADOR100K`, el premio de un
    * sorteo). `null` cuando no hubo cupón — el descuento puede venir de una

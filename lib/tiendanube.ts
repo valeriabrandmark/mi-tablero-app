@@ -16,11 +16,15 @@
  *
  * Se diferencia en tres cosas, y las tres se ven en pantalla:
  *
- * 1. NO HAY COMISIÓN. Lo que cobra la pasarela de pago (Pago Nube, Mercado
- *    Pago) por procesar el cobro no viene en ningún campo de la API de Tienda
- *    Nube, así que `comision` queda en 0. NO se inventa un porcentaje: el
- *    margen de este canal está por eso algo sobreestimado, y el tablero lo dice
- *    en vez de dar un número lindo y falso.
+ * 1. LA COMISIÓN SE CALCULA, NO VIENE. Tienda Nube no informa en el pedido lo
+ *    que cobra la pasarela: no hay campo con el monto ni con el neto
+ *    liquidado. Pero sí manda QUÉ pasarela y con QUÉ medio se pagó, y con eso
+ *    `modelo.py` la resuelve contra `bronze.comisiones_pasarela`, que tiene los
+ *    aranceles reales del panel de la tienda. No es un porcentaje inventado.
+ *
+ *    Se cobra sobre lo que el cliente pagó de verdad (`total`), no sobre el
+ *    valor de la mercadería: a la pasarela le da igual si esa plata era
+ *    producto o flete.
  *
  * 2. EL ENVÍO ES EL QUE PAGA LA TIENDA. Tienda Nube informa dos costos de envío
  *    distintos: `shipping_cost_customer` (lo que paga el comprador, que es

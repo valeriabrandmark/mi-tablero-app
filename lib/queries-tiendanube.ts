@@ -28,11 +28,13 @@ import type {
  *     venta s/IVA  = precio_neto    * cantidad
  *     costo        = costo_unitario * cantidad
  *     envío        = envio                       <- ya viene POR LÍNEA
- *     rentabilidad = venta s/IVA - costo - envío
+ *     comisión     = comision      * cantidad   <- por unidad, como en ML
+ *     rentabilidad = venta s/IVA - costo - envío - comisión
  *
- * NO hay comisión, y eso es a propósito: Tienda Nube no informa lo que cobra la
- * pasarela de pago, así que `comision` está en 0 para todo el canal. No se
- * suma un porcentaje inventado; la pantalla avisa que falta.
+ * La COMISIÓN de la pasarela no viene en el pedido: Tienda Nube no informa el
+ * monto. La calcula `modelo.py` cruzando la pasarela y el medio de pago contra
+ * `bronze.comisiones_pasarela`, que tiene los aranceles reales del panel de la
+ * tienda. No es un porcentaje inventado: sale de la tarifa publicada.
  */
 
 const VENTA_CIVA = "coalesce(total_linea, 0)";
@@ -41,7 +43,15 @@ const COSTO = "coalesce(costo_unitario, 0) * cantidad";
 const ENVIO = "coalesce(envio, 0)";
 /** Lo resignado en la línea, CON IVA. Ya está descontado de `total_linea`. */
 const DESCUENTO = "coalesce(descuento, 0)";
-const RENTABILIDAD = `(${VENTA_SIVA}) - (${COSTO}) - (${ENVIO})`;
+/**
+ * Lo que se lleva la pasarela de pago. `comision` se guarda POR UNIDAD —igual
+ * que en Mercado Libre— así que va multiplicada por la cantidad.
+ *
+ * Tienda Nube no informa el monto en el pedido: se calcula en `modelo.py`
+ * cruzando la pasarela y el medio de pago contra `bronze.comisiones_pasarela`.
+ */
+const COMISION = "coalesce(comision, 0) * cantidad";
+const RENTABILIDAD = `(${VENTA_SIVA}) - (${COSTO}) - (${ENVIO}) - (${COMISION})`;
 
 /** Rentabilidad neta de la línea: la bruta menos los impuestos sobre venta s/IVA. */
 const RENT_NETA = `(${RENTABILIDAD}) - (${VENTA_SIVA}) * ${CARGA_IMPOSITIVA}`;
@@ -377,6 +387,7 @@ async function getPedidos(f: FiltrosTiendaNube): Promise<PedidoTiendaNube[]> {
             coalesce(sum(${VENTA_SIVA}), 0)    as venta_siva,
             coalesce(sum(${COSTO}), 0)         as costo,
             coalesce(sum(${ENVIO}), 0)         as envio,
+            coalesce(sum(${COMISION}), 0)      as comision,
             coalesce(sum(${DESCUENTO}), 0)     as descuento,
             -- Un pedido tiene UN cupón, pero se agrupa por orden: max() saca el
             -- único valor no nulo sin tener que agregarlo al group by.
@@ -402,6 +413,7 @@ async function getPedidos(f: FiltrosTiendaNube): Promise<PedidoTiendaNube[]> {
       lineas: num(r.lineas),
       unidades: num(r.unidades),
       descuento: num(r.descuento),
+      comision: num(r.comision),
       cupon: r.cupon,
       ventaCiva,
       ventaSiva: num(r.venta_siva),
