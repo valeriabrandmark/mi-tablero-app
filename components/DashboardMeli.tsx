@@ -99,14 +99,14 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
       total: fmtMoneda(sumar(filas, (a) => a.ventaCiva)),
     },
     {
-      titulo: "Costo",
+      titulo: "Costo s/IVA",
       celda: (a) => fmtMoneda(a.costo),
       numerica: true,
       orden: (a) => a.costo,
       total: fmtMoneda(sumar(filas, (a) => a.costo)),
     },
     {
-      titulo: "Comisión",
+      titulo: "Comisión s/IVA",
       celda: (a) => fmtMoneda(a.comision),
       numerica: true,
       orden: (a) => a.comision,
@@ -120,7 +120,7 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
       total: fmtMoneda(sumar(filas, (a) => a.envio)),
     },
     {
-      titulo: "Rentabilidad",
+      titulo: "Rent. bruta",
       celda: (a) => (
         <span style={a.rentabilidad < 0 ? { color: TEMA.negativo } : undefined}>
           {fmtMoneda(a.rentabilidad)}
@@ -131,7 +131,7 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
       total: fmtMoneda(sumar(filas, (a) => a.rentabilidad)),
     },
     {
-      titulo: "Margen",
+      titulo: "Margen bruto",
       celda: (a) => (
         <span
           style={(a.margenPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}
@@ -235,7 +235,7 @@ function columnasTop(filas: ArticuloMeli[]): Columna<ArticuloMeli>[] {
       total: fmtNumero(sumar(filas, (a) => a.unidades)),
     },
     {
-      titulo: "Rentabilidad",
+      titulo: "Rent. bruta",
       celda: (a) => (
         <span
           style={
@@ -250,7 +250,7 @@ function columnasTop(filas: ArticuloMeli[]): Columna<ArticuloMeli>[] {
       total: fmtMoneda(sumar(filas, (a) => a.rentabilidad)),
     },
     {
-      titulo: "Margen",
+      titulo: "Margen bruto",
       celda: (a) => fmtPct(a.margenPct),
       numerica: true,
       orden: (a) => a.margenPct,
@@ -361,7 +361,7 @@ function TablaRanking({
       total: fmtNumero(sumar(filas, (r) => r.unidades)),
     },
     {
-      titulo: "Rentab.",
+      titulo: "Rent. bruta",
       celda: (r) => (
         <span style={r.rentabilidad < 0 ? { color: TEMA.negativo } : undefined}>
           {fmtMoneda(r.rentabilidad)}
@@ -372,7 +372,7 @@ function TablaRanking({
       total: fmtMoneda(sumar(filas, (r) => r.rentabilidad)),
     },
     {
-      titulo: "Margen",
+      titulo: "Margen bruto",
       celda: (r) => (
         <span
           style={(r.margenPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}
@@ -710,7 +710,7 @@ export default function DashboardMeliPage({
               />
             )}
             <TarjetaKpi
-              titulo="Costo mercadería"
+              titulo="Costo mercadería s/IVA"
               valor={fmtMoneda(k.costo)}
               detalle="Sin IVA, ya con el descuento del proveedor"
             />

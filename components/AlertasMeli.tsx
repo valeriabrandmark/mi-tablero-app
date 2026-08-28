@@ -177,13 +177,13 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
       total: fmtMoneda(sumar(filas, (f) => f.ventaSiva)),
     },
     {
-      titulo: "Costo unit.",
+      titulo: "Costo unit. s/IVA",
       celda: (f) => fmtMoneda(f.costoUnitario),
       numerica: true,
       orden: (f) => f.costoUnitario,
     },
     {
-      titulo: "Costo total",
+      titulo: "Costo total s/IVA",
       celda: (f) => fmtMoneda(f.costo),
       numerica: true,
       orden: (f) => f.costo,

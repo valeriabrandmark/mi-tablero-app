@@ -101,7 +101,7 @@ function ganadoraPorMargen(bandas: ResumenBanda[]): ResumenBanda | null {
 function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
   return [
     {
-      titulo: "%margen de la venta",
+      titulo: "%margen bruto de la venta",
       celda: (b) => (
         <span style={{ color: COLOR_BANDA[b.banda] }}>
           {labelBanda(b.banda)}
@@ -120,7 +120,7 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
       total: fmtNumero(sumar(bandas, (b) => b.unidades)),
     },
     {
-      titulo: "Margen $",
+      titulo: "Margen bruto $",
       celda: (b) => (
         <strong style={{ color: COLOR_BANDA[b.banda] }}>
           {fmtMoneda(b.margen)}
@@ -133,7 +133,7 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
     {
       // El desempate: entre dos bandas que dejan lo mismo conviene la que mueve
       // menos mercadería para lograrlo.
-      titulo: "Margen por unidad",
+      titulo: "Margen bruto por unidad",
       celda: (b) =>
         b.margenPorUnidad == null ? "—" : fmtMoneda(b.margenPorUnidad),
       numerica: true,
@@ -147,7 +147,7 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
       total: fmtMoneda(sumar(bandas, (b) => b.facturacion)),
     },
     {
-      titulo: "%margen real",
+      titulo: "%margen bruto real",
       // El del conjunto, no el promedio de los porcentajes de cada línea.
       celda: (b) => fmtPct(b.margenPct),
       numerica: true,
@@ -202,14 +202,14 @@ function columnasArticulo(
       total: fmtNumero(sumar(filas, (f) => f.unidades)),
     },
     {
-      titulo: "Margen",
+      titulo: "Margen bruto",
       celda: (f) => fmtMoneda(f.margen),
       numerica: true,
       orden: (f) => f.margen,
       total: fmtMoneda(sumar(filas, (f) => f.margen)),
     },
     {
-      titulo: "%margen",
+      titulo: "%margen bruto",
       celda: (f) => fmtPct(f.facturacion > 0 ? f.margen / f.facturacion : null),
       numerica: true,
       orden: (f) => (f.facturacion > 0 ? f.margen / f.facturacion : null),

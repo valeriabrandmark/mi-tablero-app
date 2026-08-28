@@ -131,7 +131,7 @@ function columnasPedidos(
       total: fmtMoneda(sumar(filas, (p) => p.ventaCiva)),
     },
     {
-      titulo: "Costo",
+      titulo: "Costo s/IVA",
       celda: (p) => fmtMoneda(p.costo),
       numerica: true,
       orden: (p) => p.costo,
@@ -145,7 +145,7 @@ function columnasPedidos(
       total: fmtMoneda(sumar(filas, (p) => p.envio)),
     },
     {
-      titulo: "Comisión",
+      titulo: "Comisión c/IVA",
       // Al lado del monto va DE QUIÉN es, igual que el cupón al lado del
       // descuento: la comisión no viene de la API, se calcula con el arancel de
       // esa pasarela y ese medio, y sin verlos el número no se puede auditar.
@@ -255,14 +255,14 @@ function columnasClientes(
       total: fmtMoneda(sumar(filas, (c) => c.ventaCiva)),
     },
     {
-      titulo: "Rentab.",
+      titulo: "Rent. bruta",
       celda: (c) => <Importe valor={c.rentabilidad} />,
       numerica: true,
       orden: (c) => c.rentabilidad,
       total: <Importe valor={sumar(filas, (c) => c.rentabilidad)} />,
     },
     {
-      titulo: "Margen",
+      titulo: "Margen bruto",
       celda: (c) => <Porcentaje valor={c.margenPct} />,
       numerica: true,
       orden: (c) => c.margenPct,
@@ -320,7 +320,7 @@ function columnasArticulos(
       total: fmtMoneda(sumar(filas, (a) => a.ventaCiva)),
     },
     {
-      titulo: "Costo",
+      titulo: "Costo s/IVA",
       celda: (a) => fmtMoneda(a.costo),
       numerica: true,
       orden: (a) => a.costo,
@@ -334,14 +334,14 @@ function columnasArticulos(
       total: fmtMoneda(sumar(filas, (a) => a.envio)),
     },
     {
-      titulo: "Rentabilidad",
+      titulo: "Rent. bruta",
       celda: (a) => <Importe valor={a.rentabilidad} />,
       numerica: true,
       orden: (a) => a.rentabilidad,
       total: fmtMoneda(sumar(filas, (a) => a.rentabilidad)),
     },
     {
-      titulo: "Margen",
+      titulo: "Margen bruto",
       celda: (a) => <Porcentaje valor={a.margenPct} />,
       numerica: true,
       orden: (a) => a.margenPct,
@@ -382,7 +382,7 @@ function columnasTop(
       total: fmtNumero(sumar(filas, (a) => a.unidades)),
     },
     {
-      titulo: "Rentabilidad",
+      titulo: "Rent. bruta",
       celda: (a) => (
         <span
           style={
@@ -397,7 +397,7 @@ function columnasTop(
       total: fmtMoneda(sumar(filas, (a) => a.rentabilidad)),
     },
     {
-      titulo: "Margen",
+      titulo: "Margen bruto",
       celda: (a) => <Porcentaje valor={a.margenPct} />,
       numerica: true,
       orden: (a) => a.margenPct,
@@ -449,14 +449,14 @@ function TablaRanking({
       total: fmtNumero(sumar(filas, (r) => r.unidades)),
     },
     {
-      titulo: "Rentab.",
+      titulo: "Rent. bruta",
       celda: (r) => <Importe valor={r.rentabilidad} />,
       numerica: true,
       orden: (r) => r.rentabilidad,
       total: <Importe valor={sumar(filas, (r) => r.rentabilidad)} />,
     },
     {
-      titulo: "Margen",
+      titulo: "Margen bruto",
       celda: (r) => <Porcentaje valor={r.margenPct} />,
       numerica: true,
       orden: (r) => r.margenPct,
@@ -845,6 +845,26 @@ export default function DashboardTiendaNubePage({
             />
           </Panel>
 
+          {/* Artículos va PEGADO a Pedidos y no al final: son las dos tablas de
+              detalle del canal, y la pregunta que sigue a "qué pedidos entraron"
+              es "qué se vendió". Los rankings y gráficos van después, que es
+              donde se mira el agregado. */}
+          <Panel
+            titulo="Artículos"
+            nota={`${data.articulos.length} SKUs · click para filtrar · impuestos aparte (${fmtPct(CARGA_IMPOSITIVA)})`}
+          >
+            <Tabla
+              filas={data.articulos}
+              columnas={columnasArticulos(data.articulos)}
+              clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
+              onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
+              activa={(a) =>
+                filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false
+              }
+              vacio="Sin ventas en el recorte elegido."
+            />
+          </Panel>
+
           {data.rango.dias > 1 && (
             <Panel
               titulo="Venta y rentabilidad por día"
@@ -920,21 +940,6 @@ export default function DashboardTiendaNubePage({
             </Panel>
           </div>
 
-          <Panel
-            titulo="Artículos"
-            nota={`${data.articulos.length} SKUs · click para filtrar · impuestos aparte (${fmtPct(CARGA_IMPOSITIVA)})`}
-          >
-            <Tabla
-              filas={data.articulos}
-              columnas={columnasArticulos(data.articulos)}
-              clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
-              onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
-              activa={(a) =>
-                filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false
-              }
-              vacio="Sin ventas en el recorte elegido."
-            />
-          </Panel>
 
           {/* Lo que el tablero NO sabe, dicho en la pantalla y no solo en el
               código: un margen que se lee sin esta aclaración es un margen

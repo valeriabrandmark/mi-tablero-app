@@ -97,7 +97,7 @@ function columnasResumen(semanas: ResumenSemana[]): Columna<ResumenSemana>[] {
       total: fmtNumero(sumar(semanas, (s) => s.unidades)),
     },
     {
-      titulo: "Margen $",
+      titulo: "Margen bruto $",
       celda: (s) => <strong>{fmtMoneda(s.margen)}</strong>,
       numerica: true,
       orden: (s) => s.margen,
@@ -111,7 +111,7 @@ function columnasResumen(semanas: ResumenSemana[]): Columna<ResumenSemana>[] {
       total: fmtMoneda(sumar(semanas, (s) => s.facturacion)),
     },
     {
-      titulo: "%margen",
+      titulo: "%margen bruto",
       celda: (s) => <PctBanda pct={s.margenPct} />,
       numerica: true,
       orden: (s) => s.margenPct,
@@ -257,7 +257,7 @@ function columnasArticulo(
       total: fmtNumero(sumar(filas, (f) => f.unidades)),
     },
     {
-      titulo: "Margen total",
+      titulo: "Margen bruto total",
       celda: (f) => <strong>{fmtMoneda(f.margen)}</strong>,
       numerica: true,
       orden: (f) => f.margen,
