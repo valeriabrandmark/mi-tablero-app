@@ -1,5 +1,5 @@
 import EncabezadoCanal from "@/components/EncabezadoCanal";
-import PestanasMeli, { type Pestana } from "@/components/PestanasMeli";
+import Pestanas, { type Pestana } from "@/components/Pestanas";
 
 /**
  * Las pestañas del tablero de Mercado Libre. Las tres primeras son las del
@@ -44,7 +44,7 @@ export default function MercadoLibreLayout({
       <h1 className="mb-4">
         <EncabezadoCanal canal="mercado-libre" />
       </h1>
-      <PestanasMeli pestanas={PESTANAS} />
+      <Pestanas pestanas={PESTANAS} />
       {children}
     </>
   );

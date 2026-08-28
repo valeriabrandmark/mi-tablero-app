@@ -29,7 +29,9 @@ export type ClaveIcono =
   | "objetivos"
   | "unibrandco"
   | "mercadolibre"
-  | "tiendanube";
+  | "tiendanube"
+  | "stock"
+  | "operaciones";
 
 /** Subpágina de un grupo. Lleva su propia marca porque es la que se mira. */
 export type ItemHijo = {
@@ -37,6 +39,8 @@ export type ItemHijo = {
   label: string;
   icono: ClaveIcono;
   logo?: Logo;
+  /** Página a medio construir: se lista, pero avisada. */
+  enConstruccion?: boolean;
 };
 
 export type ItemNav = {
@@ -50,14 +54,39 @@ export type ItemNav = {
   href?: string;
   /** Subpáginas. Si están, la entrada es un grupo desplegable. */
   hijos?: ItemHijo[];
+  /** Página a medio construir: se lista, pero avisada. */
+  enConstruccion?: boolean;
 };
+
+/**
+ * El puntito que marca lo que todavía se está construyendo.
+ *
+ * Un punto y no la palabra entera: en 240 px de barra, "en producción" al lado
+ * de "Analytics Tienda Nube" obliga a cortar el nombre, y el nombre es lo que
+ * se busca. El `title` lo dice con todas las letras para quien pase el mouse.
+ */
+function PuntoEnObra() {
+  return (
+    <span
+      className="bg-c3 size-1.5 shrink-0 rounded-full"
+      title="En producción"
+      aria-label="En producción"
+    />
+  );
+}
 
 /**
  * Los íconos de las secciones internas, dibujados a trazo. Van como SVG inline
  * y no como librería: son cuatro, no cambian, y sumar una dependencia entera
  * para esto haría más pesado el bundle que el tablero.
  */
-type ClaveTrazo = "ventas" | "logistica" | "cuentas" | "objetivos";
+type ClaveTrazo =
+  | "ventas"
+  | "logistica"
+  | "cuentas"
+  | "objetivos"
+  | "stock"
+  | "operaciones";
 
 const TRAZOS: Record<ClaveTrazo, ReactNode> = {
   ventas: (
@@ -84,6 +113,23 @@ const TRAZOS: Record<ClaveTrazo, ReactNode> = {
       <circle cx="12" cy="12" r="8.5" />
       <circle cx="12" cy="12" r="4.5" />
       <circle cx="12" cy="12" r="1" />
+    </>
+  ),
+  // Engranaje: la sección es "lo que pasa con la mercadería", no un tablero de
+  // un tipo de mercadería en particular, así que no lleva ni caja ni paquete.
+  operaciones: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" />
+    </>
+  ),
+  // Cajas apiladas. No se repite el cubo de Logística: ése es el paquete que
+  // viaja, éste es la mercadería que está quieta en el depósito.
+  stock: (
+    <>
+      <rect x="3" y="13" width="8" height="8" rx="1" />
+      <rect x="13" y="13" width="8" height="8" rx="1" />
+      <rect x="8" y="4" width="8" height="8" rx="1" />
     </>
   ),
 };
@@ -214,7 +260,8 @@ function Grupo({
                   className={clasesLink(activo, true)}
                 >
                   <Marca icono={h.icono} logo={h.logo} />
-                  <span className="truncate">{h.label}</span>
+                  <span className="flex-1 truncate">{h.label}</span>
+                  {h.enConstruccion && <PuntoEnObra />}
                 </Link>
               </li>
             );
@@ -278,7 +325,8 @@ function Contenido({
                   className={clasesLink(activo)}
                 >
                   <Marca icono={item.icono} logo={item.logo} />
-                  <span className="truncate">{item.label}</span>
+                  <span className="flex-1 truncate">{item.label}</span>
+                  {item.enConstruccion && <PuntoEnObra />}
                 </Link>
               </li>
             );

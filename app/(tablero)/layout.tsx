@@ -1,6 +1,6 @@
 import BarraLateral, { type ItemNav } from "@/components/BarraLateral";
 import { slugVendedor, VENDEDORES_OBJETIVOS } from "@/lib/constantes";
-import { permisoDelUsuario, puedeVer, type Rol } from "@/lib/permisos";
+import { enConstruccion, permisoDelUsuario, puedeVer, type Rol } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
 
@@ -50,8 +50,21 @@ const NAV: ItemNav[] = [
         label: "Mercado Libre",
         icono: "mercadolibre",
       },
+      // Tienda Nube también tiene pestañas adentro (Tablero, Analytics), por lo
+      // mismo que Mercado Libre: son vistas del mismo canal, no secciones
+      // distintas del negocio, así que no se abren en la barra.
       { href: "/venta-minorista/tienda-nube", label: "Tienda Nube", icono: "tiendanube" },
     ],
+  },
+  // Operaciones es la tercera pata, al lado de las dos de venta: lo que pasa
+  // con la mercadería, no con la plata. Stock no cuelga de Mayoristas ni de
+  // Minoristas porque la mercadería es UNA SOLA, se venda por donde se venda —
+  // colgarlo de un canal daría a entender que hay un stock por canal.
+  {
+    clave: "operaciones",
+    label: "Operaciones",
+    icono: "operaciones",
+    hijos: [{ href: "/stock", label: "Stock", icono: "stock" }],
   },
 ];
 
@@ -73,9 +86,19 @@ const NOMBRE_ROL: Record<Rol, string> = {
  * sobre la sección para ver listadas subpáginas que después no se pueden abrir.
  */
 function navPermitido(nav: ItemNav[], permiso: Parameters<typeof puedeVer>[0]): ItemNav[] {
-  return nav.flatMap((item) => {
-    if (!item.hijos) return item.href && puedeVer(permiso, item.href) ? [item] : [];
-    const hijos = item.hijos.filter((h) => puedeVer(permiso, h.href));
+  // La marca de "en construcción" se DERIVA de la lista de permisos.ts, no se
+  // escribe acá. Si se escribiera en los dos lados, publicar una página sería
+  // acordarse de dos lugares — y el día que alguien se acuerde de uno solo, o
+  // queda un tablero terminado con el puntito puesto, o uno a medio hacer sin
+  // aviso. Lo segundo es el que hace daño.
+  return nav.flatMap<ItemNav>((item) => {
+    if (!item.hijos) {
+      if (!item.href || !puedeVer(permiso, item.href)) return [];
+      return [{ ...item, enConstruccion: enConstruccion(item.href) }];
+    }
+    const hijos = item.hijos
+      .filter((h) => puedeVer(permiso, h.href))
+      .map((h) => ({ ...h, enConstruccion: enConstruccion(h.href) }));
     return hijos.length > 0 ? [{ ...item, hijos }] : [];
   });
 }
