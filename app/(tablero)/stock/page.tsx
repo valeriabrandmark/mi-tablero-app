@@ -25,18 +25,13 @@ export default async function StockPage() {
   // Sin auth configurada (desarrollo local) se ve el borrador: si no, no habría
   // forma de trabajar en la página.
   if (authConfigurada && !puedeVerBorradores(permiso)) {
-    return (
-      <EnProduccion
-        titulo="Stock"
-        descripcion="Va a mostrar la mercadería disponible, cuánta plata hay inmovilizada en ella, qué se está quedando sin reposición y qué lleva meses sin moverse."
-      />
-    );
+    return <EnProduccion titulo="Stock" />;
   }
 
   return (
-    <EnProduccion
-      titulo="Stock"
-      descripcion="Todavía no hay nada construido. Esta es la página donde va a vivir el tablero: el resto del andamiaje —ruta, permisos, entrada en el menú— ya está listo."
-    />
+    // EL BORRADOR. Hoy es lo mismo que ve el resto porque todavía no hay
+    // nada construido: acá abajo va el tablero a medida que se arme, y ahí
+    // recién la puerta de arriba empieza a separar de verdad.
+    <EnProduccion titulo="Stock" />
   );
 }

@@ -39,8 +39,13 @@ function accesibilidad(titulo?: string) {
   return titulo ? { role: "img" as const, "aria-label": titulo } : { "aria-hidden": true };
 }
 
-/** El naranja de Brandmark, el mismo del isotipo de las flechitas. */
-const NARANJA = "#e8801a";
+/**
+ * El naranja de Brandmark: el de las flechitas del isotipo y el de la tilde de
+ * la U de Unibrandco. Se exporta porque la barra lateral lo usa para el
+ * engranaje de Operaciones, y un segundo #e8801a escrito a mano en otro
+ * archivo es el que después queda distinto cuando se retoca la marca.
+ */
+export const NARANJA = "#e8801a";
 
 /**
  * Unibrandco: la U con la tilde arriba.
