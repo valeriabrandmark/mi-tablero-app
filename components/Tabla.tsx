@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 export type Columna<T> = {
   titulo: string;
@@ -143,6 +143,35 @@ export function Tabla<T>({
     return [...filas].sort((a, b) => signo * comparar(col.orden!(a), col.orden!(b)));
   }, [filas, columnas, orden]);
 
+  // Aviso de que la tabla sigue hacia el costado.
+  //
+  // En un teléfono una tabla más ancha que la pantalla no se lee como
+  // "scrolleá", se lee como CORTADA: quien la mira da por perdido lo que no
+  // ve y ni prueba arrastrar. El degradado del borde derecho es lo único que
+  // distingue una cosa de la otra, y por eso se apaga apenas se llega al
+  // final — un degradado permanente vuelve a mentir, al revés.
+  const contenedor = useRef<HTMLDivElement>(null);
+  const [hayMasALaDerecha, setHayMasALaDerecha] = useState(false);
+
+  useEffect(() => {
+    const el = contenedor.current;
+    if (!el) return;
+    // 1px de tolerancia: con zoom o densidades raras, scrollWidth y clientWidth
+    // difieren por una fracción de píxel en una tabla que entra entera.
+    const medir = () =>
+      setHayMasALaDerecha(el.scrollWidth - el.clientWidth - el.scrollLeft > 1);
+    medir();
+    el.addEventListener("scroll", medir, { passive: true });
+    // Hace falta además del scroll: girar el teléfono o plegar el menú cambia
+    // el ancho disponible sin que nadie haya scrolleado.
+    const observador = new ResizeObserver(medir);
+    observador.observe(el);
+    return () => {
+      el.removeEventListener("scroll", medir);
+      observador.disconnect();
+    };
+  }, [filas, columnas]);
+
   if (filas.length === 0) {
     return <p className="text-muted py-10 text-center text-sm">{vacio}</p>;
   }
@@ -150,108 +179,119 @@ export function Tabla<T>({
   const hayTotales = columnas.some((c) => c.total != null);
 
   return (
-    // Las tablas anchas scrollean solas, la página nunca scrollea en horizontal.
-    <div className="-mx-1 max-h-[420px] overflow-auto px-1">
-      <table className="w-full text-xs">
-        <thead className="bg-panel sticky top-0">
-          <tr className="border-line border-b">
-            {columnas.map((c) => {
-              const ordenable = c.orden != null;
-              const direccion = orden?.titulo === c.titulo ? orden.direccion : null;
+    <div className="relative">
+      {/* Las tablas anchas scrollean solas, la página nunca scrollea en horizontal. */}
+      <div ref={contenedor} className="-mx-1 max-h-[420px] overflow-auto px-1">
+        <table className="w-full text-xs">
+          <thead className="bg-panel sticky top-0">
+            <tr className="border-line border-b">
+              {columnas.map((c) => {
+                const ordenable = c.orden != null;
+                const direccion = orden?.titulo === c.titulo ? orden.direccion : null;
+                return (
+                  <th
+                    key={c.titulo}
+                    aria-sort={
+                      !ordenable
+                        ? undefined
+                        : direccion === "asc"
+                          ? "ascending"
+                          : direccion === "desc"
+                            ? "descending"
+                            : "none"
+                    }
+                    className={`text-muted py-2 pr-3 font-medium whitespace-nowrap ${
+                      c.numerica ? "text-right" : "text-left"
+                    }`}
+                  >
+                    {ordenable ? (
+                      <button
+                        type="button"
+                        onClick={() => alClickearEncabezado(c)}
+                        className={`group hover:text-ink cursor-pointer transition-colors ${
+                          direccion ? "text-ink" : ""
+                        }`}
+                      >
+                        {c.titulo}
+                        <Flecha direccion={direccion} />
+                      </button>
+                    ) : (
+                      c.titulo
+                    )}
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {ordenadas.map((fila, i) => {
+              const esActiva = activa?.(fila) ?? false;
+              const hayActiva = activa != null && ordenadas.some((x) => activa(x));
               return (
-                <th
-                  key={c.titulo}
-                  aria-sort={
-                    !ordenable
-                      ? undefined
-                      : direccion === "asc"
-                        ? "ascending"
-                        : direccion === "desc"
-                          ? "descending"
-                          : "none"
-                  }
-                  className={`text-muted py-2 pr-3 font-medium whitespace-nowrap ${
-                    c.numerica ? "text-right" : "text-left"
-                  }`}
+                <tr
+                  key={clave(fila, i)}
+                  onClick={onClickFila ? () => onClickFila(fila) : undefined}
+                  className={`border-line/60 hover:bg-panel-2 border-b ${
+                    onClickFila ? "cursor-pointer" : ""
+                  } ${esActiva ? "bg-c1/15" : hayActiva ? "opacity-40" : ""}`}
                 >
-                  {ordenable ? (
-                    <button
-                      type="button"
-                      onClick={() => alClickearEncabezado(c)}
-                      className={`group hover:text-ink cursor-pointer transition-colors ${
-                        direccion ? "text-ink" : ""
+                  {columnas.map((c) => (
+                    <td
+                      key={c.titulo}
+                      // Las celdas numéricas no parten: en un celular la tabla
+                      // se comprime hasta donde puede, y un importe cortado en
+                      // dos renglones ("$ 1.506." / "510") deja de leerse como
+                      // un número. Sin partir, la tabla se ensancha y scrollea,
+                      // que es el comportamiento correcto.
+                      className={`py-1.5 pr-3 ${
+                        c.numerica ? "text-right whitespace-nowrap tabular-nums" : ""
                       }`}
                     >
-                      {c.titulo}
-                      <Flecha direccion={direccion} />
-                    </button>
-                  ) : (
-                    c.titulo
-                  )}
-                </th>
+                      {c.celda(fila)}
+                    </td>
+                  ))}
+                </tr>
               );
             })}
-          </tr>
-        </thead>
-        <tbody>
-          {ordenadas.map((fila, i) => {
-            const esActiva = activa?.(fila) ?? false;
-            const hayActiva = activa != null && ordenadas.some((x) => activa(x));
-            return (
-              <tr
-                key={clave(fila, i)}
-                onClick={onClickFila ? () => onClickFila(fila) : undefined}
-                className={`border-line/60 hover:bg-panel-2 border-b ${
-                  onClickFila ? "cursor-pointer" : ""
-                } ${esActiva ? "bg-c1/15" : hayActiva ? "opacity-40" : ""}`}
-              >
-                {columnas.map((c) => (
+          </tbody>
+
+          {/* La fila de totales queda pegada abajo, igual que el encabezado queda
+              pegado arriba: en una tabla de 300 filas con scroll propio, un total
+              al final del todo no lo ve nadie.
+
+              Los totales NO se recalculan al ordenar ni al filtrar la tabla por
+              dentro, y está bien: ordenar cambia en qué orden se ven las mismas
+              filas, no cuáles son. */}
+          {hayTotales && (
+            <tfoot className="sticky bottom-0">
+              <tr className="border-line bg-panel-2 border-t-2">
+                {columnas.map((c, i) => (
                   <td
                     key={c.titulo}
-                    // Las celdas numéricas no parten: en un celular la tabla
-                    // se comprime hasta donde puede, y un importe cortado en
-                    // dos renglones ("$ 1.506." / "510") deja de leerse como
-                    // un número. Sin partir, la tabla se ensancha y scrollea,
-                    // que es el comportamiento correcto.
-                    className={`py-1.5 pr-3 ${
+                    className={`text-ink py-2 pr-3 font-medium ${
                       c.numerica ? "text-right whitespace-nowrap tabular-nums" : ""
                     }`}
                   >
-                    {c.celda(fila)}
+                    {c.total ??
+                      (i === 0 ? (
+                        <span className="text-muted">{etiquetaTotal}</span>
+                      ) : null)}
                   </td>
                 ))}
               </tr>
-            );
-          })}
-        </tbody>
+            </tfoot>
+          )}
+        </table>
+      </div>
 
-        {/* La fila de totales queda pegada abajo, igual que el encabezado queda
-            pegado arriba: en una tabla de 300 filas con scroll propio, un total
-            al final del todo no lo ve nadie.
-
-            Los totales NO se recalculan al ordenar ni al filtrar la tabla por
-            dentro, y está bien: ordenar cambia en qué orden se ven las mismas
-            filas, no cuáles son. */}
-        {hayTotales && (
-          <tfoot className="sticky bottom-0">
-            <tr className="border-line bg-panel-2 border-t-2">
-              {columnas.map((c, i) => (
-                <td
-                  key={c.titulo}
-                  className={`text-ink py-2 pr-3 font-medium ${
-                    c.numerica ? "text-right tabular-nums" : ""
-                  }`}
-                >
-                  {c.total ??
-                    (i === 0 ? (
-                      <span className="text-muted">{etiquetaTotal}</span>
-                    ) : null)}
-                </td>
-              ))}
-            </tr>
-          </tfoot>
-        )}
-      </table>
+      {/* Decorativo y no clickeable: si atajara el click o el arrastre, taparía
+          justo la columna que se está tratando de alcanzar. */}
+      {hayMasALaDerecha && (
+        <div
+          aria-hidden
+          className="from-panel pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l to-transparent"
+        />
+      )}
     </div>
   );
 }

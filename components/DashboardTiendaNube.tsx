@@ -85,7 +85,7 @@ function columnasPedidos(
     {
       titulo: "Cliente",
       celda: (p) => (
-        <span className="block max-w-[200px] truncate">{p.cliente ?? "—"}</span>
+        <span className="block max-w-[96px] sm:max-w-[200px] truncate">{p.cliente ?? "—"}</span>
       ),
       orden: (p) => p.cliente,
     },
@@ -221,7 +221,7 @@ function columnasClientes(
     {
       titulo: "Cliente",
       celda: (c) => (
-        <span className="block max-w-[220px] truncate">{c.cliente}</span>
+        <span className="block max-w-[100px] sm:max-w-[220px] truncate">{c.cliente}</span>
       ),
       orden: (c) => c.cliente,
     },
@@ -291,7 +291,7 @@ function columnasArticulos(
     {
       titulo: "Producto",
       celda: (a) => (
-        <span className="block max-w-[320px] truncate">
+        <span className="block max-w-[144px] sm:max-w-[320px] truncate">
           {a.producto ?? "—"}
         </span>
       ),
@@ -300,7 +300,7 @@ function columnasArticulos(
     {
       titulo: "Marca",
       celda: (a) => (
-        <span className="block max-w-[140px] truncate">{a.marca ?? "—"}</span>
+        <span className="block max-w-[96px] sm:max-w-[140px] truncate">{a.marca ?? "—"}</span>
       ),
       orden: (a) => a.marca,
     },
@@ -366,7 +366,7 @@ function columnasTop(
       titulo: "Producto",
       celda: (a) => (
         <span
-          className="block max-w-[260px] truncate"
+          className="block max-w-[116px] sm:max-w-[260px] truncate"
           title={a.producto ?? undefined}
         >
           {a.producto ?? a.sku ?? "—"}
@@ -429,7 +429,7 @@ function TablaRanking({
     {
       titulo,
       celda: (r) => (
-        <span className="block max-w-[220px] truncate">{r.label}</span>
+        <span className="block max-w-[100px] sm:max-w-[220px] truncate">{r.label}</span>
       ),
       orden: (r) => r.label,
     },

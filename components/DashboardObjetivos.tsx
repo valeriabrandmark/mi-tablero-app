@@ -42,7 +42,7 @@ function columnasComprobantes(
     {
       titulo: "Cliente",
       celda: (f) => (
-        <span className="block max-w-[280px] truncate">{f.cliente ?? "—"}</span>
+        <span className="block max-w-[126px] sm:max-w-[280px] truncate">{f.cliente ?? "—"}</span>
       ),
       orden: (f) => f.cliente,
     },

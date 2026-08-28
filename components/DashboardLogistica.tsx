@@ -100,7 +100,7 @@ function columnas(filas: FilaComprobante[]): Columna<FilaComprobante>[] {
     {
       titulo: "Cliente",
       celda: (f) => (
-        <span className="block max-w-[220px] truncate">{f.cliente ?? "—"}</span>
+        <span className="block max-w-[100px] sm:max-w-[220px] truncate">{f.cliente ?? "—"}</span>
       ),
       orden: (f) => f.cliente,
     },
