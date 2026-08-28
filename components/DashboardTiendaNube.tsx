@@ -166,6 +166,24 @@ function columnasPedidos(
       total: fmtMoneda(sumar(filas, (p) => p.comision)),
     },
     {
+      // Al lado de Comisión porque son las dos mitades de la MISMA tarifa: lo
+      // que se descuenta de un cobro por Nave es la suma de las dos. Separadas
+      // se ve lo que sumadas queda escondido — que Pago Nube bonifica ésta y
+      // Nave no—, que es justo lo que hace falta para elegir pasarela.
+      titulo: "Plataforma",
+      celda: (p) =>
+        p.costoTransaccion > 0 ? (
+          fmtMoneda(p.costoTransaccion)
+        ) : (
+          <span className="text-muted" title="Pago Nube bonifica el costo de plataforma">
+            —
+          </span>
+        ),
+      numerica: true,
+      orden: (p) => p.costoTransaccion,
+      total: fmtMoneda(sumar(filas, (p) => p.costoTransaccion)),
+    },
+    {
       titulo: "Rent. bruta",
       celda: (p) => <Importe valor={p.rentabilidad} />,
       numerica: true,
@@ -506,6 +524,19 @@ export default function DashboardTiendaNubePage({
     sinValores(filtros.sku) &&
     sinValores(filtros.cliente);
 
+  /**
+   * ¿Hay algún filtro de dimensión puesto? Importa sólo para el equilibrio: el
+   * abono del plan no baja porque uno mire un proveedor, pero la contribución
+   * sí, así que con un filtro puesto se estaría comparando una parte de la
+   * venta contra el costo fijo entero. El panel lo avisa en vez de mostrar una
+   * cobertura que no significa nada.
+   */
+  const filtradoPorDimension =
+    !sinValores(filtros.proveedor) ||
+    !sinValores(filtros.marca) ||
+    !sinValores(filtros.sku) ||
+    !sinValores(filtros.cliente);
+
   /** Texto del período anterior para las tarjetas, o null si no hay con qué comparar. */
   const contra = comp
     ? comp.desde === comp.hasta
@@ -605,7 +636,7 @@ export default function DashboardTiendaNubePage({
 
       {error ? null : !k ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 10 }, (_, i) => (
+          {Array.from({ length: 11 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />
           ))}
         </div>
@@ -732,6 +763,19 @@ export default function DashboardTiendaNubePage({
                   : "Calculada con el arancel de cada medio de pago"
               }
             />
+            {/* NO se suma a la comisión: es la otra mitad de la misma tarifa.
+              Está separada porque Pago Nube bonifica esta parte y Nave no, y
+              sumadas esa diferencia —que es la que decide con qué pasarela
+              conviene cobrar— queda escondida. */}
+            <TarjetaKpi
+              titulo="Costo de plataforma"
+              valor={fmtMoneda(k.costoTransaccion)}
+              detalle={
+                k.costoTransaccion === 0
+                  ? "Todo se cobró con Pago Nube, que lo bonifica"
+                  : "Parte de la comisión que se queda Tienda Nube"
+              }
+            />
             <TarjetaKpi
               titulo="Comisión sobre venta"
               valor={fmtPct(k.comisionPct)}
@@ -747,6 +791,15 @@ export default function DashboardTiendaNubePage({
             />
           </div>
         </ConAlarmaMargen>
+      )}
+
+      {data && (
+        <div className={cargando ? "opacity-50 transition-opacity" : "transition-opacity"}>
+          <PanelEquilibrio
+            eq={data.equilibrio}
+            filtrado={filtradoPorDimension}
+          />
+        </div>
       )}
 
       {data && (
@@ -887,5 +940,112 @@ export default function DashboardTiendaNubePage({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * El canal contra su costo fijo.
+ *
+ * Está aparte de la grilla de tarjetas y no es un capricho de layout: TODAS las
+ * tarjetas responden a los filtros y ésta no del todo —el abono del plan se
+ * paga igual—, así que ponerla al lado insinuaría que se comporta como las
+ * demás. Separada, la diferencia se ve.
+ */
+function PanelEquilibrio({
+  eq,
+  filtrado,
+}: {
+  eq: DashboardTiendaNube["equilibrio"];
+  filtrado: boolean;
+}) {
+  const resultado = eq.contribucion - eq.costosFijos;
+  // La barra se corta en 100 %: pasado el equilibrio lo que importa es que se
+  // llegó, y una barra que sigue creciendo achica visualmente el tramo que de
+  // verdad se mira, que es el de abajo.
+  const avance = eq.coberturaPct == null ? 0 : Math.min(Math.max(eq.coberturaPct, 0), 1);
+  const cubierto = eq.coberturaPct != null && eq.coberturaPct >= 1;
+
+  return (
+    <Panel
+      titulo="Equilibrio del canal"
+      nota={
+        filtrado
+          ? "Con filtros puestos: el plan no baja, la contribución sí"
+          : "Abono del plan prorrateado por día sobre el rango"
+      }
+    >
+      {!eq.costosFijosCargados ? (
+        <div className="space-y-2">
+          <p className="text-2xl font-semibold">{fmtMoneda(eq.contribucion)}</p>
+          <p className="text-muted text-sm">
+            Es lo que deja la operación antes del abono del plan: venta s/IVA
+            menos costo, envío, comisión y costo por transacción.
+          </p>
+          {/* `info` y no `error`: que todavía no se haya cargado el abono no es
+            una falla del tablero, es un dato que falta. */}
+          <Aviso tono="info">
+            Falta cargar cuánto sale el plan. Va en{" "}
+            <span className="font-mono text-xs">bronze.costos_plataforma_tn</span>,
+            columna <span className="font-mono text-xs">abono_mensual</span>. Hasta
+            entonces no se puede decir si el canal gana o pierde — sólo cuánto
+            genera.
+          </Aviso>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <p className="text-muted text-xs">Contribución</p>
+              <p className="text-lg font-semibold">{fmtMoneda(eq.contribucion)}</p>
+            </div>
+            <div>
+              <p className="text-muted text-xs">Costos fijos</p>
+              <p className="text-lg font-semibold">−{fmtMoneda(eq.costosFijos)}</p>
+            </div>
+            <div>
+              <p className="text-muted text-xs">Resultado del canal</p>
+              <p
+                className="text-lg font-semibold"
+                style={{ color: resultado < 0 ? TEMA.negativo : undefined }}
+              >
+                {fmtMoneda(resultado)}
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="bg-line h-2.5 w-full overflow-hidden rounded-full">
+              <div
+                className="h-full rounded-full transition-[width]"
+                style={{
+                  width: `${avance * 100}%`,
+                  background: cubierto ? PALETA[1] : TEMA.negativo,
+                }}
+              />
+            </div>
+            <p className="text-sm">
+              {cubierto ? (
+                <>
+                  Cubre el <strong>{fmtPct(eq.coberturaPct)}</strong> de los costos
+                  fijos: el canal ya pasó el equilibrio.
+                </>
+              ) : (
+                <>
+                  Cubre el <strong>{fmtPct(eq.coberturaPct)}</strong> de los costos
+                  fijos. Faltan {fmtMoneda(eq.costosFijos - eq.contribucion)} para
+                  empatar.
+                </>
+              )}
+            </p>
+            {eq.ventaEquilibrio != null && !cubierto && (
+              <p className="text-muted text-sm">
+                Al margen de contribución de este recorte, el equilibrio está en{" "}
+                {fmtMoneda(eq.ventaEquilibrio)} de venta c/IVA.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </Panel>
   );
 }

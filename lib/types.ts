@@ -678,6 +678,12 @@ export type KpisTiendaNube = {
   comision: number;
   /** Fracción de comisión sobre venta c/IVA. `null` si no hubo venta. */
   comisionPct: number | null;
+  /**
+   * La parte de la tarifa que se queda Tienda Nube por la plataforma, separada
+   * de la que se queda la pasarela. Pago Nube la bonifica; Nave la cobra
+   * entera. No se suma a `comision`: las dos salen de partir la misma tarifa.
+   */
+  costoTransaccion: number;
   /** Venta s/IVA − costo − envío − comisión. */
   rentabilidad: number;
   /** Fracción, sobre venta c/IVA. */
@@ -764,6 +770,12 @@ export type PedidoTiendaNube = {
   /** Lo que se llevó la pasarela de pago en este pedido. Ya está restado de la rentabilidad. */
   comision: number;
   /**
+   * La otra mitad de la misma tarifa: lo que cobra Tienda Nube por la
+   * plataforma. Pago Nube lo bonifica (queda en 0), Nave lo cobra entero.
+   * No es un costo aparte del de `comision` — es el mismo, partido en dos.
+   */
+  costoTransaccion: number;
+  /**
    * Código del cupón que explica el descuento (`GANADOR100K`, el premio de un
    * sorteo). `null` cuando no hubo cupón — el descuento puede venir de una
    * promoción sin código.
@@ -813,6 +825,28 @@ export type DashboardTiendaNube = {
   pedidosRecortados: boolean;
   /** Denominador de la torta: venta de TODOS los proveedores, sin filtro cruzado. */
   ventaTotalProveedores: number;
+  /**
+   * El canal contra sus costos fijos.
+   *
+   * `contribucion` es lo que deja la operación —venta s/IVA menos costo, envío,
+   * comisión y costo por transacción— antes del abono del plan. `costosFijos`
+   * es ese abono, prorrateado por día sobre el rango. La diferencia entre las
+   * dos es el resultado real del canal.
+   *
+   * OJO: `costosFijos` NO responde a los filtros de proveedor, marca o SKU —el
+   * plan se paga igual—, pero `contribucion` sí. Al filtrar se está comparando
+   * una parte de la venta contra el costo fijo entero, y la pantalla lo avisa.
+   */
+  equilibrio: {
+    contribucion: number;
+    costosFijos: number;
+    /** `false` = todavía no cargamos el abono, no que el plan sea gratis. */
+    costosFijosCargados: boolean;
+    /** Fracción de los costos fijos que cubre la contribución. */
+    coberturaPct: number | null;
+    /** Venta c/IVA necesaria para empatar, al margen de contribución actual. */
+    ventaEquilibrio: number | null;
+  };
   /** Último día con ventas cargadas: avisa si el dato viene atrasado. */
   ultimaVenta: string | null;
   generadoEn: string;

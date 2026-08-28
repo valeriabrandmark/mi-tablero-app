@@ -51,7 +51,20 @@ const DESCUENTO = "coalesce(descuento, 0)";
  * cruzando la pasarela y el medio de pago contra `bronze.comisiones_pasarela`.
  */
 const COMISION = "coalesce(comision, 0) * cantidad";
-const RENTABILIDAD = `(${VENTA_SIVA}) - (${COSTO}) - (${ENVIO}) - (${COMISION})`;
+/**
+ * La otra mitad de la misma tarifa: lo que cobra **Tienda Nube** por usar la
+ * plataforma, separado de lo que cobra la **pasarela** por mover la plata.
+ *
+ * NO ES UN COSTO NUEVO. Lo que se descuenta de un cobro por Nave son 2,8780 %,
+ * y eso siempre fue 2,1780 % de Nave + 0,7 % de Tienda Nube. Antes iba todo
+ * junto en `comision`; ahora viene partido. **El total no cambió.**
+ *
+ * Se separa porque es la única forma de contestar cuánto cuesta cobrar por una
+ * pasarela contra otra: Pago Nube bonifica esta parte al 0 %, Nave la cobra
+ * entera. Sumadas, esa diferencia queda escondida.
+ */
+const COSTO_TRANSACCION = "coalesce(costo_transaccion, 0) * cantidad";
+const RENTABILIDAD = `(${VENTA_SIVA}) - (${COSTO}) - (${ENVIO}) - (${COMISION}) - (${COSTO_TRANSACCION})`;
 
 /** Rentabilidad neta de la línea: la bruta menos los impuestos sobre venta s/IVA. */
 const RENT_NETA = `(${RENTABILIDAD}) - (${VENTA_SIVA}) * ${CARGA_IMPOSITIVA}`;
@@ -145,7 +158,8 @@ async function getKpis(f: FiltrosTiendaNube): Promise<KpisTiendaNube> {
             count(*)                        as lineas,
             coalesce(sum(${COSTO}), 0)      as costo,
             coalesce(sum(${ENVIO}), 0)      as envio,
-            coalesce(sum(${COMISION}), 0)   as comision
+            coalesce(sum(${COMISION}), 0)   as comision,
+            coalesce(sum(${COSTO_TRANSACCION}), 0) as costo_transaccion
      from gold.fact_ventas
      where ${w.sql}`,
     w.params,
@@ -157,6 +171,7 @@ async function getKpis(f: FiltrosTiendaNube): Promise<KpisTiendaNube> {
   const envio = num(fila?.envio);
   const pedidos = num(fila?.pedidos);
   const comision = num(fila?.comision);
+  const costoTransaccion = num(fila?.costo_transaccion);
 
   // OJO: la resta tiene que ser la MISMA que la de `RENTABILIDAD`, que es la
   // que usan las tablas. Acá se calcula en TypeScript y allá en SQL, asi que
@@ -165,7 +180,7 @@ async function getKpis(f: FiltrosTiendaNube): Promise<KpisTiendaNube> {
   // linea, con lo cual la tarjeta y el total de la tabla de Pedidos daban
   // distinto por el total de comisiones. Si se suma un componente nuevo, va
   // en los dos lados.
-  const rentabilidad = ventaSiva - costo - envio - comision;
+  const rentabilidad = ventaSiva - costo - envio - comision - costoTransaccion;
   const impuestos = ventaSiva * CARGA_IMPOSITIVA;
 
   return {
@@ -184,6 +199,7 @@ async function getKpis(f: FiltrosTiendaNube): Promise<KpisTiendaNube> {
     // incluye. Con envio cobrado, este porcentaje da mas alto que la tarifa
     // publicada, y no esta mal -- son dos bases distintas.
     comisionPct: pct(comision, ventaCiva),
+    costoTransaccion,
     rentabilidad,
     // Denominador c/IVA en toda la sección minorista (ver DENOMINADOR).
     margenPct: pct(rentabilidad, ventaCiva),
@@ -404,6 +420,7 @@ async function getPedidos(f: FiltrosTiendaNube): Promise<PedidoTiendaNube[]> {
             coalesce(sum(${COSTO}), 0)         as costo,
             coalesce(sum(${ENVIO}), 0)         as envio,
             coalesce(sum(${COMISION}), 0)      as comision,
+            coalesce(sum(${COSTO_TRANSACCION}), 0) as costo_transaccion,
             coalesce(sum(${DESCUENTO}), 0)     as descuento,
             -- Un pedido tiene UN cupón, pero se agrupa por orden: max() saca el
             -- único valor no nulo sin tener que agregarlo al group by.
@@ -434,6 +451,7 @@ async function getPedidos(f: FiltrosTiendaNube): Promise<PedidoTiendaNube[]> {
       unidades: num(r.unidades),
       descuento: num(r.descuento),
       comision: num(r.comision),
+      costoTransaccion: num(r.costo_transaccion),
       cupon: r.cupon,
       pasarela: r.pasarela,
       metodoPago: r.metodo_pago,
@@ -447,6 +465,51 @@ async function getPedidos(f: FiltrosTiendaNube): Promise<PedidoTiendaNube[]> {
       margenNetoPct: pct(rentabilidadNeta, ventaCiva),
     };
   });
+}
+
+/**
+ * El abono del plan que le toca al rango, prorrateado por día.
+ *
+ * NO RECIBE LOS FILTROS, Y ES A PROPÓSITO. El plan es un costo del canal: se
+ * paga igual se venda de un proveedor o de otro. Si respondiera al filtro,
+ * filtrar por una marca haría "bajar" el abono, que es exactamente la lectura
+ * equivocada. Sólo depende del rango de fechas.
+ *
+ * Se prorratea por día y no por mes entero para que un rango de quince días no
+ * cargue el abono completo — y para que el número no pegue saltos cuando el
+ * usuario mueve el calendario un día.
+ *
+ * `cargado` distingue "el plan sale $0" de "todavía no cargamos cuánto sale".
+ * Sin esa diferencia, un canal sin datos se vería como un canal gratis.
+ */
+async function getCostosFijos(
+  desde: string,
+  hasta: string,
+): Promise<{ monto: number; cargado: boolean }> {
+  if (!desde || !hasta) return { monto: 0, cargado: false };
+
+  // `cargado` viene como boolean de Postgres, no como texto: el resto de las
+  // consultas de este archivo leen números y ahí `pg` devuelve strings, pero un
+  // `bool` llega tipado. Por eso el tipo de la fila no es el de siempre.
+  const fila = await queryOne<{ monto: string | null; cargado: boolean | null }>(
+    `select coalesce(sum(vigente.abono_mensual / dias_del_mes), 0) as monto,
+            bool_or(vigente.abono_mensual is not null)             as cargado
+     from generate_series($1::date, $2::date, '1 day') as d
+     cross join lateral (
+       select extract(day from (date_trunc('month', d) + interval '1 month - 1 day'))
+         as dias_del_mes
+     ) m
+     cross join lateral (
+       select c.abono_mensual
+       from bronze.costos_plataforma_tn c
+       where c.vigente_desde <= d::date
+       order by c.vigente_desde desc
+       limit 1
+     ) vigente`,
+    [desde, hasta],
+  );
+
+  return { monto: num(fila?.monto), cargado: fila?.cargado === true };
 }
 
 /** Último día con ventas cargadas, sin filtros: avisa si el dato viene atrasado. */
@@ -523,6 +586,7 @@ export async function getDashboardTiendaNube(
     pedidos,
     ventaTotalProveedores,
     ultimaVenta,
+    costosFijos,
     kpisAnterior,
   ] = await Promise.all([
     getKpis(f),
@@ -534,6 +598,7 @@ export async function getDashboardTiendaNube(
     getPedidos(f),
     getVentaTotalProveedores(f),
     getUltimaVenta(),
+    getCostosFijos(desde, hasta),
     // El período anterior mantiene TODOS los otros filtros: comparar "este mes
     // de ALGABO" contra "el mes pasado de todo" no diría nada.
     anterior ? getKpis({ ...f, ...anterior }) : Promise.resolve(null),
@@ -562,6 +627,22 @@ export async function getDashboardTiendaNube(
     pedidos,
     pedidosRecortados: pedidos.length === TOPE_PEDIDOS,
     ventaTotalProveedores,
+    equilibrio: {
+      contribucion: kpis.rentabilidad,
+      costosFijos: costosFijos.monto,
+      costosFijosCargados: costosFijos.cargado,
+      // El % de los costos fijos que la operación llega a cubrir. Null cuando
+      // no hay costos fijos cargados: dividir por cero daría "infinito" y se
+      // leería como que sobra plata.
+      coberturaPct: costosFijos.monto > 0 ? kpis.rentabilidad / costosFijos.monto : null,
+      // Cuánto habría que vender para empatar, al margen de contribución de
+      // este mismo recorte. Null si el margen es cero o negativo: ahí no hay
+      // volumen que alcance, vender más agranda la pérdida.
+      ventaEquilibrio:
+        costosFijos.monto > 0 && kpis.rentabilidad > 0 && kpis.ventaCiva > 0
+          ? costosFijos.monto / (kpis.rentabilidad / kpis.ventaCiva)
+          : null,
+    },
     ultimaVenta,
     generadoEn: new Date().toISOString(),
   };
