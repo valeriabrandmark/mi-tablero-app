@@ -174,7 +174,7 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
       ),
     },
     {
-      titulo: "Costo prom.",
+      titulo: "Costo prom. s/IVA",
       celda: (a) => fmtMoneda(a.costoPromedio),
       numerica: true,
       orden: (a) => a.costoPromedio,
@@ -194,7 +194,7 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
       total: fmtMoneda(sumar(filas, (a) => a.facturacion)),
     },
     {
-      titulo: "% Rentab.",
+      titulo: "% Rentab. neta",
       celda: (a) => fmtPct(a.rentabilidadPct),
       numerica: true,
       orden: (a) => a.rentabilidadPct,
@@ -507,7 +507,7 @@ export default function Dashboard() {
               acento={PALETA[0]}
             />
             <TarjetaKpi
-              titulo="Costo Mercadería"
+              titulo="Costo Mercadería s/IVA"
               valor={fmtMoneda(k.costoMercaderia)}
               detalle={
                 contra && comp ? (
