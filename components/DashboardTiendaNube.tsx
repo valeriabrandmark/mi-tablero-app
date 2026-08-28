@@ -637,15 +637,19 @@ export default function DashboardTiendaNubePage({
       {error ? null : !k ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 11 }, (_, i) => (
-            <Esqueleto key={i} className="h-[86px]" />
+            <Esqueleto key={i} className="h-[74px]" />
           ))}
         </div>
       ) : (
         <ConAlarmaMargen activa={k.rentabilidadNeta < 0}>
           <div
-            className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
+            // Seis columnas para que las once tarjetas entren en dos filas y no
+            // en tres. Abajo de `lg` bajan a tres y dos: apretar seis en una
+            // pantalla chica no ahorra scroll, sólo hace ilegibles los importes.
+            className={`grid gap-2.5 transition-opacity sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 ${cargando ? "opacity-50" : ""}`}
           >
             <TarjetaKpi
+              compacta
               titulo="Venta c/IVA"
               valor={fmtMoneda(k.ventaCiva)}
               detalle={
@@ -661,6 +665,7 @@ export default function DashboardTiendaNubePage({
               }
             />
             <TarjetaKpi
+              compacta
               titulo="Rentabilidad bruta"
               valor={fmtMoneda(k.rentabilidad)}
               detalle={
@@ -677,6 +682,7 @@ export default function DashboardTiendaNubePage({
               acento={k.rentabilidad < 0 ? TEMA.negativo : PALETA[1]}
             />
             <TarjetaKpi
+              compacta
               titulo="Margen bruto"
               valor={fmtPct(k.margenPct)}
               detalle={
@@ -690,6 +696,7 @@ export default function DashboardTiendaNubePage({
               es el 7,4 % de impuestos, y verlas separadas es lo que hace que una
               venta "con margen" se lea como lo que es. */}
             <TarjetaKpi
+              compacta
               titulo="Rentabilidad neta"
               valor={fmtMoneda(k.rentabilidadNeta)}
               detalle={`${fmtPct(k.margenNetoPct)} sobre venta c/IVA · ${fmtMoneda(k.impuestos)} de impuestos`}
@@ -697,6 +704,7 @@ export default function DashboardTiendaNubePage({
             />
 
             <TarjetaKpi
+              compacta
               titulo="Pedidos"
               valor={fmtNumero(k.pedidos)}
               detalle={
@@ -712,6 +720,7 @@ export default function DashboardTiendaNubePage({
               }
             />
             <TarjetaKpi
+              compacta
               titulo="Clientes"
               valor={fmtNumero(k.clientes)}
               detalle={
@@ -726,6 +735,7 @@ export default function DashboardTiendaNubePage({
               }
             />
             <TarjetaKpi
+              compacta
               titulo="Ticket promedio"
               valor={fmtMoneda(k.ticketPromedio)}
               detalle={
@@ -743,6 +753,7 @@ export default function DashboardTiendaNubePage({
             {/* El envío que absorbe LA TIENDA, no el que paga el comprador. Son dos
               campos distintos en Tienda Nube y solo este es un costo. */}
             <TarjetaKpi
+              compacta
               titulo="Envío a cargo nuestro"
               valor={fmtMoneda(k.envio)}
               detalle={
@@ -755,6 +766,7 @@ export default function DashboardTiendaNubePage({
               son mercadería, y se leen juntos cuando uno se pregunta por qué el
               margen es el que es. */}
             <TarjetaKpi
+              compacta
               titulo="Comisión de pasarela"
               valor={fmtMoneda(k.comision)}
               detalle={
@@ -768,6 +780,7 @@ export default function DashboardTiendaNubePage({
               sumadas esa diferencia —que es la que decide con qué pasarela
               conviene cobrar— queda escondida. */}
             <TarjetaKpi
+              compacta
               titulo="Costo de plataforma"
               valor={fmtMoneda(k.costoTransaccion)}
               detalle={
@@ -777,6 +790,7 @@ export default function DashboardTiendaNubePage({
               }
             />
             <TarjetaKpi
+              compacta
               titulo="Comisión sobre venta"
               valor={fmtPct(k.comisionPct)}
               detalle={
@@ -979,12 +993,12 @@ function PanelEquilibrio({
           <p className="text-2xl font-semibold">{fmtMoneda(eq.contribucion)}</p>
           <p className="text-muted text-sm">
             Es lo que deja la operación antes del abono del plan: venta s/IVA
-            menos costo, envío, comisión y costo por transacción.
+            menos costo, envío, comisión y costo de plataforma.
           </p>
           {/* `info` y no `error`: que todavía no se haya cargado el abono no es
             una falla del tablero, es un dato que falta. */}
           <Aviso tono="info">
-            Falta cargar cuánto sale el plan. Va en{" "}
+            Falta cargar cuánto sale el plan del mes. Va en{" "}
             <span className="font-mono text-xs">bronze.costos_plataforma_tn</span>,
             columna <span className="font-mono text-xs">abono_mensual</span>. Hasta
             entonces no se puede decir si el canal gana o pierde — sólo cuánto
@@ -993,17 +1007,21 @@ function PanelEquilibrio({
         </div>
       ) : (
         <div className="space-y-4">
+          {/* "Bruta" y "bruto" son la misma palabra que en la tarjeta
+            "Rentabilidad bruta", y significan lo mismo: ANTES de la carga
+            impositiva. La contribución de acá es ese mismo número, así que
+            llamarla de otra forma haría pensar que son dos cuentas distintas. */}
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
-              <p className="text-muted text-xs">Contribución</p>
+              <p className="text-muted text-xs">Contribución bruta</p>
               <p className="text-lg font-semibold">{fmtMoneda(eq.contribucion)}</p>
             </div>
             <div>
-              <p className="text-muted text-xs">Costos fijos</p>
+              <p className="text-muted text-xs">Costos fijos (pago de plan)</p>
               <p className="text-lg font-semibold">−{fmtMoneda(eq.costosFijos)}</p>
             </div>
             <div>
-              <p className="text-muted text-xs">Resultado del canal</p>
+              <p className="text-muted text-xs">Resultado bruto del canal</p>
               <p
                 className="text-lg font-semibold"
                 style={{ color: resultado < 0 ? TEMA.negativo : undefined }}
@@ -1026,13 +1044,13 @@ function PanelEquilibrio({
             <p className="text-sm">
               {cubierto ? (
                 <>
-                  Cubre el <strong>{fmtPct(eq.coberturaPct)}</strong> de los costos
-                  fijos: el canal ya pasó el equilibrio.
+                  Cubre el <strong>{fmtPct(eq.coberturaPct)}</strong> del pago del
+                  plan: el canal ya pasó el equilibrio.
                 </>
               ) : (
                 <>
-                  Cubre el <strong>{fmtPct(eq.coberturaPct)}</strong> de los costos
-                  fijos. Faltan {fmtMoneda(eq.costosFijos - eq.contribucion)} para
+                  Cubre el <strong>{fmtPct(eq.coberturaPct)}</strong> del pago del
+                  plan. Faltan {fmtMoneda(eq.costosFijos - eq.contribucion)} para
                   empatar.
                 </>
               )}
