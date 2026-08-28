@@ -605,7 +605,7 @@ export default function DashboardTiendaNubePage({
 
       {error ? null : !k ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 8 }, (_, i) => (
+          {Array.from({ length: 10 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />
           ))}
         </div>
@@ -640,7 +640,7 @@ export default function DashboardTiendaNubePage({
                     contra={contra}
                   />
                 ) : (
-                  "Venta s/IVA − costo − envío"
+                  "Venta s/IVA − costo − envío − comisión"
                 )
               }
               acento={k.rentabilidad < 0 ? TEMA.negativo : PALETA[1]}
@@ -718,6 +718,31 @@ export default function DashboardTiendaNubePage({
                 k.envio === 0
                   ? "Sin envíos con costo en este recorte"
                   : `${fmtPct(k.envio / k.ventaCiva)} de la venta c/IVA`
+              }
+            />
+            {/* Va al lado del envío porque son los dos costos del canal que no
+              son mercadería, y se leen juntos cuando uno se pregunta por qué el
+              margen es el que es. */}
+            <TarjetaKpi
+              titulo="Comisión de pasarela"
+              valor={fmtMoneda(k.comision)}
+              detalle={
+                k.comision === 0
+                  ? "Sin comisiones en este recorte"
+                  : "Calculada con el arancel de cada medio de pago"
+              }
+            />
+            <TarjetaKpi
+              titulo="Comisión sobre venta"
+              valor={fmtPct(k.comisionPct)}
+              detalle={
+                // La aclaración no es un tecnicismo: sin ella este número se lee
+                // como "el arancel que nos cobran" y da más alto que cualquier
+                // tarifa de la tabla, porque la pasarela cobra sobre el total
+                // pagado —que incluye el envío— y acá el denominador no lo tiene.
+                k.comision === 0
+                  ? "Sin comisiones en este recorte"
+                  : "Sobre venta c/IVA, que no incluye el envío cobrado"
               }
             />
           </div>
