@@ -144,7 +144,8 @@ async function getKpis(f: FiltrosTiendaNube): Promise<KpisTiendaNube> {
             count(distinct cliente)         as clientes,
             count(*)                        as lineas,
             coalesce(sum(${COSTO}), 0)      as costo,
-            coalesce(sum(${ENVIO}), 0)      as envio
+            coalesce(sum(${ENVIO}), 0)      as envio,
+            coalesce(sum(${COMISION}), 0)   as comision
      from gold.fact_ventas
      where ${w.sql}`,
     w.params,
@@ -155,8 +156,16 @@ async function getKpis(f: FiltrosTiendaNube): Promise<KpisTiendaNube> {
   const costo = num(fila?.costo);
   const envio = num(fila?.envio);
   const pedidos = num(fila?.pedidos);
+  const comision = num(fila?.comision);
 
-  const rentabilidad = ventaSiva - costo - envio;
+  // OJO: la resta tiene que ser la MISMA que la de `RENTABILIDAD`, que es la
+  // que usan las tablas. Acá se calcula en TypeScript y allá en SQL, asi que
+  // no hay nada que obligue a las dos a coincidir salvo acordarse -- y ya me
+  // pase una vez: agregue la comision a la constante y me olvide de esta
+  // linea, con lo cual la tarjeta y el total de la tabla de Pedidos daban
+  // distinto por el total de comisiones. Si se suma un componente nuevo, va
+  // en los dos lados.
+  const rentabilidad = ventaSiva - costo - envio - comision;
   const impuestos = ventaSiva * CARGA_IMPOSITIVA;
 
   return {
@@ -168,6 +177,13 @@ async function getKpis(f: FiltrosTiendaNube): Promise<KpisTiendaNube> {
     clientes: num(fila?.clientes),
     costo,
     envio,
+    comision,
+    // El denominador es la venta c/IVA, como todo el resto de la seccion. Ojo
+    // con leerlo como "el arancel que nos cobran": la pasarela cobra sobre el
+    // TOTAL que pago el cliente, que incluye el envio, y la venta c/IVA no lo
+    // incluye. Con envio cobrado, este porcentaje da mas alto que la tarifa
+    // publicada, y no esta mal -- son dos bases distintas.
+    comisionPct: pct(comision, ventaCiva),
     rentabilidad,
     // Denominador c/IVA en toda la sección minorista (ver DENOMINADOR).
     margenPct: pct(rentabilidad, ventaCiva),

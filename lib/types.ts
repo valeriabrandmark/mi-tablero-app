@@ -674,7 +674,11 @@ export type KpisTiendaNube = {
   costo: number;
   /** Lo que paga LA TIENDA por el flete (`shipping_cost_owner`), no el comprador. */
   envio: number;
-  /** Venta s/IVA − costo − envío. Sin comisión: Tienda Nube no la informa. */
+  /** Lo que se llevó la pasarela de pago. Calculado con el arancel de cada medio. */
+  comision: number;
+  /** Fracción de comisión sobre venta c/IVA. `null` si no hubo venta. */
+  comisionPct: number | null;
+  /** Venta s/IVA − costo − envío − comisión. */
   rentabilidad: number;
   /** Fracción, sobre venta c/IVA. */
   margenPct: number | null;
