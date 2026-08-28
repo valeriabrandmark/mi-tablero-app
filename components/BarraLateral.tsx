@@ -9,6 +9,7 @@ import {
   MarcaMercadoLibre,
   MarcaTiendaNube,
   MarcaUnibrandco,
+  NARANJA,
 } from "@/components/Marcas";
 
 /**
@@ -117,9 +118,15 @@ const TRAZOS: Record<ClaveTrazo, ReactNode> = {
   ),
   // Engranaje: la sección es "lo que pasa con la mercadería", no un tablero de
   // un tipo de mercadería en particular, así que no lleva ni caja ni paquete.
+  //
+  // EL CENTRO VA EN EL NARANJA DE LA MARCA, igual que la tilde de la U: el
+  // resto del engranaje sigue a `currentColor` y se aclara al pasar por encima
+  // o al quedar activo, y el naranja queda de acento fijo. Al revés —los
+  // dientes naranjas— la entrada gritaría más que las de venta, que son las
+  // que se miran todos los días.
   operaciones: (
     <>
-      <circle cx="12" cy="12" r="3" />
+      <circle cx="12" cy="12" r="3" stroke={NARANJA} />
       <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" />
     </>
   ),
