@@ -243,13 +243,13 @@ export default function DashboardStockFullPage() {
       )}
 
       {error ? null : !k ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />
           ))}
         </div>
       ) : (
-        <div className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}>
+        <div className={`grid grid-cols-2 gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}>
           <TarjetaKpi
             titulo="Unidades en Full"
             valor={fmtNumero(k.disponible)}

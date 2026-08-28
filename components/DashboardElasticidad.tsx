@@ -608,7 +608,7 @@ export default function DashboardElasticidadPage() {
       )}
 
       {!error && cargando && !data && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />
           ))}
@@ -640,7 +640,7 @@ export default function DashboardElasticidadPage() {
           className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
         >
           <ConAlarmaMargen activa={k.margen < 0}>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {/* EL TITULAR ES EL VOTO POR ARTÍCULO, no el margen agregado. Ver
                 `ganadoraPorArticulo` para por qué el agregado engaña. */}
               <TarjetaKpi

@@ -401,7 +401,7 @@ export default function DashboardResultadosPage() {
       )}
 
       {!error && cargando && !data && (
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {SEMANAS.map((s) => (
             <Esqueleto key={s.numero} className="h-[86px]" />
           ))}
@@ -415,7 +415,7 @@ export default function DashboardResultadosPage() {
           <ConAlarmaMargen
             activa={data.semanas.reduce((t, s) => t + s.margen, 0) < 0}
           >
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {data.semanas.map((s) => {
                 const futura = !semanaEmpezada(SEMANAS[s.numero - 1], hoy);
                 const corriendo = enCurso?.numero === s.numero;

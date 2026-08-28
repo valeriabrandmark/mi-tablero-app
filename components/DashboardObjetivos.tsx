@@ -192,7 +192,7 @@ export default function DashboardObjetivosPage({
           facturación vencida" sola con un guión, que se lee como un dato real
           y no como lo que es (no se pudo consultar nada). */}
       {error ? null : resumen.length === 0 ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />
           ))}
@@ -200,7 +200,7 @@ export default function DashboardObjetivosPage({
       ) : (
         // Una tarjeta por métrica: sumar pesos con unidades no significaría nada.
         <div
-          className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
+          className={`grid grid-cols-2 gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
         >
           {resumen.map((r) => {
             const fmt = fmtMetrica(r.metrica);

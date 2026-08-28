@@ -78,16 +78,24 @@ export function TarjetaKpi({
 
   return (
     <div
-      className={`bg-panel rounded-xl border ${compacta ? "p-3" : "p-4"} ${
-        alarma ? "border-rose-500/40" : "border-line"
-      }`}
+      className={`bg-panel rounded-xl border ${
+        compacta ? "p-2.5 sm:p-3" : "p-3 sm:p-4"
+      } ${alarma ? "border-rose-500/40" : "border-line"}`}
     >
-      <p className={`text-muted leading-tight ${compacta ? "text-[11px]" : "text-xs"}`}>
+      <p
+        className={`text-muted leading-tight ${
+          compacta ? "text-[10px] sm:text-[11px]" : "text-[11px] sm:text-xs"
+        }`}
+      >
         {titulo}
       </p>
+      {/* EL VALOR ACHICA UN ESCALÓN EN CELULAR, y no es cosmético: con dos
+        tarjetas por fila en una pantalla de 360px cada una queda en unos
+        160px, y un importe como "$ 1.506.510" a 20px no entra. De `sm` para
+        arriba vuelve al tamaño de siempre, así que en la compu no cambia nada. */}
       <p
         className={`font-semibold tabular-nums tracking-tight ${
-          compacta ? "mt-1.5 text-base" : "mt-2 text-xl"
+          compacta ? "mt-1.5 text-sm sm:text-base" : "mt-1.5 text-lg sm:mt-2 sm:text-xl"
         }`}
         style={color ? { color } : undefined}
       >

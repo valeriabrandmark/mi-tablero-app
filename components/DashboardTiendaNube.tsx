@@ -635,7 +635,7 @@ export default function DashboardTiendaNubePage({
       )}
 
       {error ? null : !k ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 11 }, (_, i) => (
             <Esqueleto key={i} className="h-[74px]" />
           ))}
@@ -646,7 +646,7 @@ export default function DashboardTiendaNubePage({
             // Seis columnas para que las once tarjetas entren en dos filas y no
             // en tres. Abajo de `lg` bajan a tres y dos: apretar seis en una
             // pantalla chica no ahorra scroll, sólo hace ilegibles los importes.
-            className={`grid gap-2.5 transition-opacity sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 ${cargando ? "opacity-50" : ""}`}
+            className={`grid grid-cols-2 gap-2.5 transition-opacity sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 ${cargando ? "opacity-50" : ""}`}
           >
             <TarjetaKpi
               compacta
@@ -1025,7 +1025,7 @@ function PanelEquilibrio({
             "Rentabilidad bruta", y significan lo mismo: ANTES de la carga
             impositiva. La contribución de acá es ese mismo número, así que
             llamarla de otra forma haría pensar que son dos cuentas distintas. */}
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div>
               <p className="text-muted text-xs">Contribución bruta</p>
               <p className="text-lg font-semibold">{fmtMoneda(eq.contribucion)}</p>
