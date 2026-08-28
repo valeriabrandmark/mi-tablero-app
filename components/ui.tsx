@@ -39,7 +39,13 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <section className={`border-line bg-panel rounded-xl border p-4 ${className}`}>
+    // `min-w-0` no hace nada acá suelto, y es todo cuando el panel cae dentro
+    // de una grilla o un flex: sin él, el track se agranda hasta el ancho
+    // natural de la tabla que tiene adentro —aunque la tabla scrollee sola— y
+    // el panel termina más ancho que la pantalla. Al lado de otro panel que sí
+    // entra, se lee como que el de abajo "quedó corto", cuando el equivocado
+    // es el de arriba.
+    <section className={`border-line bg-panel min-w-0 rounded-xl border p-4 ${className}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-medium">{titulo}</h2>
         {nota && <span className="text-muted text-xs">{nota}</span>}
