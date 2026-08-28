@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import EncabezadoCanal from "@/components/EncabezadoCanal";
 import VentaRentabilidad from "@/components/charts/VentaRentabilidad";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import BarraFiltrosTiendaNube from "@/components/FiltrosTiendaNube";
@@ -546,12 +545,12 @@ export default function DashboardTiendaNubePage({
 
   return (
     <div className="space-y-4">
+      {/* El logo del canal ya lo pone el layout, arriba de las pestañas: si
+        estuviera acá también se repetiría en cada pestaña y parpadearía al
+        cambiar de una a otra. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1>
-            <EncabezadoCanal canal="tienda-nube" />
-          </h1>
-          <p className="text-muted mt-1 text-xs">
+          <p className="text-muted text-xs">
             {data
               ? `Actualizado ${new Date(data.generadoEn).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}` +
                 (data.ultimaVenta

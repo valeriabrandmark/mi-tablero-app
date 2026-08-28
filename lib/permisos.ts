@@ -23,11 +23,10 @@ import { slugVendedor, VENDEDORES_OBJETIVOS, type VendedorObjetivos } from "@/li
  * | `vendedor`         | Únicamente su propia página de objetivos          |
  * | `responsable_meli` | Únicamente la sección Venta minorista             |
  *
- * OJO con `admin`: hoy el tablero **no tiene nada editable**, así que en la
- * práctica ve lo mismo que `superadmin`. El rol existe para que la diferencia
- * esté modelada desde ahora, pero no promete una restricción que todavía no
- * hace falta: el día que se pueda cargar un objetivo desde la pantalla, ahí sí
- * hay que distinguirlos.
+ * `admin` y `superadmin` ven las mismas páginas, pero YA NO ES LO MISMO: las
+ * páginas en construcción las ve sólo el `superadmin` (ver `enConstruccion` y
+ * `puedeVerBorradores` más abajo). Ésa es hoy la única diferencia entre los dos
+ * roles. El día que se pueda editar algo desde la pantalla, va a haber otra.
  *
  * UN USUARIO SIN CLAIM NO VE NADA. Es a propósito: si alguien crea un usuario
  * y se olvida de asignarle el rol, que se quede afuera y llame, en vez de
@@ -168,6 +167,45 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   // Vendedor: solo lo suyo.
   const suya = `/objetivos/${slugVendedor(permiso.vendedor)}`;
   return pathname === suya || pathname === "/objetivos" || pathname === "/api/objetivos";
+}
+
+/**
+ * Páginas que están a medio construir.
+ *
+ * NO ES UN PERMISO SINO UN ESTADO. La ruta existe, entra en el nav y cualquiera
+ * con acceso a la sección la puede abrir — pero adentro sólo el `superadmin` ve
+ * lo que se está construyendo. El resto ve un cartel de "en producción".
+ *
+ * Se hace así, y no escondiendo la entrada, porque un tablero que aparece de la
+ * nada un martes desconcierta más que uno que se anunció. El cartel dice que
+ * viene algo; la pantalla a medio hacer, con paneles vacíos y números que
+ * todavía no cierran, es lo que no tiene que ver nadie.
+ *
+ * PARA PUBLICAR UNA: se saca de esta lista. Nada más. Sin tocar permisos, ni
+ * el nav, ni la página — que es justamente el punto de tenerlo en un solo lado.
+ */
+const PAGINAS_EN_CONSTRUCCION = [
+  "/stock",
+  "/venta-minorista/tienda-nube/analytics",
+];
+
+/** `true` si la página todavía se está construyendo. */
+export function enConstruccion(pathname: string): boolean {
+  return PAGINAS_EN_CONSTRUCCION.some(
+    (r) => pathname === r || pathname.startsWith(`${r}/`),
+  );
+}
+
+/**
+ * Quién ve los borradores: sólo el `superadmin`.
+ *
+ * `admin` queda afuera A PROPÓSITO, y es la primera vez que los dos roles se
+ * comportan distinto. Hasta hoy `puedeVer` los devolvía juntos y la diferencia
+ * era sólo teórica; esto la vuelve real, que era lo que el rol prometía desde
+ * el principio.
+ */
+export function puedeVerBorradores(permiso: Permiso | null): boolean {
+  return permiso?.rol === "superadmin";
 }
 
 /** Adónde mandar al usuario cuando entra, o cuando pide algo que no puede ver. */

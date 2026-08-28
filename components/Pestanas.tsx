@@ -11,7 +11,8 @@ export type Pestana = {
 };
 
 /**
- * Pestañas de la sección Mercado Libre, arriba del contenido.
+ * Pestañas de un canal, arriba del contenido. Las usan Mercado Libre y Tienda
+ * Nube.
  *
  * Van acá y no en la barra lateral porque son vistas de un mismo tablero —los
  * mismos datos mirados distinto—, mientras que la barra lateral separa
@@ -21,7 +22,7 @@ export type Pestana = {
  * lleva a una página vacía se lee como que el tablero está roto, y esconderla
  * hace que nadie sepa que falta.
  */
-export default function PestanasMeli({ pestanas }: { pestanas: Pestana[] }) {
+export default function Pestanas({ pestanas }: { pestanas: Pestana[] }) {
   const pathname = usePathname();
 
   return (
