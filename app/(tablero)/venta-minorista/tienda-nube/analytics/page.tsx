@@ -22,18 +22,13 @@ export default async function AnalyticsTiendaNubePage() {
   const permiso = permisoDelUsuario(usuario);
 
   if (authConfigurada && !puedeVerBorradores(permiso)) {
-    return (
-      <EnProduccion
-        titulo="Analytics Tienda Nube"
-        descripcion="Va a mostrar de dónde llega la gente a la tienda, qué productos se miran más y en qué paso del checkout se abandona la compra."
-      />
-    );
+    return <EnProduccion titulo="Analytics Tienda Nube" />;
   }
 
   return (
-    <EnProduccion
-      titulo="Analytics Tienda Nube"
-      descripcion="Frenada esperando acceso de lectura a la propiedad de Google Analytics, que hoy administra la agencia. No falta código: falta de dónde leer."
-    />
+    // EL BORRADOR. Hoy es lo mismo que ve el resto porque todavía no hay
+    // nada construido: acá abajo va el tablero a medida que se arme, y ahí
+    // recién la puerta de arriba empieza a separar de verdad.
+    <EnProduccion titulo="Analytics Tienda Nube" />
   );
 }
