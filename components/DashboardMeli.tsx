@@ -568,7 +568,7 @@ export default function DashboardMeliPage({
       )}
 
       {error ? null : !k ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 8 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />
           ))}
@@ -576,7 +576,7 @@ export default function DashboardMeliPage({
       ) : (
         <ConAlarmaMargen activa={k.rentabilidadNeta < 0}>
           <div
-            className={`grid gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 ${cargando ? "opacity-50" : ""}`}
+            className={`grid grid-cols-2 gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 ${cargando ? "opacity-50" : ""}`}
           >
             <TarjetaKpi
               titulo={conCanceladas ? "Transaccionado c/IVA" : "Venta c/IVA"}

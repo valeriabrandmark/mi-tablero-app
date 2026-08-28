@@ -208,7 +208,14 @@ export function Tabla<T>({
                 {columnas.map((c) => (
                   <td
                     key={c.titulo}
-                    className={`py-1.5 pr-3 ${c.numerica ? "text-right tabular-nums" : ""}`}
+                    // Las celdas numéricas no parten: en un celular la tabla
+                    // se comprime hasta donde puede, y un importe cortado en
+                    // dos renglones ("$ 1.506." / "510") deja de leerse como
+                    // un número. Sin partir, la tabla se ensancha y scrollea,
+                    // que es el comportamiento correcto.
+                    className={`py-1.5 pr-3 ${
+                      c.numerica ? "text-right whitespace-nowrap tabular-nums" : ""
+                    }`}
                   >
                     {c.celda(fila)}
                   </td>

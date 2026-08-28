@@ -382,14 +382,14 @@ export default function AlertasMeliPage({
       )}
 
       {error ? null : !data ? (
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {Array.from({ length: 3 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />
           ))}
         </div>
       ) : (
         <div
-          className={`grid gap-3 transition-opacity sm:grid-cols-3 ${cargando ? "opacity-50" : ""}`}
+          className={`grid grid-cols-2 gap-3 transition-opacity sm:grid-cols-3 ${cargando ? "opacity-50" : ""}`}
         >
           {resumen.map((r) => (
             <TarjetaKpi
