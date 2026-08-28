@@ -54,12 +54,21 @@ export function TarjetaKpi({
   valor,
   detalle,
   acento,
+  compacta = false,
 }: {
   titulo: string;
   valor: string;
   /** Nodo y no string: hay tarjetas que muestran la variación con color. */
   detalle?: ReactNode;
   acento?: string;
+  /**
+   * Achica padding y tipografía para que entren más por fila.
+   *
+   * Es opt-in y no el default a propósito: esta tarjeta la usan diez tableros,
+   * y el que tiene once KPIs es uno solo. Achicarla para todos cambiaría nueve
+   * pantallas que nadie pidió tocar.
+   */
+  compacta?: boolean;
 }) {
   // Con el margen en negativo la alarma pisa el acento propio de la tarjeta:
   // si no, quedaba una fila mitad roja y mitad de colores, que es justo lo que
@@ -69,18 +78,30 @@ export function TarjetaKpi({
 
   return (
     <div
-      className={`bg-panel rounded-xl border p-4 ${
+      className={`bg-panel rounded-xl border ${compacta ? "p-3" : "p-4"} ${
         alarma ? "border-rose-500/40" : "border-line"
       }`}
     >
-      <p className="text-muted text-xs leading-tight">{titulo}</p>
+      <p className={`text-muted leading-tight ${compacta ? "text-[11px]" : "text-xs"}`}>
+        {titulo}
+      </p>
       <p
-        className="mt-2 text-xl font-semibold tabular-nums tracking-tight"
+        className={`font-semibold tabular-nums tracking-tight ${
+          compacta ? "mt-1.5 text-base" : "mt-2 text-xl"
+        }`}
         style={color ? { color } : undefined}
       >
         {valor}
       </p>
-      {detalle && <p className="text-muted mt-1 text-[11px] leading-tight">{detalle}</p>}
+      {detalle && (
+        <p
+          className={`text-muted mt-1 leading-tight ${
+            compacta ? "text-[10px]" : "text-[11px]"
+          }`}
+        >
+          {detalle}
+        </p>
+      )}
     </div>
   );
 }
