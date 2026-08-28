@@ -817,6 +817,15 @@ export default function DashboardTiendaNubePage({
       )}
 
       {data && (
+        <div className={cargando ? "opacity-50 transition-opacity" : "transition-opacity"}>
+          <PanelAdquisicion
+            ad={data.adquisicion}
+            filtrado={filtradoPorDimension}
+          />
+        </div>
+      )}
+
+      {data && (
         <div
           className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
         >
@@ -1067,6 +1076,111 @@ function PanelEquilibrio({
               </p>
             )}
           </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+/**
+ * Cuánto cuesta traer un cliente nuevo, y si conviene.
+ *
+ * El número solo no dice nada: $15.000 de costo de adquisición es una ganga o
+ * un desastre según cuánto deje ese cliente. Por eso el panel muestra siempre
+ * los dos y su diferencia, que es lo único accionable.
+ *
+ * Y lo compara contra la contribución de UNA compra —no de la vida del
+ * cliente— porque en este canal casi nadie vuelve: de treinta y un compradores
+ * volvió uno. Donde hay recompra se puede pagar caro por entrar y recuperar
+ * después; acá cada venta tiene que pagarse sola.
+ */
+function PanelAdquisicion({
+  ad,
+  filtrado,
+}: {
+  ad: DashboardTiendaNube["adquisicion"];
+  filtrado: boolean;
+}) {
+  const deja = ad.contribucionPorNuevo;
+  const margen = ad.cac != null && deja != null ? deja - ad.cac : null;
+  const conviene = margen != null && margen > 0;
+
+  return (
+    <Panel
+      titulo="Costo de adquisición"
+      nota={
+        filtrado
+          ? "Con filtros puestos: la inversión no baja, la contribución sí"
+          : "Inversión en marketing prorrateada por día sobre el rango"
+      }
+    >
+      {!ad.gastoCargado ? (
+        <div className="space-y-2">
+          <p className="text-2xl font-semibold">{fmtNumero(ad.clientesNuevos)}</p>
+          <p className="text-muted text-sm">
+            {ad.clientesNuevos === 1
+              ? "cliente nuevo en el recorte"
+              : "clientes nuevos en el recorte"}
+            {deja != null && <> · dejaron {fmtMoneda(deja)} de contribución cada uno</>}
+          </p>
+          {/* Tono informativo: el dato falta, no falla nada. */}
+          <Aviso tono="info">
+            Falta cargar la inversión en marketing del período —agencia, pauta,
+            influencers— en{" "}
+            <span className="font-mono text-xs">bronze.gastos_marketing</span>. No
+            viene de ninguna API: ni Tienda Nube ni Google Analytics saben lo que se
+            paga por la pauta. Con ese dato sale el costo por cliente.
+          </Aviso>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div>
+              <p className="text-muted text-xs">Inversión en marketing</p>
+              <p className="text-lg font-semibold">{fmtMoneda(ad.gasto)}</p>
+            </div>
+            <div>
+              <p className="text-muted text-xs">Clientes nuevos</p>
+              <p className="text-lg font-semibold">{fmtNumero(ad.clientesNuevos)}</p>
+            </div>
+            <div>
+              <p className="text-muted text-xs">Costo por cliente</p>
+              <p className="text-lg font-semibold">
+                {ad.cac == null ? "—" : fmtMoneda(ad.cac)}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted text-xs">Deja cada uno</p>
+              <p className="text-lg font-semibold">
+                {deja == null ? "—" : fmtMoneda(deja)}
+              </p>
+            </div>
+          </div>
+
+          {margen != null && (
+            <p className="text-sm">
+              {conviene ? (
+                <>
+                  Cada cliente nuevo deja{" "}
+                  <strong style={{ color: PALETA[1] }}>{fmtMoneda(margen)}</strong> más
+                  de lo que costó traerlo.
+                </>
+              ) : (
+                <>
+                  Cada cliente nuevo cuesta{" "}
+                  <strong style={{ color: TEMA.negativo }}>
+                    {fmtMoneda(Math.abs(margen))}
+                  </strong>{" "}
+                  más de lo que deja. Con un solo comprador repetido en toda la
+                  historia del canal, no hay una segunda compra que lo compense.
+                </>
+              )}
+            </p>
+          )}
+          <p className="text-muted text-[11px] leading-tight">
+            La contribución por cliente es bruta —antes de impuestos— y no descuenta
+            el abono del plan, que se mira aparte en Equilibrio del canal.
+          </p>
         </div>
       )}
     </Panel>
