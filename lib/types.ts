@@ -847,6 +847,28 @@ export type DashboardTiendaNube = {
     /** Venta c/IVA necesaria para empatar, al margen de contribución actual. */
     ventaEquilibrio: number | null;
   };
+  /**
+   * Cuánto cuesta traer un cliente nuevo, y con qué compararlo.
+   *
+   * `gasto` es la inversión en marketing del rango (agencia, pauta,
+   * influencers), prorrateada por día. NO sale de ninguna API: se carga a mano
+   * en `bronze.gastos_marketing`, porque ni Tienda Nube ni Google Analytics
+   * saben lo que se paga por la pauta.
+   *
+   * `contribucionPorNuevo` es el número contra el que hay que leer el `cac`:
+   * si traer al cliente cuesta más que lo que deja, esa venta pierde plata. Y
+   * con la recompra que tiene el canal —uno de cada treinta y un compradores
+   * volvió— no hay una segunda compra que lo compense.
+   */
+  adquisicion: {
+    gasto: number;
+    /** `false` = no cargamos el gasto del período, no que haya sido cero. */
+    gastoCargado: boolean;
+    clientesNuevos: number;
+    /** Costo de adquisición. `null` si falta el gasto o no hubo clientes. */
+    cac: number | null;
+    contribucionPorNuevo: number | null;
+  };
   /** Último día con ventas cargadas: avisa si el dato viene atrasado. */
   ultimaVenta: string | null;
   generadoEn: string;

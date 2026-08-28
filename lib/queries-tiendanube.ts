@@ -512,6 +512,61 @@ async function getCostosFijos(
   return { monto: num(fila?.monto), cargado: fila?.cargado === true };
 }
 
+/**
+ * Lo que se gastó en traer gente, y cuántos clientes nuevos entraron.
+ *
+ * Las dos mitades del costo de adquisición. Ninguna viene de Google Analytics
+ * —GA mide gente, no plata que sale—, así que este número se puede tener sin
+ * esperar a que Analytics junte nada.
+ *
+ * TAMPOCO RECIBE LOS FILTROS, por lo mismo que el abono del plan: lo que se le
+ * paga a la agencia no baja porque uno mire un proveedor. Sólo el rango.
+ *
+ * "Cliente nuevo" es aquel cuya PRIMERA compra del canal cae dentro del rango.
+ * Se mide sobre `cliente`, que es el nombre: dos personas distintas con el
+ * mismo nombre contarían como una. Con treinta clientes el riesgo es chico, y
+ * es el mismo criterio que ya usa la tarjeta de Clientes — que las dos cuenten
+ * igual importa más que afinar una de las dos.
+ */
+async function getMarketing(
+  desde: string,
+  hasta: string,
+): Promise<{ gasto: number; cargado: boolean; clientesNuevos: number }> {
+  if (!desde || !hasta) return { gasto: 0, cargado: false, clientesNuevos: 0 };
+
+  const [gastos, nuevos] = await Promise.all([
+    queryOne<{ monto: string | null; cargado: boolean | null }>(
+      `select coalesce(sum(g.monto / m.dias_del_mes), 0) as monto,
+              count(g.monto) > 0                        as cargado
+       from generate_series($1::date, $2::date, '1 day') as d
+       cross join lateral (
+         select extract(day from (date_trunc('month', d) + interval '1 month - 1 day'))
+           as dias_del_mes
+       ) m
+       left join bronze.gastos_marketing g
+         on g.mes = date_trunc('month', d)::date`,
+      [desde, hasta],
+    ),
+    queryOne<Record<string, string | null>>(
+      `select count(*) as nuevos
+       from (
+         select cliente, min(fecha) as primera
+         from gold.fact_ventas
+         where canal = $1 and cliente is not null
+         group by cliente
+       ) p
+       where p.primera between $2::date and $3::date`,
+      [CANAL_TIENDA_NUBE, desde, hasta],
+    ),
+  ]);
+
+  return {
+    gasto: num(gastos?.monto),
+    cargado: gastos?.cargado === true,
+    clientesNuevos: num(nuevos?.nuevos),
+  };
+}
+
 /** Último día con ventas cargadas, sin filtros: avisa si el dato viene atrasado. */
 async function getUltimaVenta(): Promise<string | null> {
   const fila = await queryOne<{ fecha: string | null }>(
@@ -587,6 +642,7 @@ export async function getDashboardTiendaNube(
     ventaTotalProveedores,
     ultimaVenta,
     costosFijos,
+    marketing,
     kpisAnterior,
   ] = await Promise.all([
     getKpis(f),
@@ -599,6 +655,7 @@ export async function getDashboardTiendaNube(
     getVentaTotalProveedores(f),
     getUltimaVenta(),
     getCostosFijos(desde, hasta),
+    getMarketing(desde, hasta),
     // El período anterior mantiene TODOS los otros filtros: comparar "este mes
     // de ALGABO" contra "el mes pasado de todo" no diría nada.
     anterior ? getKpis({ ...f, ...anterior }) : Promise.resolve(null),
@@ -641,6 +698,24 @@ export async function getDashboardTiendaNube(
       ventaEquilibrio:
         costosFijos.monto > 0 && kpis.rentabilidad > 0 && kpis.ventaCiva > 0
           ? costosFijos.monto / (kpis.rentabilidad / kpis.ventaCiva)
+          : null,
+    },
+    adquisicion: {
+      gasto: marketing.gasto,
+      gastoCargado: marketing.cargado,
+      clientesNuevos: marketing.clientesNuevos,
+      // Lo que costó traer a cada cliente nuevo. Null sin gasto cargado o sin
+      // clientes: un "$0 por cliente" se leería como que salieron gratis.
+      cac:
+        marketing.cargado && marketing.clientesNuevos > 0
+          ? marketing.gasto / marketing.clientesNuevos
+          : null,
+      // Con qué compararlo: lo que deja cada cliente nuevo. Se reparte la
+      // contribución del recorte entre TODOS los pedidos y se le asigna a los
+      // nuevos su parte — con casi cero recompra, cada pedido es un cliente.
+      contribucionPorNuevo:
+        marketing.clientesNuevos > 0
+          ? kpis.rentabilidad / marketing.clientesNuevos
           : null,
     },
     ultimaVenta,
