@@ -41,7 +41,7 @@ function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
     {
       titulo: "Cliente",
       celda: (f) => (
-        <span className="block max-w-[260px] truncate">{f.razonSocial}</span>
+        <span className="block max-w-[116px] sm:max-w-[260px] truncate">{f.razonSocial}</span>
       ),
       orden: (f) => f.razonSocial,
     },

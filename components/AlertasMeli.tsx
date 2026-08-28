@@ -133,7 +133,7 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     {
       titulo: "Descripción",
       celda: (f) => (
-        <span className="block max-w-[260px] truncate">
+        <span className="block max-w-[116px] sm:max-w-[260px] truncate">
           {f.producto ?? "—"}
         </span>
       ),
@@ -142,7 +142,7 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     {
       titulo: "Proveedor",
       celda: (f) => (
-        <span className="block max-w-[180px] truncate">
+        <span className="block max-w-[96px] sm:max-w-[180px] truncate">
           {f.proveedor ?? "—"}
         </span>
       ),
@@ -151,7 +151,7 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     {
       titulo: "Marca",
       celda: (f) => (
-        <span className="block max-w-[130px] truncate">{f.marca ?? "—"}</span>
+        <span className="block max-w-[96px] sm:max-w-[130px] truncate">{f.marca ?? "—"}</span>
       ),
       orden: (f) => f.marca,
     },

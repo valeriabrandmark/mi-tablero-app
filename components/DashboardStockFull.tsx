@@ -31,7 +31,7 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
       titulo: "Producto",
       celda: (f) => (
         <span
-          className="block max-w-[300px] truncate"
+          className="block max-w-[136px] sm:max-w-[300px] truncate"
           title={f.producto ?? undefined}
         >
           {f.producto ?? "—"}
@@ -42,7 +42,7 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
     {
       titulo: "Marca",
       celda: (f) => (
-        <span className="block max-w-[130px] truncate">{f.marca ?? "—"}</span>
+        <span className="block max-w-[96px] sm:max-w-[130px] truncate">{f.marca ?? "—"}</span>
       ),
       orden: (f) => f.marca,
     },

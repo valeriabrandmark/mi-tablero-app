@@ -169,7 +169,7 @@ function columnasArticulo(
       titulo: "Producto",
       celda: (f) => (
         <span
-          className="block max-w-[230px] truncate"
+          className="block max-w-[104px] sm:max-w-[230px] truncate"
           title={f.producto ?? undefined}
         >
           {f.producto ?? "—"}

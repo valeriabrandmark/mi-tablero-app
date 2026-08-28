@@ -97,7 +97,7 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
     {
       titulo: "Producto",
       celda: (a) => (
-        <span className="block max-w-[280px] truncate">
+        <span className="block max-w-[126px] sm:max-w-[280px] truncate">
           {a.producto ?? "—"}
         </span>
       ),
@@ -225,7 +225,7 @@ function colComprobantes(
     {
       titulo: "Cliente",
       celda: (c) => (
-        <span className="block max-w-[260px] truncate">{c.cliente ?? "—"}</span>
+        <span className="block max-w-[116px] sm:max-w-[260px] truncate">{c.cliente ?? "—"}</span>
       ),
       orden: (c) => c.cliente,
     },
