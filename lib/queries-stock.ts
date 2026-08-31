@@ -1,0 +1,342 @@
+import { query, queryOne } from "@/lib/db";
+import { agregarFiltro } from "@/lib/filtros";
+import {
+  COBERTURA_OBJETIVO_DIAS,
+  PLAZO_REPOSICION_DIAS,
+  PROVEEDORES_NO_MERCADERIA,
+  VENTANA_POR_DEFECTO,
+  tramoCobertura,
+} from "@/lib/stock";
+import type {
+  DashboardStock,
+  FilaStock,
+  FiltrosStock,
+  KpisStock,
+  ProveedorStock,
+  TramoStock,
+} from "@/lib/types";
+
+/**
+ * Consultas del tablero de Stock.
+ *
+ * Cruza CINCO fuentes, cada una con algo que las otras no tienen:
+ *
+ *   bronze.digip_stock         unidades en el depósito de Tucumán
+ *   bronze.ml_stock_full       unidades en el depósito de Mercado Libre
+ *   bronze.ml_publicaciones    el mapa inventory_id -> SKU, que ML no da hecho
+ *   bronze.sigma_articulos     proveedor, marca y descripción
+ *   bronze.costos_historicos   el costo con el que se valoriza
+ *   gold.fact_ventas           el ritmo de venta, que es lo que vuelve
+ *                              interpretable a todo lo anterior
+ *
+ * Es exactamente lo que la planilla de compras arma pegando exportaciones a
+ * mano, con la diferencia de que acá está al día y las cuentas se definen una
+ * sola vez. Ver lib/stock.ts para las tres cosas que se hacen distinto y por qué.
+ */
+
+/**
+ * El SKU de una publicación vive dentro del array `attributes`, no en
+ * `seller_custom_field` — que está vacío en casi todas. Mismo rodeo que en
+ * queries-stock-full.ts, por el mismo motivo.
+ */
+const SKU_DE_PUBLICACION = `(select a->>'value_name'
+     from jsonb_array_elements(p.attributes::jsonb) a
+    where a->>'id' = 'SELLER_SKU'
+    limit 1)`;
+
+/**
+ * El armado completo, listo para filtrar. Una sola definición porque la usan
+ * los KPIs, los dos gráficos y la tabla: escrita cuatro veces, terminarían
+ * midiendo cosas distintas sin que nada avise.
+ *
+ * $1 es la ventana en días sobre la que se mide el ritmo de venta.
+ */
+const BASE = `
+with por_inv as (
+  -- Un renglón por INVENTARIO y no por publicación: varias publicaciones
+  -- comparten el mismo stock físico, y sumarlas lo contaría de más.
+  select p.inventory_id, max(${SKU_DE_PUBLICACION}) as sku
+  from bronze.ml_publicaciones p
+  where p."shipping.logistic_type" = 'fulfillment'
+    and p.inventory_id is not null
+  group by p.inventory_id
+),
+full_ml as (
+  select i.sku, sum(coalesce(f.available_quantity, 0)) as unidades
+  from bronze.ml_stock_full f
+  join por_inv i on i.inventory_id = f.inventory_id
+  where i.sku is not null
+  group by i.sku
+),
+tuc as (
+  -- Agrupado por código: hay 24 códigos repetidos en el export de Digip, y sin
+  -- esto el join los multiplicaría en todas las cuentas de plata.
+  select trim(codigo) as sku, sum(coalesce("stock.disponible", 0)) as unidades
+  from bronze.digip_stock
+  group by 1
+),
+costo as (
+  -- El costo del último mes que lo tenga cargado. Los artículos sin costo
+  -- quedan en 0 a propósito: son testers y exhibidores, que no se compran.
+  select distinct on (sku) sku, costo_real
+  from bronze.costos_historicos
+  where costo_real > 0
+  order by sku, mes_comercial desc
+),
+ventas as (
+  select sku,
+         max(fecha)                                                  as ultima_venta,
+         coalesce(sum(cantidad) filter (where fecha >= current_date - $1::int), 0) as uds,
+         coalesce(sum(cantidad) filter (where fecha >= current_date - $1::int
+                                          and canal = 'Mercado Libre'), 0) as uds_meli,
+         coalesce(sum(cantidad) filter (where fecha >= current_date - $1::int
+                                          and canal = 'Tienda Nube'), 0)   as uds_tn,
+         coalesce(sum(cantidad) filter (where fecha >= current_date - $1::int
+                                          and canal = 'Mayorista'), 0)     as uds_may
+  from gold.fact_ventas
+  group by sku
+),
+stock as (
+  -- FULL OUTER: hay SKU que sólo están en Tucumán y SKU que sólo están en Full.
+  -- Un inner join perdería justo los que están en un solo depósito, que son los
+  -- que más interesa mirar.
+  select coalesce(t.sku, f.sku)         as sku,
+         coalesce(t.unidades, 0)        as tuc,
+         coalesce(f.unidades, 0)        as full_ml
+  from tuc t
+  full outer join full_ml f on f.sku = t.sku
+),
+base as (
+  select s.sku,
+         a.descripcion                                  as producto,
+         a."proveedorNombre"                            as proveedor,
+         a."attributes.marca"                           as marca,
+         s.tuc,
+         s.full_ml,
+         (s.tuc + s.full_ml)                            as total,
+         coalesce(c.costo_real, 0)                      as costo,
+         (s.tuc + s.full_ml) * coalesce(c.costo_real, 0) as valor,
+         coalesce(v.uds, 0)                             as uds,
+         coalesce(v.uds_meli, 0)                        as uds_meli,
+         coalesce(v.uds_tn, 0)                          as uds_tn,
+         coalesce(v.uds_may, 0)                         as uds_may,
+         v.ultima_venta,
+         -- El ritmo es unidades por DÍA. La planilla lo guardaba mensual y lo
+         -- llamaba "STOCK MAX", que es lo que hacía leer un ritmo como un tope.
+         coalesce(v.uds, 0)::numeric / $1::int          as ritmo_diario,
+         -- Sin ventas no hay cobertura: es null y no un número enorme. Son dos
+         -- situaciones distintas y la planilla las mezclaba en un #DIV/0!.
+         case when coalesce(v.uds, 0) = 0 then null
+              else (s.tuc + s.full_ml) / (coalesce(v.uds, 0)::numeric / $1::int)
+         end                                            as cobertura
+  from stock s
+  left join bronze.sigma_articulos a on trim(a.id) = s.sku
+  left join costo c on c.sku = s.sku
+  left join ventas v on v.sku = s.sku
+  where (s.tuc + s.full_ml) > 0
+    and coalesce(a."proveedorNombre", '') <> all($2::text[])
+),
+-- El exceso y el sugerido salen del ritmo, así que van en su propio nivel para
+-- no repetir la expresión entera en cada uno.
+calculada as (
+  select b.*,
+         greatest(0, b.total - b.ritmo_diario * ${COBERTURA_OBJETIVO_DIAS})           as exceso_u,
+         greatest(0, b.total - b.ritmo_diario * ${COBERTURA_OBJETIVO_DIAS}) * b.costo as exceso,
+         -- Lo que falta para llegar al objetivo CONTANDO lo que se va a vender
+         -- mientras la reposición viaja. Sin sumar el plazo, el pedido llega
+         -- justo cuando el artículo ya se quebró.
+         ceil(greatest(0, b.ritmo_diario * ${COBERTURA_OBJETIVO_DIAS + PLAZO_REPOSICION_DIAS} - b.total)) as sugerido
+  from base b
+)`;
+
+type Where = { sql: string; params: unknown[] };
+
+function where(f: FiltrosStock): Where {
+  const params: unknown[] = [f.ventana ?? VENTANA_POR_DEFECTO, PROVEEDORES_NO_MERCADERIA];
+  const clauses: string[] = [];
+
+  agregarFiltro(clauses, params, "proveedor", f.proveedor);
+  agregarFiltro(clauses, params, "marca", f.marca);
+  agregarFiltro(clauses, params, "sku", f.sku);
+
+  if (f.buscar) {
+    params.push(`%${f.buscar}%`);
+    clauses.push(`(sku ilike $${params.length} or producto ilike $${params.length})`);
+  }
+
+  // El tramo se filtra con los mismos bordes que usa `tramoCobertura`, escritos
+  // acá una vez. No se puede llamar a la función de TypeScript desde SQL, así
+  // que lo que se cuida es que los números salgan de las mismas constantes.
+  if (f.tramo) {
+    const rango: Record<string, string> = {
+      quiebre: `cobertura is not null and cobertura < ${PLAZO_REPOSICION_DIAS}`,
+      ajustado: `cobertura >= ${PLAZO_REPOSICION_DIAS} and cobertura < ${COBERTURA_OBJETIVO_DIAS}`,
+      objetivo: `cobertura >= ${COBERTURA_OBJETIVO_DIAS} and cobertura < 60`,
+      sobra: `cobertura >= 60 and cobertura <= 120`,
+      excedido: `cobertura > 120`,
+      sin_venta: `cobertura is null`,
+    };
+    if (rango[f.tramo]) clauses.push(rango[f.tramo]);
+  }
+
+  return { sql: clauses.length ? `where ${clauses.join(" and ")}` : "", params };
+}
+
+const num = (v: unknown): number => Number(v ?? 0);
+
+async function getKpis(f: FiltrosStock): Promise<KpisStock> {
+  const w = where(f);
+  const fila = await queryOne<Record<string, string>>(
+    `${BASE}
+     select count(*)                                                as skus,
+            coalesce(sum(total), 0)                                 as unidades,
+            coalesce(sum(valor), 0)                                 as valor,
+            count(*) filter (where cobertura is null)               as skus_sin_venta,
+            coalesce(sum(valor) filter (where cobertura is null), 0) as valor_sin_venta,
+            count(*) filter (where cobertura is not null
+                               and cobertura < ${PLAZO_REPOSICION_DIAS}) as skus_quiebre,
+            coalesce(sum(exceso), 0)                                as exceso,
+            count(*) filter (where costo = 0)                       as skus_sin_costo
+     from calculada ${w.sql}`,
+    w.params,
+  );
+
+  return {
+    skus: num(fila?.skus),
+    unidades: num(fila?.unidades),
+    valor: num(fila?.valor),
+    skusSinVenta: num(fila?.skus_sin_venta),
+    valorSinVenta: num(fila?.valor_sin_venta),
+    skusQuiebre: num(fila?.skus_quiebre),
+    exceso: num(fila?.exceso),
+    skusSinCosto: num(fila?.skus_sin_costo),
+  };
+}
+
+/**
+ * Cuánto stock hay en cada tramo de cobertura.
+ *
+ * El tramo se resuelve en TypeScript con `tramoCobertura` y no en SQL: con los
+ * cortes escritos en los dos lados, el día que se muevan van a quedar
+ * distintos en cada uno y nadie lo va a notar hasta que los números no cierren.
+ */
+async function getTramos(f: FiltrosStock): Promise<TramoStock[]> {
+  const w = where(f);
+  const filas = await query<Record<string, string | null>>(
+    `${BASE}
+     select cobertura, total, valor
+     from calculada ${w.sql}`,
+    w.params,
+  );
+
+  const mapa = new Map<string, TramoStock>();
+  for (const r of filas) {
+    const clave = tramoCobertura(r.cobertura == null ? null : num(r.cobertura));
+    const actual = mapa.get(clave) ?? { tramo: clave, skus: 0, unidades: 0, valor: 0 };
+    actual.skus += 1;
+    actual.unidades += num(r.total);
+    actual.valor += num(r.valor);
+    mapa.set(clave, actual);
+  }
+  return [...mapa.values()];
+}
+
+async function getProveedores(f: FiltrosStock): Promise<ProveedorStock[]> {
+  const w = where(f);
+  const filas = await query<Record<string, string | null>>(
+    `${BASE}
+     select coalesce(proveedor, 'Sin dato') as proveedor,
+            count(*)                        as skus,
+            coalesce(sum(valor), 0)         as valor,
+            coalesce(sum(exceso), 0)        as exceso
+     from calculada ${w.sql}
+     group by 1
+     order by 3 desc`,
+    w.params,
+  );
+  return filas.map((r) => ({
+    proveedor: r.proveedor as string,
+    skus: num(r.skus),
+    valor: num(r.valor),
+    exceso: num(r.exceso),
+  }));
+}
+
+/** Tope de filas que bajan al navegador. Son ~3.300 SKU con stock. */
+const TOPE = 500;
+
+async function getFilas(f: FiltrosStock): Promise<FilaStock[]> {
+  const w = where(f);
+  const filas = await query<Record<string, string | null>>(
+    `${BASE}
+     select sku, producto, proveedor, marca,
+            tuc, full_ml, total, costo, valor,
+            uds, uds_meli, uds_tn, uds_may,
+            ritmo_diario, cobertura, exceso_u, exceso, sugerido,
+            to_char(ultima_venta, 'YYYY-MM-DD') as ultima_venta
+     from calculada ${w.sql}
+     -- Por plata, no por unidades: el orden tiene que empujar arriba lo que más
+     -- pesa en el bolsillo, que es lo que se decide primero.
+     order by valor desc
+     limit ${TOPE}`,
+    w.params,
+  );
+
+  return filas.map((r) => ({
+    sku: r.sku as string,
+    producto: r.producto,
+    proveedor: r.proveedor,
+    marca: r.marca,
+    tuc: num(r.tuc),
+    full: num(r.full_ml),
+    total: num(r.total),
+    costo: num(r.costo),
+    valor: num(r.valor),
+    uds: num(r.uds),
+    udsMeli: num(r.uds_meli),
+    udsTn: num(r.uds_tn),
+    udsMayorista: num(r.uds_may),
+    ritmoDiario: num(r.ritmo_diario),
+    cobertura: r.cobertura == null ? null : num(r.cobertura),
+    excesoU: num(r.exceso_u),
+    exceso: num(r.exceso),
+    sugerido: num(r.sugerido),
+    ultimaVenta: r.ultima_venta,
+  }));
+}
+
+export async function getOpcionesStock() {
+  const params = [VENTANA_POR_DEFECTO, PROVEEDORES_NO_MERCADERIA];
+  const [proveedores, marcas] = await Promise.all([
+    query<{ v: string }>(
+      `${BASE} select distinct proveedor as v from calculada
+       where proveedor is not null order by 1`,
+      params,
+    ),
+    query<{ v: string }>(
+      `${BASE} select distinct marca as v from calculada
+       where marca is not null order by 1`,
+      params,
+    ),
+  ]);
+  return { proveedores: proveedores.map((r) => r.v), marcas: marcas.map((r) => r.v) };
+}
+
+export async function getDashboardStock(f: FiltrosStock): Promise<DashboardStock> {
+  const [kpis, tramos, proveedores, filas] = await Promise.all([
+    getKpis(f),
+    getTramos(f),
+    getProveedores(f),
+    getFilas(f),
+  ]);
+
+  return {
+    kpis,
+    tramos,
+    proveedores,
+    filas,
+    recortada: filas.length === TOPE,
+    ventana: f.ventana ?? VENTANA_POR_DEFECTO,
+    generadoEn: new Date().toISOString(),
+  };
+}
