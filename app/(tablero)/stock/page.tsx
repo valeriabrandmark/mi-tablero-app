@@ -1,3 +1,4 @@
+import DashboardStock from "@/components/DashboardStock";
 import EnProduccion from "@/components/EnProduccion";
 import { permisoDelUsuario, puedeVerBorradores } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
@@ -15,8 +16,8 @@ export const metadata = { title: "Stock — Tablero Brandmark" };
  * que cambia es el CONTENIDO. Bloquear la ruta daría un 403 y parecería un
  * error de permisos, cuando lo que pasa es que todavía no está hecha.
  *
- * Para publicarla: sacar "/stock" de PAGINAS_EN_CONSTRUCCION en lib/permisos.ts
- * y reemplazar el borrador de abajo por el tablero.
+ * Para publicarla: sacar "/stock" de PAGINAS_EN_CONSTRUCCION en lib/permisos.ts.
+ * Ahí desaparece la rama del cartel y el tablero lo ve cualquiera con acceso.
  */
 export default async function StockPage() {
   const usuario = authConfigurada ? await getUsuario() : null;
@@ -28,10 +29,7 @@ export default async function StockPage() {
     return <EnProduccion titulo="Stock" />;
   }
 
-  return (
-    // EL BORRADOR. Hoy es lo mismo que ve el resto porque todavía no hay
-    // nada construido: acá abajo va el tablero a medida que se arme, y ahí
-    // recién la puerta de arriba empieza a separar de verdad.
-    <EnProduccion titulo="Stock" />
-  );
+  // EL BORRADOR. Ahora la puerta de arriba separa de verdad: el `admin` ve el
+  // cartel y acá abajo está lo que se está construyendo.
+  return <DashboardStock />;
 }

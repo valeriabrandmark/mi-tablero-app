@@ -1089,3 +1089,87 @@ export type DashboardResultados = {
   recortada: boolean;
   generadoEn: string;
 };
+
+/* -------------------------------------------------------------------------
+   Stock (Operaciones)
+   ------------------------------------------------------------------------- */
+
+export type FiltrosStock = {
+  proveedor?: string[];
+  marca?: string[];
+  sku?: string[];
+  /** Sobre cuántos días se mide el ritmo de venta. Ver lib/stock.ts. */
+  ventana?: number;
+  /** Deja sólo los artículos de un tramo de cobertura. */
+  tramo?: string;
+  /** Busca por SKU o por descripción. */
+  buscar?: string;
+};
+
+export type FilaStock = {
+  sku: string;
+  producto: string | null;
+  proveedor: string | null;
+  marca: string | null;
+  /** Depósito de Tucumán (Digip), unidades disponibles. */
+  tuc: number;
+  /** Depósito de Mercado Libre (Full), unidades disponibles. */
+  full: number;
+  total: number;
+  /** Costo neto del último mes con costo cargado. `0` si no hay. */
+  costo: number;
+  valor: number;
+  /** Unidades vendidas en la ventana elegida, por canal. */
+  uds: number;
+  udsMeli: number;
+  udsTn: number;
+  udsMayorista: number;
+  /** Unidades por día. `0` si no vendió. */
+  ritmoDiario: number;
+  /** Días que dura el stock al ritmo actual. `null` si no vendió. */
+  cobertura: number | null;
+  /** Unidades por encima de la cobertura objetivo, y su costo. */
+  excesoU: number;
+  exceso: number;
+  /** Unidades que faltan para cubrir objetivo + reposición. */
+  sugerido: number;
+  ultimaVenta: string | null;
+};
+
+export type KpisStock = {
+  skus: number;
+  unidades: number;
+  valor: number;
+  /** Sin una venta en la ventana. */
+  skusSinVenta: number;
+  valorSinVenta: number;
+  /** Se agotan antes de que llegue una reposición pedida hoy. */
+  skusQuiebre: number;
+  /** Plata por encima de la cobertura objetivo. */
+  exceso: number;
+  skusSinCosto: number;
+};
+
+export type TramoStock = {
+  tramo: string;
+  skus: number;
+  unidades: number;
+  valor: number;
+};
+
+export type ProveedorStock = {
+  proveedor: string;
+  skus: number;
+  valor: number;
+  exceso: number;
+};
+
+export type DashboardStock = {
+  kpis: KpisStock;
+  tramos: TramoStock[];
+  proveedores: ProveedorStock[];
+  filas: FilaStock[];
+  recortada: boolean;
+  ventana: number;
+  generadoEn: string;
+};
