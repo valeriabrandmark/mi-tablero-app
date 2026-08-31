@@ -137,6 +137,27 @@ export default function BarrasCategoria({
       stroke={TEMA.line}
     />
   );
+  const ejeCategoriaAbajo = (
+    <XAxis
+      dataKey="label"
+      tick={{ fill: TEMA.muted, fontSize: 11 }}
+      stroke={TEMA.line}
+      // NO `interval={0}`, que es lo que hacía que las 24 horas del gráfico de
+      // Mercado Libre se pisaran entre sí hasta no leerse ninguna. Forzar
+      // todas las etiquetas es peor que mostrar menos: una etiqueta ilegible
+      // no informa, y encima tapa a la de al lado.
+      //
+      // `equidistantPreserveStart` saltea de a paso fijo —de dos en dos, de
+      // tres en tres— hasta que entran. El paso fijo importa: saltear parejo
+      // deja un eje que se sigue leyendo como una escala de horas, mientras
+      // que esconder las que se pisan dejaría huecos arbitrarios y habría que
+      // ir leyendo número por número para saber dónde se está parado.
+      //
+      // Cuando las categorías son pocas —los tramos de Cuentas Corrientes, los
+      // de Elasticidad— entran todas y esto no cambia nada.
+      interval="equidistantPreserveStart"
+    />
+  );
 
   return (
     <ResponsiveContainer width="100%" height={alto}>
@@ -147,7 +168,7 @@ export default function BarrasCategoria({
         barCategoryGap="20%"
       >
         <CartesianGrid stroke={TEMA.line} strokeDasharray="3 3" horizontal={!horizontal} vertical={horizontal} />
-        {horizontal ? ejeValor : <XAxis dataKey="label" tick={{ fill: TEMA.muted, fontSize: 11 }} stroke={TEMA.line} interval={0} />}
+        {horizontal ? ejeValor : ejeCategoriaAbajo}
         {horizontal ? ejeCategoria : <YAxis tickFormatter={formato} tick={{ fill: TEMA.muted, fontSize: 11 }} stroke={TEMA.line} width={70} />}
         <Tooltip
           content={
