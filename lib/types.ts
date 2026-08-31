@@ -1100,6 +1100,8 @@ export type FiltrosStock = {
   sku?: string[];
   /** Sobre cuántos días se mide el ritmo de venta. Ver lib/stock.ts. */
   ventana?: number;
+  /** Qué depósito se mira: `ambos`, `tucuman` o `full`. */
+  deposito?: string;
   /** Deja sólo los artículos de un tramo de cobertura. */
   tramo?: string;
   /** Busca por SKU o por descripción. */
@@ -1134,6 +1136,8 @@ export type FilaStock = {
   /** Unidades que faltan para cubrir objetivo + reposición. */
   sugerido: number;
   ultimaVenta: string | null;
+  /** Última factura de compra que incluye este SKU. Ver `comprasHasta`. */
+  ultimaCompra: string | null;
 };
 
 export type KpisStock = {
@@ -1171,5 +1175,13 @@ export type DashboardStock = {
   filas: FilaStock[];
   recortada: boolean;
   ventana: number;
+  deposito: string;
+  /**
+   * Fecha de la última compra cargada en la base. Se muestra en pantalla porque
+   * la columna "Última compra" es un piso, no la verdad: pasada esta fecha no
+   * hay comprobantes cargados y la fecha de un artículo puede ser vieja sólo
+   * por eso.
+   */
+  comprasHasta: string | null;
   generadoEn: string;
 };

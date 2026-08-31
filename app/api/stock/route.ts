@@ -2,7 +2,12 @@ import { NextResponse, type NextRequest } from "next/server";
 import { lista } from "@/lib/filtros";
 import { enConstruccion, permisoDelUsuario, puedeVer, puedeVerBorradores } from "@/lib/permisos";
 import { getDashboardStock, getOpcionesStock } from "@/lib/queries-stock";
-import { VENTANAS_RITMO, VENTANA_POR_DEFECTO } from "@/lib/stock";
+import {
+  DEPOSITOS,
+  DEPOSITO_POR_DEFECTO,
+  VENTANAS_RITMO,
+  VENTANA_POR_DEFECTO,
+} from "@/lib/stock";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
 import type { FiltrosStock } from "@/lib/types";
@@ -33,6 +38,13 @@ export async function GET(request: NextRequest) {
   const crudaVentana = Number(sp.get("ventana"));
   const ventana = VENTANAS_RITMO.find((v) => v === crudaVentana) ?? VENTANA_POR_DEFECTO;
 
+  // Mismo criterio que la ventana: se valida contra la lista. Un depósito
+  // inventado entraría en el `case` del SQL y caería silencioso en "los dos",
+  // que es justo lo que el usuario no pidió.
+  const crudoDeposito = sp.get("deposito");
+  const deposito =
+    DEPOSITOS.find((d) => d.clave === crudoDeposito)?.clave ?? DEPOSITO_POR_DEFECTO;
+
   const filtros: FiltrosStock = {
     proveedor: lista(sp, "proveedor"),
     marca: lista(sp, "marca"),
@@ -40,6 +52,7 @@ export async function GET(request: NextRequest) {
     tramo: sp.get("tramo") ?? undefined,
     buscar: sp.get("buscar")?.slice(0, 80) || undefined,
     ventana,
+    deposito,
   };
 
   try {

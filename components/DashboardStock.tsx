@@ -10,6 +10,8 @@ import { fmtFechaCorta, fmtMoneda, fmtNumero } from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
 import {
   COBERTURA_OBJETIVO_DIAS,
+  DEPOSITOS,
+  DEPOSITO_POR_DEFECTO,
   PLAZO_REPOSICION_DIAS,
   TRAMOS_COBERTURA,
   VENTANAS_RITMO,
@@ -173,11 +175,21 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
       celda: (f) => (f.ultimaVenta ? fmtFechaCorta(f.ultimaVenta) : "—"),
       orden: (f) => f.ultimaVenta,
     },
+    {
+      titulo: "Última compra",
+      celda: (f) => (f.ultimaCompra ? fmtFechaCorta(f.ultimaCompra) : "—"),
+      // Sin fecha ordena al final, que es lo que hace `Tabla` con los `null`:
+      // no saber cuándo se compró no es lo mismo que haber comprado hace mucho.
+      orden: (f) => f.ultimaCompra,
+    },
   ];
 }
 
 export default function DashboardStockPage() {
-  const inicial: FiltrosStock = { ventana: VENTANA_POR_DEFECTO };
+  const inicial: FiltrosStock = {
+    ventana: VENTANA_POR_DEFECTO,
+    deposito: DEPOSITO_POR_DEFECTO,
+  };
   const [filtros, setFiltros] = useState<FiltrosStock>(inicial);
   const [buscado, setBuscado] = useState("");
 
@@ -190,6 +202,7 @@ export default function DashboardStockPage() {
       tramo: filtros.tramo ? [filtros.tramo] : undefined,
       buscar: filtros.buscar ? [filtros.buscar] : undefined,
       ventana: [String(filtros.ventana ?? VENTANA_POR_DEFECTO)],
+      deposito: [filtros.deposito ?? DEPOSITO_POR_DEFECTO],
     },
     { conOpciones: "1" },
   );
@@ -204,13 +217,15 @@ export default function DashboardStockPage() {
 
   const k = data?.kpis;
   const ventana = filtros.ventana ?? VENTANA_POR_DEFECTO;
+  const deposito = filtros.deposito ?? DEPOSITO_POR_DEFECTO;
   const sinCambios =
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
     sinValores(filtros.sku) &&
     !filtros.tramo &&
     !filtros.buscar &&
-    ventana === VENTANA_POR_DEFECTO;
+    ventana === VENTANA_POR_DEFECTO &&
+    deposito === DEPOSITO_POR_DEFECTO;
 
   return (
     <div className="space-y-4">
@@ -259,6 +274,33 @@ export default function DashboardStockPage() {
                     }`}
                   >
                     {v} días
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* El depósito cambia QUÉ STOCK se mira, no sólo qué filas se ven:
+              con "Full" elegido, la plata, la cobertura y el sugerido son los
+              de Mercado Libre solo. */}
+          <div className="flex flex-col gap-1">
+            <span className="text-muted text-[11px]">Depósito</span>
+            <div className="flex flex-wrap gap-1">
+              {DEPOSITOS.map((d) => {
+                const activo = deposito === d.clave;
+                return (
+                  <button
+                    key={d.clave}
+                    type="button"
+                    onClick={() => cambiar({ ...filtros, deposito: d.clave })}
+                    aria-pressed={activo}
+                    className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+                      activo
+                        ? "border-c1 bg-c1/15 text-c1"
+                        : "border-line text-muted hover:bg-panel-2 hover:text-ink"
+                    }`}
+                  >
+                    {d.label}
                   </button>
                 );
               })}
@@ -406,6 +448,19 @@ export default function DashboardStockPage() {
                   });
                 }}
               />
+
+              {/* La leyenda va DEBAJO del gráfico y no en un tooltip: los
+                  nombres de los tramos son decisiones ("quiebre", "excedido"),
+                  no categorías obvias, y sin el rango al lado hay que
+                  acordarse de memoria qué quiere decir cada uno. */}
+              <dl className="text-muted mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] sm:grid-cols-3">
+                {TRAMOS_COBERTURA.map((t) => (
+                  <div key={t.clave} className="flex items-baseline gap-1.5">
+                    <dt className="text-ink font-medium whitespace-nowrap">{t.label}</dt>
+                    <dd className="m-0 truncate">{t.desc}</dd>
+                  </div>
+                ))}
+              </dl>
             </Panel>
 
             <Panel titulo="Stock por proveedor" nota="Top 15 por valor · click para filtrar">
@@ -459,6 +514,14 @@ export default function DashboardStockPage() {
             <p className="mt-1">
               El plazo de reposición es un promedio de {PLAZO_REPOSICION_DIAS} días para
               todos los proveedores. Con los plazos reales cargados, cada uno usa el suyo.
+            </p>
+            <p className="mt-1">
+              <strong>La columna «Última compra» es un piso, no la verdad.</strong> Sólo
+              hay comprobantes cargados
+              {data.comprasHasta ? ` hasta el ${fmtFechaCorta(data.comprasHasta)}` : ""}, y
+              dos de cada tres llegan sin el detalle de renglones, así que no se sabe qué
+              SKU traían. Un artículo comprado después figura con la fecha vieja o sin
+              fecha. Se arregla del lado del orquestador.
             </p>
           </Aviso>
         </div>

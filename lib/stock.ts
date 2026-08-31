@@ -70,6 +70,25 @@ export const VENTANA_POR_DEFECTO: VentanaRitmo = 120;
 export const PROVEEDORES_NO_MERCADERIA = ["AGENCIA PROVEEDORES", "PROVEEDOR INICIAL"];
 
 /**
+ * Los dos depósitos, y la opción de mirarlos juntos.
+ *
+ * EL FILTRO CAMBIA EL STOCK, NO LA DEMANDA. Al elegir "Full", la cobertura pasa
+ * a decir cuántos días de venta cubre lo que hay en Mercado Libre — pero contra
+ * la venta de TODOS los canales, no sólo la de Meli. Es a propósito: no existe
+ * en los datos un mapa depósito → canal (Tienda Nube y mayorista salen los dos
+ * de Tucumán), así que inventarlo daría un número que parece más preciso de lo
+ * que es.
+ */
+export const DEPOSITOS = [
+  { clave: "ambos", label: "Los dos" },
+  { clave: "tucuman", label: "Tucumán" },
+  { clave: "full", label: "Meli Full" },
+] as const;
+
+export type ClaveDeposito = (typeof DEPOSITOS)[number]["clave"];
+export const DEPOSITO_POR_DEFECTO: ClaveDeposito = "ambos";
+
+/**
  * Tramos de cobertura. NO son cortes redondos: cada uno es una decisión
  * distinta, y por eso los bordes son los dos números del negocio.
  *

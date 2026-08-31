@@ -2,6 +2,7 @@ import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import {
   COBERTURA_OBJETIVO_DIAS,
+  DEPOSITO_POR_DEFECTO,
   PLAZO_REPOSICION_DIAS,
   PROVEEDORES_NO_MERCADERIA,
   VENTANA_POR_DEFECTO,
@@ -28,6 +29,7 @@ import type {
  *   bronze.costos_historicos   el costo con el que se valoriza
  *   gold.fact_ventas           el ritmo de venta, que es lo que vuelve
  *                              interpretable a todo lo anterior
+ *   bronze.sigma_compras       cuándo se compró por última vez cada artículo
  *
  * Es exactamente lo que la planilla de compras arma pegando exportaciones a
  * mano, con la diferencia de que acá está al día y las cuentas se definen una
@@ -49,7 +51,7 @@ const SKU_DE_PUBLICACION = `(select a->>'value_name'
  * los KPIs, los dos gráficos y la tabla: escrita cuatro veces, terminarían
  * midiendo cosas distintas sin que nada avise.
  *
- * $1 es la ventana en días sobre la que se mide el ritmo de venta.
+ * $1 es la ventana en días del ritmo de venta y $3 el depósito que se mira.
  */
 const BASE = `
 with por_inv as (
@@ -83,6 +85,21 @@ costo as (
   where costo_real > 0
   order by sku, mes_comercial desc
 ),
+compras as (
+  -- La última compra de cada SKU. El detalle de renglones viaja como JSON
+  -- dentro de la columna items, así que hay que abrirlo para saber qué se compró.
+  --
+  -- ES UN PISO Y NO LA VERDAD: dos de cada tres comprobantes llegan con
+  -- items vacío, y no hay compras cargadas después del 11/06/2026. Un
+  -- artículo comprado en agosto figura con la fecha vieja, o sin fecha. Se
+  -- muestra igual porque saber que algo NO se compró en meses vale, pero la
+  -- pantalla dice hasta dónde llegan los datos (ver getComprasHasta más abajo).
+  select it->>'articuloId' as sku, max(c."fechaFactura") as ultima_compra
+  from bronze.sigma_compras c
+  cross join lateral jsonb_array_elements(c.items::jsonb) it
+  where it->>'articuloId' is not null
+  group by 1
+),
 ventas as (
   select sku,
          max(fecha)                                                  as ultima_venta,
@@ -102,7 +119,16 @@ stock as (
   -- que más interesa mirar.
   select coalesce(t.sku, f.sku)         as sku,
          coalesce(t.unidades, 0)        as tuc,
-         coalesce(f.unidades, 0)        as full_ml
+         coalesce(f.unidades, 0)        as full_ml,
+         -- El total depende del depósito elegido, y de ahí cuelga TODO lo
+         -- demás: la plata, la cobertura, el exceso y el sugerido. Mirar sólo
+         -- Full y seguir valorizando los dos depósitos daría un número que no
+         -- es de ninguno de los dos.
+         case $3::text
+           when 'tucuman' then coalesce(t.unidades, 0)
+           when 'full'    then coalesce(f.unidades, 0)
+           else coalesce(t.unidades, 0) + coalesce(f.unidades, 0)
+         end                            as total
   from tuc t
   full outer join full_ml f on f.sku = t.sku
 ),
@@ -113,27 +139,29 @@ base as (
          a."attributes.marca"                           as marca,
          s.tuc,
          s.full_ml,
-         (s.tuc + s.full_ml)                            as total,
+         s.total,
          coalesce(c.costo_real, 0)                      as costo,
-         (s.tuc + s.full_ml) * coalesce(c.costo_real, 0) as valor,
+         s.total * coalesce(c.costo_real, 0)            as valor,
          coalesce(v.uds, 0)                             as uds,
          coalesce(v.uds_meli, 0)                        as uds_meli,
          coalesce(v.uds_tn, 0)                          as uds_tn,
          coalesce(v.uds_may, 0)                         as uds_may,
          v.ultima_venta,
+         co.ultima_compra,
          -- El ritmo es unidades por DÍA. La planilla lo guardaba mensual y lo
          -- llamaba "STOCK MAX", que es lo que hacía leer un ritmo como un tope.
          coalesce(v.uds, 0)::numeric / $1::int          as ritmo_diario,
          -- Sin ventas no hay cobertura: es null y no un número enorme. Son dos
          -- situaciones distintas y la planilla las mezclaba en un #DIV/0!.
          case when coalesce(v.uds, 0) = 0 then null
-              else (s.tuc + s.full_ml) / (coalesce(v.uds, 0)::numeric / $1::int)
+              else s.total / (coalesce(v.uds, 0)::numeric / $1::int)
          end                                            as cobertura
   from stock s
   left join bronze.sigma_articulos a on trim(a.id) = s.sku
   left join costo c on c.sku = s.sku
   left join ventas v on v.sku = s.sku
-  where (s.tuc + s.full_ml) > 0
+  left join compras co on co.sku = s.sku
+  where s.total > 0
     and coalesce(a."proveedorNombre", '') <> all($2::text[])
 ),
 -- El exceso y el sugerido salen del ritmo, así que van en su propio nivel para
@@ -152,7 +180,11 @@ calculada as (
 type Where = { sql: string; params: unknown[] };
 
 function where(f: FiltrosStock): Where {
-  const params: unknown[] = [f.ventana ?? VENTANA_POR_DEFECTO, PROVEEDORES_NO_MERCADERIA];
+  const params: unknown[] = [
+    f.ventana ?? VENTANA_POR_DEFECTO,
+    PROVEEDORES_NO_MERCADERIA,
+    f.deposito ?? DEPOSITO_POR_DEFECTO,
+  ];
   const clauses: string[] = [];
 
   agregarFiltro(clauses, params, "proveedor", f.proveedor);
@@ -273,7 +305,8 @@ async function getFilas(f: FiltrosStock): Promise<FilaStock[]> {
             tuc, full_ml, total, costo, valor,
             uds, uds_meli, uds_tn, uds_may,
             ritmo_diario, cobertura, exceso_u, exceso, sugerido,
-            to_char(ultima_venta, 'YYYY-MM-DD') as ultima_venta
+            to_char(ultima_venta, 'YYYY-MM-DD') as ultima_venta,
+            ultima_compra
      from calculada ${w.sql}
      -- Por plata, no por unidades: el orden tiene que empujar arriba lo que más
      -- pesa en el bolsillo, que es lo que se decide primero.
@@ -302,11 +335,12 @@ async function getFilas(f: FiltrosStock): Promise<FilaStock[]> {
     exceso: num(r.exceso),
     sugerido: num(r.sugerido),
     ultimaVenta: r.ultima_venta,
+    ultimaCompra: r.ultima_compra,
   }));
 }
 
 export async function getOpcionesStock() {
-  const params = [VENTANA_POR_DEFECTO, PROVEEDORES_NO_MERCADERIA];
+  const params = [VENTANA_POR_DEFECTO, PROVEEDORES_NO_MERCADERIA, DEPOSITO_POR_DEFECTO];
   const [proveedores, marcas] = await Promise.all([
     query<{ v: string }>(
       `${BASE} select distinct proveedor as v from calculada
@@ -322,12 +356,27 @@ export async function getOpcionesStock() {
   return { proveedores: proveedores.map((r) => r.v), marcas: marcas.map((r) => r.v) };
 }
 
+/**
+ * Hasta qué fecha hay compras cargadas.
+ *
+ * Se consulta en vez de escribirse a mano porque el día que el orquestador
+ * empiece a traer las que faltan, la pantalla tiene que dejar de disculparse
+ * sola. Una constante quedaría mintiendo justo cuando el problema se arregló.
+ */
+async function getComprasHasta(): Promise<string | null> {
+  const fila = await queryOne<{ v: string | null }>(
+    `select max("fechaFactura") as v from bronze.sigma_compras`,
+  );
+  return fila?.v ?? null;
+}
+
 export async function getDashboardStock(f: FiltrosStock): Promise<DashboardStock> {
-  const [kpis, tramos, proveedores, filas] = await Promise.all([
+  const [kpis, tramos, proveedores, filas, comprasHasta] = await Promise.all([
     getKpis(f),
     getTramos(f),
     getProveedores(f),
     getFilas(f),
+    getComprasHasta(),
   ]);
 
   return {
@@ -337,6 +386,8 @@ export async function getDashboardStock(f: FiltrosStock): Promise<DashboardStock
     filas,
     recortada: filas.length === TOPE,
     ventana: f.ventana ?? VENTANA_POR_DEFECTO,
+    deposito: f.deposito ?? DEPOSITO_POR_DEFECTO,
+    comprasHasta,
     generadoEn: new Date().toISOString(),
   };
 }
