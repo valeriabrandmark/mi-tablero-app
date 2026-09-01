@@ -1204,3 +1204,105 @@ export type DashboardStock = {
   comprasHasta: string | null;
   generadoEn: string;
 };
+
+/* -------------------------------------------------------------------------
+   Antigüedad de stock (Operaciones -> Stock -> Antigüedad)
+   ------------------------------------------------------------------------- */
+
+export type FiltrosAntiguedad = {
+  proveedor?: string[];
+  marca?: string[];
+  sku?: string[];
+  /** Deja los artículos con alguna unidad en ese tramo de antigüedad en Full. */
+  tramo?: string;
+  /** Deja los artículos con alguna unidad en ese tramo de vencimiento. */
+  vencimiento?: string;
+  buscar?: string;
+};
+
+export type FilaAntiguedad = {
+  sku: string;
+  producto: string | null;
+  proveedor: string | null;
+  marca: string | null;
+  /** Unidades en Full aptas para vender, y las que no. */
+  aptas: number;
+  noAptas: number;
+  /** Unidades en ubicaciones activas de Tucumán, sin apartar para pedidos. */
+  tuc: number;
+  total: number;
+  costo: number;
+  valor: number;
+  /**
+   * Días que las unidades llevan en Full, promedio ponderado por unidad.
+   * `null` si el SKU no está en Full o si la foto todavía no se calculó.
+   */
+  diasEnFull: number | null;
+  /** Unidades sobre las que se pudo medir la antigüedad. */
+  uMedidas: number;
+  /** Unidades en Full con más de 120 días, y lo que valen a costo. */
+  uMas120: number;
+  valorMas120: number;
+  /**
+   * `true` si el libro de operaciones no explicaba todas las unidades del
+   * inventario. Las que sobran se cuentan como viejas —el lado conservador—,
+   * así que la antigüedad de ese SKU es un piso.
+   */
+  parcial: boolean;
+  /** Unidades de Tucumán con la fecha de vencimiento ya pasada. */
+  uVencido: number;
+  valorVencido: number;
+  /** Unidades que vencen dentro del plazo de alarma. */
+  uPorVencer: number;
+  valorPorVencer: number;
+  /** El próximo vencimiento que todavía no pasó. */
+  proxVto: string | null;
+  diasAVencer: number | null;
+  /** Unidades vendidas en la ventana, y cuándo fue la última venta. */
+  uds: number;
+  ultimaVenta: string | null;
+  /** Días hasta agotar el stock al ritmo de la ventana. `null` si no vendió. */
+  diasAgotar: number | null;
+};
+
+export type KpisAntiguedad = {
+  skus: number;
+  uFull: number;
+  uTucuman: number;
+  valor: number;
+  /** Unidades en Full que Mercado Libre no deja vender (perdidas, retiros). */
+  noAptas: number;
+  uMas120: number;
+  valorMas120: number;
+  uVencido: number;
+  valorVencido: number;
+  uPorVencer: number;
+  valorPorVencer: number;
+  /** Antigüedad promedio en Full, ponderada por unidad. `null` sin foto. */
+  diasPromedio: number | null;
+  /** SKU cuya antigüedad es un piso porque el libro no cerraba. */
+  skusParciales: number;
+};
+
+export type TramoAntiguedad = { tramo: string; unidades: number; valor: number };
+export type TramoVencimiento = { tramo: string; unidades: number; valor: number };
+
+export type DashboardAntiguedad = {
+  kpis: KpisAntiguedad;
+  antiguedad: TramoAntiguedad[];
+  vencimiento: TramoVencimiento[];
+  filas: FilaAntiguedad[];
+  recortada: boolean;
+  ventanaVentas: number;
+  diasPorVencer: number;
+  /** Fecha de la última foto de antigüedad. `null` si todavía no corrió. */
+  antiguedadAl: string | null;
+  /**
+   * Cuántos SKU trae esa foto. Puede ser 0 con fecha cargada: el paso calcula
+   * por inventario de Mercado Libre y el enlace con nuestro código es otro
+   * momento. La pantalla usa los dos datos para decir cuál de las dos cosas
+   * falta, en vez de mostrar ceros.
+   */
+  antiguedadSkus: number;
+  generadoEn: string;
+};
