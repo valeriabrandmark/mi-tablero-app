@@ -545,6 +545,18 @@ export default function DashboardAntiguedadPage() {
                 ? ` Hoy son ${fmtNumero(k.skusParciales)} artículos.`
                 : ""}
             </p>
+            {data.antiguedadSkusFull > data.antiguedadSkus && data.antiguedadSkus > 0 && (
+              <p className="mt-1">
+                <strong>
+                  La foto de antigüedad cubre {fmtNumero(data.antiguedadSkus)} de los{" "}
+                  {fmtNumero(data.antiguedadSkusFull)} artículos con stock en Full.
+                </strong>{" "}
+                Los {fmtNumero(data.antiguedadSkusFull - data.antiguedadSkus)} que faltan
+                son inventarios que Mercado Libre no contestó ese día. Muestran un guión
+                en «Días en Full», que acá quiere decir «no se pudo medir» — no «recién
+                llegó».
+              </p>
+            )}
             <p className="mt-1">
               <strong>Los vencimientos son sólo de Tucumán.</strong> Mercado Libre no informa
               la fecha de vencimiento de lo que guarda en Full, así que de esas unidades no

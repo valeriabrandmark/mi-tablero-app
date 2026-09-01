@@ -431,7 +431,27 @@ export async function getOpcionesAntiguedad() {
  * En un `try` porque la tabla puede no existir todavía en una base donde el
  * paso nunca corrió, y eso no tiene que tumbar la pantalla entera.
  */
-async function getFotoAntiguedad(): Promise<{ fecha: string | null; skus: number }> {
+async function getFotoAntiguedad(): Promise<{
+  fecha: string | null;
+  skus: number;
+  skusFull: number;
+}> {
+  // Cuántos SKU TENDRÍA que cubrir la foto. Va sin los filtros de pantalla a
+  // propósito: es una medida de la foto, no del recorte que se está mirando.
+  const enFull = await queryOne<{ v: string }>(
+    `with por_inv as (
+       select p.inventory_id, max(${SKU_DE_PUBLICACION}) as sku
+       from bronze.ml_publicaciones p
+       where p."shipping.logistic_type" = 'fulfillment'
+         and p.inventory_id is not null
+       group by p.inventory_id
+     )
+     select count(distinct i.sku) as v
+     from bronze.ml_stock_full f
+     join por_inv i on i.inventory_id = f.inventory_id
+     where i.sku is not null and coalesce(f.available_quantity, 0) > 0`,
+  );
+
   try {
     const fila = await queryOne<{ fecha: string | null; skus: string }>(
       `select to_char(max(fecha), 'YYYY-MM-DD')                          as fecha,
@@ -440,9 +460,13 @@ async function getFotoAntiguedad(): Promise<{ fecha: string | null; skus: number
               )                                                          as skus
        from bronze.ml_stock_antiguedad`,
     );
-    return { fecha: fila?.fecha ?? null, skus: num(fila?.skus) };
+    return {
+      fecha: fila?.fecha ?? null,
+      skus: num(fila?.skus),
+      skusFull: num(enFull?.v),
+    };
   } catch {
-    return { fecha: null, skus: 0 };
+    return { fecha: null, skus: 0, skusFull: num(enFull?.v) };
   }
 }
 
@@ -467,6 +491,7 @@ export async function getDashboardAntiguedad(
     diasPorVencer: DIAS_POR_VENCER_ALERTA,
     antiguedadAl: foto.fecha,
     antiguedadSkus: foto.skus,
+    antiguedadSkusFull: foto.skusFull,
     generadoEn: new Date().toISOString(),
   };
 }
