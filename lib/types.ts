@@ -1304,5 +1304,12 @@ export type DashboardAntiguedad = {
    * falta, en vez de mostrar ceros.
    */
   antiguedadSkus: number;
+  /**
+   * Cuántos SKU con stock en Full HABRÍA que cubrir. Si son más que
+   * `antiguedadSkus`, la diferencia son los inventarios que Mercado Libre no
+   * contestó ese día — y esos SKU muestran un guión, que sin esta cuenta se
+   * leería como "no está en Full" en vez de "no se pudo medir".
+   */
+  antiguedadSkusFull: number;
   generadoEn: string;
 };
