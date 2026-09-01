@@ -68,9 +68,17 @@ costo as (
 -- Hoy la tabla está vacía —la planilla de Google todavía no se carga sola— y
 -- por eso el descuento arranca en cero y la pantalla lo dice.
 sell_in as (
+  -- SOLO LA OFERTA DEL MES, que es lo que va a FDESCU1.
+  --
+  -- En la planilla, al lado de la columna del mes hay columnas de eventos
+  -- ("HOT SALE") y de cortes especificos ("1/7/2026 (Glade)"). Son ofertas de
+  -- verdad y se guardan, pero NO son el descuento con el que se arma la orden
+  -- del mes: una promo de tres dias aplicada a la compra de un mes entero es
+  -- un pedido mal hecho. El evento vacio es la oferta del mes.
   select sku, descuento_pct
   from bronze.sell_in
   where mes_comercial = $3::text
+    and evento = ''
 ),
 -- El costo de lista y el sell in calculado del mes elegido. El calculado se
 -- MUESTRA como referencia —es con lo que venimos costeando— pero no viaja al
@@ -346,7 +354,9 @@ async function getMeses(): Promise<string[]> {
   // los del sell in aparecen solos.
   const filas = await query<{ v: string }>(
     `select v from (
-       select distinct mes_comercial as v from bronze.sell_in
+       -- Sin los eventos sin fecha, que se guardan con el mes vacio: en un
+       -- selector de meses, una opcion en blanco no se puede elegir ni entender.
+       select distinct mes_comercial as v from bronze.sell_in where mes_comercial <> ''
        union
        select distinct mes_comercial from bronze.costos_historicos
      ) m
@@ -359,7 +369,8 @@ async function getMeses(): Promise<string[]> {
 /** Cuántos artículos tiene el sell in del mes elegido. `0` = todavía no se cargó. */
 async function getSellInCargado(mes: string): Promise<number> {
   const fila = await queryOne<{ v: string }>(
-    `select count(*) as v from bronze.sell_in where mes_comercial = $1::text`,
+    `select count(*) as v from bronze.sell_in
+     where mes_comercial = $1::text and evento = ''`,
     [mes],
   );
   return Number(fila?.v ?? 0);
