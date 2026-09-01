@@ -176,6 +176,47 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
       orden: (f) => f.ultimaVenta,
     },
     {
+      titulo: "Días en Full",
+      // Sólo existe para lo que está en el depósito de Mercado Libre: en
+      // Tucumán no hay historia de movimientos con la que reconstruirlo. Un
+      // guión es "no se sabe", no "es nuevo".
+      celda: (f) =>
+        f.diasEnFull == null ? (
+          <span className="text-muted">—</span>
+        ) : (
+          <span
+            style={f.uMas120 > 0 ? { color: PALETA[2] } : undefined}
+            title={
+              f.uMas120 > 0
+                ? `${fmtNumero(f.uMas120)} unidades con más de 120 días`
+                : undefined
+            }
+          >
+            {fmtNumero(Math.round(f.diasEnFull))} d
+          </span>
+        ),
+      numerica: true,
+      orden: (f) => f.diasEnFull,
+      total: (() => {
+        const con = filas.filter((f) => f.diasEnFull != null && f.full > 0);
+        if (con.length === 0) return "—";
+        const u = sumar(con, (f) => f.full);
+        const prom = u > 0 ? sumar(con, (f) => (f.diasEnFull ?? 0) * f.full) / u : 0;
+        return `${fmtNumero(Math.round(prom))} d prom.`;
+      })(),
+    },
+    {
+      titulo: "+120 días u.",
+      celda: (f) => (
+        <span style={f.uMas120 > 0 ? { color: TEMA.negativo } : undefined}>
+          {f.uMas120 > 0 ? fmtNumero(f.uMas120) : "—"}
+        </span>
+      ),
+      numerica: true,
+      orden: (f) => f.uMas120,
+      total: fmtNumero(sumar(filas, (f) => f.uMas120)),
+    },
+    {
       titulo: "Última compra",
       celda: (f) => (f.ultimaCompra ? fmtFechaCorta(f.ultimaCompra) : "—"),
       // Sin fecha ordena al final, que es lo que hace `Tabla` con los `null`:
@@ -381,14 +422,14 @@ export default function DashboardStockPage() {
       )}
 
       {error ? null : !k ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }, (_, i) => (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          {Array.from({ length: 5 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />
           ))}
         </div>
       ) : (
         <div
-          className={`grid grid-cols-2 gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
+          className={`grid grid-cols-2 gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-5 ${cargando ? "opacity-50" : ""}`}
         >
           <TarjetaKpi
             titulo="Stock valorizado neto"
@@ -414,6 +455,18 @@ export default function DashboardStockPage() {
             valor={fmtNumero(k.skusQuiebre)}
             detalle={`SKU que no llegan a los ${PLAZO_REPOSICION_DIAS} días de reposición`}
             acento={k.skusQuiebre > 0 ? PALETA[3] : undefined}
+          />
+          {/* Sólo de Full, y la tarjeta lo dice: en Tucumán no se puede saber
+              hace cuánto que una unidad está ahí. */}
+          <TarjetaKpi
+            titulo="+120 días en Full"
+            valor={fmtMoneda(k.valorMas120)}
+            detalle={
+              data?.antiguedadAl
+                ? `${fmtNumero(k.uMas120)} unidades · al ${fmtFechaCorta(data.antiguedadAl)}`
+                : "Todavía sin calcular"
+            }
+            acento={k.valorMas120 > 0 ? TEMA.negativo : undefined}
           />
         </div>
       )}
@@ -514,6 +567,19 @@ export default function DashboardStockPage() {
             <p className="mt-1">
               El plazo de reposición es un promedio de {PLAZO_REPOSICION_DIAS} días para
               todos los proveedores. Con los plazos reales cargados, cada uno usa el suyo.
+            </p>
+            <p className="mt-1">
+              <strong>«Días en Full» son días en el depósito, no el cargo de Mercado
+              Libre.</strong> El cargo por almacenamiento prolongado usa un umbral que{" "}
+              <em>depende de la categoría</em> —un perfume puede entrar a los 60 días y
+              una crema a los 120—, y ese umbral no viene por API. Acá el corte es 120
+              para todos, así que en las categorías que cobran antes el número queda
+              corto. Sirve para saber qué mover; no para saber qué te facturaron.
+            </p>
+            <p className="mt-1">
+              Sólo existe para <strong>Mercado Libre Full</strong>. En Tucumán no hay
+              historia de movimientos con la que reconstruirlo, así que un artículo que
+              está sólo allá muestra un guión — que es «no se sabe», no «es nuevo».
             </p>
             <p className="mt-1">
               <strong>La columna «Última compra» es un piso, no la verdad.</strong> Sólo

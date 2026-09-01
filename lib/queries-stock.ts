@@ -30,6 +30,7 @@ import type {
  *   gold.fact_ventas           el ritmo de venta, que es lo que vuelve
  *                              interpretable a todo lo anterior
  *   bronze.sigma_compras       cuándo se compró por última vez cada artículo
+ *   bronze.ml_stock_antiguedad hace cuánto que la mercadería está en Full
  *
  * Es exactamente lo que la planilla de compras arma pegando exportaciones a
  * mano, con la diferencia de que acá está al día y las cuentas se definen una
@@ -100,6 +101,29 @@ compras as (
   where it->>'articuloId' is not null
   group by 1
 ),
+antiguedad as (
+  -- Hace cuanto que la mercaderia esta parada en Full, de la ultima foto que
+  -- haya. La calcula ml_antiguedad.py en tablero_quo reconstruyendo el libro de
+  -- movimientos del inventario: Mercado Libre no da el dato hecho.
+  --
+  -- SUMA POR SKU porque la foto es por INVENTARIO, y hay 5 SKU que usan mas de
+  -- uno. Sin agrupar, el join los duplicaria en todas las cuentas de plata.
+  --
+  -- SOLO EXISTE PARA FULL. En Tucuman no hay historia de movimientos con la que
+  -- reconstruir nada, asi que un SKU que solo esta alla queda en null -- que es
+  -- "no se sabe" y no "es nuevo".
+  select a.sku,
+         sum(a.u_mas_120)                                          as u_mas_120,
+         -- Promedio ponderado por unidad: un inventario de una unidad no puede
+         -- mover el promedio igual que uno de mil.
+         case when sum(a.unidades) > 0
+              then sum(a.dias_promedio * a.unidades) / sum(a.unidades)
+         end                                                       as dias
+  from bronze.ml_stock_antiguedad a
+  where a.fecha = (select max(fecha) from bronze.ml_stock_antiguedad)
+    and a.sku is not null
+  group by a.sku
+),
 ventas as (
   select sku,
          max(fecha)                                                  as ultima_venta,
@@ -148,6 +172,9 @@ base as (
          coalesce(v.uds_may, 0)                         as uds_may,
          v.ultima_venta,
          co.ultima_compra,
+         ant.dias                                       as dias_en_full,
+         coalesce(ant.u_mas_120, 0)                     as u_mas_120,
+         coalesce(ant.u_mas_120, 0) * coalesce(c.costo_real, 0) as valor_mas_120,
          -- El ritmo es unidades por DÍA. La planilla lo guardaba mensual y lo
          -- llamaba "STOCK MAX", que es lo que hacía leer un ritmo como un tope.
          coalesce(v.uds, 0)::numeric / $1::int          as ritmo_diario,
@@ -161,6 +188,7 @@ base as (
   left join costo c on c.sku = s.sku
   left join ventas v on v.sku = s.sku
   left join compras co on co.sku = s.sku
+  left join antiguedad ant on ant.sku = s.sku
   where s.total > 0
     and coalesce(a."proveedorNombre", '') <> all($2::text[])
 ),
@@ -228,7 +256,9 @@ async function getKpis(f: FiltrosStock): Promise<KpisStock> {
             count(*) filter (where cobertura is not null
                                and cobertura < ${PLAZO_REPOSICION_DIAS}) as skus_quiebre,
             coalesce(sum(exceso), 0)                                as exceso,
-            count(*) filter (where costo = 0)                       as skus_sin_costo
+            count(*) filter (where costo = 0)                       as skus_sin_costo,
+            coalesce(sum(u_mas_120), 0)                             as u_mas_120,
+            coalesce(sum(valor_mas_120), 0)                         as valor_mas_120
      from calculada ${w.sql}`,
     w.params,
   );
@@ -242,6 +272,8 @@ async function getKpis(f: FiltrosStock): Promise<KpisStock> {
     skusQuiebre: num(fila?.skus_quiebre),
     exceso: num(fila?.exceso),
     skusSinCosto: num(fila?.skus_sin_costo),
+    uMas120: num(fila?.u_mas_120),
+    valorMas120: num(fila?.valor_mas_120),
   };
 }
 
@@ -306,7 +338,8 @@ async function getFilas(f: FiltrosStock): Promise<FilaStock[]> {
             uds, uds_meli, uds_tn, uds_may,
             ritmo_diario, cobertura, exceso_u, exceso, sugerido,
             to_char(ultima_venta, 'YYYY-MM-DD') as ultima_venta,
-            ultima_compra
+            ultima_compra,
+            dias_en_full, u_mas_120, valor_mas_120
      from calculada ${w.sql}
      -- Por plata, no por unidades: el orden tiene que empujar arriba lo que más
      -- pesa en el bolsillo, que es lo que se decide primero.
@@ -336,6 +369,9 @@ async function getFilas(f: FiltrosStock): Promise<FilaStock[]> {
     sugerido: num(r.sugerido),
     ultimaVenta: r.ultima_venta,
     ultimaCompra: r.ultima_compra,
+    diasEnFull: r.dias_en_full == null ? null : num(r.dias_en_full),
+    uMas120: num(r.u_mas_120),
+    valorMas120: num(r.valor_mas_120),
   }));
 }
 
@@ -370,14 +406,38 @@ async function getComprasHasta(): Promise<string | null> {
   return fila?.v ?? null;
 }
 
+/**
+ * De cuándo es la foto de antigüedad.
+ *
+ * `null` mientras el paso del orquestador no haya corrido, y la pantalla lo
+ * dice. Sin eso, una columna vacía se leería como "no hay mercadería vieja",
+ * que es la lectura opuesta a la verdadera.
+ *
+ * En un `try` porque la tabla puede no existir todavía en una base donde el
+ * paso nunca corrió: eso no tiene que tumbar el tablero entero.
+ */
+async function getAntiguedadAl(): Promise<string | null> {
+  try {
+    const fila = await queryOne<{ v: string | null }>(
+      `select to_char(max(fecha), 'YYYY-MM-DD') as v
+       from bronze.ml_stock_antiguedad`,
+    );
+    return fila?.v ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getDashboardStock(f: FiltrosStock): Promise<DashboardStock> {
-  const [kpis, tramos, proveedores, filas, comprasHasta] = await Promise.all([
-    getKpis(f),
-    getTramos(f),
-    getProveedores(f),
-    getFilas(f),
-    getComprasHasta(),
-  ]);
+  const [kpis, tramos, proveedores, filas, comprasHasta, antiguedadAl] =
+    await Promise.all([
+      getKpis(f),
+      getTramos(f),
+      getProveedores(f),
+      getFilas(f),
+      getComprasHasta(),
+      getAntiguedadAl(),
+    ]);
 
   return {
     kpis,
@@ -388,6 +448,7 @@ export async function getDashboardStock(f: FiltrosStock): Promise<DashboardStock
     ventana: f.ventana ?? VENTANA_POR_DEFECTO,
     deposito: f.deposito ?? DEPOSITO_POR_DEFECTO,
     comprasHasta,
+    antiguedadAl,
     generadoEn: new Date().toISOString(),
   };
 }

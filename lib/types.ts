@@ -1138,6 +1138,16 @@ export type FilaStock = {
   ultimaVenta: string | null;
   /** Última factura de compra que incluye este SKU. Ver `comprasHasta`. */
   ultimaCompra: string | null;
+  /**
+   * Días que las unidades llevan en el depósito de Mercado Libre, promedio
+   * ponderado por unidad. `null` si el SKU no tiene stock en Full o si todavía
+   * no se calculó. SÓLO aplica a Full: en Tucumán no hay historia de
+   * movimientos con la que reconstruirlo.
+   */
+  diasEnFull: number | null;
+  /** Unidades en Full que llevan más de 120 días, y lo que valen a costo. */
+  uMas120: number;
+  valorMas120: number;
 };
 
 export type KpisStock = {
@@ -1149,6 +1159,9 @@ export type KpisStock = {
   valorSinVenta: number;
   /** Se agotan antes de que llegue una reposición pedida hoy. */
   skusQuiebre: number;
+  /** Unidades en Full con más de 120 días encima, y su costo. */
+  uMas120: number;
+  valorMas120: number;
   /** Plata por encima de la cobertura objetivo. */
   exceso: number;
   skusSinCosto: number;
@@ -1176,6 +1189,12 @@ export type DashboardStock = {
   recortada: boolean;
   ventana: number;
   deposito: string;
+  /**
+   * Fecha de la última foto de antigüedad. `null` mientras el paso del
+   * orquestador no haya corrido: la pantalla lo dice en vez de mostrar ceros
+   * que se leerían como "no hay mercadería vieja".
+   */
+  antiguedadAl: string | null;
   /**
    * Fecha de la última compra cargada en la base. Se muestra en pantalla porque
    * la columna "Última compra" es un piso, no la verdad: pasada esta fecha no
