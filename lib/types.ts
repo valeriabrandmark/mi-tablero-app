@@ -1313,3 +1313,63 @@ export type DashboardAntiguedad = {
   antiguedadSkusFull: number;
   generadoEn: string;
 };
+
+/* -------------------------------------------------------------------------
+   Compras (Operaciones -> Stock -> Compras)
+   ------------------------------------------------------------------------- */
+
+export type FiltrosCompras = {
+  proveedor?: string[];
+  marca?: string[];
+  /** Sobre cuántos días se mide el ritmo de venta. Ver lib/stock.ts. */
+  ventana?: number;
+  /** Mes comercial del que sale la oferta del proveedor (`YYYY-MM`). */
+  mes?: string;
+  /** `true` para ver también los artículos que el cálculo no pidió comprar. */
+  todos?: boolean;
+  buscar?: string;
+};
+
+export type FilaCompra = {
+  sku: string;
+  producto: string | null;
+  proveedor: string | null;
+  marca: string | null;
+  /** Cuántas unidades trae un bulto. `1` cuando el artículo no se compra así. */
+  unidadesPorBulto: number;
+  tuc: number;
+  full: number;
+  total: number;
+  /** Costo neto con el que se valoriza el stock que ya está. */
+  costo: number;
+  valor: number;
+  /** Costo de lista del mes elegido: sobre éste se aplica el descuento. */
+  costoLista: number;
+  /**
+   * Descuento del proveedor en el mes elegido, EN PUNTOS (15 = 15 %). `null`
+   * si ese mes no tiene el artículo cargado — que no es lo mismo que 0.
+   */
+  ofertaPct: number | null;
+  /** Unidades vendidas en la ventana del ritmo. */
+  uds: number;
+  ritmoDiario: number;
+  cobertura: number | null;
+  /** Unidades que faltan para cubrir objetivo + reposición. */
+  sugerido: number;
+  /** Unidades vendidas en los últimos 3 meses, y qué rentabilidad dejaron. */
+  udsRentabilidad: number;
+  rentabilidad: number | null;
+  ultimaVenta: string | null;
+  ultimaCompra: string | null;
+};
+
+export type DashboardCompras = {
+  filas: FilaCompra[];
+  recortada: boolean;
+  ventana: number;
+  /** Mes de la oferta que se está usando, y los que hay para elegir. */
+  mes: string;
+  meses: string[];
+  comprasHasta: string | null;
+  generadoEn: string;
+};
