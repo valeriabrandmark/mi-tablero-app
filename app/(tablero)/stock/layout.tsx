@@ -11,6 +11,10 @@ import Pestanas, { type Pestana } from "@/components/Pestanas";
 const PESTANAS: Pestana[] = [
   { href: "/stock", label: "Tablero" },
   { href: "/stock/antiguedad", label: "Antigüedad" },
+  // Compras es la única que no sólo mira: arma una orden y la baja en el
+  // formato que importa Sigma. Va acá igual porque las cuentas son las mismas
+  // —ritmo, cobertura, sugerido— y separarla las duplicaría.
+  { href: "/stock/compras", label: "Compras" },
 ];
 
 export default function StockLayout({ children }: LayoutProps<"/stock">) {
