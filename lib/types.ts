@@ -1346,10 +1346,21 @@ export type FilaCompra = {
   /** Costo de lista del mes elegido: sobre éste se aplica el descuento. */
   costoLista: number;
   /**
-   * Descuento del proveedor en el mes elegido, EN PUNTOS (15 = 15 %). `null`
-   * si ese mes no tiene el artículo cargado — que no es lo mismo que 0.
+   * El sell in VIGENTE del proveedor en el mes elegido, EN PUNTOS (15 = 15 %).
+   * Es el único que puede ir a FDESCU1. Sale de `bronze.sell_in`, que se carga
+   * desde la planilla de Google. `null` mientras no esté cargado — que no es lo
+   * mismo que 0.
    */
-  ofertaPct: number | null;
+  sellInPct: number | null;
+  /**
+   * El sell in CALCULADO a partir de nuestras compras
+   * (`costos_historicos.oferta_pct`), con el que se valoriza el costo real.
+   *
+   * SE MUESTRA COMO REFERENCIA Y NO VIAJA AL ARCHIVO. No es lo que el proveedor
+   * tiene vigente: mandarlo en una orden de compra sería pedir con un descuento
+   * inventado.
+   */
+  ofertaCalculadaPct: number | null;
   /** Unidades vendidas en la ventana del ritmo. */
   uds: number;
   ritmoDiario: number;
@@ -1367,9 +1378,15 @@ export type DashboardCompras = {
   filas: FilaCompra[];
   recortada: boolean;
   ventana: number;
-  /** Mes de la oferta que se está usando, y los que hay para elegir. */
+  /** Mes del que sale el sell in, y los que hay para elegir. */
   mes: string;
   meses: string[];
+  /**
+   * Cuántos artículos tiene el sell in de ese mes. `0` es "todavía no se
+   * cargó", y la pantalla lo dice en vez de mostrar todos los descuentos en
+   * cero como si el proveedor no diera ninguno.
+   */
+  sellInCargado: number;
   comprasHasta: string | null;
   generadoEn: string;
 };

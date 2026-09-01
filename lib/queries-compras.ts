@@ -56,10 +56,25 @@ costo as (
   where costo_real > 0
   order by sku, mes_comercial desc
 ),
--- La oferta del proveedor DEL MES QUE SE ELIGE, que es la que va a FDESCU1.
--- Va aparte del costo porque son dos preguntas distintas: con qué valorizamos
--- lo que ya tenemos, y qué descuento nos hacen en la compra que estamos
--- armando. El mes de la oferta lo elige el usuario.
+-- El sell in VIGENTE DEL PROVEEDOR en el mes elegido: el descuento con el que
+-- se le pide, y el único que puede ir a FDESCU1.
+--
+-- SALE DE bronze.sell_in Y NO DE costos_historicos, y la diferencia no es un
+-- detalle: el oferta_pct de costos_historicos es un sell in CALCULADO a partir de
+-- nuestras compras, que se usa para trasladarlo a las ofertas del mes. Sirve
+-- para valorizar lo que ya compramos; NO es lo que el proveedor tiene vigente.
+-- Mandarlo en una orden de compra sería pedir con un descuento inventado.
+--
+-- Hoy la tabla está vacía —la planilla de Google todavía no se carga sola— y
+-- por eso el descuento arranca en cero y la pantalla lo dice.
+sell_in as (
+  select sku, descuento_pct
+  from bronze.sell_in
+  where mes_comercial = $3::text
+),
+-- El costo de lista y el sell in calculado del mes elegido. El calculado se
+-- MUESTRA como referencia —es con lo que venimos costeando— pero no viaja al
+-- archivo.
 oferta as (
   select sku, oferta_pct, costo_teorico
   from bronze.costos_historicos
@@ -114,7 +129,8 @@ base as (
          -- El costo de lista del mes elegido, que es sobre el que se aplica el
          -- descuento. Si ese mes no está cargado, cae al último costo conocido.
          coalesce(o.costo_teorico, c.costo_teorico, c.costo_real, 0) as costo_lista,
-         o.oferta_pct                                   as oferta_pct,
+         o.oferta_pct                                   as oferta_calculada_pct,
+         si.descuento_pct                               as sell_in_pct,
          coalesce(v.uds, 0)                             as uds,
          v.ultima_venta,
          co.ultima_compra,
@@ -130,6 +146,7 @@ base as (
   left join bronze.sigma_articulos a on trim(a.id) = s.sku
   left join costo c on c.sku = s.sku
   left join oferta o on o.sku = s.sku
+  left join sell_in si on si.sku = s.sku
   left join ventas v on v.sku = s.sku
   left join compras co on co.sku = s.sku
   where coalesce(a."proveedorNombre", '') <> all($2::text[])
@@ -180,7 +197,8 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<FilaCompra[]> {
   const filas = await query<Record<string, string | null>>(
     `${BASE}
      select sku, producto, proveedor, marca, u_bulto,
-            tuc, full_ml, total, costo, valor, costo_lista, oferta_pct,
+            tuc, full_ml, total, costo, valor, costo_lista,
+            oferta_calculada_pct, sell_in_pct,
             uds, ritmo_diario, cobertura, sugerido,
             uds_rent, rentabilidad,
             to_char(ultima_venta, 'YYYY-MM-DD') as ultima_venta,
@@ -204,7 +222,9 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<FilaCompra[]> {
     costo: num(r.costo),
     valor: num(r.valor),
     costoLista: num(r.costo_lista),
-    ofertaPct: r.oferta_pct == null ? null : num(r.oferta_pct),
+    ofertaCalculadaPct:
+      r.oferta_calculada_pct == null ? null : num(r.oferta_calculada_pct),
+    sellInPct: r.sell_in_pct == null ? null : num(r.sell_in_pct),
     uds: num(r.uds),
     ritmoDiario: num(r.ritmo_diario),
     cobertura: r.cobertura == null ? null : num(r.cobertura),
@@ -225,13 +245,29 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<FilaCompra[]> {
  * ninguno.
  */
 async function getMeses(): Promise<string[]> {
+  // La unión de los dos: los meses que tienen sell in cargado y los que tienen
+  // costos. Mientras `bronze.sell_in` esté vacía el selector sigue teniendo los
+  // meses de siempre —si no, quedaría sin ninguna opción— y el día que se carguen
+  // los del sell in aparecen solos.
   const filas = await query<{ v: string }>(
-    `select distinct mes_comercial as v
-     from bronze.costos_historicos
-     order by 1 desc
+    `select v from (
+       select distinct mes_comercial as v from bronze.sell_in
+       union
+       select distinct mes_comercial from bronze.costos_historicos
+     ) m
+     order by v desc
      limit 24`,
   );
   return filas.map((r) => r.v);
+}
+
+/** Cuántos artículos tiene el sell in del mes elegido. `0` = todavía no se cargó. */
+async function getSellInCargado(mes: string): Promise<number> {
+  const fila = await queryOne<{ v: string }>(
+    `select count(*) as v from bronze.sell_in where mes_comercial = $1::text`,
+    [mes],
+  );
+  return Number(fila?.v ?? 0);
 }
 
 export async function getOpcionesCompras() {
@@ -272,9 +308,10 @@ export async function getDashboardCompras(
   // descuentos en cero sin decir por qué.
   const mes = (f.mes && meses.includes(f.mes) ? f.mes : meses[0]) ?? "";
 
-  const [filas, comprasHasta] = await Promise.all([
+  const [filas, comprasHasta, sellInCargado] = await Promise.all([
     getFilas(f, mes),
     getComprasHasta(),
+    getSellInCargado(mes),
   ]);
 
   return {
@@ -283,6 +320,7 @@ export async function getDashboardCompras(
     ventana: f.ventana ?? VENTANA_POR_DEFECTO,
     mes,
     meses,
+    sellInCargado,
     comprasHasta,
     generadoEn: new Date().toISOString(),
   };

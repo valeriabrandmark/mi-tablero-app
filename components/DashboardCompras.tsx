@@ -334,9 +334,9 @@ export default function DashboardComprasPage() {
             onChange={(e) => editar(f.sku, { descuento: Number(e.target.value) || 0 })}
             className={`${CLASE_CELDA_EDITABLE} ${excedido ? "border-rose-500/60" : ""}`}
             title={
-              f.ofertaPct == null
-                ? "El mes elegido no tiene este artículo cargado: arranca en 0"
-                : `Oferta del proveedor en el mes elegido: ${f.ofertaPct.toFixed(2)} %`
+              f.sellInPct == null
+                ? "El sell in del proveedor no está cargado para este mes: arranca en 0 y hay que ponerlo a mano"
+                : `Sell in del proveedor en el mes elegido: ${f.sellInPct.toFixed(2)} %`
             }
             aria-label={`Descuento de ${f.sku}`}
           />
@@ -344,6 +344,21 @@ export default function DashboardComprasPage() {
       },
       numerica: true,
       orden: (f) => orden.get(f.sku)?.descuento ?? 0,
+    },
+    {
+      // REFERENCIA, NO VIAJA AL ARCHIVO. Es el sell in calculado con nuestras
+      // compras (costos_historicos.oferta_pct), con el que se viene costeando.
+      // Se muestra para poder comparar contra el del proveedor, y el título dice
+      // qué es: puesto como "oferta" a secas se copiaría a la orden pensando
+      // que es el descuento con el que se pide.
+      titulo: "s/ n. compras %",
+      celda: (f) => (
+        <span className="text-muted" title="Sell in calculado con nuestras compras. No va al archivo.">
+          {f.ofertaCalculadaPct == null ? "—" : f.ofertaCalculadaPct.toFixed(2)}
+        </span>
+      ),
+      numerica: true,
+      orden: (f) => f.ofertaCalculadaPct,
     },
     {
       titulo: "A pagar",
@@ -437,7 +452,7 @@ export default function DashboardComprasPage() {
           {/* El mes de la oferta: de acá sale el descuento que va al archivo. */}
           <div className="flex flex-col gap-1">
             <label className="text-muted text-[11px]" htmlFor="mes-oferta">
-              Oferta del mes
+              Sell in del mes
             </label>
             <select
               id="mes-oferta"
@@ -525,8 +540,8 @@ export default function DashboardComprasPage() {
           ({COBERTURA_OBJETIVO_DIAS} de objetivo más {PLAZO_REPOSICION_DIAS} que tarda la
           reposición) al ritmo de los últimos {filtros.ventana ?? VENTANA_POR_DEFECTO} días,
           contando el stock de <strong>los dos depósitos</strong>. El{" "}
-          <strong>descuento</strong> viene de la oferta del proveedor del mes elegido y se
-          puede corregir fila por fila.
+          <strong>descuento</strong> es el <strong>sell in vigente del proveedor</strong> del
+          mes elegido y se puede corregir fila por fila.
         </span>
       </div>
 
@@ -566,11 +581,14 @@ export default function DashboardComprasPage() {
             acento={resumen.neto > 0 ? PALETA[1] : undefined}
           />
           <TarjetaKpi
-            titulo="Ahorro por las ofertas"
+            titulo="Ahorro por el descuento"
             valor={fmtMoneda(resumen.bruto - resumen.neto)}
             detalle={
-              data.mes ? `Oferta de ${fmtMes(data.mes)}` : "Sin mes de oferta cargado"
+              data.sellInCargado > 0
+                ? `Sell in de ${fmtMes(data.mes)} · ${fmtNumero(data.sellInCargado)} artículos`
+                : "Sell in sin cargar: los descuentos van a mano"
             }
+            acento={data.sellInCargado === 0 ? PALETA[3] : undefined}
           />
         </div>
       )}
@@ -639,7 +657,7 @@ export default function DashboardComprasPage() {
                 ? `Los ${filas.length} de mayor peso`
                 : `${fmtNumero(filas.length)} artículos`) +
               ` · ritmo de ${data.ventana} días` +
-              (data.mes ? ` · oferta de ${fmtMes(data.mes)}` : "")
+              (data.mes ? ` · sell in de ${fmtMes(data.mes)}` : "")
             }
           >
             <Tabla
@@ -670,11 +688,21 @@ export default function DashboardComprasPage() {
               exactamente uno elegido: no existe la orden que mezcla dos.
             </p>
             <p className="mt-1">
-              <strong>El descuento sale de la oferta del proveedor del mes elegido</strong>{" "}
-              (<span className="font-mono text-xs">costos_historicos.oferta_pct</span>), que
-              es la misma con la que se valoriza el costo real. Un artículo que ese mes no
-              esté cargado arranca en 0 — que quiere decir «no sabemos», no «sin
-              descuento»—, y se puede corregir a mano.
+              <strong>
+                El descuento es el sell in VIGENTE DEL PROVEEDOR, y hoy no está cargado.
+              </strong>{" "}
+              Vive en la planilla de Google y todavía no se sincroniza sola, así que la
+              columna arranca en <strong>0 y hay que ponerla a mano</strong>. Cero acá
+              quiere decir «no lo sabemos», no «sin descuento».
+            </p>
+            <p className="mt-1">
+              La columna <strong>«s/ n. compras %»</strong> es otra cosa y{" "}
+              <strong>no va al archivo</strong>: es el sell in{" "}
+              <em>calculado con nuestras compras</em> (
+              <span className="font-mono text-xs">costos_historicos.oferta_pct</span>), el
+              que se usa para valorizar el costo real y trasladarlo a las ofertas del mes.
+              Sirve para comparar, no para pedir: mandarlo en una orden sería pedirle al
+              proveedor con un descuento inventado.
               {resumen.recortados > 0 && (
                 <>
                   {" "}
