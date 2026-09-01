@@ -91,13 +91,23 @@ export type RenglonOrden = {
   descuento: number;
 };
 
-/** El renglón con el que arranca cada artículo: el sugerido y la oferta del mes. */
+/**
+ * El renglón con el que arranca cada artículo: el sugerido y el sell in del mes.
+ *
+ * EL DESCUENTO SALE DEL SELL IN DEL PROVEEDOR Y DE NINGÚN OTRO LADO. Sin sell in
+ * cargado arranca en CERO, y la pantalla dice por qué. La tentación es usar el
+ * `oferta_pct` de `costos_historicos`, que está a mano y casi siempre tiene un
+ * número — pero ése es un sell in CALCULADO con nuestras compras para
+ * trasladarlo a las ofertas del mes, no el que el proveedor tiene vigente.
+ * Mandarlo en una orden sería pedirle al proveedor con un descuento inventado,
+ * y el error viajaría en un archivo que alguien importa sin volver a mirarlo.
+ */
 export function renglonInicial(f: FilaCompra): RenglonOrden {
   const unidad = unidadPorDefecto(f.unidadesPorBulto);
   return {
     unidad,
     cantidad: cantidadSugerida(f.sugerido, unidad, f.unidadesPorBulto),
-    descuento: f.ofertaPct ?? 0,
+    descuento: f.sellInPct ?? 0,
   };
 }
 

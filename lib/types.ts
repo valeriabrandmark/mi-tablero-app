@@ -1346,10 +1346,21 @@ export type FilaCompra = {
   /** Costo de lista del mes elegido: sobre éste se aplica el descuento. */
   costoLista: number;
   /**
-   * Descuento del proveedor en el mes elegido, EN PUNTOS (15 = 15 %). `null`
-   * si ese mes no tiene el artículo cargado — que no es lo mismo que 0.
+   * El sell in VIGENTE del proveedor en el mes elegido, EN PUNTOS (15 = 15 %).
+   * Es el único que puede ir a FDESCU1. Sale de `bronze.sell_in`, que se carga
+   * desde la planilla de Google. `null` mientras no esté cargado — que no es lo
+   * mismo que 0.
    */
-  ofertaPct: number | null;
+  sellInPct: number | null;
+  /**
+   * El sell in CALCULADO a partir de nuestras compras
+   * (`costos_historicos.oferta_pct`), con el que se valoriza el costo real.
+   *
+   * SE MUESTRA COMO REFERENCIA Y NO VIAJA AL ARCHIVO. No es lo que el proveedor
+   * tiene vigente: mandarlo en una orden de compra sería pedir con un descuento
+   * inventado.
+   */
+  ofertaCalculadaPct: number | null;
   /** Unidades vendidas en la ventana del ritmo. */
   uds: number;
   ritmoDiario: number;
@@ -1359,6 +1370,34 @@ export type FilaCompra = {
   /** Unidades vendidas en los últimos 3 meses, y qué rentabilidad dejaron. */
   udsRentabilidad: number;
   rentabilidad: number | null;
+  /**
+   * Lo mismo pero del MES CALENDARIO pasado. Va aparte de la ventana móvil
+   * porque son dos preguntas: cómo viene rindiendo el artículo, y a cuánto se
+   * vendió el mes que acaba de cerrar — que es contra lo que se mira si la
+   * oferta que el proveedor ofrece ahora conviene.
+   */
+  udsMesPasado: number;
+  rentMesPasado: number | null;
+  /**
+   * Si ese SKU aparece en un renglón de compra del mes pasado.
+   *
+   * `false` NO alcanza para decir "no se compró": de los 173 comprobantes de
+   * agosto, 14 traen el detalle de renglones. Por eso viene al lado
+   * `proveedorComproMesPasado`, que sale de la cabecera y no del detalle.
+   */
+  compradoMesPasado: boolean;
+  /** Si hubo alguna compra a ese proveedor el mes pasado, por cabecera. */
+  proveedorComproMesPasado: boolean;
+  /**
+   * Los últimos seis meses de descuento, del más nuevo al más viejo. Para poder
+   * decir si la oferta de este mes es buena o si es la de siempre.
+   *
+   * Vienen los dos por separado y la pantalla muestra uno: el del proveedor
+   * cuando esté cargado, el calculado con nuestras compras mientras tanto. El
+   * título de la columna dice cuál de los dos se está viendo.
+   */
+  histSellIn: { mes: string; pct: number }[];
+  histCalculado: { mes: string; pct: number }[];
   ultimaVenta: string | null;
   ultimaCompra: string | null;
 };
@@ -1367,9 +1406,19 @@ export type DashboardCompras = {
   filas: FilaCompra[];
   recortada: boolean;
   ventana: number;
-  /** Mes de la oferta que se está usando, y los que hay para elegir. */
+  /** El mes calendario pasado (`YYYY-MM`), que es de donde salen las columnas
+   * de rentabilidad y de compra del mes pasado. Lo calcula el servidor para que
+   * la pantalla no lo vuelva a deducir y los dos puedan discrepar un día 1. */
+  mesPasado: string;
+  /** Mes del que sale el sell in, y los que hay para elegir. */
   mes: string;
   meses: string[];
+  /**
+   * Cuántos artículos tiene el sell in de ese mes. `0` es "todavía no se
+   * cargó", y la pantalla lo dice en vez de mostrar todos los descuentos en
+   * cero como si el proveedor no diera ninguno.
+   */
+  sellInCargado: number;
   comprasHasta: string | null;
   generadoEn: string;
 };
