@@ -1370,6 +1370,34 @@ export type FilaCompra = {
   /** Unidades vendidas en los últimos 3 meses, y qué rentabilidad dejaron. */
   udsRentabilidad: number;
   rentabilidad: number | null;
+  /**
+   * Lo mismo pero del MES CALENDARIO pasado. Va aparte de la ventana móvil
+   * porque son dos preguntas: cómo viene rindiendo el artículo, y a cuánto se
+   * vendió el mes que acaba de cerrar — que es contra lo que se mira si la
+   * oferta que el proveedor ofrece ahora conviene.
+   */
+  udsMesPasado: number;
+  rentMesPasado: number | null;
+  /**
+   * Si ese SKU aparece en un renglón de compra del mes pasado.
+   *
+   * `false` NO alcanza para decir "no se compró": de los 173 comprobantes de
+   * agosto, 14 traen el detalle de renglones. Por eso viene al lado
+   * `proveedorComproMesPasado`, que sale de la cabecera y no del detalle.
+   */
+  compradoMesPasado: boolean;
+  /** Si hubo alguna compra a ese proveedor el mes pasado, por cabecera. */
+  proveedorComproMesPasado: boolean;
+  /**
+   * Los últimos seis meses de descuento, del más nuevo al más viejo. Para poder
+   * decir si la oferta de este mes es buena o si es la de siempre.
+   *
+   * Vienen los dos por separado y la pantalla muestra uno: el del proveedor
+   * cuando esté cargado, el calculado con nuestras compras mientras tanto. El
+   * título de la columna dice cuál de los dos se está viendo.
+   */
+  histSellIn: { mes: string; pct: number }[];
+  histCalculado: { mes: string; pct: number }[];
   ultimaVenta: string | null;
   ultimaCompra: string | null;
 };
@@ -1378,6 +1406,10 @@ export type DashboardCompras = {
   filas: FilaCompra[];
   recortada: boolean;
   ventana: number;
+  /** El mes calendario pasado (`YYYY-MM`), que es de donde salen las columnas
+   * de rentabilidad y de compra del mes pasado. Lo calcula el servidor para que
+   * la pantalla no lo vuelva a deducir y los dos puedan discrepar un día 1. */
+  mesPasado: string;
   /** Mes del que sale el sell in, y los que hay para elegir. */
   mes: string;
   meses: string[];

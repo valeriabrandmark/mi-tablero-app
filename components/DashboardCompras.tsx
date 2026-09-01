@@ -192,6 +192,9 @@ export default function DashboardComprasPage() {
     }
   };
 
+  // Hay sell in del proveedor cargado para ese mes, o todavía no.
+  const sellInHayDatos = (data?.sellInCargado ?? 0) > 0;
+
   const sinCambios =
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
@@ -361,6 +364,31 @@ export default function DashboardComprasPage() {
       orden: (f) => f.ofertaCalculadaPct,
     },
     {
+      // De dónde sale depende de qué haya: el sell in del proveedor cuando esté
+      // cargado, el calculado mientras tanto. EL TÍTULO DICE CUÁL, que es lo que
+      // evita leer un número como si fuera el otro.
+      titulo: sellInHayDatos ? "Sell in últ. 6 m" : "s/ n. compras 6 m",
+      celda: (f) => {
+        const h = sellInHayDatos ? f.histSellIn : f.histCalculado;
+        if (h.length === 0) return <span className="text-muted">—</span>;
+        return (
+          <span
+            className="tabular-nums whitespace-nowrap"
+            title={h.map((x) => `${fmtMes(x.mes)}: ${x.pct.toFixed(2)} %`).join("\n")}
+          >
+            {h.map((x) => Math.round(x.pct)).join(" · ")}
+          </span>
+        );
+      },
+      // Ordena por el más viejo de la serie contra el actual: lo que interesa
+      // es si HOY estamos mejor o peor que el promedio de los últimos meses.
+      orden: (f) => {
+        const h = sellInHayDatos ? f.histSellIn : f.histCalculado;
+        if (h.length === 0) return null;
+        return h.reduce((a, x) => a + x.pct, 0) / h.length;
+      },
+    },
+    {
       titulo: "A pagar",
       celda: (f) => {
         const r = orden.get(f.sku);
@@ -401,6 +429,55 @@ export default function DashboardComprasPage() {
         ),
       numerica: true,
       orden: (f) => f.rentabilidad,
+    },
+    {
+      // La del mes que acaba de cerrar, aparte de la ventana móvil: es contra
+      // ésta que se mira si la oferta que el proveedor ofrece ahora conviene.
+      titulo: `Rent. ${data ? fmtMes(data.mesPasado) : "mes pasado"}`,
+      celda: (f) =>
+        f.rentMesPasado == null ? (
+          <span className="text-muted">sin venta</span>
+        ) : (
+          <span
+            style={{
+              color:
+                f.rentMesPasado < 0
+                  ? TEMA.negativo
+                  : f.rentMesPasado < 0.1
+                    ? PALETA[3]
+                    : undefined,
+            }}
+            title={`${fmtNumero(f.udsMesPasado)} unidades vendidas`}
+          >
+            {fmtPct(f.rentMesPasado)}
+          </span>
+        ),
+      numerica: true,
+      orden: (f) => f.rentMesPasado,
+    },
+    {
+      // TRES ESTADOS Y NO DOS, porque el detalle de renglones casi no viene: de
+      // los 173 comprobantes de agosto, 14 traen items. Un "no" a secas sería
+      // mentira la mayoría de las veces.
+      titulo: "¿Comprado el mes pasado?",
+      celda: (f) => {
+        if (f.compradoMesPasado)
+          return <span style={{ color: PALETA[1] }}>sí</span>;
+        if (f.proveedorComproMesPasado)
+          return (
+            <span
+              className="text-muted"
+              title="Se le compró al proveedor, pero ese comprobante no trae el detalle de renglones: no se puede saber si incluía este artículo."
+            >
+              no consta
+            </span>
+          );
+        return (
+          <span title="No hubo ninguna compra a este proveedor el mes pasado.">no</span>
+        );
+      },
+      // Ordena por lo seguro primero: sí (2), no consta (1), no (0).
+      orden: (f) => (f.compradoMesPasado ? 2 : f.proveedorComproMesPasado ? 1 : 0),
     },
     {
       titulo: "Última compra",
@@ -684,6 +761,17 @@ export default function DashboardComprasPage() {
               con coma separadora Excel lo parte al medio.
             </p>
             <p className="mt-1">
+              En <span className="font-mono text-xs">UNICOM</span> va exactamente{" "}
+              {UNIDADES_COMPRA.map((u, i) => (
+                <span key={u.clave}>
+                  {i > 0 ? " o " : ""}
+                  <span className="font-mono text-xs">{u.unicom}</span>
+                </span>
+              ))}
+              . Está escrito acá para poder compararlo con lo que espera Sigma sin abrir el
+              archivo: si alguna vez rechaza la importación, es lo primero para mirar.
+            </p>
+            <p className="mt-1">
               <strong>Una orden, un proveedor.</strong> Por eso la descarga pide que haya
               exactamente uno elegido: no existe la orden que mezcla dos.
             </p>
@@ -721,6 +809,23 @@ export default function DashboardComprasPage() {
               informa las columnas de tránsito y recepción en cero, así que un pedido ya
               hecho y todavía no recibido no se ve por ningún lado y el sugerido lo vuelve a
               pedir. Es lo primero para revisar antes de mandar la orden.
+            </p>
+            <p className="mt-1">
+              <strong>«¿Comprado el mes pasado?» tiene tres respuestas y no dos.</strong>{" "}
+              <em>Sí</em> es que el artículo aparece en un renglón de compra. <em>No</em> es
+              que no hubo ninguna compra a ese proveedor, y eso sí es seguro.{" "}
+              <em>No consta</em> es que al proveedor se le compró pero ese comprobante llegó
+              sin el detalle de renglones — de los 173 comprobantes de agosto, 14 traen
+              items—, así que no se puede saber. Un «no» ahí sería mentira la mayoría de las
+              veces.
+            </p>
+            <p className="mt-1">
+              La columna de los <strong>últimos 6 meses de descuento</strong> es para ver si
+              la oferta de este mes es buena o es la de siempre. Muestra el{" "}
+              {sellInHayDatos
+                ? "sell in del proveedor"
+                : "sell in calculado con nuestras compras, porque el del proveedor todavía no está cargado"}
+              , y el título de la columna dice cuál de los dos se está viendo.
             </p>
             <p className="mt-1">
               <strong>La rentabilidad es de los últimos {MESES_RENTABILIDAD} meses</strong>,
