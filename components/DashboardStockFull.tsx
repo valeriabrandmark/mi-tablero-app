@@ -3,10 +3,16 @@
 import { useState } from "react";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
-import { sumar, Tabla, type Columna } from "@/components/Tabla";
+import { contarSkus, sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
-import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
+import {
+  fmtFechaCorta,
+  fmtFechaCortaConAnio,
+  fmtMoneda,
+  fmtNumero,
+  fmtPct,
+} from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
 import { TRAMOS, UMBRALES_TARJETAS, UMBRAL_PARADO } from "@/lib/stock-full";
 import { useDatosTablero } from "@/lib/useDatosTablero";
@@ -38,6 +44,9 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
         </span>
       ),
       orden: (f) => f.producto,
+      // El recuento va en esta columna y no en la del SKU para no pisar
+      // la etiqueta "Total", que es la que dice si la tabla está recortada.
+      total: `${fmtNumero(contarSkus(filas, (f) => f.sku))} SKU`,
     },
     {
       titulo: "Marca",
@@ -79,7 +88,7 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
     },
     {
       titulo: "Última venta",
-      celda: (f) => (f.ultimaVenta ? fmtFechaCorta(f.ultimaVenta) : "—"),
+      celda: (f) => (f.ultimaVenta ? fmtFechaCortaConAnio(f.ultimaVenta) : "—"),
       orden: (f) => f.ultimaVenta,
     },
     {

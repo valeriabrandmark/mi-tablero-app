@@ -3,10 +3,15 @@
 import { useState } from "react";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
-import { sumar, Tabla, type Columna } from "@/components/Tabla";
+import { contarSkus, sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
-import { fmtFechaCorta, fmtMoneda, fmtNumero } from "@/lib/format";
+import {
+  fmtFechaCorta,
+  fmtFechaCortaConAnio,
+  fmtMoneda,
+  fmtNumero,
+} from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
 import {
   COBERTURA_OBJETIVO_DIAS,
@@ -64,6 +69,9 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
         </span>
       ),
       orden: (f) => f.producto,
+      // El recuento va en esta columna y no en la del SKU para no pisar
+      // la etiqueta "Total", que es la que dice si la tabla está recortada.
+      total: `${fmtNumero(contarSkus(filas, (f) => f.sku))} SKU`,
     },
     {
       titulo: "Proveedor",
@@ -172,7 +180,7 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Última venta",
-      celda: (f) => (f.ultimaVenta ? fmtFechaCorta(f.ultimaVenta) : "—"),
+      celda: (f) => (f.ultimaVenta ? fmtFechaCortaConAnio(f.ultimaVenta) : "—"),
       orden: (f) => f.ultimaVenta,
     },
     {
@@ -218,7 +226,7 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Última compra",
-      celda: (f) => (f.ultimaCompra ? fmtFechaCorta(f.ultimaCompra) : "—"),
+      celda: (f) => (f.ultimaCompra ? fmtFechaCortaConAnio(f.ultimaCompra) : "—"),
       // Sin fecha ordena al final, que es lo que hace `Tabla` con los `null`:
       // no saber cuándo se compró no es lo mismo que haber comprado hace mucho.
       orden: (f) => f.ultimaCompra,
@@ -233,6 +241,11 @@ export default function DashboardStockPage() {
   };
   const [filtros, setFiltros] = useState<FiltrosStock>(inicial);
   const [buscado, setBuscado] = useState("");
+
+  // Vive acá y no en `filtros` a propósito: no recorta nada, así que no tiene
+  // que volver a pedirle los datos al servidor ni entrar en el "sin cambios"
+  // que decide si el botón de limpiar filtros está activo.
+  const [enUnidades, setEnUnidades] = useState(false);
 
   const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
     "/api/stock",
@@ -475,15 +488,51 @@ export default function DashboardStockPage() {
         <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
           <div className="grid gap-4 xl:grid-cols-2">
             <Panel
-              titulo="Cuánta plata hay en cada tramo"
-              nota="Valor neto a costo · click para filtrar"
+              titulo={
+                enUnidades ? "Cuántas unidades hay en cada tramo" : "Cuánta plata hay en cada tramo"
+              }
+              nota={
+                enUnidades
+                  ? "Unidades físicas · click para filtrar"
+                  : "Valor neto a costo · click para filtrar"
+              }
             >
+              {/* Plata y unidades cuentan historias distintas y por eso están
+                  las dos: un tramo puede ser poca plata y muchísimas unidades
+                  —lo barato que sobra ocupa depósito igual— o al revés. Un
+                  switch y no dos gráficos porque las barras son las mismas y
+                  el click filtra igual; verlos al lado sólo partiría la
+                  atención en dos. */}
+              <div className="border-line mb-3 inline-flex rounded-lg border p-0.5">
+                {[
+                  { on: false, label: "Plata" },
+                  { on: true, label: "Unidades" },
+                ].map((op) => (
+                  <button
+                    key={op.label}
+                    type="button"
+                    onClick={() => setEnUnidades(op.on)}
+                    aria-pressed={enUnidades === op.on}
+                    className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+                      enUnidades === op.on
+                        ? "bg-c1/15 text-c1 font-medium"
+                        : "text-muted hover:text-ink"
+                    }`}
+                  >
+                    {op.label}
+                  </button>
+                ))}
+              </div>
+
               <BarrasCategoria
-                datos={TRAMOS_COBERTURA.map((t) => ({
-                  label: t.label,
-                  valor: data.tramos.find((x) => x.tramo === t.clave)?.valor ?? 0,
-                }))}
-                formato={fmtMoneda}
+                datos={TRAMOS_COBERTURA.map((t) => {
+                  const fila = data.tramos.find((x) => x.tramo === t.clave);
+                  return {
+                    label: t.label,
+                    valor: (enUnidades ? fila?.unidades : fila?.valor) ?? 0,
+                  };
+                })}
+                formato={enUnidades ? fmtNumero : fmtMoneda}
                 horizontal={false}
                 alturaMinima={220}
                 vacio="Sin stock para el filtro elegido."

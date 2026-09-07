@@ -3,7 +3,7 @@
 import { useState } from "react";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
-import { sumar, Tabla, type Columna } from "@/components/Tabla";
+import { contarSkus, sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { fmtFechaCorta, fmtMoneda, fmtNumero } from "@/lib/format";
@@ -50,6 +50,9 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
         </span>
       ),
       orden: (f) => f.producto,
+      // El recuento va en esta columna y no en la del SKU para no pisar
+      // la etiqueta "Total", que es la que dice si la tabla está recortada.
+      total: `${fmtNumero(contarSkus(filas, (f) => f.sku))} SKU`,
     },
     {
       titulo: "Proveedor",

@@ -65,6 +65,20 @@ export function fmtFechaCorta(iso: string): string {
 }
 
 /**
+ * `05/08/26` para fechas de tabla, donde el año SÍ hace falta.
+ *
+ * Es una función aparte y no un parámetro de `fmtFechaCorta` porque los dos
+ * usos son distintos: en un eje de días el año es ruido —todas las barras son
+ * del mismo mes—, pero en una columna como "Última compra" un `05/08` pelado
+ * no distingue entre hace un mes y hace tres años, que es justo lo que uno
+ * quiere saber antes de reponer.
+ */
+export function fmtFechaCortaConAnio(iso: string): string {
+  const [a, m, d] = iso.split("-");
+  return a && m && d ? `${d}/${m}/${a.slice(-2)}` : iso;
+}
+
+/**
  * Formateador que le corresponde a cada métrica de objetivos. Existe para que
  * un objetivo de facturación no se muestre como "45.000.000" pelado ni uno de
  * unidades con signo de pesos.
