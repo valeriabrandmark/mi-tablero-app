@@ -47,6 +47,7 @@ export async function GET(request: NextRequest) {
 
   const filtros: FiltrosStock = {
     proveedor: lista(sp, "proveedor"),
+    grupo: lista(sp, "grupo"),
     marca: lista(sp, "marca"),
     sku: lista(sp, "sku"),
     tramo: sp.get("tramo") ?? undefined,

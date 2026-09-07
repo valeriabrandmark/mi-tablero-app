@@ -3,6 +3,7 @@ import { agregarFiltro } from "@/lib/filtros";
 import { MESES_RENTABILIDAD } from "@/lib/compras";
 import {
   COBERTURA_OBJETIVO_DIAS,
+  GRUPO_PROVEEDOR_POR_DEFECTO,
   PLAZO_REPOSICION_DIAS,
   PROVEEDORES_NO_MERCADERIA,
   VENTANA_POR_DEFECTO,
@@ -180,6 +181,10 @@ base as (
   select s.sku,
          a.descripcion                                  as producto,
          a."proveedorNombre"                            as proveedor,
+         -- QUO MKT por defecto: en bronze.proveedores_grupo están sólo los de
+         -- NOA, así que un proveedor nuevo entra como QUO sin que nadie lo
+         -- cargue. (Sin backticks: esto vive adentro de un template literal.)
+         coalesce(pg.grupo, '${GRUPO_PROVEEDOR_POR_DEFECTO}') as grupo,
          a."attributes.marca"                           as marca,
          -- Sin dato se toma 1: un bulto de una unidad es lo mismo que la
          -- unidad, así que en el peor caso el artículo se pide de a uno. Poner
@@ -216,6 +221,7 @@ base as (
          end                                            as cobertura
   from stock s
   left join bronze.sigma_articulos a on trim(a.id) = s.sku
+  left join bronze.proveedores_grupo pg on pg.proveedor = a."proveedorNombre"
   left join costo c on c.sku = s.sku
   left join oferta o on o.sku = s.sku
   left join sell_in si on si.sku = s.sku
@@ -246,6 +252,7 @@ function where(f: FiltrosCompras, mes: string): Where {
   const clauses: string[] = [];
 
   agregarFiltro(clauses, params, "proveedor", f.proveedor);
+  agregarFiltro(clauses, params, "grupo", f.grupo);
   agregarFiltro(clauses, params, "marca", f.marca);
 
   if (f.buscar) {
@@ -367,7 +374,7 @@ async function getSellInCargado(mes: string): Promise<number> {
 
 export async function getOpcionesCompras() {
   const params = [VENTANA_POR_DEFECTO, PROVEEDORES_NO_MERCADERIA, ""];
-  const [proveedores, marcas, meses] = await Promise.all([
+  const [proveedores, marcas, grupos, meses] = await Promise.all([
     query<{ v: string }>(
       `${BASE} select distinct proveedor as v from calculada
        where proveedor is not null order by 1`,
@@ -378,11 +385,19 @@ export async function getOpcionesCompras() {
        where marca is not null order by 1`,
       params,
     ),
+    // Igual que en Stock: salen de los datos, así que un grupo nuevo en la
+    // tabla aparece en el selector sin tocar código.
+    query<{ v: string }>(
+      `${BASE} select distinct grupo as v from calculada
+       where grupo is not null order by 1`,
+      params,
+    ),
     getMeses(),
   ]);
   return {
     proveedores: proveedores.map((r) => r.v),
     marcas: marcas.map((r) => r.v),
+    grupos: grupos.map((r) => r.v),
     meses,
   };
 }

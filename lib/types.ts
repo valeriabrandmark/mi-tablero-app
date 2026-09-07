@@ -1098,6 +1098,11 @@ export type FiltrosStock = {
   proveedor?: string[];
   marca?: string[];
   sku?: string[];
+  /**
+   * Empresa del grupo a la que pertenece el proveedor ("NOA COMERCIAL" o
+   * "QUO MKT"). Sale de `bronze.proveedores_grupo`, con QUO MKT por defecto.
+   */
+  grupo?: string[];
   /** Sobre cuántos días se mide el ritmo de venta. Ver lib/stock.ts. */
   ventana?: number;
   /** Qué depósito se mira: `ambos`, `tucuman` o `full`. */
@@ -1321,6 +1326,11 @@ export type DashboardAntiguedad = {
 export type FiltrosCompras = {
   proveedor?: string[];
   marca?: string[];
+  /**
+   * Empresa del grupo a la que pertenece el proveedor ("NOA COMERCIAL" o
+   * "QUO MKT"). Sale de `bronze.proveedores_grupo`, con QUO MKT por defecto.
+   */
+  grupo?: string[];
   /** Sobre cuántos días se mide el ritmo de venta. Ver lib/stock.ts. */
   ventana?: number;
   /** Mes comercial del que sale la oferta del proveedor (`YYYY-MM`). */

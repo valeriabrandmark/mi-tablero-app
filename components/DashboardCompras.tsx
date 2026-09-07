@@ -39,7 +39,12 @@ import {
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type { DashboardCompras, FilaCompra, FiltrosCompras } from "@/lib/types";
 
-type Opciones = { proveedores: string[]; marcas: string[]; meses: string[] };
+type Opciones = {
+  proveedores: string[];
+  marcas: string[];
+  grupos: string[];
+  meses: string[];
+};
 type Respuesta = DashboardCompras & { opciones: Opciones | null };
 
 const CLASE_CELDA_EDITABLE =
@@ -203,6 +208,7 @@ export default function DashboardComprasPage() {
   const sellInHayDatos = (data?.sellInCargado ?? 0) > 0;
 
   const sinCambios =
+    sinValores(filtros.grupo) &&
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
     !filtros.buscar &&
@@ -523,6 +529,15 @@ export default function DashboardComprasPage() {
 
       <div className="border-line bg-panel flex flex-col gap-3 rounded-xl border p-3">
         <div className="flex flex-wrap items-end gap-3">
+          {/* Antes que Proveedor: es el corte más grueso. Y en esta pantalla
+              importa más todavía, porque la orden de compra se arma por
+              proveedor y conviene llegar al de la empresa correcta. */}
+          <SelectorMultiple
+            etiqueta="Empresa"
+            valores={filtros.grupo}
+            opciones={data?.opciones?.grupos ?? []}
+            onChange={(v) => cambiar({ ...filtros, grupo: v })}
+          />
           <SelectorMultiple
             etiqueta="Proveedor"
             valores={filtros.proveedor}
