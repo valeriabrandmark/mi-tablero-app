@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
-import { sumar, Tabla, type Columna } from "@/components/Tabla";
+import { contarSkus, sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import {
   aCsv,
@@ -21,7 +21,14 @@ import {
   type RenglonOrden,
 } from "@/lib/compras";
 import { vacio as sinValores } from "@/lib/filtros";
-import { fmtFechaCorta, fmtMes, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
+import {
+  fmtFechaCorta,
+  fmtFechaCortaConAnio,
+  fmtMes,
+  fmtMoneda,
+  fmtNumero,
+  fmtPct,
+} from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
 import {
   COBERTURA_OBJETIVO_DIAS,
@@ -216,6 +223,9 @@ export default function DashboardComprasPage() {
         </span>
       ),
       orden: (f) => f.producto,
+      // El recuento va en esta columna y no en la del SKU para no pisar
+      // la etiqueta "Total", que es la que dice si la tabla está recortada.
+      total: `${fmtNumero(contarSkus(filas, (f) => f.sku))} SKU`,
     },
     {
       titulo: "U. x bulto",
@@ -481,7 +491,7 @@ export default function DashboardComprasPage() {
     },
     {
       titulo: "Última compra",
-      celda: (f) => (f.ultimaCompra ? fmtFechaCorta(f.ultimaCompra) : "—"),
+      celda: (f) => (f.ultimaCompra ? fmtFechaCortaConAnio(f.ultimaCompra) : "—"),
       orden: (f) => f.ultimaCompra,
     },
   ];

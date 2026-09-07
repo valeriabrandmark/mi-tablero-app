@@ -48,6 +48,29 @@ export function sumar<T>(
 }
 
 /**
+ * Cuántos SKU DISTINTOS hay en la tabla, para la fila de totales.
+ *
+ * Distintos y no `filas.length`: hay tablas donde el mismo artículo aparece
+ * más de una vez —en Stock Full varias publicaciones comparten inventario— y
+ * ahí contar filas diría un número más grande que el catálogo.
+ *
+ * Las filas sin SKU no se cuentan. Son inventarios de Mercado Libre que
+ * todavía no están enlazados a nuestros códigos: sumarlos como si fueran uno
+ * cada uno inventaría artículos que no sabemos cuáles son.
+ */
+export function contarSkus<T>(
+  filas: T[],
+  sku: (fila: T) => string | null | undefined,
+): number {
+  const vistos = new Set<string>();
+  for (const f of filas) {
+    const s = sku(f);
+    if (s) vistos.add(s);
+  }
+  return vistos.size;
+}
+
+/**
  * El margen del conjunto: rentabilidad total sobre venta total.
  *
  * NO es el promedio simple de los porcentajes de cada fila, y la diferencia no

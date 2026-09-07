@@ -100,7 +100,11 @@ export const DEPOSITO_POR_DEFECTO: ClaveDeposito = "ambos";
  *   sin_venta  no vendió una unidad en toda la ventana
  */
 export const TRAMOS_COBERTURA = [
-  { clave: "quiebre", label: "Quiebre", desc: `Menos de ${PLAZO_REPOSICION_DIAS} días` },
+  {
+    clave: "quiebre",
+    label: "Próximo a quiebre",
+    desc: `Menos de ${PLAZO_REPOSICION_DIAS} días`,
+  },
   { clave: "ajustado", label: "Ajustado", desc: `${PLAZO_REPOSICION_DIAS} a ${COBERTURA_OBJETIVO_DIAS} días` },
   { clave: "objetivo", label: "En objetivo", desc: `${COBERTURA_OBJETIVO_DIAS} a 60 días` },
   { clave: "sobra", label: "De sobra", desc: "60 a 120 días" },
