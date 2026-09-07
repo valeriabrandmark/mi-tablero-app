@@ -1,6 +1,13 @@
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
-import { MESES_RENTABILIDAD } from "@/lib/compras";
+import {
+  COBERTURA_MAXIMA_COMPRA_DIAS,
+  COBERTURA_SIN_INFLAR_DIAS,
+  FACTOR_OFERTA_MAX,
+  MESES_HISTORIA_SELL_IN,
+  MESES_RENTABILIDAD,
+  PUNTOS_OFERTA_PARA_DUPLICAR,
+} from "@/lib/compras";
 import {
   COBERTURA_OBJETIVO_DIAS,
   GRUPO_PROVEEDOR_POR_DEFECTO,
@@ -66,12 +73,15 @@ costo as (
 -- para valorizar lo que ya compramos; NO es lo que el proveedor tiene vigente.
 -- Mandarlo en una orden de compra sería pedir con un descuento inventado.
 --
--- Hoy la tabla está vacía —la planilla de Google todavía no se carga sola— y
--- por eso el descuento arranca en cero y la pantalla lo dice.
+-- SE EXCLUYEN LOS EVENTOS, por lo mismo que en la historia de más abajo: una
+-- oferta de "HOT SALE" no es el descuento del mes, y con las dos cargadas el
+-- join devolvía dos filas para el mismo artículo y duplicaba sus unidades en
+-- todos los totales de la tabla.
 sell_in as (
   select sku, descuento_pct
   from bronze.sell_in
   where mes_comercial = $3::text
+    and evento = ''
 ),
 -- El costo de lista y el sell in calculado del mes elegido. El calculado se
 -- MUESTRA como referencia —es con lo que venimos costeando— pero no viaja al
@@ -112,32 +122,51 @@ proveedores_mes_pasado as (
     and "fechaFactura" <  to_char(date_trunc('month', current_date), 'YYYY-MM-DD')
     and "proveedorNombre" is not null
 ),
--- LOS ÚLTIMOS SEIS MESES DE DESCUENTO, para poder decir si la oferta de este mes
--- es buena o si es la de siempre. Van los dos: el sell in del proveedor —cuando
--- esté cargado— y el calculado con nuestras compras, que es el que hay hoy. La
+-- LOS SEIS MESES ANTERIORES AL ELEGIDO. Siempre los mismos seis y siempre en
+-- el mismo orden para todos los artículos, que es lo que hace comparable la
+-- columna: antes se tomaban "las últimas seis filas que existieran", así que un
+-- artículo con oferta en marzo, mayo y agosto mostraba 30 · 20 · 30 al lado de
+-- otro con 30 · 20 · 30 de meses completamente distintos. Ahora un mes sin
+-- oferta es un 0 explícito.
+--
+-- ANTERIORES, sin incluir el mes elegido: el descuento vigente ya se ve en la
+-- columna "Desc %", y repetirlo acá adelante hacía leer la serie corrida un
+-- mes. La historia es contra qué se compara el vigente, no el vigente otra vez.
+meses_hist as (
+  select to_char(to_date($3::text || '-01', 'YYYY-MM-DD') - (n || ' month')::interval,
+                 'YYYY-MM') as mes
+  from generate_series(1, ${MESES_HISTORIA_SELL_IN}) as n
+),
+-- Van los dos: el sell in del proveedor y el calculado con nuestras compras. La
 -- pantalla muestra uno solo y el título dice cuál.
+--
+-- SE EXCLUYEN LOS EVENTOS (evento <> ''). Una oferta de "HOT SALE" o "Glam" no
+-- es el descuento del mes: es otra negociación, con otras fechas. Mezclarlas
+-- además duplicaba filas --en 2026-07 hay 302 SKU con las dos-- y eso inflaba
+-- los totales de la tabla, no sólo esta columna.
+--
+-- La MEDIANA sale de acá y no de un promedio: con seis valores donde varios son
+-- 0, un solo mes de oferta grande corre el promedio y haría ver como "oferta
+-- excepcional" algo que pasó el mes pasado. La mediana aguanta ese caso.
 hist_sell_in as (
-  select sku, jsonb_agg(jsonb_build_object('mes', mes, 'pct', pct) order by mes desc) as historia
-  from (
-    select sku, mes_comercial as mes, descuento_pct as pct,
-           row_number() over (partition by sku order by mes_comercial desc) as n
-    from bronze.sell_in
-    where mes_comercial <= $3::text
-  ) x
-  where n <= 6
-  group by sku
+  select s.sku,
+         jsonb_agg(jsonb_build_object('mes', m.mes, 'pct', coalesce(si.descuento_pct, 0))
+                   order by m.mes desc)                                        as historia,
+         percentile_cont(0.5) within group (order by coalesce(si.descuento_pct, 0)) as mediana
+  from (select distinct sku from bronze.sell_in where evento = '') s
+  cross join meses_hist m
+  left join bronze.sell_in si
+         on si.sku = s.sku and si.mes_comercial = m.mes and si.evento = ''
+  group by s.sku
 ),
 hist_calculado as (
-  select sku, jsonb_agg(jsonb_build_object('mes', mes, 'pct', pct) order by mes desc) as historia
-  from (
-    select sku, mes_comercial as mes, oferta_pct as pct,
-           row_number() over (partition by sku order by mes_comercial desc) as n
-    from bronze.costos_historicos
-    where mes_comercial <= $3::text
-      and oferta_pct is not null
-  ) x
-  where n <= 6
-  group by sku
+  select s.sku,
+         jsonb_agg(jsonb_build_object('mes', m.mes, 'pct', coalesce(c.oferta_pct, 0))
+                   order by m.mes desc) as historia
+  from (select distinct sku from bronze.costos_historicos) s
+  cross join meses_hist m
+  left join bronze.costos_historicos c on c.sku = s.sku and c.mes_comercial = m.mes
+  group by s.sku
 ),
 ventas as (
   select sku,
@@ -214,6 +243,7 @@ base as (
          coalesce(co.comprado_mes_pasado, false)        as comprado_mes_pasado,
          (pmp.proveedor is not null)                    as proveedor_compro,
          hs.historia                                    as hist_sell_in,
+         hs.mediana                                     as mediana_sell_in,
          hc.historia                                    as hist_calculado,
          coalesce(v.uds, 0)::numeric / $1::int          as ritmo_diario,
          case when coalesce(v.uds, 0) = 0 then null
@@ -232,13 +262,46 @@ base as (
   left join hist_calculado hc on hc.sku = s.sku
   where coalesce(a."proveedorNombre", '') <> all($2::text[])
 ),
-calculada as (
+con_base as (
   select b.*,
          -- Lo mismo que en el tablero de Stock, con las mismas constantes:
          -- lo que falta para cubrir el objetivo contando lo que se vende
-         -- mientras la reposición viaja.
-         ceil(greatest(0, b.ritmo_diario * ${COBERTURA_OBJETIVO_DIAS + PLAZO_REPOSICION_DIAS} - b.total)) as sugerido
+         -- mientras la reposición viaja. Es "cuánto necesito".
+         greatest(0, b.ritmo_diario * ${COBERTURA_OBJETIVO_DIAS + PLAZO_REPOSICION_DIAS} - b.total) as sugerido_base,
+         -- El techo duro: nunca pasar de esta cobertura, por buena que esté la
+         -- oferta. Separa "aprovechar un descuento" de "comprar un año".
+         greatest(0, b.ritmo_diario * ${COBERTURA_MAXIMA_COMPRA_DIAS} - b.total)                    as sugerido_tope,
+         -- Cuánto está EL DESCUENTO DE ESTE MES por encima de lo habitual, en
+         -- puntos. Sin sell in vigente cargado no hay ventaja que medir: queda
+         -- en 0 y el factor da 1, o sea el sugerido de siempre.
+         greatest(0, coalesce(b.sell_in_pct, 0) - coalesce(b.mediana_sell_in, 0))                   as ventaja_pp
   from base b
+),
+con_factor as (
+  select c.*,
+         -- 1 = comprar lo que hace falta. 2 = el doble. Entre medio, lineal:
+         -- ${PUNTOS_OFERTA_PARA_DUPLICAR} puntos de ventaja llevan el factor a ${FACTOR_OFERTA_MAX}.
+         --
+         -- NO SE INFLA LO QUE YA SOBRA: pasado el borde de "Excedido", una
+         -- oferta no es una oportunidad, es más plata quieta. Y sin ventas no
+         -- hay ritmo, así que tampoco hay nada que adelantar.
+         case
+           when c.cobertura is null then 1::numeric
+           when c.cobertura > ${COBERTURA_SIN_INFLAR_DIAS} then 1::numeric
+           else least(
+             ${FACTOR_OFERTA_MAX}::numeric,
+             1 + c.ventaja_pp / ${PUNTOS_OFERTA_PARA_DUPLICAR}::numeric
+           )
+         end as factor_oferta
+  from con_base c
+),
+calculada as (
+  select f.*,
+         -- El sugerido final: la necesidad, movida por la oferta, contra el
+         -- techo. El least va al final y no antes para que el tope sea siempre
+         -- lo último que manda.
+         ceil(least(f.sugerido_base * f.factor_oferta, f.sugerido_tope)) as sugerido
+  from con_factor f
 )`;
 
 type Where = { sql: string; params: unknown[] };
@@ -293,6 +356,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<FilaCompra[]> {
             tuc, full_ml, total, costo, valor, costo_lista,
             oferta_calculada_pct, sell_in_pct,
             uds, ritmo_diario, cobertura, sugerido,
+            sugerido_base, sugerido_tope, factor_oferta, mediana_sell_in,
             uds_rent, rentabilidad,
             uds_mes_pasado, rent_mes_pasado,
             comprado_mes_pasado, proveedor_compro,
@@ -325,6 +389,10 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<FilaCompra[]> {
     ritmoDiario: num(r.ritmo_diario),
     cobertura: r.cobertura == null ? null : num(r.cobertura),
     sugerido: num(r.sugerido),
+    sugeridoBase: num(r.sugerido_base),
+    sugeridoTope: num(r.sugerido_tope),
+    factorOferta: num(r.factor_oferta),
+    medianaSellIn: r.mediana_sell_in == null ? null : num(r.mediana_sell_in),
     udsRentabilidad: num(r.uds_rent),
     rentabilidad: r.rentabilidad == null ? null : num(r.rentabilidad),
     udsMesPasado: num(r.uds_mes_pasado),

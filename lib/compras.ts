@@ -14,10 +14,59 @@
  * haya un proveedor elegido, y no hay forma de mezclar dos en el mismo archivo.
  */
 
+import { COBERTURA_OBJETIVO_DIAS, PLAZO_REPOSICION_DIAS } from "@/lib/stock";
 import type { FilaCompra } from "@/lib/types";
 
 /** Sobre cuántos meses se mide la rentabilidad de venta del artículo. */
 export const MESES_RENTABILIDAD = 3;
+
+/** Cuántos meses de descuento se muestran para atrás. */
+export const MESES_HISTORIA_SELL_IN = 6;
+
+/* -------------------------------------------------------------------------
+   EL SUGERIDO Y LA OFERTA
+
+   El sugerido base es el mismo del tablero de Stock: lo que falta para cubrir
+   el objetivo contando lo que se vende mientras la reposición viaja. Eso
+   responde "cuánto necesito", que es sólo la mitad de la pregunta del que
+   compra: la otra mitad es "y conviene comprarlo AHORA".
+
+   Un descuento muy por encima del habitual es una razón para adelantar compra
+   --se paga menos por la misma unidad-- y uno igual al de siempre no lo es. De
+   ahí sale el factor: no inventa demanda, mueve en el tiempo la que ya existe.
+   ------------------------------------------------------------------------- */
+
+/**
+ * Cuántos puntos de descuento POR ENCIMA DE LO HABITUAL duplican la compra.
+ *
+ * Sale del ejemplo que dio el negocio: "si los últimos 4 meses tuve un 10 % y
+ * este mes tengo 40, sugerir el doble". 40 − 10 = 30 puntos.
+ */
+export const PUNTOS_OFERTA_PARA_DUPLICAR = 30;
+
+/**
+ * Tope del multiplicador. Con 60 puntos de ventaja el factor daría 3, y no hay
+ * descuento que justifique comprar el triple: la plata se inmoviliza igual y
+ * el artículo puede dejar de venderse.
+ */
+export const FACTOR_OFERTA_MAX = 2;
+
+/**
+ * El techo duro, en días de venta. Por más grande que sea la oferta, no se
+ * sugiere pasar de acá.
+ *
+ * Es lo que separa "aprovechar una oferta" de "comprar un año de mercadería":
+ * un artículo con ritmo bajo y 50 % de descuento daría, sin este tope, un
+ * sugerido que tarda meses en venderse y que hay que pagar y almacenar hoy.
+ */
+export const COBERTURA_MAXIMA_COMPRA_DIAS = 90;
+
+/**
+ * A partir de qué cobertura ya no se infla nada, por buena que esté la oferta.
+ * Es el borde del tramo "Excedido" de Stock: si ya sobra, la oferta no es una
+ * oportunidad, es más plata quieta.
+ */
+export const COBERTURA_SIN_INFLAR_DIAS = 120;
 
 /**
  * Las dos formas de comprar.
@@ -227,4 +276,83 @@ export function nombreArchivo(proveedor: string, extension: string): string {
     .slice(0, 40);
   const hoy = new Date().toISOString().slice(0, 10);
   return `OC-${limpio || "PROVEEDOR"}-${hoy}.${extension}`;
+}
+
+/* -------------------------------------------------------------------------
+   POR QUÉ ESA CANTIDAD
+   ------------------------------------------------------------------------- */
+
+/**
+ * El renglón por renglón de cómo se llegó al sugerido, para el tooltip.
+ *
+ * Devuelve LÍNEAS y no una frase armada: el `title` de una celda las separa con
+ * saltos, y así cada paso de la cuenta se lee solo. Un párrafo obligaría a
+ * seguir la aritmética de memoria, que es justo lo que el tooltip viene a
+ * evitar.
+ *
+ * Vive acá y no en el componente porque es una explicación de la cuenta, y la
+ * cuenta vive en este archivo. Si mañana cambia el factor, las dos cosas se
+ * tocan juntas.
+ */
+export function porQueSugerido(f: FilaCompra): string[] {
+  if (f.cobertura == null) {
+    return [
+      "Sin ventas en la ventana: no hay ritmo con el que calcular nada.",
+      `Stock hoy: ${Math.round(f.total)} u.`,
+    ];
+  }
+
+  const l: string[] = [
+    `Se vende ${f.ritmoDiario.toFixed(2)} u. por día y hay ${Math.round(f.total)} u.`,
+    `Alcanza para ${Math.round(f.cobertura)} días.`,
+    `Para cubrir ${COBERTURA_OBJETIVO_DIAS} días de objetivo + ${PLAZO_REPOSICION_DIAS}` +
+      ` de reposición faltan ${Math.ceil(f.sugeridoBase)} u.`,
+  ];
+
+  if (f.cobertura > COBERTURA_SIN_INFLAR_DIAS) {
+    l.push(
+      "",
+      `Ya hay más de ${COBERTURA_SIN_INFLAR_DIAS} días de cobertura, así que la` +
+        " oferta no infla la compra: comprar más sería plata quieta.",
+    );
+    return l;
+  }
+
+  const vigente = f.sellInPct;
+  const mediana = f.medianaSellIn;
+
+  if (vigente == null || mediana == null) {
+    l.push(
+      "",
+      "Sin sell in del proveedor con qué comparar: se sugiere lo que hace falta" +
+        " y nada más.",
+    );
+  } else if (f.factorOferta <= 1) {
+    l.push(
+      "",
+      `El descuento de este mes (${vigente.toFixed(1)} %) no supera al habitual` +
+        ` (${mediana.toFixed(1)} %), así que no hay motivo para adelantar compra.`,
+    );
+  } else {
+    l.push(
+      "",
+      `El descuento de este mes es ${vigente.toFixed(1)} % contra ${mediana.toFixed(1)} %` +
+        ` habitual: ${(vigente - mediana).toFixed(1)} puntos de ventaja.`,
+      `Por eso se multiplica por ${f.factorOferta.toFixed(2)}` +
+        ` (${PUNTOS_OFERTA_PARA_DUPLICAR} puntos = el doble, tope ${FACTOR_OFERTA_MAX}x).`,
+    );
+  }
+
+  // El tope sólo se nombra cuando efectivamente mordió. Decir "no llegó al
+  // techo" en cada artículo sería ruido en el 95 % de las filas.
+  const sinTope = Math.ceil(f.sugeridoBase * f.factorOferta);
+  if (f.sugerido < sinTope) {
+    l.push(
+      `Daría ${sinTope} u., pero el techo de ${COBERTURA_MAXIMA_COMPRA_DIAS} días` +
+        ` de cobertura lo baja a ${f.sugerido}.`,
+    );
+  }
+
+  l.push("", `Sugerido: ${f.sugerido} u.`);
+  return l;
 }

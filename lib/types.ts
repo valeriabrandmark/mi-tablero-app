@@ -1375,8 +1375,24 @@ export type FilaCompra = {
   uds: number;
   ritmoDiario: number;
   cobertura: number | null;
-  /** Unidades que faltan para cubrir objetivo + reposición. */
+  /**
+   * Cuántas unidades sugiere comprar la pantalla: la necesidad movida por la
+   * oferta y recortada por el techo. Es lo que se ve y con lo que arranca el
+   * renglón de la orden. Las cuatro piezas de abajo son para poder justificarlo
+   * en el tooltip sin recalcular nada en el navegador.
+   */
   sugerido: number;
+  /** Unidades que faltan para cubrir objetivo + reposición, sin tocar. */
+  sugeridoBase: number;
+  /** El techo: lo máximo que se puede pedir sin pasar la cobertura máxima. */
+  sugeridoTope: number;
+  /** Por cuánto se multiplicó la base por la oferta. 1 = no se movió. */
+  factorOferta: number;
+  /**
+   * La mediana del descuento de los últimos meses, contra la que se compara el
+   * vigente. `null` si el artículo nunca estuvo en la planilla de sell in.
+   */
+  medianaSellIn: number | null;
   /** Unidades vendidas en los últimos 3 meses, y qué rentabilidad dejaron. */
   udsRentabilidad: number;
   rentabilidad: number | null;

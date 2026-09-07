@@ -15,6 +15,7 @@ import {
   lineasParaExportar,
   MESES_RENTABILIDAD,
   nombreArchivo,
+  porQueSugerido,
   renglonInicial,
   UNIDADES_COMPRA,
   type ClaveUnidadCompra,
@@ -265,7 +266,35 @@ export default function DashboardComprasPage() {
     },
     {
       titulo: "Sugerido u.",
-      celda: (f) => (f.sugerido > 0 ? fmtNumero(f.sugerido) : "—"),
+      // El número solo no alcanza para firmar una compra: el que decide tiene
+      // que poder ver de dónde salió sin preguntarle a nadie. Por eso el
+      // tooltip trae la cuenta entera, paso por paso.
+      celda: (f) => {
+        const texto = porQueSugerido(f).join("\n");
+        if (f.sugerido <= 0) {
+          return (
+            <span className="text-muted" title={texto}>
+              —
+            </span>
+          );
+        }
+        return (
+          <span
+            title={texto}
+            // Subrayado punteado: la señal de que hay algo para leer al pasar
+            // por encima. Sin eso el tooltip existe y nadie se entera.
+            className={
+              f.factorOferta > 1
+                ? "decoration-dotted underline underline-offset-2"
+                : "decoration-dotted underline underline-offset-2 opacity-90"
+            }
+            style={f.factorOferta > 1 ? { color: PALETA[1] } : undefined}
+          >
+            {fmtNumero(f.sugerido)}
+            {f.factorOferta > 1 ? ` ×${f.factorOferta.toFixed(1)}` : ""}
+          </span>
+        );
+      },
       numerica: true,
       orden: (f) => f.sugerido,
       total: fmtNumero(sumar(filas, (f) => f.sugerido)),
