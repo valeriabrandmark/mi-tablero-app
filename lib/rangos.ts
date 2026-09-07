@@ -11,7 +11,7 @@
  * cualquier sección que venga después.
  */
 
-import { DIA_INICIO_MES_COMERCIAL, mesComercialActual } from "@/lib/constantes";
+import { limitesMesComercial, mesComercialActual } from "@/lib/constantes";
 
 /**
  * Hoy en Argentina, `YYYY-MM-DD`.
@@ -38,18 +38,15 @@ export function sumarDias(fecha: string, dias: number): string {
 
 export type Rango = { desde: string; hasta: string };
 
-/** El mes comercial vigente (del 6 al 5) como rango de fechas. */
+/**
+ * El mes comercial vigente como rango de fechas.
+ *
+ * Los bordes los calcula `limitesMesComercial`, que es donde viven los cierres
+ * movidos. Repetir acá la cuenta del 6 al 5 haría que un mes con excepción
+ * mostrara un día de más o de menos que lo que los datos tienen etiquetado.
+ */
 export function mesComercialComoRango(hoy: string = hoyArgentina()): Rango {
-  const mes = mesComercialActual(new Date(`${hoy}T12:00:00Z`));
-  const [anio, m] = mes.split("-").map(Number);
-  const dd = String(DIA_INICIO_MES_COMERCIAL).padStart(2, "0");
-  const finAnio = m === 12 ? anio + 1 : anio;
-  const finMes = m === 12 ? 1 : m + 1;
-  const hastaMes = `${finAnio}-${String(finMes).padStart(2, "0")}`;
-  return {
-    desde: `${mes}-${dd}`,
-    hasta: sumarDias(`${hastaMes}-${dd}`, -1),
-  };
+  return limitesMesComercial(mesComercialActual(new Date(`${hoy}T12:00:00Z`)));
 }
 
 export type Preset = { label: string; rango: (hoy: string) => Rango };
