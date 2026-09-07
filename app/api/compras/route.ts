@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
 
   const filtros: FiltrosCompras = {
     proveedor: lista(sp, "proveedor"),
+    grupo: lista(sp, "grupo"),
     marca: lista(sp, "marca"),
     buscar: sp.get("buscar")?.slice(0, 80) || undefined,
     ventana,

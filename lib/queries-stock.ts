@@ -3,6 +3,7 @@ import { agregarFiltro } from "@/lib/filtros";
 import {
   COBERTURA_OBJETIVO_DIAS,
   DEPOSITO_POR_DEFECTO,
+  GRUPO_PROVEEDOR_POR_DEFECTO,
   PLAZO_REPOSICION_DIAS,
   PROVEEDORES_NO_MERCADERIA,
   VENTANA_POR_DEFECTO,
@@ -160,6 +161,9 @@ base as (
   select s.sku,
          a.descripcion                                  as producto,
          a."proveedorNombre"                            as proveedor,
+         -- QUO MKT por defecto: en la tabla están sólo los de NOA, así que un
+         -- proveedor nuevo entra como QUO sin que nadie lo cargue.
+         coalesce(pg.grupo, '${GRUPO_PROVEEDOR_POR_DEFECTO}') as grupo,
          a."attributes.marca"                           as marca,
          s.tuc,
          s.full_ml,
@@ -185,6 +189,7 @@ base as (
          end                                            as cobertura
   from stock s
   left join bronze.sigma_articulos a on trim(a.id) = s.sku
+  left join bronze.proveedores_grupo pg on pg.proveedor = a."proveedorNombre"
   left join costo c on c.sku = s.sku
   left join ventas v on v.sku = s.sku
   left join compras co on co.sku = s.sku
@@ -216,6 +221,7 @@ function where(f: FiltrosStock): Where {
   const clauses: string[] = [];
 
   agregarFiltro(clauses, params, "proveedor", f.proveedor);
+  agregarFiltro(clauses, params, "grupo", f.grupo);
   agregarFiltro(clauses, params, "marca", f.marca);
   agregarFiltro(clauses, params, "sku", f.sku);
 
@@ -377,7 +383,7 @@ async function getFilas(f: FiltrosStock): Promise<FilaStock[]> {
 
 export async function getOpcionesStock() {
   const params = [VENTANA_POR_DEFECTO, PROVEEDORES_NO_MERCADERIA, DEPOSITO_POR_DEFECTO];
-  const [proveedores, marcas] = await Promise.all([
+  const [proveedores, marcas, grupos] = await Promise.all([
     query<{ v: string }>(
       `${BASE} select distinct proveedor as v from calculada
        where proveedor is not null order by 1`,
@@ -388,8 +394,20 @@ export async function getOpcionesStock() {
        where marca is not null order by 1`,
       params,
     ),
+    // Los grupos salen de los datos y no de una constante: el día que el
+    // negocio agregue un tercero a `bronze.proveedores_grupo`, el selector lo
+    // muestra solo. Una lista fija en el código lo dejaría invisible.
+    query<{ v: string }>(
+      `${BASE} select distinct grupo as v from calculada
+       where grupo is not null order by 1`,
+      params,
+    ),
   ]);
-  return { proveedores: proveedores.map((r) => r.v), marcas: marcas.map((r) => r.v) };
+  return {
+    proveedores: proveedores.map((r) => r.v),
+    marcas: marcas.map((r) => r.v),
+    grupos: grupos.map((r) => r.v),
+  };
 }
 
 /**

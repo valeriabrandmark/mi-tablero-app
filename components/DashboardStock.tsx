@@ -33,7 +33,7 @@ import type { DashboardStock, FilaStock, FiltrosStock } from "@/lib/types";
  */
 const TOPE_TEXTO = 500;
 
-type Opciones = { proveedores: string[]; marcas: string[] };
+type Opciones = { proveedores: string[]; marcas: string[]; grupos: string[] };
 type Respuesta = DashboardStock & { opciones: Opciones | null };
 
 /** El color de la cobertura: rojo si se está por quebrar, rojo si sobra mucho. */
@@ -273,6 +273,7 @@ export default function DashboardStockPage() {
   const ventana = filtros.ventana ?? VENTANA_POR_DEFECTO;
   const deposito = filtros.deposito ?? DEPOSITO_POR_DEFECTO;
   const sinCambios =
+    sinValores(filtros.grupo) &&
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
     sinValores(filtros.sku) &&
@@ -361,6 +362,15 @@ export default function DashboardStockPage() {
             </div>
           </div>
 
+          {/* Va ANTES de Proveedor porque es el corte más grueso: primero se
+              elige la empresa del grupo y después, si hace falta, el proveedor
+              suelto de adentro. */}
+          <SelectorMultiple
+            etiqueta="Empresa"
+            valores={filtros.grupo}
+            opciones={data?.opciones?.grupos ?? []}
+            onChange={(v) => cambiar({ ...filtros, grupo: v })}
+          />
           <SelectorMultiple
             etiqueta="Proveedor"
             valores={filtros.proveedor}
