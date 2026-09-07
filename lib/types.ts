@@ -1448,3 +1448,87 @@ export type DashboardCompras = {
   comprasHasta: string | null;
   generadoEn: string;
 };
+
+// --- Trazabilidad de Full ---------------------------------------------------
+
+export type FiltrosTrazabilidad = {
+  proveedor?: string[];
+  grupo?: string[];
+  sku?: string[];
+  /**
+   * La línea de base: desde qué día se cuenta el saldo. Sin esto arranca en la
+   * primera foto que haya. Sirve para "borrón y cuenta nueva" después de
+   * resolver un reclamo con Mercado Libre.
+   */
+  desde?: string;
+  /** Ver también los artículos cuyo saldo cierra en cero (el 71 %). */
+  todos?: boolean;
+  /** Sólo los que pasan el umbral de reclamo. */
+  soloReclamables?: boolean;
+  buscar?: string;
+};
+
+export type KpisTrazabilidad = {
+  skus: number;
+  /** Los que netean exactamente cero: la cuenta les cierra. */
+  skusEnOrden: number;
+  skusReclamables: number;
+  /** Saldo del conjunto. Positivo = ML declara de más. */
+  neto: number;
+  unidadesReclamables: number;
+  plataReclamable: number;
+  /**
+   * La suma de TODAS las caídas diarias, sin netear. Se muestra al lado del
+   * neto a propósito: la distancia entre los dos es cuánto de lo que parece un
+   * faltante se corrige solo al día siguiente.
+   */
+  brutoCaidas: number;
+  enviado: number;
+  vendido: number;
+};
+
+export type PuntoTrazabilidad = {
+  fecha: string;
+  /** Lo que no explican ni las ventas ni el stock del día anterior. */
+  sorpresa: number;
+  enviado: number;
+  vendido: number;
+  /** La suma corrida de `sorpresa`: la línea que importa. */
+  acumulado: number;
+};
+
+export type FilaTrazabilidad = {
+  sku: string;
+  producto: string | null;
+  proveedor: string | null;
+  marca: string | null;
+  grupo: string | null;
+  /** El saldo. Negativo = Mercado Libre declara menos de lo que debería. */
+  neto: number;
+  /**
+   * Lo despachado en los últimos días, que todavía puede estar viajando. Se
+   * suma al neto antes de decidir si hay algo que reclamar.
+   */
+  enTransito: number;
+  brutoCaidas: number;
+  diasConCaida: number;
+  enviado: number;
+  vendido: number;
+  declaradoHoy: number;
+  primeraCaida: string | null;
+  ultimaCaida: string | null;
+  costo: number;
+  /** Lo que vale el faltante, a costo. Sólo tiene sentido si `neto` es negativo. */
+  plata: number;
+};
+
+export type DashboardTrazabilidad = {
+  kpis: KpisTrazabilidad;
+  serie: PuntoTrazabilidad[];
+  filas: FilaTrazabilidad[];
+  recortada: boolean;
+  /** Desde y hasta cuándo hay foto diaria del stock de Full. */
+  desde: string | null;
+  hasta: string | null;
+  diasDeFoto: number;
+};
