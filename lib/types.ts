@@ -1344,6 +1344,12 @@ export type FilaCompra = {
   sku: string;
   producto: string | null;
   proveedor: string | null;
+  /**
+   * La empresa del grupo a la que pertenece el proveedor: "NOA COMERCIAL" o
+   * "QUO MKT". Es la que EMITE la orden, así que va en el encabezado del Excel
+   * que se le manda: una OC de un proveedor de NOA no la firma Quo.
+   */
+  grupo: string | null;
   marca: string | null;
   /**
    * EL CÓDIGO CON EL QUE EL PROVEEDOR LO VENDE (`sigma_articulos.codigoCompra`)

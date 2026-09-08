@@ -13,6 +13,7 @@ import {
   DESCUENTO_MAXIMO,
   descuentoValido,
   excelParaProveedor,
+  factorNeto,
   lineasParaExportar,
   MESES_RENTABILIDAD,
   nombreArchivo,
@@ -86,6 +87,18 @@ export default function DashboardComprasPage() {
    * cambiar un filtro o a reordenar la tabla.
    */
   const [ediciones, setEdiciones] = useState<Map<string, RenglonOrden>>(new Map());
+
+  /**
+   * La nota que va en la carátula del Excel del proveedor ("Ofertas agosto").
+   *
+   * ES OPCIONAL A PROPÓSITO. Bloquear la descarga hasta que alguien escriba
+   * algo convierte el campo en un trámite: se termina poniendo "." para poder
+   * bajar el archivo, y una nota que dice "." es peor que ninguna. Si está
+   * vacío, esa línea simplemente no aparece.
+   *
+   * No va al archivo de Sigma: la grilla de importación no tiene dónde ponerla.
+   */
+  const [comentario, setComentario] = useState("");
 
   const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
     "/api/compras",
@@ -199,10 +212,9 @@ export default function DashboardComprasPage() {
       unidades += u;
       if (r.unidad === "bulto") bultos += r.cantidad;
       const lista = f.costoLista > 0 ? f.costoLista : f.costo;
-      const desc = descuentoValido(r.descuento);
-      if (r.descuento > DESCUENTO_MAXIMO) recortados += 1;
+      if (r.descuento > DESCUENTO_MAXIMO || r.descuento2 > DESCUENTO_MAXIMO) recortados += 1;
       bruto += u * lista;
-      neto += u * lista * (1 - desc / 100);
+      neto += u * lista * factorNeto(r.descuento, r.descuento2);
     }
     return { renglones, unidades, bultos, bruto, neto, recortados, sinCodigo };
   }, [filas, orden]);
@@ -217,7 +229,7 @@ export default function DashboardComprasPage() {
     if (formato === "xlsx") {
       // El Excel se arma de las FILAS y no de las líneas de Sigma: necesita el
       // costo, el EAN y el nombre del artículo, que a ese archivo no van.
-      const libro = excelParaProveedor(filas, orden, proveedorUnico);
+      const libro = excelParaProveedor(filas, orden, proveedorUnico, comentario);
       if (libro.filas.length === 0) return;
       bajar(
         aXlsx(libro),
@@ -398,7 +410,7 @@ export default function DashboardComprasPage() {
       total: fmtNumero(resumen.unidades),
     },
     {
-      titulo: "Desc. %",
+      titulo: "Desc 1 (Sell in) %",
       celda: (f) => {
         const r = orden.get(f.sku);
         const excedido = (r?.descuento ?? 0) > DESCUENTO_MAXIMO;
@@ -416,12 +428,43 @@ export default function DashboardComprasPage() {
                 ? "El sell in del proveedor no está cargado para este mes: arranca en 0 y hay que ponerlo a mano"
                 : `Sell in del proveedor en el mes elegido: ${f.sellInPct.toFixed(2)} %`
             }
-            aria-label={`Descuento de ${f.sku}`}
+            aria-label={`Desc 1 de ${f.sku}`}
           />
         );
       },
       numerica: true,
       orden: (f) => orden.get(f.sku)?.descuento ?? 0,
+    },
+    {
+      // EL SEGUNDO DESCUENTO ARRANCA VACÍO Y NO SALE DE NINGÚN DATO: es el que
+      // se negocia por fuera del sell in de lista. Se aplica EN CASCADA sobre
+      // lo que quedó del primero, no sumado -- ver factorNeto en lib/compras.
+      titulo: "Desc 2 %",
+      celda: (f) => {
+        const r = orden.get(f.sku);
+        const excedido = (r?.descuento2 ?? 0) > DESCUENTO_MAXIMO;
+        const d1 = descuentoValido(r?.descuento ?? 0);
+        const d2 = descuentoValido(r?.descuento2 ?? 0);
+        return (
+          <input
+            type="number"
+            min={0}
+            max={DESCUENTO_MAXIMO}
+            step={0.5}
+            value={r?.descuento2 ?? 0}
+            onChange={(e) => editar(f.sku, { descuento2: Number(e.target.value) || 0 })}
+            className={`${CLASE_CELDA_EDITABLE} ${excedido ? "border-rose-500/60" : ""}`}
+            title={
+              d2 > 0
+                ? `${d1} % y ${d2} % en cascada = ${((1 - factorNeto(d1, d2)) * 100).toFixed(2)} % de descuento total (no ${(d1 + d2).toFixed(2)} %)`
+                : "Segundo descuento, a mano. Se aplica sobre lo que queda después del Desc 1, no se suma."
+            }
+            aria-label={`Desc 2 de ${f.sku}`}
+          />
+        );
+      },
+      numerica: true,
+      orden: (f) => orden.get(f.sku)?.descuento2 ?? 0,
     },
     {
       // REFERENCIA, NO VIAJA AL ARCHIVO. Es el sell in calculado con nuestras
@@ -470,7 +513,7 @@ export default function DashboardComprasPage() {
         if (!r || r.cantidad <= 0) return <span className="text-muted">—</span>;
         const lista = f.costoLista > 0 ? f.costoLista : f.costo;
         const u = aUnidades(r.cantidad, r.unidad, f.unidadesPorBulto);
-        return fmtMoneda(u * lista * (1 - descuentoValido(r.descuento) / 100));
+        return fmtMoneda(u * lista * factorNeto(r.descuento, r.descuento2));
       },
       numerica: true,
       orden: (f) => {
@@ -480,7 +523,7 @@ export default function DashboardComprasPage() {
         return (
           aUnidades(r.cantidad, r.unidad, f.unidadesPorBulto) *
           lista *
-          (1 - descuentoValido(r.descuento) / 100)
+          factorNeto(r.descuento, r.descuento2)
         );
       },
       total: fmtMoneda(resumen.neto),
@@ -787,6 +830,16 @@ export default function DashboardComprasPage() {
             </button>
 
             <div className="ml-auto flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                value={comentario}
+                onChange={(e) => setComentario(e.target.value)}
+                maxLength={120}
+                placeholder="Nota para el proveedor (ej. Ofertas agosto)"
+                title="Sale en la carátula del Excel, debajo del título. Opcional; no va al archivo de Sigma."
+                aria-label="Nota para la carátula del Excel"
+                className="border-line bg-panel-2 text-ink placeholder:text-muted focus:border-c1 w-60 rounded-lg border px-2.5 py-1.5 text-xs outline-none"
+              />
               {!proveedorUnico && (
                 <span className="text-muted text-[11px]">
                   Elegí <strong>un</strong> proveedor para bajar la orden
@@ -846,12 +899,25 @@ export default function DashboardComprasPage() {
           <Aviso tono="info">
             <p className="font-medium">Qué lleva el archivo, y qué mirar antes de mandarlo.</p>
             <p className="mt-1">
-              El archivo tiene las cuatro columnas de la grilla de Sigma —
+              El archivo tiene las {COLUMNAS_SIGMA.length} columnas de la grilla de Sigma —
               <span className="font-mono text-xs">{COLUMNAS_SIGMA.join(" · ")}</span>— y
               sólo los renglones con cantidad: un cero no es «comprar cero», es un artículo
               que decidiste no pedir. El <strong>TXT va separado por tabulaciones</strong> y
               el CSV por punto y coma, porque el descuento lleva coma decimal («15,00») y
               con coma separadora Excel lo parte al medio.
+            </p>
+            <p className="mt-1">
+              <strong>Los dos descuentos se aplican en cascada, no se suman.</strong>{" "}
+              <span className="font-mono text-xs">FDESCU1</span> es el sell in y{" "}
+              <span className="font-mono text-xs">FDESCU2</span> el segundo, que arranca
+              vacío y se pone a mano. Un 15 % y un 10 %{" "}
+              <strong>no son 25 %</strong>: el segundo se calcula sobre lo que quedó
+              después del primero, así que el neto es 0,85 × 0,90 = 76,5 % del costo, o sea{" "}
+              <strong>23,5 %</strong>. Así los liquida el proveedor y así los aplica Sigma;
+              en una orden grande la diferencia es plata. El{" "}
+              <span className="font-mono text-xs">FDESCU2</span> viaja siempre, aunque esté
+              en cero: una grilla con la última columna vacía se importa, una a la que le
+              falta una columna no.
             </p>
             <p className="mt-1">
               En <span className="font-mono text-xs">UNICOM</span> va exactamente{" "}
@@ -874,9 +940,12 @@ export default function DashboardComprasPage() {
               dos— pero habla el idioma del que lo recibe: lleva su{" "}
               <strong>código de compra</strong> y el <strong>EAN</strong> en vez de nuestro
               SKU, el nombre del artículo, y el costo <em>de la unidad que se le pide</em>:
-              si el renglón va por bulto, el costo que se muestra es el del bulto. Cierra
-              con el total de la orden. Es para adjuntar a un mail, no para importar en
-              ningún lado.
+              si el renglón va por bulto, el costo que se muestra es el del bulto. Arriba
+              de todo lleva la carátula —<strong>quién compra, la fecha y a quién</strong>,
+              más la nota que escribas al lado del botón— y cierra con el total. La empresa
+              que emite sale del <strong>grupo del proveedor</strong>: una orden de un
+              proveedor de NOA no la firma Quo. Es para adjuntar a un mail, no para
+              importar en ningún lado.
               {resumen.sinCodigo > 0 && (
                 <>
                   {" "}
@@ -892,7 +961,7 @@ export default function DashboardComprasPage() {
             </p>
             <p className="mt-1">
               <strong>
-                El descuento es el sell in VIGENTE DEL PROVEEDOR, y hoy no está cargado.
+                El Desc 1 es el sell in VIGENTE DEL PROVEEDOR, y hoy no está cargado.
               </strong>{" "}
               Vive en la planilla de Google y todavía no se sincroniza sola, así que la
               columna arranca en <strong>0 y hay que ponerla a mano</strong>. Cero acá

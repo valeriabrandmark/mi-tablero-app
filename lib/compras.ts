@@ -14,7 +14,11 @@
  * haya un proveedor elegido, y no hay forma de mezclar dos en el mismo archivo.
  */
 
-import { COBERTURA_OBJETIVO_DIAS, PLAZO_REPOSICION_DIAS } from "@/lib/stock";
+import {
+  COBERTURA_OBJETIVO_DIAS,
+  GRUPO_PROVEEDOR_POR_DEFECTO,
+  PLAZO_REPOSICION_DIAS,
+} from "@/lib/stock";
 import type { CeldaXlsx, ColumnaXlsx, LibroXlsx } from "@/lib/xlsx";
 import type { FilaCompra } from "@/lib/types";
 
@@ -137,9 +141,32 @@ export function aUnidades(
 export type RenglonOrden = {
   unidad: ClaveUnidadCompra;
   cantidad: number;
-  /** Descuento del proveedor, en PUNTOS (15 = 15 %), como lo espera FDESCU1. */
+  /**
+   * DESC 1: el sell in vigente del proveedor, en PUNTOS (15 = 15 %), como lo
+   * espera FDESCU1. Arranca del dato y se puede corregir a mano.
+   */
   descuento: number;
+  /**
+   * DESC 2: el segundo descuento, en PUNTOS. ARRANCA SIEMPRE EN CERO y no sale
+   * de ningún dato: es el que se negocia por fuera del sell in de lista —una
+   * bonificación por volumen, un acuerdo puntual— y por eso lo pone la persona
+   * o no está.
+   */
+  descuento2: number;
 };
+
+/**
+ * Los dos descuentos, aplicados EN CASCADA y no sumados.
+ *
+ * 15 % y 10 % NO son 25 %: el segundo se calcula sobre lo que quedó después del
+ * primero, así que el neto es 0,85 × 0,90 = 76,5 % del costo, o sea 23,5 % de
+ * descuento y no 25. Es como los liquidan los proveedores y como los aplica
+ * Sigma con FDESCU1 y FDESCU2, y la diferencia en una orden grande es plata de
+ * verdad.
+ */
+export function factorNeto(descuento1: number, descuento2: number): number {
+  return (1 - descuentoValido(descuento1) / 100) * (1 - descuentoValido(descuento2) / 100);
+}
 
 /**
  * El renglón con el que arranca cada artículo: el sugerido y el sell in del mes.
@@ -158,6 +185,8 @@ export function renglonInicial(f: FilaCompra): RenglonOrden {
     unidad,
     cantidad: cantidadSugerida(f.sugerido, unidad, f.unidadesPorBulto),
     descuento: f.sellInPct ?? 0,
+    // Vacío a propósito: ver RenglonOrden.
+    descuento2: 0,
   };
 }
 
@@ -166,10 +195,21 @@ export function renglonInicial(f: FilaCompra): RenglonOrden {
    ------------------------------------------------------------------------- */
 
 /**
- * Las cuatro columnas de la grilla de compra de Sigma, en su orden y con sus
- * nombres exactos. El orden importa: la grilla las lee por posición.
+ * Las columnas de la grilla de compra de Sigma, en su orden y con sus nombres
+ * exactos. El orden importa: la grilla las lee por posición.
+ *
+ * FDESCU2 ES EL SEGUNDO DESCUENTO, y va siempre aunque esté en cero: una grilla
+ * de cinco columnas con la última vacía se importa; una de cuatro cuando el
+ * importador espera cinco, no. Sigma los aplica en cascada, igual que
+ * `factorNeto`.
  */
-export const COLUMNAS_SIGMA = ["FCODREF", "UNICOM", "CANTIDAD", "FDESCU1"] as const;
+export const COLUMNAS_SIGMA = [
+  "FCODREF",
+  "UNICOM",
+  "CANTIDAD",
+  "FDESCU1",
+  "FDESCU2",
+] as const;
 
 /**
  * El descuento como lo escribe Sigma: dos decimales y coma.
@@ -202,6 +242,7 @@ export type LineaExportada = {
   unicom: string;
   cantidad: number;
   descuento: number;
+  descuento2: number;
 };
 
 /**
@@ -224,6 +265,7 @@ export function lineasParaExportar(
       unicom: UNIDADES_COMPRA.find((u) => u.clave === r.unidad)!.unicom,
       cantidad: Math.round(r.cantidad),
       descuento: descuentoValido(r.descuento),
+      descuento2: descuentoValido(r.descuento2),
     });
   }
   return lineas;
@@ -239,7 +281,15 @@ export function lineasParaExportar(
 export function aTxt(lineas: LineaExportada[]): string {
   const filas = [COLUMNAS_SIGMA.join("\t")];
   for (const l of lineas) {
-    filas.push([l.sku, l.unicom, String(l.cantidad), fmtDescuento(l.descuento)].join("\t"));
+    filas.push(
+      [
+        l.sku,
+        l.unicom,
+        String(l.cantidad),
+        fmtDescuento(l.descuento),
+        fmtDescuento(l.descuento2),
+      ].join("\t"),
+    );
   }
   // Termina en salto de línea: hay importadores que se comen el último renglón
   // si el archivo no cierra con uno.
@@ -256,7 +306,15 @@ export function aTxt(lineas: LineaExportada[]): string {
 export function aCsv(lineas: LineaExportada[]): string {
   const filas = [COLUMNAS_SIGMA.join(";")];
   for (const l of lineas) {
-    filas.push([l.sku, l.unicom, String(l.cantidad), fmtDescuento(l.descuento)].join(";"));
+    filas.push(
+      [
+        l.sku,
+        l.unicom,
+        String(l.cantidad),
+        fmtDescuento(l.descuento),
+        fmtDescuento(l.descuento2),
+      ].join(";"),
+    );
   }
   return "\ufeff" + filas.join("\r\n") + "\r\n";
 }
@@ -295,11 +353,30 @@ export const COLUMNAS_EXCEL_PROVEEDOR: ColumnaXlsx[] = [
   { titulo: "Cantidad", formato: "entero", ancho: 10 },
   { titulo: "Unidad", formato: "texto", ancho: 10 },
   { titulo: "Artículo", formato: "texto", ancho: 46 },
-  { titulo: "Desc. sell in", formato: "porcentaje", ancho: 12 },
+  { titulo: "Desc 1 (Sell in)", formato: "porcentaje", ancho: 14 },
+  { titulo: "Desc 2", formato: "porcentaje", ancho: 10 },
   { titulo: "Costo de lista", formato: "moneda", ancho: 14 },
   { titulo: "Costo con desc.", formato: "moneda", ancho: 15 },
   { titulo: "Total", formato: "moneda", ancho: 15 },
 ];
+
+/**
+ * QUIÉN EMITE LA ORDEN, según el grupo del proveedor.
+ *
+ * No es decorado del encabezado: es la empresa que le compra y a la que el
+ * proveedor le va a facturar. Una OC de un proveedor de NOA no la firma Quo.
+ *
+ * Si mañana aparece un grupo nuevo, cae en su propio nombre en vez de mentir
+ * una razón social — que es feo pero honesto.
+ */
+export const RAZON_SOCIAL_POR_GRUPO: Record<string, string> = {
+  "QUO MKT": "Quo Marketing SRL",
+};
+
+export function razonSocial(grupo: string | null | undefined): string {
+  if (!grupo) return RAZON_SOCIAL_POR_GRUPO[GRUPO_PROVEEDOR_POR_DEFECTO] ?? GRUPO_PROVEEDOR_POR_DEFECTO;
+  return RAZON_SOCIAL_POR_GRUPO[grupo] ?? grupo;
+}
 
 /**
  * El renglón valorizado: lo que se pide, en la unidad elegida, con su costo.
@@ -317,8 +394,17 @@ function renglonValorizado(f: FilaCompra, r: RenglonOrden) {
   const unitario = f.costoLista > 0 ? f.costoLista : f.costo;
   const lista = r.unidad === "bulto" ? unitario * porBulto : unitario;
   const descuento = descuentoValido(r.descuento);
-  const conDescuento = lista * (1 - descuento / 100);
-  return { porBulto, lista, descuento, conDescuento, total: conDescuento * r.cantidad };
+  const descuento2 = descuentoValido(r.descuento2);
+  // En cascada, no sumados: ver factorNeto.
+  const conDescuento = lista * factorNeto(descuento, descuento2);
+  return {
+    porBulto,
+    lista,
+    descuento,
+    descuento2,
+    conDescuento,
+    total: conDescuento * r.cantidad,
+  };
 }
 
 /**
@@ -332,10 +418,14 @@ export function excelParaProveedor(
   filas: FilaCompra[],
   orden: Map<string, RenglonOrden>,
   proveedor: string,
+  comentario?: string,
 ): LibroXlsx {
   const renglones: CeldaXlsx[][] = [];
   let total = 0;
   let unidades = 0;
+  // El grupo sale de las filas y no de un parámetro porque la orden es de UN
+  // proveedor: todas sus filas traen el mismo. La primera alcanza.
+  const grupo = filas.find((f) => f.grupo)?.grupo ?? null;
 
   for (const f of filas) {
     const r = orden.get(f.sku);
@@ -355,35 +445,45 @@ export function excelParaProveedor(
       // Guardar el 15 pelado obligaría al que recibe el archivo a acordarse de
       // que ese número son puntos y no una cantidad.
       v.descuento / 100,
+      // El Desc 2 en cero se escribe igual y no se deja vacío: "0,0 %" dice que
+      // no hay segundo descuento, y una celda en blanco dice que no se sabe.
+      v.descuento2 / 100,
       v.lista,
       v.conDescuento,
       v.total,
     ]);
   }
 
+  // LA CARÁTULA. Va arriba y no abajo porque es lo primero que el que abre el
+  // archivo necesita saber: quién le compra, cuándo y a quién. Abajo quedaba
+  // como una nota al pie de algo que ya terminó de leer.
+  const titulos = [
+    `OC ${razonSocial(grupo)} · ${fmtFechaDeHoy()} · ${proveedor}`,
+    `${renglones.length} renglones · ${unidades.toLocaleString("es-AR")} unidades`,
+  ];
+  // El comentario es opcional: si no hay, esa línea no existe en vez de quedar
+  // una fila vacía en el medio de la carátula.
+  const nota = (comentario ?? "").trim();
+  if (nota) titulos.push(nota);
+
   return {
     hoja: "Orden de compra",
+    titulos,
     columnas: COLUMNAS_EXCEL_PROVEEDOR,
     filas: renglones,
-    // LA FILA DE CIERRE NO SUMA LA COLUMNA "Cantidad", y no es un olvido:
-    // sumar bultos con unidades da un número que no significa nada. Las
-    // unidades físicas —que sí se pueden sumar— van escritas al lado del
-    // total, que es donde se pueden leer sin confundirlas con la cantidad
-    // pedida de cada renglón.
-    total: [
-      "TOTAL",
-      null,
-      null,
-      null,
-      null,
-      null,
-      `${proveedor} · ${renglones.length} renglones · ${unidades.toLocaleString("es-AR")} unidades`,
-      null,
-      null,
-      null,
-      total,
-    ],
+    // LA FILA DE CIERRE NO SUMA "Cantidad", y no es un olvido: sumar bultos con
+    // unidades da un número que no significa nada. Las unidades físicas —que sí
+    // se pueden sumar— están arriba, en la carátula.
+    total: ["TOTAL", null, null, null, null, null, null, null, null, null, null, total],
   };
+}
+
+/** La fecha de hoy como se escribe acá: 08/09/2026. */
+function fmtFechaDeHoy(): string {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}/${d.getFullYear()}`;
 }
 
 /**

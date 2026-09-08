@@ -244,6 +244,8 @@ const ESTILO = {
   enteroTotal: 7,
   monedaTotal: 8,
   porcentajeTotal: 9,
+  titulo: 10,
+  subtitulo: 11,
 } as const;
 
 const ESTILO_POR_FORMATO: Record<FormatoXlsx, number> = {
@@ -289,9 +291,11 @@ const ESTILOS_XML =
   '<numFmt numFmtId="165" formatCode="&quot;$&quot;\\ #,##0.00"/>' +
   '<numFmt numFmtId="166" formatCode="0.0%"/>' +
   "</numFmts>" +
-  '<fonts count="2">' +
+  '<fonts count="4">' +
   '<font><sz val="11"/><name val="Calibri"/></font>' +
   '<font><b/><sz val="11"/><name val="Calibri"/></font>' +
+  '<font><b/><sz val="14"/><name val="Calibri"/></font>' +
+  '<font><i/><sz val="11"/><color rgb="FF5A6478"/><name val="Calibri"/></font>' +
   "</fonts>" +
   // El relleno 0 y el 1 son obligatorios y en ese orden: Excel los da por
   // sentados y numera los propios a partir del 2.
@@ -306,7 +310,7 @@ const ESTILOS_XML =
   "</borders>" +
   '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
   // El orden de acá abajo ES el objeto ESTILO de arriba. Se tocan juntos.
-  '<cellXfs count="10">' +
+  '<cellXfs count="12">' +
   '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
   '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>' +
   '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
@@ -317,6 +321,8 @@ const ESTILOS_XML =
   '<xf numFmtId="164" fontId="1" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/>' +
   '<xf numFmtId="165" fontId="1" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/>' +
   '<xf numFmtId="166" fontId="1" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/>' +
+  '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+  '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
   "</cellXfs>" +
   // El estilo "Normal" es formalmente opcional y en la práctica no: sin él,
   // los lectores estrictos avisan que el libro no tiene estilo por defecto.
@@ -331,6 +337,16 @@ function nombreDeHoja(n: string): string {
 
 export type LibroXlsx = {
   hoja: string;
+  /**
+   * Las líneas de arriba de todo, antes de la tabla: quién emite, para quién,
+   * de qué fecha, y lo que se quiera aclarar. La primera va grande y en
+   * negrita; las demás en gris.
+   *
+   * NO SE FUSIONAN CELDAS. Excel deja que un texto largo se derrame sobre las
+   * celdas vacías de la derecha, que es lo que pasa acá, y las celdas
+   * fusionadas rompen el ordenar y el filtrar de la tabla de abajo.
+   */
+  titulos?: string[];
   columnas: ColumnaXlsx[];
   filas: CeldaXlsx[][];
   /** La fila de cierre, en negrita y con una línea arriba. Opcional. */
@@ -351,16 +367,29 @@ export function aXlsx(libro: LibroXlsx): Uint8Array<ArrayBuffer> {
     .map((c, i) => `<col min="${i + 1}" max="${i + 1}" width="${c.ancho}" customWidth="1"/>`)
     .join("");
 
-  let cuerpo = filaXml(
-    1,
+  const titulos = libro.titulos ?? [];
+  let cuerpo = "";
+  for (let i = 0; i < titulos.length; i++) {
+    cuerpo += filaXml(i + 1, [titulos[i]], [i === 0 ? ESTILO.titulo : ESTILO.subtitulo]);
+  }
+
+  // La fila del encabezado de la tabla. Con títulos arriba queda una fila
+  // vacía en el medio, que es la que separa la carátula de los datos: sin ella
+  // el encabezado se lee como una línea más del texto de arriba.
+  const filaEncabezado = titulos.length === 0 ? 1 : titulos.length + 2;
+  cuerpo += filaXml(
+    filaEncabezado,
     columnas.map((c) => c.titulo),
     encabezados,
   );
-  for (let i = 0; i < filas.length; i++) cuerpo += filaXml(i + 2, filas[i], estilos);
-  if (libro.total) cuerpo += filaXml(filas.length + 2, libro.total, estilosTotal);
+  for (let i = 0; i < filas.length; i++) {
+    cuerpo += filaXml(filaEncabezado + 1 + i, filas[i], estilos);
+  }
+  const filaTotal = filaEncabezado + 1 + filas.length;
+  if (libro.total) cuerpo += filaXml(filaTotal, libro.total, estilosTotal);
 
   const ultima = letraColumna(columnas.length);
-  const alto = filas.length + (libro.total ? 2 : 1);
+  const alto = libro.total ? filaTotal : filaTotal - 1;
 
   const hoja =
     CABECERA_XML +
@@ -369,14 +398,15 @@ export function aXlsx(libro: LibroXlsx): Uint8Array<ArrayBuffer> {
     // El encabezado queda fijo al scrollear. En una orden de 300 renglones es
     // la diferencia entre saber qué columna se está mirando y no saberlo.
     '<sheetViews><sheetView workbookViewId="0">' +
-    '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>' +
+    `<pane ySplit="${filaEncabezado}" topLeftCell="A${filaEncabezado + 1}"` +
+    ' activePane="bottomLeft" state="frozen"/>' +
     "</sheetView></sheetViews>" +
     '<sheetFormatPr defaultRowHeight="15"/>' +
     `<cols>${cols}</cols>` +
     `<sheetData>${cuerpo}</sheetData>` +
     // El filtro de Excel sobre el encabezado. No incluye la fila de total: si
     // la incluyera, filtrar por proveedor la escondería.
-    `<autoFilter ref="A1:${ultima}${filas.length + 1}"/>` +
+    `<autoFilter ref="A${filaEncabezado}:${ultima}${filaEncabezado + filas.length}"/>` +
     "</worksheet>";
 
   const contentTypes =

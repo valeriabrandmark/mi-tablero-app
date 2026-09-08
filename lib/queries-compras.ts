@@ -354,7 +354,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<FilaCompra[]> {
   const w = where(f, mes);
   const filas = await query<Record<string, unknown>>(
     `${BASE}
-     select sku, producto, proveedor, marca, codigo_compra, ean, u_bulto,
+     select sku, producto, proveedor, grupo, marca, codigo_compra, ean, u_bulto,
             tuc, full_ml, total, costo, valor, costo_lista,
             oferta_calculada_pct, sell_in_pct,
             uds, ritmo_diario, cobertura, sugerido,
@@ -376,6 +376,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<FilaCompra[]> {
     sku: r.sku as string,
     producto: (r.producto as string | null) ?? null,
     proveedor: (r.proveedor as string | null) ?? null,
+    grupo: (r.grupo as string | null) ?? null,
     marca: (r.marca as string | null) ?? null,
     codigoCompra: (r.codigo_compra as string | null) ?? null,
     ean: (r.ean as string | null) ?? null,
