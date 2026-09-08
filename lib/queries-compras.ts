@@ -15,6 +15,7 @@ import {
   PROVEEDORES_NO_MERCADERIA,
   VENTANA_POR_DEFECTO,
 } from "@/lib/stock";
+import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import type { DashboardCompras, FilaCompra, FiltrosCompras } from "@/lib/types";
 
 /**
@@ -34,15 +35,9 @@ import type { DashboardCompras, FilaCompra, FiltrosCompras } from "@/lib/types";
  */
 const BASE = `
 with por_inv as (
-  select p.inventory_id,
-         max((select a->>'value_name'
-                from jsonb_array_elements(p.attributes::jsonb) a
-               where a->>'id' = 'SELLER_SKU'
-               limit 1)) as sku
-  from bronze.ml_publicaciones p
-  where p."shipping.logistic_type" = 'fulfillment'
-    and p.inventory_id is not null
-  group by p.inventory_id
+  -- Un renglón por INVENTARIO y no por publicación: varias publicaciones
+  -- comparten el mismo stock físico, y sumarlas lo contaría de más.
+  ${POR_INVENTARIO_SKU}
 ),
 full_ml as (
   select i.sku, sum(coalesce(f.available_quantity, 0)) as unidades
@@ -215,6 +210,13 @@ base as (
          -- cargue. (Sin backticks: esto vive adentro de un template literal.)
          coalesce(pg.grupo, '${GRUPO_PROVEEDOR_POR_DEFECTO}') as grupo,
          a."attributes.marca"                           as marca,
+         -- LOS DOS CÓDIGOS QUE NO SON NUESTROS. Van sólo al Excel que se le
+         -- manda al proveedor, no al archivo de Sigma: el proveedor no conoce
+         -- nuestro SKU, conoce el código con el que él lo vende y el EAN.
+         -- \`nullif(trim(...), '')\` porque el export trae cadenas vacías, y una
+         -- celda vacía se lee mejor que un espacio.
+         nullif(trim(a."codigoCompra"), '')             as codigo_compra,
+         nullif(trim(a."eanUnidad"), '')                as ean,
          -- Sin dato se toma 1: un bulto de una unidad es lo mismo que la
          -- unidad, así que en el peor caso el artículo se pide de a uno. Poner
          -- 0 haría una división por cero; inventar 6 haría pedir de más.
@@ -352,7 +354,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<FilaCompra[]> {
   const w = where(f, mes);
   const filas = await query<Record<string, unknown>>(
     `${BASE}
-     select sku, producto, proveedor, marca, u_bulto,
+     select sku, producto, proveedor, grupo, marca, codigo_compra, ean, u_bulto,
             tuc, full_ml, total, costo, valor, costo_lista,
             oferta_calculada_pct, sell_in_pct,
             uds, ritmo_diario, cobertura, sugerido,
@@ -374,7 +376,10 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<FilaCompra[]> {
     sku: r.sku as string,
     producto: (r.producto as string | null) ?? null,
     proveedor: (r.proveedor as string | null) ?? null,
+    grupo: (r.grupo as string | null) ?? null,
     marca: (r.marca as string | null) ?? null,
+    codigoCompra: (r.codigo_compra as string | null) ?? null,
+    ean: (r.ean as string | null) ?? null,
     unidadesPorBulto: num(r.u_bulto),
     tuc: num(r.tuc),
     full: num(r.full_ml),

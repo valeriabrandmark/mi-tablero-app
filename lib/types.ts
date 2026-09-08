@@ -1344,7 +1344,28 @@ export type FilaCompra = {
   sku: string;
   producto: string | null;
   proveedor: string | null;
+  /**
+   * La empresa del grupo a la que pertenece el proveedor: "NOA COMERCIAL" o
+   * "QUO MKT". Es la que EMITE la orden, así que va en el encabezado del Excel
+   * que se le manda: una OC de un proveedor de NOA no la firma Quo.
+   */
+  grupo: string | null;
   marca: string | null;
+  /**
+   * EL CÓDIGO CON EL QUE EL PROVEEDOR LO VENDE (`sigma_articulos.codigoCompra`)
+   * y el EAN de la unidad. No son nuestros: existen para el Excel que se le
+   * manda al proveedor por mail, donde nuestro SKU no le dice nada. Al archivo
+   * de Sigma NO van: esa grilla se importa contra nuestro maestro.
+   *
+   * `null` cuando el maestro no los tiene cargados: hoy 572 artículos sin
+   * código de compra y 340 sin EAN, de 8.244. De esos 572, 105 se vendieron en
+   * los últimos 120 días, así que pueden llegar a una orden de verdad. En el
+   * Excel salen como celda VACÍA y no como cero, y la pantalla dice cuántos
+   * renglones de la orden están así: es algo que se arregla cargando el código
+   * en Sigma, no acá.
+   */
+  codigoCompra: string | null;
+  ean: string | null;
   /** Cuántas unidades trae un bulto. `1` cuando el artículo no se compra así. */
   unidadesPorBulto: number;
   tuc: number;
