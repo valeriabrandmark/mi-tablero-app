@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { descuentoValido, UNIDADES_COMPRA, type RenglonOrden } from "@/lib/compras";
-import { permisoDelUsuario, puedeVerBorradores } from "@/lib/permisos";
+import { permisoDelUsuario, puedeEscribirEnElERP } from "@/lib/permisos";
 import { getArticulosParaOrden } from "@/lib/queries-compras";
 import {
   armarOrdenSigma,
@@ -24,9 +24,14 @@ export const dynamic = "force-dynamic";
  * mandada se anula a mano en Sigma. Eso justifica tres cosas que en una ruta
  * de lectura serían exageradas.
  *
- * PRIMERA: LA MIRA UN SOLO ROL. `superadmin`, el mismo que ve los borradores.
- * `admin` "ve todo sin editar" y esto es editar el ERP. Es la segunda vez que
- * los dos roles se comportan distinto, y por el mismo motivo que la primera.
+ * PRIMERA: LA MIRA UN SOLO ROL. `superadmin`. `admin` "ve todo sin editar" y
+ * esto es editar el ERP.
+ *
+ * El permiso es `puedeEscribirEnElERP` y no `puedeVerBorradores`, aunque hoy
+ * devuelvan lo mismo: cuando Compras era un borrador las dos preguntas tenían
+ * la misma respuesta, y publicada la sección dejaron de tenerla. La pantalla
+ * además esconde el botón, pero eso es una cortesía --no ofrecer algo que va a
+ * fallar--; el que decide es este chequeo.
  *
  * SEGUNDA: EL PRECIO NO VIENE DEL NAVEGADOR. Del cuerpo se aceptan las
  * decisiones de la persona --qué SKU, cuánto, con qué descuentos y en qué
@@ -115,7 +120,7 @@ function leerRenglones(crudo: unknown): Map<string, RenglonOrden> {
 export async function POST(request: NextRequest) {
   if (authConfigurada) {
     const permiso = permisoDelUsuario(await getUsuario());
-    if (!puedeVerBorradores(permiso)) {
+    if (!puedeEscribirEnElERP(permiso)) {
       return NextResponse.json(
         { error: "Mandar órdenes al ERP requiere el rol superadmin." },
         { status: 403 },

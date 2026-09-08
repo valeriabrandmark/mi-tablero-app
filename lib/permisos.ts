@@ -185,7 +185,6 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
  * el nav, ni la página — que es justamente el punto de tenerlo en un solo lado.
  */
 const PAGINAS_EN_CONSTRUCCION = [
-  "/stock",
   "/venta-minorista/tienda-nube/analytics",
 ];
 
@@ -205,6 +204,27 @@ export function enConstruccion(pathname: string): boolean {
  * el principio.
  */
 export function puedeVerBorradores(permiso: Permiso | null): boolean {
+  return permiso?.rol === "superadmin";
+}
+
+/**
+ * Quién puede escribir en el ERP: mandar una orden de compra a Sigma.
+ *
+ * ES UNA FUNCIÓN APARTE Y NO `puedeVerBorradores`, aunque hoy devuelvan lo
+ * mismo. Hasta ahora Compras era un borrador y el único que la veía era el
+ * `superadmin`, así que reusar esa función alcanzaba. Publicada la sección,
+ * las dos preguntas se separaron: "¿ve una página a medio hacer?" y "¿puede
+ * cargar una orden en el ERP?" dejaron de tener la misma respuesta el día que
+ * el `admin` entró a Operaciones.
+ *
+ * Y la respuesta correcta para el `admin` es NO. El rol está definido como "ve
+ * todo, sin editar", y cargar una orden de compra en Sigma es lo más editar
+ * que hace este tablero: no tiene deshacer y se arregla a mano en el ERP.
+ *
+ * El `admin` sí baja el TXT, el CSV y el Excel: eso es llevarse un archivo, y
+ * lo que pase después lo decide una persona.
+ */
+export function puedeEscribirEnElERP(permiso: Permiso | null): boolean {
   return permiso?.rol === "superadmin";
 }
 
