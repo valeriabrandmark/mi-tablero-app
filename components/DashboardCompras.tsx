@@ -130,7 +130,9 @@ export default function DashboardComprasPage() {
   const [confirmando, setConfirmando] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState<
-    { ok: true; enviado: OrdenSigma } | { ok: false; error: string; problemas?: string[] } | null
+    | { ok: true; enviado: OrdenSigma }
+    | { ok: false; error: string; problemas?: string[]; enviado?: OrdenSigma }
+    | null
   >(null);
 
   const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
@@ -307,7 +309,14 @@ export default function DashboardComprasPage() {
         setResultado({ ok: true, enviado: json.enviado as OrdenSigma });
         setConfirmando(false);
       } else {
-        setResultado({ ok: false, error: json.error ?? `Error ${r.status}`, problemas: json.problemas });
+        setResultado({
+          ok: false,
+          error: json.error ?? `Error ${r.status}`,
+          problemas: json.problemas,
+          // El cuerpo exacto que salió, para poder mirarlo cuando el ERP
+          // contesta algo que no está en su tabla de errores.
+          enviado: json.enviado as OrdenSigma | undefined,
+        });
       }
     } catch (e) {
       setResultado({ ok: false, error: e instanceof Error ? e.message : "Error de red" });
@@ -1051,6 +1060,21 @@ export default function DashboardComprasPage() {
                         <li key={p}>{p}</li>
                       ))}
                     </ul>
+                  )}
+                  {/* CUANDO EL ERP CONTESTA ALGO QUE NO ESTÁ EN SU TABLA DE
+                      ERRORES, el mensaje solo no alcanza para arreglar nada:
+                      hay que ver qué se le mandó. Va acá y no en la consola
+                      porque quien lo necesita es la persona que va a
+                      copiárselo a soporte. */}
+                  {resultado.enviado && (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-xs">
+                        Ver lo que se intentó mandar
+                      </summary>
+                      <pre className="bg-panel-2 mt-1 max-h-64 overflow-auto rounded-md p-2 text-[11px]">
+                        {JSON.stringify(resultado.enviado, null, 2)}
+                      </pre>
+                    </details>
                   )}
                 </>
               )}
