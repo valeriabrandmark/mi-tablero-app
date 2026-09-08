@@ -15,6 +15,7 @@
  */
 
 import { COBERTURA_OBJETIVO_DIAS, PLAZO_REPOSICION_DIAS } from "@/lib/stock";
+import type { CeldaXlsx, ColumnaXlsx, LibroXlsx } from "@/lib/xlsx";
 import type { FilaCompra } from "@/lib/types";
 
 /** Sobre cuántos meses se mide la rentabilidad de venta del artículo. */
@@ -258,6 +259,131 @@ export function aCsv(lineas: LineaExportada[]): string {
     filas.push([l.sku, l.unicom, String(l.cantidad), fmtDescuento(l.descuento)].join(";"));
   }
   return "\ufeff" + filas.join("\r\n") + "\r\n";
+}
+
+/* -------------------------------------------------------------------------
+   EL EXCEL PARA EL PROVEEDOR
+
+   Es OTRO archivo y no otro formato del mismo. El de Sigma tiene cuatro
+   columnas y habla en nuestro idioma: nuestro SKU, nuestra grilla, nuestro
+   importador. Éste se manda por mail a una persona del otro lado que no tiene
+   nuestro maestro y necesita entender, sin preguntar nada, qué se le está
+   pidiendo y por cuánta plata.
+
+   POR ESO LLEVA EL CÓDIGO DE COMPRA Y EL EAN: son los dos identificadores que
+   el proveedor sí reconoce. Y por eso lleva el costo y el subtotal, que al
+   archivo de Sigma no van: acá el número es parte del pedido —"esto te compro
+   y a este precio"— y es lo primero que el proveedor va a mirar.
+   ------------------------------------------------------------------------- */
+
+/**
+ * Las columnas del Excel, en el orden en que se leen.
+ *
+ * LA COLUMNA "Unidad" NO ESTABA EN EL PEDIDO Y ESTÁ IGUAL. Sin ella "Cantidad:
+ * 12" es ambiguo del peor modo posible: son 12 bultos o 12 unidades, y con
+ * bultos de 6 la diferencia es pedir 72 o pedir 12. El costo de al lado tiene
+ * el mismo problema, y por eso su título dice de qué es.
+ */
+export const COLUMNAS_EXCEL_PROVEEDOR: ColumnaXlsx[] = [
+  { titulo: "SKU", formato: "texto", ancho: 12 },
+  { titulo: "Cód. compra proveedor", formato: "texto", ancho: 22 },
+  // EL EAN VA COMO TEXTO Y NO COMO NÚMERO, a propósito. Son 13 dígitos: como
+  // número, Excel lo muestra en notación científica ("7,79E+12") y le come el
+  // cero de adelante a los que lo tienen. Un EAN no se suma, se lee.
+  { titulo: "EAN", formato: "texto", ancho: 16 },
+  { titulo: "U x bulto", formato: "entero", ancho: 10 },
+  { titulo: "Cantidad", formato: "entero", ancho: 10 },
+  { titulo: "Unidad", formato: "texto", ancho: 10 },
+  { titulo: "Artículo", formato: "texto", ancho: 46 },
+  { titulo: "Desc. sell in", formato: "porcentaje", ancho: 12 },
+  { titulo: "Costo de lista", formato: "moneda", ancho: 14 },
+  { titulo: "Costo con desc.", formato: "moneda", ancho: 15 },
+  { titulo: "Total", formato: "moneda", ancho: 15 },
+];
+
+/**
+ * El renglón valorizado: lo que se pide, en la unidad elegida, con su costo.
+ *
+ * EL COSTO DE LISTA ES EL DE LA UNIDAD ELEGIDA. Si el renglón va por bulto, el
+ * costo que se muestra es el del BULTO —el de la unidad multiplicado por
+ * cuántas trae—, porque un precio unitario al lado de una cantidad en bultos
+ * es una cuenta a medio hacer que el que recibe el mail va a tener que
+ * terminar, y va a terminar mal.
+ */
+function renglonValorizado(f: FilaCompra, r: RenglonOrden) {
+  const porBulto = f.unidadesPorBulto > 0 ? f.unidadesPorBulto : 1;
+  // El mismo respaldo que usa el resumen de la pantalla: sin costo de lista
+  // cargado se valoriza con el costo real, que es lo único que hay.
+  const unitario = f.costoLista > 0 ? f.costoLista : f.costo;
+  const lista = r.unidad === "bulto" ? unitario * porBulto : unitario;
+  const descuento = descuentoValido(r.descuento);
+  const conDescuento = lista * (1 - descuento / 100);
+  return { porBulto, lista, descuento, conDescuento, total: conDescuento * r.cantidad };
+}
+
+/**
+ * El libro entero, listo para bajar.
+ *
+ * Toma las MISMAS filas y la MISMA orden que el archivo de Sigma, así que los
+ * dos archivos no pueden discrepar: si un renglón está en cero no está en
+ * ninguno de los dos.
+ */
+export function excelParaProveedor(
+  filas: FilaCompra[],
+  orden: Map<string, RenglonOrden>,
+  proveedor: string,
+): LibroXlsx {
+  const renglones: CeldaXlsx[][] = [];
+  let total = 0;
+  let unidades = 0;
+
+  for (const f of filas) {
+    const r = orden.get(f.sku);
+    if (!r || !(r.cantidad > 0)) continue;
+    const v = renglonValorizado(f, r);
+    total += v.total;
+    unidades += aUnidades(r.cantidad, r.unidad, f.unidadesPorBulto);
+    renglones.push([
+      f.sku,
+      f.codigoCompra,
+      f.ean,
+      v.porBulto,
+      r.cantidad,
+      UNIDADES_COMPRA.find((u) => u.clave === r.unidad)!.label,
+      f.producto,
+      // Como fracción: en el .xlsx el 15 % se guarda 0,15 y se muestra "15,0 %".
+      // Guardar el 15 pelado obligaría al que recibe el archivo a acordarse de
+      // que ese número son puntos y no una cantidad.
+      v.descuento / 100,
+      v.lista,
+      v.conDescuento,
+      v.total,
+    ]);
+  }
+
+  return {
+    hoja: "Orden de compra",
+    columnas: COLUMNAS_EXCEL_PROVEEDOR,
+    filas: renglones,
+    // LA FILA DE CIERRE NO SUMA LA COLUMNA "Cantidad", y no es un olvido:
+    // sumar bultos con unidades da un número que no significa nada. Las
+    // unidades físicas —que sí se pueden sumar— van escritas al lado del
+    // total, que es donde se pueden leer sin confundirlas con la cantidad
+    // pedida de cada renglón.
+    total: [
+      "TOTAL",
+      null,
+      null,
+      null,
+      null,
+      null,
+      `${proveedor} · ${renglones.length} renglones · ${unidades.toLocaleString("es-AR")} unidades`,
+      null,
+      null,
+      null,
+      total,
+    ],
+  };
 }
 
 /**

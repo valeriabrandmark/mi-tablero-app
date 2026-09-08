@@ -12,6 +12,7 @@ import {
   COLUMNAS_SIGMA,
   DESCUENTO_MAXIMO,
   descuentoValido,
+  excelParaProveedor,
   lineasParaExportar,
   MESES_RENTABILIDAD,
   nombreArchivo,
@@ -38,6 +39,7 @@ import {
   VENTANA_POR_DEFECTO,
 } from "@/lib/stock";
 import { useDatosTablero } from "@/lib/useDatosTablero";
+import { aXlsx } from "@/lib/xlsx";
 import type { DashboardCompras, FilaCompra, FiltrosCompras } from "@/lib/types";
 
 type Opciones = {
@@ -51,8 +53,8 @@ type Respuesta = DashboardCompras & { opciones: Opciones | null };
 const CLASE_CELDA_EDITABLE =
   "border-line bg-panel-2 text-ink focus:border-c1 w-16 rounded-md border px-1.5 py-1 text-right text-xs tabular-nums outline-none";
 
-/** Descarga un texto como archivo. */
-function bajar(contenido: string, nombre: string, tipo: string) {
+/** Descarga un contenido como archivo. Texto o bytes: al Blob le da igual. */
+function bajar(contenido: BlobPart, nombre: string, tipo: string) {
   const url = URL.createObjectURL(new Blob([contenido], { type: tipo }));
   const a = document.createElement("a");
   a.href = url;
@@ -184,10 +186,15 @@ export default function DashboardComprasPage() {
     let bruto = 0;
     let neto = 0;
     let recortados = 0;
+    // Renglones a los que el maestro no les tiene cargado el código con el que
+    // el proveedor los vende. No rompen nada —van al Excel con la celda
+    // vacía— pero el que recibe el mail no los va a poder identificar.
+    let sinCodigo = 0;
     for (const f of filas) {
       const r = orden.get(f.sku);
       if (!r || !(r.cantidad > 0)) continue;
       renglones += 1;
+      if (!f.codigoCompra) sinCodigo += 1;
       const u = aUnidades(r.cantidad, r.unidad, f.unidadesPorBulto);
       unidades += u;
       if (r.unidad === "bulto") bultos += r.cantidad;
@@ -197,7 +204,7 @@ export default function DashboardComprasPage() {
       bruto += u * lista;
       neto += u * lista * (1 - desc / 100);
     }
-    return { renglones, unidades, bultos, bruto, neto, recortados };
+    return { renglones, unidades, bultos, bruto, neto, recortados, sinCodigo };
   }, [filas, orden]);
 
   // LAS ÓRDENES SON POR PROVEEDOR. Con dos elegidos el archivo mezclaría
@@ -205,8 +212,20 @@ export default function DashboardComprasPage() {
   const proveedorUnico =
     filtros.proveedor?.length === 1 ? filtros.proveedor[0] : null;
 
-  const descargar = (formato: "txt" | "csv") => {
+  const descargar = (formato: "txt" | "csv" | "xlsx") => {
     if (!proveedorUnico) return;
+    if (formato === "xlsx") {
+      // El Excel se arma de las FILAS y no de las líneas de Sigma: necesita el
+      // costo, el EAN y el nombre del artículo, que a ese archivo no van.
+      const libro = excelParaProveedor(filas, orden, proveedorUnico);
+      if (libro.filas.length === 0) return;
+      bajar(
+        aXlsx(libro),
+        nombreArchivo(proveedorUnico, "xlsx"),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      );
+      return;
+    }
     const lineas = lineasParaExportar(filas, orden);
     if (lineas.length === 0) return;
     if (formato === "txt") {
@@ -783,6 +802,15 @@ export default function DashboardComprasPage() {
               </button>
               <button
                 type="button"
+                onClick={() => descargar("xlsx")}
+                disabled={!proveedorUnico || resumen.renglones === 0}
+                title="Excel valorizado, con el código y el EAN del proveedor, para mandarle por mail"
+                className="border-c1 bg-c1/15 text-c1 hover:bg-c1/25 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Bajar Excel para el proveedor
+              </button>
+              <button
+                type="button"
                 onClick={() => descargar("csv")}
                 disabled={!proveedorUnico || resumen.renglones === 0}
                 className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
@@ -839,6 +867,28 @@ export default function DashboardComprasPage() {
             <p className="mt-1">
               <strong>Una orden, un proveedor.</strong> Por eso la descarga pide que haya
               exactamente uno elegido: no existe la orden que mezcla dos.
+            </p>
+            <p className="mt-1">
+              <strong>El Excel para el proveedor es otro archivo, no otro formato.</strong>{" "}
+              Sale de los mismos renglones —si acá está en cero, no está en ninguno de los
+              dos— pero habla el idioma del que lo recibe: lleva su{" "}
+              <strong>código de compra</strong> y el <strong>EAN</strong> en vez de nuestro
+              SKU, el nombre del artículo, y el costo <em>de la unidad que se le pide</em>:
+              si el renglón va por bulto, el costo que se muestra es el del bulto. Cierra
+              con el total de la orden. Es para adjuntar a un mail, no para importar en
+              ningún lado.
+              {resumen.sinCodigo > 0 && (
+                <>
+                  {" "}
+                  <strong>
+                    {fmtNumero(resumen.sinCodigo)} de los {fmtNumero(resumen.renglones)}{" "}
+                    renglones no tienen cargado el código de compra del proveedor
+                  </strong>{" "}
+                  en el maestro de Sigma, así que en el Excel esa celda va vacía. El
+                  artículo se pide igual —el proveedor lo va a reconocer por el EAN y por
+                  el nombre— pero es algo para cargar en Sigma, no acá.
+                </>
+              )}
             </p>
             <p className="mt-1">
               <strong>
