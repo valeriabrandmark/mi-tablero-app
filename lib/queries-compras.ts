@@ -16,6 +16,7 @@ import {
   VENTANA_POR_DEFECTO,
 } from "@/lib/stock";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
+import type { ArticuloParaOrden } from "@/lib/sigma-orden";
 import type { DashboardCompras, FilaCompra, FiltrosCompras } from "@/lib/types";
 
 /**
@@ -516,4 +517,61 @@ export async function getDashboardCompras(
     comprasHasta,
     generadoEn: new Date().toISOString(),
   };
+}
+
+/* -------------------------------------------------------------------------
+   LOS DATOS PARA MANDAR LA ORDEN AL ERP
+
+   Es una consulta aparte y chiquita, y no un pedazo de BASE, porque contesta
+   otra pregunta: no "qué conviene comprar" sino "cuánto vale de verdad esto
+   que la persona ya decidió comprar".
+
+   EXISTE PARA NO CONFIAR EN EL NAVEGADOR. La pantalla manda qué SKU, cuántos y
+   con qué descuentos —eso lo decide la persona y está bien—, pero el PRECIO no
+   lo edita nadie: se vuelve a leer acá. Aceptarlo del navegador sería dejar
+   que cualquiera con la consola abierta cargue una orden al ERP al precio que
+   se le ocurra.
+
+   El costo se arma igual que en BASE: el del mes elegido si está, el último
+   conocido si no.
+
+   $1 SKUs · $2 mes de la oferta
+   ------------------------------------------------------------------------- */
+export async function getArticulosParaOrden(
+  skus: string[],
+  mes: string,
+): Promise<ArticuloParaOrden[]> {
+  if (skus.length === 0) return [];
+  const filas = await query<Record<string, unknown>>(
+    `select trim(a.id)                                as sku,
+            nullif(trim(a."proveedorCodigo"), '')     as proveedor_codigo,
+            a."proveedorNombre"                       as proveedor_nombre,
+            coalesce(pg.grupo, '${GRUPO_PROVEEDOR_POR_DEFECTO}') as grupo,
+            greatest(coalesce(a."unidadesPorBulto", 1), 1)       as u_bulto,
+            coalesce(o.costo_teorico, c.costo_teorico, c.costo_real, 0) as costo_lista
+     from bronze.sigma_articulos a
+     left join bronze.proveedores_grupo pg on pg.proveedor = a."proveedorNombre"
+     left join (
+       select sku, costo_teorico
+       from bronze.costos_historicos
+       where mes_comercial = $2::text
+     ) o on o.sku = trim(a.id)
+     left join (
+       select distinct on (sku) sku, costo_real, costo_teorico
+       from bronze.costos_historicos
+       where costo_real > 0
+       order by sku, mes_comercial desc
+     ) c on c.sku = trim(a.id)
+     where trim(a.id) = any($1::text[])`,
+    [skus, mes],
+  );
+
+  return filas.map((r) => ({
+    sku: r.sku as string,
+    proveedorCodigo: (r.proveedor_codigo as string | null) ?? null,
+    proveedorNombre: (r.proveedor_nombre as string | null) ?? null,
+    grupo: (r.grupo as string | null) ?? null,
+    unidadesPorBulto: num(r.u_bulto),
+    costoLista: num(r.costo_lista),
+  }));
 }
