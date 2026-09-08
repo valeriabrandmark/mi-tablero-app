@@ -40,7 +40,6 @@
  */
 
 import { descuentoValido, UNIDADES_COMPRA, type RenglonOrden } from "@/lib/compras";
-import { PLAZO_REPOSICION_DIAS } from "@/lib/stock";
 
 /* -------------------------------------------------------------------------
    LOS CÓDIGOS DE LA CABECERA
@@ -123,7 +122,6 @@ export type OrdenSigma = {
   codigoSucursal: string;
   moneda: string;
   cotizacion: number;
-  frecdia: number;
   observaciones: string;
   items: ItemSigma[];
 };
@@ -288,10 +286,26 @@ export function armarOrdenSigma(
     codigoSucursal: CODIGO_SUCURSAL,
     moneda: MONEDA,
     cotizacion: COTIZACION,
-    // Los días que tarda en llegar. El campo se llama `frecdia` --literalmente,
-    // no `fechaRecepcion`-- y la documentación aclara que el nombre viejo no se
-    // acepta.
-    frecdia: PLAZO_REPOSICION_DIAS,
+    // `frecdia` NO SE MANDA, y no es un olvido.
+    //
+    // La documentación lo declara `numeric`, opcional, "días para la
+    // recepción", y su ejemplo manda 21. Mandamos PLAZO_REPOSICION_DIAS, que
+    // son 10, y el ERP contestó:
+    //
+    //     invalid input syntax for type date: "10"
+    //
+    // O sea que del otro lado ese valor termina en una columna de FECHA. Y
+    // cierra con la pantalla de Sigma, donde el campo de al lado del depósito
+    // no es un número de días sino "Fecha Rec.", con un calendario.
+    //
+    // Era el único campo de la cabecera cuyo valor era 10, así que la
+    // documentación y el servidor se contradicen y le creemos al servidor.
+    //
+    // COMO ES OPCIONAL, LA SALIDA MÁS SEGURA ES NO MANDARLO: la orden entra sin
+    // fecha de recepción --que se completa en Sigma como se completaba antes--
+    // en vez de entrar con una inventada por nosotros. Si algún día hace falta,
+    // el candidato a probar es una fecha yyyy-mm-dd a PLAZO_REPOSICION_DIAS de
+    // hoy, y se prueba de a una cosa por vez.
     // Es el campo "Obs. p/Proveedor" de la pantalla de Sigma, el mismo lugar
     // donde hoy se escribe a mano "OFERTAS DE SELL IN ENVIADAS". Por eso lleva
     // la nota de la pantalla y no una leyenda automática.

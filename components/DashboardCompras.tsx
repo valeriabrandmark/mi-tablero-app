@@ -52,6 +52,24 @@ type Opciones = {
 };
 type Respuesta = DashboardCompras & { opciones: Opciones | null };
 
+/**
+ * Lo que muestra una celda editable cuando el número es CERO: nada.
+ *
+ * POR QUÉ NO MUESTRA EL 0. Un `0` en la celda no es un dato, es un obstáculo:
+ * para escribir 1 hay que borrarlo primero, y si el cursor queda del lado
+ * equivocado sale `10`. Con cantidades y descuentos eso no es un typo
+ * cualquiera -- es pedir diez veces de más, o un descuento de 10 puntos que
+ * nadie negoció, en un archivo que después alguien importa sin volver a mirar.
+ *
+ * Vacío y cero son lo mismo acá: un renglón sin cantidad es un artículo que no
+ * se pide, y no hay ninguna diferencia entre "no puse nada" y "puse cero". Por
+ * eso se puede tratar igual sin perder información -- y `editar` ya convierte
+ * el vacío en 0 cuando la persona termina.
+ */
+function sinCero(n: number | undefined): number | string {
+  return n ? n : "";
+}
+
 const CLASE_CELDA_EDITABLE =
   "border-line bg-panel-2 text-ink focus:border-c1 w-16 rounded-md border px-1.5 py-1 text-right text-xs tabular-nums outline-none";
 
@@ -432,7 +450,7 @@ export default function DashboardComprasPage() {
             type="number"
             min={0}
             step={1}
-            value={r?.cantidad ?? 0}
+            value={sinCero(r?.cantidad)}
             onChange={(e) =>
               editar(f.sku, { cantidad: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
             }
@@ -471,7 +489,7 @@ export default function DashboardComprasPage() {
             min={0}
             max={DESCUENTO_MAXIMO}
             step={0.5}
-            value={r?.descuento ?? 0}
+            value={sinCero(r?.descuento)}
             onChange={(e) => editar(f.sku, { descuento: Number(e.target.value) || 0 })}
             className={`${CLASE_CELDA_EDITABLE} ${excedido ? "border-rose-500/60" : ""}`}
             title={
@@ -502,7 +520,7 @@ export default function DashboardComprasPage() {
             min={0}
             max={DESCUENTO_MAXIMO}
             step={0.5}
-            value={r?.descuento2 ?? 0}
+            value={sinCero(r?.descuento2)}
             onChange={(e) => editar(f.sku, { descuento2: Number(e.target.value) || 0 })}
             className={`${CLASE_CELDA_EDITABLE} ${excedido ? "border-rose-500/60" : ""}`}
             title={
