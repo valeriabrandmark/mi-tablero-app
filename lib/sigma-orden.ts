@@ -329,9 +329,23 @@ export function armarOrdenSigma(
      * ejemplo oficial: sólo cambian los valores.
      */
     frecdia: fechaISO(masDias(ahora, PLAZO_REPOSICION_DIAS)),
-    // Sin fecha de vencimiento propia: la condición de pago (30 días) es la que
-    // la determina. Va `null` explícito y no omitido, por lo de arriba.
-    vencimiento: null,
+    /*
+     * VENCIMIENTO IGUAL A LA FECHA DE PEDIDO, y no `null`.
+     *
+     * Iba en null --el ejemplo de la documentación lo manda así y el campo
+     * figura como opcional-- y el ERP siguió contestando "Query with
+     * RESPONSE_CODE returned no rows" incluso con todos los demás campos
+     * puestos.
+     *
+     * Lo que decide es la orden REAL: en la 00000371, Pedido y Vencimiento
+     * dicen los dos 31/08/2026. O sea que en una orden de verdad el campo NO
+     * está vacío, aunque la condición de pago sea a 30 días. Contra la
+     * documentación y contra su ejemplo, gana lo que el sistema tiene cargado.
+     *
+     * Es la misma lección que `frecdia`, aplicada al campo de al lado: acá
+     * "opcional" no quiere decir que el ERP sepa arreglárselas sin el dato.
+     */
+    vencimiento: fecha,
     observacionInterna: "",
     observaciones: observaciones.trim().slice(0, 200),
     items,
