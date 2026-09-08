@@ -1,5 +1,6 @@
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
+import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import { PROVEEDORES_NO_MERCADERIA } from "@/lib/stock";
 import {
   DIAS_POR_VENCER_ALERTA,
@@ -31,10 +32,6 @@ import type {
  */
 
 /** El SKU vive dentro de `attributes`. Mismo rodeo que en queries-stock.ts. */
-const SKU_DE_PUBLICACION = `(select a->>'value_name'
-     from jsonb_array_elements(p.attributes::jsonb) a
-    where a->>'id' = 'SELLER_SKU'
-    limit 1)`;
 
 /**
  * Las unidades de Tucumán que cuentan.
@@ -79,11 +76,7 @@ const BASE = `
 with por_inv as (
   -- Un renglón por INVENTARIO y no por publicación: varias publicaciones
   -- comparten el mismo stock físico y sumarlas lo contaría de más.
-  select p.inventory_id, max(${SKU_DE_PUBLICACION}) as sku
-  from bronze.ml_publicaciones p
-  where p."shipping.logistic_type" = 'fulfillment'
-    and p.inventory_id is not null
-  group by p.inventory_id
+  ${POR_INVENTARIO_SKU}
 ),
 full_ml as (
   select i.sku,
@@ -440,11 +433,7 @@ async function getFotoAntiguedad(): Promise<{
   // propósito: es una medida de la foto, no del recorte que se está mirando.
   const enFull = await queryOne<{ v: string }>(
     `with por_inv as (
-       select p.inventory_id, max(${SKU_DE_PUBLICACION}) as sku
-       from bronze.ml_publicaciones p
-       where p."shipping.logistic_type" = 'fulfillment'
-         and p.inventory_id is not null
-       group by p.inventory_id
+       ${POR_INVENTARIO_SKU}
      )
      select count(distinct i.sku) as v
      from bronze.ml_stock_full f
