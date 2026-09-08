@@ -74,15 +74,21 @@ export const COBERTURA_MAXIMA_COMPRA_DIAS = 90;
 export const COBERTURA_SIN_INFLAR_DIAS = 120;
 
 /**
- * Las dos formas de comprar.
+ * Las dos formas de comprar, con los tres nombres que tiene cada una.
  *
- * `Bultos` y `Unidad` son los textos que espera la columna UNICOM de Sigma,
- * escritos tal cual. NO son etiquetas de pantalla: viajan al archivo. Si Sigma
- * cambia lo que acepta, se cambia acá y en ningún otro lado.
+ * SON TRES Y NO UNO, y no es redundancia: cada camino habla distinto.
+ *
+ *   label    lo que lee la persona en la pantalla
+ *   unicom   lo que espera la columna UNICOM de la grilla de Sigma, tal cual
+ *   api      lo que espera `unidadDeCompra` de ImportOrdenDeCompra: una LETRA
+ *
+ * La API acepta B, U, D y P (bulto, unidad, display, pallet). Usamos las dos
+ * primeras porque son las dos que la pantalla ofrece; el día que haga falta
+ * comprar por display se agrega acá y en ningún otro lado.
  */
 export const UNIDADES_COMPRA = [
-  { clave: "bulto", label: "Bultos", unicom: "Bultos" },
-  { clave: "unidad", label: "Unidades", unicom: "Unidad" },
+  { clave: "bulto", label: "Bultos", unicom: "Bultos", api: "B" },
+  { clave: "unidad", label: "Unidades", unicom: "Unidad", api: "U" },
 ] as const;
 
 export type ClaveUnidadCompra = (typeof UNIDADES_COMPRA)[number]["clave"];

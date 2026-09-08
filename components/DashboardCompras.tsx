@@ -40,6 +40,7 @@ import {
   VENTANA_POR_DEFECTO,
 } from "@/lib/stock";
 import { useDatosTablero } from "@/lib/useDatosTablero";
+import { RESUMEN_CABECERA, type OrdenSigma } from "@/lib/sigma-orden";
 import { aXlsx } from "@/lib/xlsx";
 import type { DashboardCompras, FilaCompra, FiltrosCompras } from "@/lib/types";
 
@@ -99,6 +100,20 @@ export default function DashboardComprasPage() {
    * No va al archivo de Sigma: la grilla de importación no tiene dónde ponerla.
    */
   const [comentario, setComentario] = useState("");
+
+  /**
+   * El envío de la orden al ERP, en tres estados: nada, confirmando, mandando.
+   *
+   * HAY UN PASO DE CONFIRMACIÓN Y NO ES UN `confirm()` DEL NAVEGADOR. Lo que
+   * hay que revisar antes de mandar son diez números y seis códigos de
+   * cabecera; un cartel que diga «¿estás seguro?» no deja revisar nada, y lo
+   * único que enseña es a apretar Aceptar sin leer.
+   */
+  const [confirmando, setConfirmando] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [resultado, setResultado] = useState<
+    { ok: true; enviado: OrdenSigma } | { ok: false; error: string; problemas?: string[] } | null
+  >(null);
 
   const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
     "/api/compras",
@@ -244,6 +259,42 @@ export default function DashboardComprasPage() {
       bajar(aTxt(lineas), nombreArchivo(proveedorUnico, "txt"), "text/plain;charset=utf-8");
     } else {
       bajar(aCsv(lineas), nombreArchivo(proveedorUnico, "csv"), "text/csv;charset=utf-8");
+    }
+  };
+
+  /**
+   * Manda la orden al ERP.
+   *
+   * VIAJA LO QUE LA PERSONA DECIDIÓ Y NADA MÁS: SKU, unidad, cantidad y los dos
+   * descuentos. El precio lo vuelve a leer el servidor de la base -- si se
+   * mandara desde acá, cualquiera con la consola abierta podría cargar una
+   * orden al precio que quiera.
+   */
+  const enviarASigma = async () => {
+    if (!proveedorUnico || resumen.renglones === 0) return;
+    setEnviando(true);
+    setResultado(null);
+    try {
+      const renglones = filas
+        .map((f) => ({ sku: f.sku, ...orden.get(f.sku) }))
+        .filter((r) => (r.cantidad ?? 0) > 0);
+
+      const r = await fetch("/api/compras/sigma", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ renglones, mes: data?.mes, nota: comentario }),
+      });
+      const json = await r.json();
+      if (r.ok) {
+        setResultado({ ok: true, enviado: json.enviado as OrdenSigma });
+        setConfirmando(false);
+      } else {
+        setResultado({ ok: false, error: json.error ?? `Error ${r.status}`, problemas: json.problemas });
+      }
+    } catch (e) {
+      setResultado({ ok: false, error: e instanceof Error ? e.message : "Error de red" });
+    } finally {
+      setEnviando(false);
     }
   };
 
@@ -855,6 +906,18 @@ export default function DashboardComprasPage() {
               </button>
               <button
                 type="button"
+                onClick={() => {
+                  setResultado(null);
+                  setConfirmando((v) => !v);
+                }}
+                disabled={!proveedorUnico || resumen.renglones === 0}
+                title="Carga la orden directamente en Sigma. Pide confirmar antes."
+                className="border-c1 bg-c1 text-panel hover:bg-c1/85 rounded-lg border px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Enviar a Sigma
+              </button>
+              <button
+                type="button"
                 onClick={() => descargar("xlsx")}
                 disabled={!proveedorUnico || resumen.renglones === 0}
                 title="Excel valorizado, con el código y el EAN del proveedor, para mandarle por mail"
@@ -872,6 +935,109 @@ export default function DashboardComprasPage() {
               </button>
             </div>
           </div>
+
+          {/* LA CONFIRMACIÓN DEL ENVÍO.
+              Muestra lo que la persona decidió y, sobre todo, los seis códigos
+              de cabecera que NO eligió y que igual van a quedar cargados. Un
+              cartel de «¿estás seguro?» no dejaría revisar nada. */}
+          {confirmando && (
+            <div className="border-c1 bg-panel space-y-3 rounded-xl border p-4">
+              <p className="text-ink text-sm font-medium">
+                Se va a cargar una orden de compra en Sigma. No se puede deshacer desde
+                acá: si sale mal, hay que anularla en Sigma.
+              </p>
+              <div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted">Proveedor</span>
+                  <strong className="text-right">{proveedorUnico}</strong>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted">Renglones</span>
+                  <strong>{fmtNumero(resumen.renglones)}</strong>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted">Unidades</span>
+                  <strong>{fmtNumero(resumen.unidades)}</strong>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted">A pagar con descuento</span>
+                  <strong>{fmtMoneda(resumen.neto)}</strong>
+                </div>
+                {RESUMEN_CABECERA.map((c) => (
+                  <div key={c.campo} className="flex justify-between gap-3">
+                    <span className="text-muted">{c.campo}</span>
+                    <span className="font-mono">{c.valor}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between gap-3 sm:col-span-2">
+                  <span className="text-muted">Obs. para el proveedor</span>
+                  <span className="text-right">
+                    {comentario.trim() || <em className="text-muted">sin nota</em>}
+                  </span>
+                </div>
+              </div>
+              <p className="text-muted text-[11px]">
+                La orden entra en estado <strong>Pendiente</strong>: queda cargada pero no
+                aprobada. El precio de cada renglón lo vuelve a leer el servidor de la base,
+                no se manda desde esta pantalla.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={enviarASigma}
+                  disabled={enviando}
+                  className="border-c1 bg-c1 text-panel hover:bg-c1/85 rounded-lg border px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+                >
+                  {enviando ? "Mandando…" : "Confirmo, mandar la orden"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmando(false)}
+                  disabled={enviando}
+                  className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {resultado && (
+            <Aviso tono={resultado.ok ? "info" : "error"}>
+              {resultado.ok ? (
+                <>
+                  <p className="font-medium">La orden se cargó en Sigma.</p>
+                  <p className="mt-1">
+                    Proveedor <strong>{resultado.enviado.proveedorId}</strong> · empresa{" "}
+                    <strong>{resultado.enviado.empresa}</strong> ·{" "}
+                    {fmtNumero(resultado.enviado.items.length)} renglones · estado{" "}
+                    <strong>Pendiente</strong>. Buscala en Sigma para aprobarla.
+                  </p>
+                  {/* Se muestra lo que se mandó, y no un "listo" a secas: en una
+                      operación sin deshacer, la constancia de qué se cargó vale
+                      más que el mensaje de éxito. */}
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs">Ver lo que se mandó</summary>
+                    <pre className="bg-panel-2 mt-1 max-h-64 overflow-auto rounded-md p-2 text-[11px]">
+                      {JSON.stringify(resultado.enviado, null, 2)}
+                    </pre>
+                  </details>
+                </>
+              ) : (
+                <>
+                  <p className="font-medium">No se mandó la orden.</p>
+                  <p className="mt-1">{resultado.error}</p>
+                  {resultado.problemas && resultado.problemas.length > 0 && (
+                    <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                      {resultado.problemas.map((p) => (
+                        <li key={p}>{p}</li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </Aviso>
+          )}
 
           <Panel
             titulo="Artículos"
