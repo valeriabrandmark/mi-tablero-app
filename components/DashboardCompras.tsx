@@ -85,7 +85,7 @@ function bajar(contenido: BlobPart, nombre: string, tipo: string) {
   URL.revokeObjectURL(url);
 }
 
-export default function DashboardComprasPage() {
+export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boolean }) {
   const inicial: FiltrosCompras = { ventana: VENTANA_POR_DEFECTO };
   const [filtros, setFiltros] = useState<FiltrosCompras>(inicial);
   const [buscado, setBuscado] = useState("");
@@ -931,6 +931,11 @@ export default function DashboardComprasPage() {
               >
                 Bajar TXT para Sigma
               </button>
+              {/* El botón que escribe en el ERP sólo lo ve quien puede usarlo.
+                  Esconderlo no es el permiso --de eso se encarga la ruta de
+                  API-- pero ofrecer un botón que va a contestar 403 es peor
+                  que no ofrecerlo. */}
+              {puedeEnviar && (
               <button
                 type="button"
                 onClick={() => {
@@ -943,6 +948,7 @@ export default function DashboardComprasPage() {
               >
                 Enviar a Sigma
               </button>
+              )}
               <button
                 type="button"
                 onClick={() => descargar("xlsx")}
@@ -967,7 +973,7 @@ export default function DashboardComprasPage() {
               Muestra lo que la persona decidió y, sobre todo, los seis códigos
               de cabecera que NO eligió y que igual van a quedar cargados. Un
               cartel de «¿estás seguro?» no dejaría revisar nada. */}
-          {confirmando && (
+          {puedeEnviar && confirmando && (
             <div className="border-c1 bg-panel space-y-3 rounded-xl border p-4">
               <p className="text-ink text-sm font-medium">
                 Se va a cargar una orden de compra en Sigma. No se puede deshacer desde
