@@ -131,7 +131,7 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState<
     | { ok: true; enviado: OrdenSigma }
-    | { ok: false; error: string; problemas?: string[]; enviado?: OrdenSigma }
+    | { ok: false; error: string; problemas?: string[]; enviado?: OrdenSigma; url?: string }
     | null
   >(null);
 
@@ -313,6 +313,7 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
           ok: false,
           error: json.error ?? `Error ${r.status}`,
           problemas: json.problemas,
+          url: json.url as string | undefined,
           // El cuerpo exacto que salió, para poder mirarlo cuando el ERP
           // contesta algo que no está en su tabla de errores.
           enviado: json.enviado as OrdenSigma | undefined,
@@ -1072,6 +1073,11 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
                       hay que ver qué se le mandó. Va acá y no en la consola
                       porque quien lo necesita es la persona que va a
                       copiárselo a soporte. */}
+                  {resultado.url && (
+                    <p className="mt-1 text-xs">
+                      A esta URL: <span className="font-mono break-all">{resultado.url}</span>
+                    </p>
+                  )}
                   {resultado.enviado && (
                     <details className="mt-2">
                       <summary className="cursor-pointer text-xs">

@@ -160,7 +160,14 @@ export async function POST(request: NextRequest) {
 
     const payload = armarOrdenSigma(articulos, orden, nota);
 
-    const respuesta = await fetch(urlDeSigma(), {
+    // La URL viaja a la pantalla junto con el error. NO LLEVA CREDENCIALES: el
+    // token va en la cabecera `X-Auth-Token`, no acá. Y sirve para lo único
+    // que no se puede resolver mirando el JSON -- soporte dijo "fijate que la
+    // URL tiene que ser tal", y esto deja compararla carácter por carácter en
+    // vez de deducirla de tres variables de entorno que nadie ve juntas.
+    const url = urlDeSigma();
+
+    const respuesta = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -179,6 +186,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: texto || `Sigma contestó ${respuesta.status} sin explicar por qué.`,
+          url,
           enviado: payload,
         },
         { status: 502 },
