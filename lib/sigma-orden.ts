@@ -40,6 +40,7 @@
  */
 
 import { descuentoValido, UNIDADES_COMPRA, type RenglonOrden } from "@/lib/compras";
+import { PLAZO_REPOSICION_DIAS } from "@/lib/stock";
 
 /* -------------------------------------------------------------------------
    LOS CÓDIGOS DE LA CABECERA
@@ -107,6 +108,7 @@ export type ItemSigma = {
   descuento3: number;
   descuento4: number;
   descuento5: number;
+  descuento6: number;
   unidadDeCompra: string;
 };
 
@@ -122,7 +124,10 @@ export type OrdenSigma = {
   codigoSucursal: string;
   moneda: string;
   cotizacion: number;
+  frecdia: string;
+  vencimiento: string | null;
   observaciones: string;
+  observacionInterna: string;
   items: ItemSigma[];
 };
 
@@ -144,11 +149,18 @@ export type ArticuloParaOrden = {
   costoLista: number;
 };
 
-/** La fecha de hoy en el formato que pide Sigma: yyyy-mm-dd. */
-export function hoyISO(ahora: Date = new Date()): string {
-  const mm = String(ahora.getMonth() + 1).padStart(2, "0");
-  const dd = String(ahora.getDate()).padStart(2, "0");
-  return `${ahora.getFullYear()}-${mm}-${dd}`;
+/** Una fecha en el formato que pide Sigma: yyyy-mm-dd. */
+export function fechaISO(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+/** La fecha de hoy más N días, sin tocar la original. */
+export function masDias(d: Date, dias: number): Date {
+  const otra = new Date(d);
+  otra.setDate(otra.getDate() + dias);
+  return otra;
 }
 
 /**
@@ -164,7 +176,12 @@ export function hoyISO(ahora: Date = new Date()): string {
  */
 export function precioDelRenglon(a: ArticuloParaOrden, r: RenglonOrden): number {
   const porBulto = a.unidadesPorBulto > 0 ? a.unidadesPorBulto : 1;
-  return r.unidad === "bulto" ? a.costoLista * porBulto : a.costoLista;
+  const bruto = r.unidad === "bulto" ? a.costoLista * porBulto : a.costoLista;
+  // A DOS DECIMALES, que es lo que es un precio. El costo de la base tiene
+  // cuatro (15.698,5776) y por bulto se van a seis; mandarlos así es pedirle al
+  // ERP que redondee por su cuenta y que su total no cierre con el que la
+  // pantalla mostró antes de confirmar.
+  return Math.round(bruto * 100) / 100;
 }
 
 /**
@@ -269,11 +286,15 @@ export function armarOrdenSigma(
       descuento3: 0,
       descuento4: 0,
       descuento5: 0,
+      // El 6 la documentación lo da por opcional, pero SE MANDA IGUAL. Ver la
+      // nota de `frecdia` de más abajo: acá "opcional" quiere decir "no lo
+      // valido", no "sé qué hacer si no está".
+      descuento6: 0,
       unidadDeCompra: UNIDADES_COMPRA.find((u) => u.clave === r.unidad)!.api,
     });
   }
 
-  const fecha = hoyISO(ahora);
+  const fecha = fechaISO(ahora);
   return {
     empresa: EMPRESA_POR_GRUPO[grupo ?? ""] ?? EMPRESA_POR_GRUPO["QUO MKT"],
     proveedorId,
@@ -286,29 +307,32 @@ export function armarOrdenSigma(
     codigoSucursal: CODIGO_SUCURSAL,
     moneda: MONEDA,
     cotizacion: COTIZACION,
-    // `frecdia` NO SE MANDA, y no es un olvido.
-    //
-    // La documentación lo declara `numeric`, opcional, "días para la
-    // recepción", y su ejemplo manda 21. Mandamos PLAZO_REPOSICION_DIAS, que
-    // son 10, y el ERP contestó:
-    //
-    //     invalid input syntax for type date: "10"
-    //
-    // O sea que del otro lado ese valor termina en una columna de FECHA. Y
-    // cierra con la pantalla de Sigma, donde el campo de al lado del depósito
-    // no es un número de días sino "Fecha Rec.", con un calendario.
-    //
-    // Era el único campo de la cabecera cuyo valor era 10, así que la
-    // documentación y el servidor se contradicen y le creemos al servidor.
-    //
-    // COMO ES OPCIONAL, LA SALIDA MÁS SEGURA ES NO MANDARLO: la orden entra sin
-    // fecha de recepción --que se completa en Sigma como se completaba antes--
-    // en vez de entrar con una inventada por nosotros. Si algún día hace falta,
-    // el candidato a probar es una fecha yyyy-mm-dd a PLAZO_REPOSICION_DIAS de
-    // hoy, y se prueba de a una cosa por vez.
-    // Es el campo "Obs. p/Proveedor" de la pantalla de Sigma, el mismo lugar
-    // donde hoy se escribe a mano "OFERTAS DE SELL IN ENVIADAS". Por eso lleva
-    // la nota de la pantalla y no una leyenda automática.
+    /*
+     * NO SE OMITE NINGÚN CAMPO, Y ESO ES LO QUE ARREGLÓ EL SEGUNDO ERROR.
+     *
+     * La historia, porque es la parte que hay que entender antes de tocar esto:
+     *
+     *   frecdia: 10          -> invalid input syntax for type date: "10"
+     *   frecdia omitido      -> Query with RESPONSE_CODE returned no rows
+     *
+     * El primer error dice que ese valor termina en una columna de FECHA -- la
+     * documentación lo declara `numeric` y su ejemplo manda 21, pero el
+     * servidor manda más que la documentación. El segundo aparece recién al
+     * sacarlo, así que la columna además no admite nulos: sin el campo, el
+     * insert falla adentro del procedimiento y no devuelve la fila de estado
+     * que el ERP espera. De ahí el mensaje, que no es de validación sino de
+     * plomería rota.
+     *
+     * Los dos errores se explican con la misma causa, y la conclusión es que
+     * acá "opcional" significa "no lo valido", NO "sé qué hacer si no está".
+     * Por eso ahora va todo lo documentado, con el mismo esqueleto que el
+     * ejemplo oficial: sólo cambian los valores.
+     */
+    frecdia: fechaISO(masDias(ahora, PLAZO_REPOSICION_DIAS)),
+    // Sin fecha de vencimiento propia: la condición de pago (30 días) es la que
+    // la determina. Va `null` explícito y no omitido, por lo de arriba.
+    vencimiento: null,
+    observacionInterna: "",
     observaciones: observaciones.trim().slice(0, 200),
     items,
   };
