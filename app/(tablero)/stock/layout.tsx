@@ -15,6 +15,9 @@ const PESTANAS: Pestana[] = [
   // formato que importa Sigma. Va acá igual porque las cuentas son las mismas
   // —ritmo, cobertura, sugerido— y separarla las duplicaría.
   { href: "/stock/compras", label: "Compras" },
+  // Va al final porque es la única que no mira el stock de hoy sino cómo se
+  // movió: es una auditoría contra Mercado Libre, no una foto del depósito.
+  { href: "/stock/trazabilidad-full", label: "Trazabilidad Full" },
 ];
 
 export default function StockLayout({ children }: LayoutProps<"/stock">) {
