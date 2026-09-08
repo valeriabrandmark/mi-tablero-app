@@ -170,7 +170,8 @@ export default function DashboardTrazabilidadFull() {
       buscar: filtros.buscar,
       todos: filtros.todos ? "1" : undefined,
       soloReclamables: filtros.soloReclamables ? "1" : undefined,
-    },
+      // Ver la nota en DashboardStock: obliga a que estén todas las claves.
+    } satisfies Record<keyof FiltrosTrazabilidad, string | string[] | undefined>,
   );
 
   const cambiar = (f: FiltrosTrazabilidad) => {

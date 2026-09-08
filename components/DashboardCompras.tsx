@@ -89,12 +89,23 @@ export default function DashboardComprasPage() {
     "/api/compras",
     {
       proveedor: filtros.proveedor,
+      grupo: filtros.grupo,
       marca: filtros.marca,
       buscar: filtros.buscar ? [filtros.buscar] : undefined,
       ventana: [String(filtros.ventana ?? VENTANA_POR_DEFECTO)],
       mes: filtros.mes ? [filtros.mes] : undefined,
       todos: filtros.todos ? ["1"] : undefined,
-    },
+      // RED DE SEGURIDAD. `satisfies` obliga a que estén TODAS las claves
+      // de FiltrosCompras: si mañana se agrega un filtro y se olvida acá, esto
+      // rompe el build.
+      //
+      // Existe porque ya pasó. El filtro de Empresa se cableó en el tipo, en
+      // la ruta de API, en el SQL y en el selector -- y faltó esta línea, que
+      // es la que lo mete en la query string. Sin ella el filtro cambiaba pero
+      // la URL no, el efecto no se volvía a disparar y la pantalla quedaba
+      // sombreada para siempre. Ni tsc, ni eslint, ni el build lo veían: para
+      // todos ellos era un objeto válido al que le faltaba una clave.
+    } satisfies Record<keyof FiltrosCompras, string | string[] | undefined>,
     { conOpciones: "1" },
   );
 
