@@ -84,6 +84,29 @@ export const COTIZACION = 1;
 export const ESTADO_PENDIENTE = "P";
 
 /**
+ * EL USUARIO CON EL QUE QUEDA FIRMADA LA ORDEN.
+ *
+ * La documentación dice que `fusuari` y `usuario` "no se leen" y que el
+ * usuario de la cabecera "proviene de la sesión". Pero una llamada por API con
+ * token NO TIENE SESIÓN: no hay de dónde sacarlo. Si esa columna es
+ * obligatoria en la base, el insert falla adentro del procedimiento y el ERP
+ * contesta "Query with RESPONSE_CODE returned no rows" -- que es exactamente
+ * el error que quedó cuando ya todos los campos documentados estaban bien.
+ *
+ * Es la tercera vez que la documentación de este endpoint dice una cosa y el
+ * servidor hace otra, después de `frecdia` (declarado numérico, resultó fecha)
+ * y de "opcional" (que resultó ser "no lo valido").
+ *
+ * 3 es ANA.M, la persona que compra. Va acá y no como parámetro de la pantalla
+ * porque hoy Compras la ve un solo rol; el día que la vea más de una persona,
+ * esto tiene que salir del usuario que apretó el botón y no de una constante.
+ */
+export const USUARIO_SIGMA = 3;
+
+/** El otro campo de usuario del ejemplo. Va en 0, como ahí. */
+export const FUSUARI_SIGMA = 0;
+
+/**
  * Qué empresa compra, según el grupo del proveedor.
  *
  * Son los mismos códigos que `lib/constantes.ts` usa para mostrar nombres, y
@@ -115,6 +138,8 @@ export type ItemSigma = {
 export type OrdenSigma = {
   empresa: string;
   proveedorId: string;
+  fusuari: number;
+  usuario: number;
   fechaCarga: string;
   fechaPedido: string;
   depositoRecepcion: string;
@@ -298,6 +323,8 @@ export function armarOrdenSigma(
   return {
     empresa: EMPRESA_POR_GRUPO[grupo ?? ""] ?? EMPRESA_POR_GRUPO["QUO MKT"],
     proveedorId,
+    fusuari: FUSUARI_SIGMA,
+    usuario: USUARIO_SIGMA,
     fechaCarga: fecha,
     fechaPedido: fecha,
     depositoRecepcion: DEPOSITO_RECEPCION,
