@@ -1,5 +1,6 @@
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
+import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import { PROVEEDORES_NO_MERCADERIA } from "@/lib/stock";
 import {
   DIAS_PARA_LLEGAR_A_FULL,
@@ -31,10 +32,6 @@ import type {
  * `seller_custom_field`, que esta vacio en casi todas.
  */
 
-const SKU_DE_PUBLICACION = `(select a->>'value_name'
-     from jsonb_array_elements(p.attributes::jsonb) a
-    where a->>'id' = 'SELLER_SKU'
-    limit 1)`;
 
 /**
  * $1 es la fecha desde la que se cuenta: la linea de base.
@@ -46,11 +43,7 @@ const SKU_DE_PUBLICACION = `(select a->>'value_name'
  */
 const BASE = `
 with por_inv as (
-  select p.inventory_id, max(${SKU_DE_PUBLICACION}) as sku
-  from bronze.ml_publicaciones p
-  where p."shipping.logistic_type" = 'fulfillment'
-    and p.inventory_id is not null
-  group by p.inventory_id
+  ${POR_INVENTARIO_SKU}
 ),
 declarado as (
   select h.fecha, i.sku, sum(h.total) as total

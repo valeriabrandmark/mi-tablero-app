@@ -1,5 +1,6 @@
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
+import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import { CANAL_MELI } from "@/lib/meli";
 import { UMBRAL_PARADO, UMBRALES_TARJETAS, tramoDe } from "@/lib/stock-full";
 import type {
@@ -25,12 +26,6 @@ import type {
  * hace exactamente el mismo rodeo, por lo mismo.
  */
 
-/** El SKU de una publicación, sacado del array de atributos. */
-const SKU_DE_PUBLICACION = `(select a->>'value_name'
-     from jsonb_array_elements(p.attributes::jsonb) a
-    where a->>'id' = 'SELLER_SKU'
-    limit 1)`;
-
 /**
  * Un renglón por inventario, no por publicación.
  *
@@ -40,11 +35,15 @@ const SKU_DE_PUBLICACION = `(select a->>'value_name'
  * doble.
  */
 const POR_INVENTARIO = `
+  -- El SKU sale del mapa ya calculado (ver lib/sql-meli.ts); el titulo y el
+  -- precio siguen viniendo de las publicaciones, que es donde viven. Asi esta
+  -- consulta deja de parsear 14 MB de JSON para sacar un solo campo.
   select p.inventory_id,
-         max(${SKU_DE_PUBLICACION}) as sku,
+         max(m.sku)                 as sku,
          max(p.title)               as titulo,
          max(p.price)               as precio_publicado
   from bronze.ml_publicaciones p
+  join (${POR_INVENTARIO_SKU}) m on m.inventory_id = p.inventory_id
   where p."shipping.logistic_type" = 'fulfillment'
     and p.inventory_id is not null
   group by p.inventory_id`;
