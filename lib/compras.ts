@@ -371,6 +371,7 @@ export const COLUMNAS_EXCEL_PROVEEDOR: ColumnaXlsx[] = [
  */
 export const RAZON_SOCIAL_POR_GRUPO: Record<string, string> = {
   "QUO MKT": "Quo Marketing SRL",
+  "NOA COMERCIAL": "Noa Comercial SRL",
 };
 
 export function razonSocial(grupo: string | null | undefined): string {
