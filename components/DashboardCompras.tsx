@@ -91,8 +91,11 @@ function bajar(contenido: BlobPart, nombre: string, tipo: string) {
 
 export default function DashboardComprasPage({
   puedeEnviar,
+  usuarioSigma,
 }: {
   puedeEnviar: boolean;
+  /** Nombre en Sigma de quien va a firmar la orden. `null` fuera de la lista. */
+  usuarioSigma: string | null;
 }) {
   const inicial: FiltrosCompras = {
     ventana: VENTANA_POR_DEFECTO,
@@ -230,6 +233,27 @@ export default function DashboardComprasPage({
     setFiltros(f);
   };
 
+  /**
+   * Vuelve al punto de partida sin recargar la página.
+   *
+   * Es lo que hace falta después de mandar una orden: sin esto la pantalla se
+   * queda con el cartel del resultado y con la orden anterior armada, y la
+   * única salida era F5 --que además vuelve a pedir todos los datos.
+   *
+   * Borrar las ediciones NO deja la pantalla vacía: la orden se DERIVA del
+   * sugerido, así que sin ediciones encima cada artículo vuelve a su cantidad
+   * sugerida. Es exactamente el estado en el que estaba al abrir la sección.
+   */
+  const empezarDeNuevo = () => {
+    setResultado(null);
+    setConfirmando(false);
+    setEdiciones(new Map());
+    setComentario("");
+  };
+
+  /** Saca un renglón de la orden. Cantidad 0 es "no lo pidas", no "pedí cero". */
+  const sacarDeLaOrden = (sku: string) => editar(sku, { cantidad: 0 });
+
   const editar = (sku: string, parche: Partial<RenglonOrden>) => {
     const actual = orden.get(sku);
     if (!actual) return;
@@ -311,6 +335,19 @@ export default function DashboardComprasPage({
     }
     return { renglones, unidades, bultos, bruto, neto, recortados, sinCodigo };
   }, [filas, orden]);
+
+  /**
+   * Los renglones que hoy tienen cantidad, con su nombre. Es lo que se manda, y
+   * también lo que se muestra para poder sacar uno cuando Sigma rechaza la
+   * orden por culpa de un artículo concreto.
+   */
+  const renglonesDeLaOrden = useMemo(
+    () =>
+      filas
+        .map((f) => ({ fila: f, renglon: orden.get(f.sku) }))
+        .filter((r) => (r.renglon?.cantidad ?? 0) > 0),
+    [filas, orden],
+  );
 
   // LAS ÓRDENES SON POR PROVEEDOR. Con dos elegidos el archivo mezclaría
   // proveedores en una sola orden, que es algo que no existe.
@@ -1257,6 +1294,10 @@ export default function DashboardComprasPage({
                   </span>
                   <strong>{fmtMoneda(resumen.neto)}</strong>
                 </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted">Queda a nombre de</span>
+                  <strong>{usuarioSigma ?? "—"}</strong>
+                </div>
                 {RESUMEN_CABECERA.map((c) => (
                   <div key={c.campo} className="flex justify-between gap-3">
                     <span className="text-muted">{c.campo}</span>
@@ -1325,6 +1366,16 @@ export default function DashboardComprasPage({
                       {JSON.stringify(resultado.enviado, null, 2)}
                     </pre>
                   </details>
+                  {/* Sin esto, después de una orden buena la única forma de
+                      armar la siguiente era recargar la página -- y eso vuelve
+                      a pedir todos los datos para nada. */}
+                  <button
+                    type="button"
+                    onClick={empezarDeNuevo}
+                    className="border-line hover:bg-panel-2 text-muted hover:text-ink mt-3 rounded-lg border px-3 py-1.5 text-xs"
+                  >
+                    Formular otra orden
+                  </button>
                 </>
               ) : (
                 <>
@@ -1389,6 +1440,76 @@ export default function DashboardComprasPage({
                       </pre>
                     </details>
                   )}
+
+                  {/* SACAR EL RENGLÓN QUE MOLESTA, SIN VOLVER A LA TABLA.
+                      Sigma rechaza la orden entera por UN artículo --"costo
+                      cero", "no existe"-- y decía cuál, pero había que ir a
+                      buscarlo entre cientos de filas para vaciarle la cantidad.
+                      Acá está la orden como quedó, y cada X lo saca.
+
+                      SÓLO CUANDO NADA SALIÓ. Si ya se le habló a Sigma, editar
+                      y reintentar es cargar una segunda orden; ahí abajo va
+                      "formular otra" en vez de "reintentar". */}
+                  {!resultado.mandado && renglonesDeLaOrden.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-xs font-medium">
+                        La orden como quedó (
+                        {fmtNumero(renglonesDeLaOrden.length)} renglones). Sacá
+                        el que sobra y volvé a mandarla:
+                      </p>
+                      <ul className="border-line mt-1 max-h-48 divide-y divide-white/5 overflow-auto rounded-md border">
+                        {renglonesDeLaOrden.map(({ fila, renglon }) => (
+                          <li
+                            key={fila.sku}
+                            className="flex items-center gap-2 px-2 py-1 text-xs"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => sacarDeLaOrden(fila.sku)}
+                              aria-label={`Sacar ${fila.sku} de la orden`}
+                              title="Sacar este renglón de la orden"
+                              className="border-line text-muted hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-300 shrink-0 rounded border px-1.5 leading-5"
+                            >
+                              ✕
+                            </button>
+                            <span className="font-mono shrink-0">
+                              {fila.sku}
+                            </span>
+                            <span className="text-muted truncate">
+                              {fila.producto ?? "—"}
+                            </span>
+                            <span className="ml-auto shrink-0 tabular-nums">
+                              {fmtNumero(renglon!.cantidad)}{" "}
+                              {UNIDADES_COMPRA.find(
+                                (u) => u.clave === renglon!.unidad,
+                              )?.label ?? renglon!.unidad}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {!resultado.mandado && (
+                      <button
+                        type="button"
+                        onClick={enviarASigma}
+                        disabled={enviando || renglonesDeLaOrden.length === 0}
+                        className="border-c1 bg-c1 text-panel hover:bg-c1/85 rounded-lg border px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+                      >
+                        {enviando ? "Mandando…" : "Reintentar"}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={empezarDeNuevo}
+                      disabled={enviando}
+                      className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40"
+                    >
+                      Formular otra orden
+                    </button>
+                  </div>
                 </>
               )}
             </Aviso>

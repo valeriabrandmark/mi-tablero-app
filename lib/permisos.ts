@@ -1,4 +1,8 @@
-import { slugVendedor, VENDEDORES_OBJETIVOS, type VendedorObjetivos } from "@/lib/constantes";
+import {
+  slugVendedor,
+  VENDEDORES_OBJETIVOS,
+  type VendedorObjetivos,
+} from "@/lib/constantes";
 
 /**
  * Permisos del tablero.
@@ -51,7 +55,10 @@ export type Rol = (typeof ROLES)[number];
  * usuario quedaría sin acceso y el motivo no se vería por ningún lado.
  */
 function normalizarRol(valor: string): string {
-  return valor.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return valor
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
 }
 
 // Un miembro por rol y no `{ rol: "superadmin" | "admin" | "supervisor" }`:
@@ -65,7 +72,10 @@ export type Permiso =
   | { rol: "vendedor"; vendedor: VendedorObjetivos };
 
 /** Forma mínima del usuario de Supabase que hace falta acá. */
-type UsuarioConClaim = { app_metadata?: Record<string, unknown> | null } | null | undefined;
+type UsuarioConClaim =
+  | { app_metadata?: Record<string, unknown> | null }
+  | null
+  | undefined;
 
 function texto(valor: unknown): string | null {
   return typeof valor === "string" && valor.trim() !== "" ? valor.trim() : null;
@@ -82,7 +92,8 @@ export function permisoDelUsuario(usuario: UsuarioConClaim): Permiso | null {
 
   const vendedorCrudo = texto(meta.vendedor);
   const vendedor = vendedorCrudo
-    ? (VENDEDORES_OBJETIVOS.find((v) => v === vendedorCrudo.toUpperCase()) ?? null)
+    ? (VENDEDORES_OBJETIVOS.find((v) => v === vendedorCrudo.toUpperCase()) ??
+      null)
     : null;
 
   // Sin `rol` pero con `vendedor` se asume vendedor: es la forma vieja del
@@ -96,10 +107,12 @@ export function permisoDelUsuario(usuario: UsuarioConClaim): Permiso | null {
   if (rol === "vendedor") {
     return vendedor ? { rol, vendedor } : null;
   }
-  return { rol };   // superadmin | admin | supervisor | responsable_meli
+  return { rol }; // superadmin | admin | supervisor | responsable_meli
 }
 
-const PAGINAS_OBJETIVOS = VENDEDORES_OBJETIVOS.map((v) => `/objetivos/${slugVendedor(v)}`);
+const PAGINAS_OBJETIVOS = VENDEDORES_OBJETIVOS.map(
+  (v) => `/objetivos/${slugVendedor(v)}`,
+);
 
 /**
  * Rutas que ve cualquiera con permiso válido, sin importar el rol: son de la
@@ -120,7 +133,9 @@ export const INICIO_MINORISTA = `${RAIZ_MINORISTA}/mercado-libre`;
  * tener que salir de este prefijo y tener su propia regla.
  */
 function esDeMinorista(pathname: string): boolean {
-  return pathname === RAIZ_MINORISTA || pathname.startsWith(`${RAIZ_MINORISTA}/`);
+  return (
+    pathname === RAIZ_MINORISTA || pathname.startsWith(`${RAIZ_MINORISTA}/`)
+  );
 }
 
 /**
@@ -139,7 +154,9 @@ const APIS_MINORISTA = [
 ];
 
 function esApiMinorista(pathname: string): boolean {
-  return APIS_MINORISTA.some((r) => pathname === r || pathname.startsWith(`${r}/`));
+  return APIS_MINORISTA.some(
+    (r) => pathname === r || pathname.startsWith(`${r}/`),
+  );
 }
 
 /**
@@ -154,7 +171,8 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   if (PAGINAS_DE_CUENTA.includes(pathname)) return true;
   if (permiso.rol === "superadmin" || permiso.rol === "admin") return true;
 
-  const esDeObjetivos = pathname === "/objetivos" || PAGINAS_OBJETIVOS.includes(pathname);
+  const esDeObjetivos =
+    pathname === "/objetivos" || PAGINAS_OBJETIVOS.includes(pathname);
 
   if (permiso.rol === "responsable_meli") {
     return esDeMinorista(pathname) || esApiMinorista(pathname);
@@ -166,7 +184,11 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
 
   // Vendedor: solo lo suyo.
   const suya = `/objetivos/${slugVendedor(permiso.vendedor)}`;
-  return pathname === suya || pathname === "/objetivos" || pathname === "/api/objetivos";
+  return (
+    pathname === suya ||
+    pathname === "/objetivos" ||
+    pathname === "/api/objetivos"
+  );
 }
 
 /**
@@ -184,9 +206,7 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
  * PARA PUBLICAR UNA: se saca de esta lista. Nada más. Sin tocar permisos, ni
  * el nav, ni la página — que es justamente el punto de tenerlo en un solo lado.
  */
-const PAGINAS_EN_CONSTRUCCION = [
-  "/venta-minorista/tienda-nube/analytics",
-];
+const PAGINAS_EN_CONSTRUCCION = ["/venta-minorista/tienda-nube/analytics"];
 
 /** `true` si la página todavía se está construyendo. */
 export function enConstruccion(pathname: string): boolean {
@@ -208,43 +228,80 @@ export function puedeVerBorradores(permiso: Permiso | null): boolean {
 }
 
 /**
+ * QUIÉN PUEDE CARGAR ÓRDENES EN EL ERP, Y CON QUÉ USUARIO DE SIGMA.
+ *
+ * Es una lista de personas y NO un rol, que es lo que lo hace distinto de todo
+ * el resto de este archivo. Tres motivos, y el tercero es el que decide:
+ *
+ * 1. NO ALCANZA CON EL ROL. El encargado de compras es `admin`, y ese rol está
+ *    definido como "ve todo, sin editar" -- se lo separó a propósito el día que
+ *    entró a Operaciones. Abrirle el ERP a TODO el rol le daría la capacidad a
+ *    cualquier admin futuro, que no es lo que se pidió.
+ *
+ * 2. UNA ORDEN NO TIENE DESHACER. Se arregla a mano en Sigma. Para algo así,
+ *    una lista corta que se lee de un vistazo vale más que una regla.
+ *
+ * 3. HACE FALTA EL NÚMERO IGUAL. Sigma pide un `usuario` numérico en el cuerpo
+ *    de la orden, y ese número es de la persona: la orden queda firmada con él.
+ *    Ese dato hay que tenerlo en algún lado sí o sí, y una vez que existe la
+ *    tabla, preguntarle a ella "¿puede mandar?" sale gratis y no puede
+ *    contradecir a "¿con qué número?".
+ *
+ * El número sale de Sigma y no se puede deducir de nada nuestro. Para sumar a
+ * alguien: su mail de acceso al tablero y su número de usuario en Sigma.
+ *
+ * El `admin` que no esté acá SÍ baja el TXT, el CSV y el Excel: eso es llevarse
+ * un archivo, y lo que pase después lo decide una persona.
+ */
+export const USUARIOS_ERP: Record<string, { sigma: number; nombre: string }> = {
+  "a.maldonado@brandmark.com.ar": { sigma: 3, nombre: "ANA.M" },
+  "alejandrogray@gmail.com": { sigma: 8, nombre: "ALEJANDRO.G" },
+};
+
+/** El usuario de Sigma de esa persona, o `null` si no está habilitada. */
+export function usuarioSigmaDe(email: string | null | undefined) {
+  if (!email) return null;
+  return USUARIOS_ERP[email.trim().toLowerCase()] ?? null;
+}
+
+/**
  * Quién puede escribir en el ERP: mandar una orden de compra a Sigma.
  *
- * ES UNA FUNCIÓN APARTE Y NO `puedeVerBorradores`, aunque hoy devuelvan lo
- * mismo. Hasta ahora Compras era un borrador y el único que la veía era el
- * `superadmin`, así que reusar esa función alcanzaba. Publicada la sección,
- * las dos preguntas se separaron: "¿ve una página a medio hacer?" y "¿puede
- * cargar una orden en el ERP?" dejaron de tener la misma respuesta el día que
- * el `admin` entró a Operaciones.
- *
- * Y la respuesta correcta para el `admin` es NO. El rol está definido como "ve
- * todo, sin editar", y cargar una orden de compra en Sigma es lo más editar
- * que hace este tablero: no tiene deshacer y se arregla a mano en el ERP.
- *
- * El `admin` sí baja el TXT, el CSV y el Excel: eso es llevarse un archivo, y
- * lo que pase después lo decide una persona.
+ * El rol sigue contando: la persona tiene que poder ver Compras. La lista dice
+ * quién, además, puede apretar el botón.
  */
-export function puedeEscribirEnElERP(permiso: Permiso | null): boolean {
-  return permiso?.rol === "superadmin";
+export function puedeEscribirEnElERP(
+  permiso: Permiso | null,
+  email: string | null | undefined,
+): boolean {
+  if (!permiso) return false;
+  if (permiso.rol !== "superadmin" && permiso.rol !== "admin") return false;
+  return usuarioSigmaDe(email) != null;
 }
 
 /** Adónde mandar al usuario cuando entra, o cuando pide algo que no puede ver. */
 export function paginaInicial(permiso: Permiso | null): string {
   if (!permiso) return "/login";
-  if (permiso.rol === "vendedor") return `/objetivos/${slugVendedor(permiso.vendedor)}`;
+  if (permiso.rol === "vendedor")
+    return `/objetivos/${slugVendedor(permiso.vendedor)}`;
   if (permiso.rol === "supervisor") return PAGINAS_OBJETIVOS[0];
   if (permiso.rol === "responsable_meli") return INICIO_MINORISTA;
   return "/ventas-mayoristas";
 }
 
 /** `true` si el usuario puede ver la página de objetivos de ese vendedor. */
-export function puedeVerVendedor(permiso: Permiso | null, vendedor: string): boolean {
+export function puedeVerVendedor(
+  permiso: Permiso | null,
+  vendedor: string,
+): boolean {
   if (!permiso) return false;
   if (permiso.rol === "vendedor") return permiso.vendedor === vendedor;
   // Se lista explícitamente en vez de `return true`: con el `true` de antes,
   // cada rol nuevo pasaba a ver los objetivos de los cuatro vendedores sin que
   // nadie lo decidiera — que es justo lo que NO tiene que ver el de Meli.
   return (
-    permiso.rol === "superadmin" || permiso.rol === "admin" || permiso.rol === "supervisor"
+    permiso.rol === "superadmin" ||
+    permiso.rol === "admin" ||
+    permiso.rol === "supervisor"
   );
 }
