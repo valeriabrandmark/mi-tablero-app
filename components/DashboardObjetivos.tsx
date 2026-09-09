@@ -7,10 +7,18 @@ import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
-import { fmtMes, fmtMetrica, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
+import {
+  fmtFechaCortaConAnio,
+  fmtMes,
+  fmtMetrica,
+  fmtMoneda,
+  fmtNumero,
+  fmtPct,
+} from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
+  ComprobanteVencido,
   DashboardObjetivos,
   FilaComprobanteObjetivo,
   FiltrosObjetivos,
@@ -76,6 +84,77 @@ function columnasComprobantes(
   ];
 }
 
+/**
+ * Los comprobantes que están detrás de la tarjeta de deuda vencida.
+ *
+ * La tarjeta dice CUÁNTA plata está vencida; esto dice de quién y desde cuándo,
+ * que es lo que hace falta para ir a cobrarla.
+ */
+function columnasVencidos(
+  filas: ComprobanteVencido[],
+): Columna<ComprobanteVencido>[] {
+  return [
+    {
+      titulo: "Comprobante",
+      ayuda: "Número del comprobante impago, tal como está en Sigma.",
+      celda: (f) => <span className="font-mono">{f.comprobante ?? "—"}</span>,
+      orden: (f) => f.comprobante,
+    },
+    {
+      titulo: "Fecha",
+      ayuda: "Cuándo se emitió el comprobante, no cuándo venció.",
+      celda: (f) => (f.fecha ? fmtFechaCortaConAnio(f.fecha) : "—"),
+      orden: (f) => f.fecha,
+    },
+    {
+      titulo: "Venció el",
+      ayuda: "La fecha de vencimiento, que ya pasó.",
+      celda: (f) => (f.vencimiento ? fmtFechaCortaConAnio(f.vencimiento) : "—"),
+      orden: (f) => f.vencimiento,
+    },
+    {
+      titulo: "Cliente",
+      celda: (f) => (
+        <span className="block max-w-[180px] truncate sm:max-w-[280px]">
+          {f.cliente ?? "—"}
+        </span>
+      ),
+      orden: (f) => f.cliente,
+    },
+    {
+      titulo: "Total del comprobante",
+      ayuda: "Lo que decía el comprobante cuando se emitió.",
+      celda: (f) => fmtMoneda(f.total),
+      numerica: true,
+      orden: (f) => f.total,
+      total: fmtMoneda(sumar(filas, (f) => f.total)),
+    },
+    {
+      titulo: "Adeuda",
+      ayuda:
+        "Lo que queda debiendo hoy: el total menos lo que se haya pagado a cuenta. Es el número con el que se va a cobrar.",
+      celda: (f) => (
+        <strong style={{ color: TEMA.negativo }}>{fmtMoneda(f.adeuda)}</strong>
+      ),
+      numerica: true,
+      orden: (f) => f.adeuda,
+      total: fmtMoneda(sumar(filas, (f) => f.adeuda)),
+    },
+    {
+      titulo: "Días vencido",
+      ayuda:
+        "Días desde el vencimiento. Lo calcula el orquestador, así que cuenta igual que en Cuentas Corrientes.",
+      celda: (f) => (
+        <span style={{ color: f.diasVencido > 90 ? TEMA.negativo : undefined }}>
+          {fmtNumero(f.diasVencido)}
+        </span>
+      ),
+      numerica: true,
+      orden: (f) => f.diasVencido,
+    },
+  ];
+}
+
 export default function DashboardObjetivosPage({
   vendedor,
   mesInicial,
@@ -88,6 +167,10 @@ export default function DashboardObjetivosPage({
     vendedor,
     mes: [mesInicial],
   });
+
+  // El texto tipeado vive aparte del filtro para no disparar una consulta por
+  // tecla: se manda al enviar el formulario o al salir del campo.
+  const [buscado, setBuscado] = useState(filtros.buscar ?? "");
 
   const { data, cargando, error, recargar, empezarCarga } =
     useDatosTablero<Respuesta>(
@@ -176,8 +259,33 @@ export default function DashboardObjetivosPage({
           formato={fmtMes}
           todos="Todos los meses"
         />
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            cambiar({ ...filtros, buscar: buscado.trim() || undefined });
+          }}
+          className="flex flex-col gap-1"
+        >
+          <label className="text-muted text-[11px]" htmlFor="buscar-objetivos">
+            Buscar
+          </label>
+          <input
+            id="buscar-objetivos"
+            value={buscado}
+            onChange={(e) => setBuscado(e.target.value)}
+            onBlur={() =>
+              cambiar({ ...filtros, buscar: buscado.trim() || undefined })
+            }
+            placeholder="Cliente o comprobante"
+            title="Busca en las dos columnas a la vez. Recorta las ventas, no el objetivo."
+            className="border-line bg-panel-2 text-ink placeholder:text-muted focus:border-c1 w-52 rounded-lg border px-2.5 py-1.5 text-xs outline-none"
+          />
+        </form>
         <BotonLimpiar
-          onClick={() => cambiar({ vendedor, mes: [mesInicial] })}
+          onClick={() => {
+            setBuscado("");
+            cambiar({ vendedor, mes: [mesInicial] });
+          }}
           deshabilitado={sinCambios}
         />
 
@@ -312,6 +420,61 @@ export default function DashboardObjetivosPage({
                   ? filtros.cliente.includes(f.cliente ?? "")
                   : false
               }
+            />
+          </Panel>
+
+          {/* EL DETALLE DE LA TARJETA DE VENCIDO.
+              No se mueve con el selector de mes, igual que la tarjeta: las dos
+              salen de la foto de cuentas corrientes al momento de la carga y no
+              de un acumulado del mes comercial. La nota lo dice para que nadie
+              lea el número como "vencido en septiembre". */}
+          <Panel
+            titulo="Comprobantes vencidos"
+            nota={
+              data.comprobantesVencidos.length === 0
+                ? "Sin comprobantes vencidos"
+                : `${fmtNumero(data.comprobantesVencidos.length)} comprobantes · foto al ${
+                    vencido?.fechaCarga ?? "—"
+                  } · no cambia con el mes`
+            }
+          >
+            {/* POR QUÉ EL TOTAL PUEDE NO DAR IGUAL QUE LA TARJETA, dicho acá y
+                no escondido. La tarjeta sale de un saldo por CLIENTE ya
+                consolidado; esta tabla, de una fila por COMPROBANTE. Un pago a
+                cuenta que todavía no se imputó a ninguna factura baja el saldo
+                del cliente y no baja ninguna fila de acá.
+
+                No es un caso raro: EDUARDO VICENTE CASTILLO tiene $568.281 en
+                comprobantes vencidos y un saldo consolidado NEGATIVO de
+                -$84.527. Sin esta nota, la diferencia parece un error del
+                tablero.
+
+                Se muestra sólo cuando efectivamente difieren, y por más de un
+                peso: avisar de una diferencia de centavos sería ruido. */}
+            {vencido != null &&
+              Math.abs(
+                sumar(data.comprobantesVencidos, (f) => f.adeuda) -
+                  vencido.deudaVencida,
+              ) > 1 && (
+                <p className="text-muted mb-2 text-[11px] leading-tight">
+                  El total de acá abajo (
+                  {fmtMoneda(sumar(data.comprobantesVencidos, (f) => f.adeuda))}
+                  ) no coincide con la tarjeta de arriba (
+                  {fmtMoneda(vencido.deudaVencida)}) porque{" "}
+                  <strong>son dos cortes distintos</strong>: la tarjeta es el
+                  saldo por cliente ya consolidado y esto es comprobante por
+                  comprobante. Un pago a cuenta que todavía no se imputó a
+                  ninguna factura baja el saldo del cliente y no baja ninguna
+                  fila de esta tabla. Para ir a cobrar sirve ésta; para saber
+                  cuánto debe el cliente, la de arriba.
+                </p>
+              )}
+            <Tabla
+              filas={data.comprobantesVencidos}
+              columnas={columnasVencidos(data.comprobantesVencidos)}
+              etiquetaTotal="Total vencido"
+              clave={(f, i) => `${f.comprobante}-${i}`}
+              vacio="Este vendedor no tiene comprobantes vencidos impagos."
             />
           </Panel>
         </div>

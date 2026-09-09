@@ -291,6 +291,33 @@ export type FiltrosObjetivos = {
    * eso el avance sigue midiéndose contra la meta entera y la pantalla lo dice.
    */
   cliente?: string[];
+  /**
+   * Texto libre. Va contra el nombre del cliente Y el número de comprobante a
+   * la vez, porque quien busca tiene uno de los dos a mano y no quiere elegir
+   * contra cuál compara. Recorta las VENTAS, igual que `cliente`.
+   */
+  buscar?: string;
+};
+
+/**
+ * Un comprobante impago cuyo vencimiento ya pasó.
+ *
+ * Sale de `bronze.cuentas_corrientes_aging`, que es UNA FOTO al momento de la
+ * carga y no un acumulado del mes: por eso esta tabla no se mueve con el
+ * selector de mes, igual que la tarjeta de vencido de arriba.
+ */
+export type ComprobanteVencido = {
+  comprobante: string | null;
+  /** Del comprobante, no del vencimiento. */
+  fecha: string | null;
+  vencimiento: string | null;
+  cliente: string | null;
+  empresa: string | null;
+  /** Lo que decía el comprobante. */
+  total: number;
+  /** Lo que queda debiendo: el total menos lo que se haya pagado a cuenta. */
+  adeuda: number;
+  diasVencido: number;
 };
 
 /** Totales de una métrica. Nunca se mezclan dos métricas en un mismo total. */
@@ -362,6 +389,8 @@ export type DashboardObjetivos = {
   resumen: ResumenMetrica[];
   /** Null si el vendedor todavía no tiene código de SIGMA. */
   vencido: VencidoVendedor | null;
+  /** Los comprobantes que están detrás de ese número, uno por uno. */
+  comprobantesVencidos: ComprobanteVencido[];
   porGrupo: FilaObjetivo[];
   serieFacturacion: PuntoFacturacion[];
   comprobantes: FilaComprobanteObjetivo[];
