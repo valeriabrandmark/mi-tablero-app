@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getDashboardObjetivos, getOpcionesObjetivos } from "@/lib/queries-objetivos";
+import {
+  getDashboardObjetivos,
+  getOpcionesObjetivos,
+} from "@/lib/queries-objetivos";
 import { VENDEDORES_OBJETIVOS } from "@/lib/constantes";
 import { lista } from "@/lib/filtros";
 import { permisoDelUsuario, puedeVerVendedor } from "@/lib/permisos";
@@ -37,6 +40,7 @@ export async function GET(request: NextRequest) {
     mes: lista(sp, "mes"),
     grupo: lista(sp, "grupo"),
     cliente: lista(sp, "cliente"),
+    buscar: sp.get("buscar")?.slice(0, 80) || undefined,
   };
 
   try {
@@ -46,7 +50,8 @@ export async function GET(request: NextRequest) {
     ]);
     return NextResponse.json({ ...data, opciones });
   } catch (error) {
-    const mensaje = error instanceof Error ? error.message : "Error desconocido";
+    const mensaje =
+      error instanceof Error ? error.message : "Error desconocido";
     console.error("[api/objetivos]", error);
     return NextResponse.json({ error: mensaje }, { status: 500 });
   }
