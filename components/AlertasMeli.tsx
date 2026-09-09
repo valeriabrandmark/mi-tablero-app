@@ -175,6 +175,38 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
       total: fmtNumero(sumar(filas, (f) => f.cantidad)),
     },
     {
+      titulo: "Oferta prov. %",
+      ayuda:
+        "Lo que el proveedor nos descontó a nosotros el mes de esa venta (columna J del Excel de costos). Es del COSTO, no de la venta.",
+      celda: (f) =>
+        f.ofertaProveedorPct == null ? "—" : fmtPct(f.ofertaProveedorPct / 100),
+      numerica: true,
+      orden: (f) => f.ofertaProveedorPct,
+      total: fmtPct(
+        promedioPonderado(
+          filas.filter((f) => f.ofertaProveedorPct != null),
+          (f) => ((f.ofertaProveedorPct ?? 0) / 100) * f.cantidad,
+          (f) => f.cantidad,
+        ),
+      ),
+    },
+    {
+      titulo: "Oferta propia %",
+      ayuda:
+        "Lo que ponemos nosotros encima del descuento del proveedor (columna K del Excel de costos).",
+      celda: (f) =>
+        f.ofertaPropiaPct == null ? "—" : fmtPct(f.ofertaPropiaPct / 100),
+      numerica: true,
+      orden: (f) => f.ofertaPropiaPct,
+      total: fmtPct(
+        promedioPonderado(
+          filas.filter((f) => f.ofertaPropiaPct != null),
+          (f) => ((f.ofertaPropiaPct ?? 0) / 100) * f.cantidad,
+          (f) => f.cantidad,
+        ),
+      ),
+    },
+    {
       titulo: "Venta c/IVA",
       ayuda: "Lo que pagó el comprador, IVA incluido.",
       celda: (f) => fmtMoneda(f.ventaCiva),

@@ -349,6 +349,41 @@ function columnasArticulos(
       total: fmtNumero(sumar(filas, (a) => a.unidades)),
     },
     {
+      titulo: "Oferta prov. %",
+      ayuda:
+        "Lo que el proveedor nos descontó a nosotros ese mes (columna J del Excel de costos). Es del COSTO, no de la venta. Promedio ponderado por unidades; sólo cuentan los SKU con costo cargado.",
+      celda: (a) =>
+        a.ofertaProveedorPct == null ? "—" : fmtPct(a.ofertaProveedorPct / 100),
+      numerica: true,
+      orden: (a) => a.ofertaProveedorPct,
+      // El cero SÍ entra: la oferta del proveedor está cargada para casi todos
+      // los SKU y "0 %" quiere decir que ese mes no hubo oferta, que es un dato.
+      // Sólo quedan afuera los que no tienen el costo cargado.
+      total: fmtPct(
+        promedioPonderado(
+          filas.filter((a) => a.ofertaProveedorPct != null),
+          (a) => ((a.ofertaProveedorPct ?? 0) / 100) * a.unidades,
+          (a) => a.unidades,
+        ),
+      ),
+    },
+    {
+      titulo: "Oferta propia %",
+      ayuda:
+        "Lo que ponemos nosotros encima del descuento del proveedor (columna K del Excel de costos). Mismo promedio ponderado.",
+      celda: (a) =>
+        a.ofertaPropiaPct == null ? "—" : fmtPct(a.ofertaPropiaPct / 100),
+      numerica: true,
+      orden: (a) => a.ofertaPropiaPct,
+      total: fmtPct(
+        promedioPonderado(
+          filas.filter((a) => a.ofertaPropiaPct != null),
+          (a) => ((a.ofertaPropiaPct ?? 0) / 100) * a.unidades,
+          (a) => a.unidades,
+        ),
+      ),
+    },
+    {
       titulo: "Venta c/IVA",
       ayuda: "Lo que pagó el comprador, IVA incluido.",
       celda: (a) => fmtMoneda(a.ventaCiva),
