@@ -608,7 +608,17 @@ export function nombreArchivo(proveedor: string, extension: string): string {
  * cuenta vive en este archivo. Si mañana cambia el factor, las dos cosas se
  * tocan juntas.
  */
-export function porQueSugerido(f: FilaCompra): string[] {
+export function porQueSugerido(
+  f: FilaCompra,
+  /**
+   * Los días de cobertura con los que se calculó ESTA fila. Es obligatorio a
+   * propósito: con un valor por defecto, el día que alguien llame a esta
+   * función sin pasarlo el tooltip diría "30 días" sobre un sugerido calculado
+   * para 90, y un número que se explica con la cuenta equivocada es peor que
+   * uno sin explicar.
+   */
+  coberturaDias: number,
+): string[] {
   if (f.cobertura == null) {
     return [
       "Sin ventas en la ventana: no hay ritmo con el que calcular nada.",
@@ -619,7 +629,7 @@ export function porQueSugerido(f: FilaCompra): string[] {
   const l: string[] = [
     `Se vende ${f.ritmoDiario.toFixed(2)} u. por día y hay ${Math.round(f.total)} u.`,
     `Alcanza para ${Math.round(f.cobertura)} días.`,
-    `Para cubrir ${COBERTURA_OBJETIVO_DIAS} días de objetivo + ${PLAZO_REPOSICION_DIAS}` +
+    `Para cubrir ${coberturaDias} días de compra + ${PLAZO_REPOSICION_DIAS}` +
       ` de reposición faltan ${Math.ceil(f.sugeridoBase)} u.`,
   ];
 

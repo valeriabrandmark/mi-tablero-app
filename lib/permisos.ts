@@ -29,7 +29,13 @@ import {
  *
  * `admin` y `superadmin` ven las mismas páginas, pero YA NO ES LO MISMO: las
  * páginas en construcción las ve sólo el `superadmin` (ver `enConstruccion` y
- * `puedeVerBorradores` más abajo). Ésa es hoy la única diferencia entre los dos
+ * `puedeVerBorradores` más abajo).
+ *
+ * Y HAY UNA TERCERA COSA QUE NO SALE DEL ROL: cargar órdenes en el ERP. Eso lo
+ * decide la lista `USUARIOS_ERP` de más abajo, persona por persona, porque
+ * además de "¿puede?" hace falta saber "¿con qué número de Sigma se firma?".
+ * Un `admin` puede o no puede según esté en esa lista. La diferencia entre los
+ * dos roles
  * roles. El día que se pueda editar algo desde la pantalla, va a haber otra.
  *
  * UN USUARIO SIN CLAIM NO VE NADA. Es a propósito: si alguien crea un usuario

@@ -1527,6 +1527,15 @@ export type DashboardCompras = {
   filas: FilaCompra[];
   recortada: boolean;
   ventana: number;
+  /**
+   * Los días de cobertura con los que se calculó el sugerido.
+   *
+   * LO DEVUELVE EL SERVIDOR aunque la pantalla ya los eligió, por el mismo
+   * motivo que `ventana` y `mesPasado`: mientras una consulta viaja, el filtro
+   * local ya cambió, y explicar un número con un parámetro que no es el que se
+   * usó es peor que no explicarlo.
+   */
+  cobertura: number;
   /** El mes calendario pasado (`YYYY-MM`), que es de donde salen las columnas
    * de rentabilidad y de compra del mes pasado. Lo calcula el servidor para que
    * la pantalla no lo vuelva a deducir y los dos puedan discrepar un día 1. */

@@ -580,6 +580,7 @@ export async function getDashboardCompras(
     recortada: filas.length === TOPE,
     mesPasado,
     ventana: f.ventana ?? VENTANA_POR_DEFECTO,
+    cobertura: coberturaValida(f.cobertura),
     mes,
     meses,
     sellInCargado,

@@ -63,10 +63,10 @@ export function descuentosAgrupados(t: string): string {
  * Los dos descuentos DE UNA LÍNEA, sin agrupar. Sin promedio ponderado porque
  * no hay nada que promediar: es una venta sola.
  *
- * `t` queda sin usar, y se pide igual para que las dos funciones se llamen
- * igual desde afuera y nadie tenga que acordarse de cuál lleva tabla.
+ * No pide la tabla de ventas --a diferencia de `descuentosAgrupados`-- porque
+ * no la necesita: los dos valores salen enteros del join. Se le pasaba un
+ * parámetro sin usar para que las dos se llamaran igual, y eso obliga a
+ * inventar un argumento que no significa nada.
  */
-export function descuentosDeLinea(_t: string): string {
-  return `ch.ch_oferta_prov::float8   as "ofertaProveedorPct",
+export const DESCUENTOS_DE_LINEA = `ch.ch_oferta_prov::float8   as "ofertaProveedorPct",
             ch.ch_oferta_propia::float8 as "ofertaPropiaPct"`;
-}

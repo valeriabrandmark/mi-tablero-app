@@ -3,8 +3,8 @@ import { query, queryOne } from "@/lib/db";
 import { agregarFiltro, vacio } from "@/lib/filtros";
 import { hoyArgentina, sumarDias } from "@/lib/rangos";
 import {
+  DESCUENTOS_DE_LINEA,
   descuentosAgrupados,
-  descuentosDeLinea,
   joinCostos,
 } from "@/lib/sql-descuentos";
 import {
@@ -869,7 +869,7 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
             nro_orden::bigint::text          as nro_orden,
             sku, producto, proveedor, marca,
             cantidad,
-            ${descuentosDeLinea("fv")},
+            ${DESCUENTOS_DE_LINEA},
             ${VENTA_CIVA}                    as venta_civa,
             ${VENTA_SIVA}                    as venta_siva,
             costo_unitario,
