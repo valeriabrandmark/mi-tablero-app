@@ -956,6 +956,8 @@ export type FiltrosStockFull = {
   proveedor?: string[];
   marca?: string[];
   sku?: string[];
+  /** Filtro cruzado: sale de hacer click en una barra del gráfico de tramos. */
+  tramo?: string;
   /** "Sin vender hace más de N días". El que nunca vendió entra siempre. */
   minDias?: number;
 };
@@ -964,14 +966,44 @@ export type KpisStockFull = {
   skus: number;
   /** Unidades que Mercado Libre puede vender. */
   disponible: number;
-  /** En el depósito pero NO vendibles: dañadas, en revisión, reservadas. */
+  /**
+   * En el depósito pero NO vendibles: dañadas, en revisión, reservadas.
+   *
+   * CUENTA TAMBIÉN LOS ARTÍCULOS QUE ESTÁN ENTEROS ASÍ, que es lo que la hacía
+   * mentir: el resto de la pantalla mira sólo stock vendible, y con ese corte
+   * un artículo con cero disponibles y tres trabadas no existía. Eran 87 de
+   * 120 unidades, el 72 %.
+   */
   noDisponible: number;
   valorizacion: number;
+  /**
+   * Lo mismo que `valorizacion` pero A COSTO NETO: el teórico con la oferta del
+   * proveedor ya descontada.
+   *
+   * Son dos preguntas distintas y por eso están las dos. A precio de venta dice
+   * cuánto se dejaría de facturar; a costo, cuánta plata NUESTRA está parada
+   * ahí. Para decidir si conviene retirar mercadería de Full manda la segunda.
+   */
+  valorizacionCosto: number;
+  /** Lo trabado, valorizado a costo. */
+  valorizacionCostoNoDisponible: number;
   /** SKUs sin vender hace más de `UMBRAL_PARADO` días, o que nunca vendieron. */
   skusParados: number;
   valorizacionParada: number;
   /** Unidades vendidas en los últimos 30 días, para saber si el stock rota. */
   uds30: number;
+};
+
+/** Un artículo con unidades que Mercado Libre no puede vender. */
+export type FilaNoDisponible = {
+  sku: string | null;
+  producto: string | null;
+  proveedor: string | null;
+  marca: string | null;
+  noDisponible: number;
+  /** Las que SÍ se pueden vender. En 0 está el peor caso: nada vendible. */
+  disponible: number;
+  valorizacionCosto: number;
 };
 
 export type TramoStockFull = {
@@ -1002,6 +1034,8 @@ export type DashboardStockFull = {
   umbrales: Record<number, number>;
   tramos: TramoStockFull[];
   filas: FilaStockFull[];
+  /** Los artículos detrás de la tarjeta de "No disponible". */
+  noDisponible: FilaNoDisponible[];
   recortada: boolean;
   /**
    * Desde cuándo hay foto diaria del stock, o null si todavía no hay ninguna.
