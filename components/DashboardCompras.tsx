@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { contarSkus, sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
@@ -44,6 +44,7 @@ import {
 } from "@/lib/stock";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import { RESUMEN_CABECERA, type OrdenSigma } from "@/lib/sigma-orden";
+import type { OrdenEnviada } from "@/lib/queries-ordenes";
 import { aXlsx } from "@/lib/xlsx";
 import type { DashboardCompras, FilaCompra, FiltrosCompras } from "@/lib/types";
 
@@ -154,6 +155,26 @@ export default function DashboardComprasPage({
       }
     | null
   >(null);
+
+  // EL HISTORIAL SE PIDE APARTE Y A DEMANDA. Es la constancia de lo que ya se
+  // mandó: no cambia con los filtros, no hace falta para armar la orden, y
+  // pedirlo con cada cambio de proveedor sería una consulta de más en cada
+  // click. Se trae al abrir el panel y se refresca al mandar una orden.
+  const [historial, setHistorial] = useState<OrdenEnviada[] | null>(null);
+  const [cargandoHistorial, setCargandoHistorial] = useState(false);
+
+  const traerHistorial = useCallback(async () => {
+    setCargandoHistorial(true);
+    try {
+      const r = await fetch("/api/compras/ordenes");
+      const json = await r.json();
+      setHistorial(Array.isArray(json.ordenes) ? json.ordenes : []);
+    } catch {
+      setHistorial([]);
+    } finally {
+      setCargandoHistorial(false);
+    }
+  }, []);
 
   const coberturaElegida = filtros.cobertura ?? COBERTURA_OBJETIVO_DIAS;
   // Sólo dice si el campo manual está ABIERTO. El valor vive en los filtros,
@@ -355,6 +376,10 @@ export default function DashboardComprasPage({
         body: JSON.stringify({ renglones, mes: data?.mes, nota: comentario }),
       });
       const json = await r.json();
+      // Salió o no salió, quedó registrada: si el panel está abierto, que se
+      // vea sin tener que recargar la página.
+      if (historial !== null) void traerHistorial();
+
       if (r.ok) {
         setResultado({ ok: true, enviado: json.enviado as OrdenSigma });
         setConfirmando(false);
@@ -1322,6 +1347,80 @@ export default function DashboardComprasPage({
                   : "Nada que comprar con este filtro: ningún artículo está por debajo de la cobertura objetivo."
               }
             />
+          </Panel>
+
+          {/* LO QUE YA SE MANDÓ.
+              Del lado de Sigma queda el resultado; lo que se PIDIÓ --cantidad,
+              unidad, precio y descuentos de cada renglón-- no queda en ningún
+              lado. Acá sí, tal como viajó. */}
+          <Panel
+            titulo="Órdenes ya mandadas"
+            nota={
+              historial === null
+                ? "Constancia de lo que se le mandó a Sigma"
+                : `${fmtNumero(historial.length)} órdenes · la más nueva primero`
+            }
+          >
+            {historial === null ? (
+              <button
+                type="button"
+                onClick={() => void traerHistorial()}
+                disabled={cargandoHistorial}
+                className="border-line text-muted hover:bg-panel-2 hover:text-ink rounded-lg border px-3 py-1.5 text-xs transition-colors disabled:opacity-50"
+              >
+                {cargandoHistorial ? "Buscando…" : "Ver el historial"}
+              </button>
+            ) : historial.length === 0 ? (
+              <p className="text-muted text-sm">
+                Todavía no se mandó ninguna orden desde el tablero.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {historial.map((o) => (
+                  <details
+                    key={o.id}
+                    className="border-line rounded-lg border px-3 py-2"
+                  >
+                    <summary className="cursor-pointer text-xs">
+                      <span className="tabular-nums">{o.enviadaEn}</span>
+                      {" · "}
+                      <strong>
+                        {o.proveedorNombre ?? o.proveedorCodigo ?? "—"}
+                      </strong>
+                      {" · "}
+                      {fmtNumero(o.renglones)} renglones ·{" "}
+                      {fmtNumero(o.unidades)} unidades
+                      {" · "}
+                      {fmtMoneda(o.totalBruto)}
+                      {o.resultado === "incierto" && (
+                        <span className="ml-2 text-amber-400">
+                          · sin confirmar
+                        </span>
+                      )}
+                      {o.usuario ? (
+                        <span className="text-muted"> · {o.usuario}</span>
+                      ) : null}
+                    </summary>
+                    {o.nota && (
+                      <p className="text-muted mt-1 text-xs">{o.nota}</p>
+                    )}
+                    {o.resultado === "incierto" && (
+                      <p className="mt-1 text-xs text-amber-300">
+                        Sigma contestó «{o.respuesta ?? "sin mensaje"}». Eso NO
+                        quiere decir que no haya entrado: su API contesta error
+                        también cuando la orden se carga bien.
+                      </p>
+                    )}
+                    {/* El cuerpo exacto, que es el punto de todo esto: acá se
+                        ve si un renglón se pidió en bultos o en unidades, y a
+                        qué precio se lo pidió ese día. */}
+                    <pre className="bg-panel-2 mt-2 max-h-64 overflow-auto rounded-md p-2 text-[11px]">
+                      {JSON.stringify(o.payload, null, 2)}
+                    </pre>
+                  </details>
+                ))}
+              </div>
+            )}
           </Panel>
 
           <Aviso tono="info">
