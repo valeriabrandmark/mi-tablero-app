@@ -176,6 +176,20 @@ function getPorGrupo(f: FiltrosObjetivos): Promise<FilaObjetivo[]> {
      select grupo,
             null::text as vendedor,
             metrica,
+            -- LOS SKU DEL GRUPO, para que la barra diga contra qué se mide.
+            --
+            -- Sin esto "VASELINE LIP 4.8 G" no deja ver que son DOS SKUs
+            -- sumados, y el vendedor no sabe si le cuentan las dos variantes o
+            -- una sola. Sale de la misma tabla que usa el match, así que lo que
+            -- se muestra es literalmente lo que se está midiendo.
+            --
+            -- Solo para criterio sku: en los grupos de empresa los items son
+            -- nombres de empresa que el titulo ya dice.
+            (select string_agg(i.valor, ' + ' order by i.valor)
+               from gold.objetivos_grupo_item i
+               join gold.objetivos_grupo g2 on g2.grupo = i.grupo
+              where i.grupo = avance.grupo
+                and g2.criterio = 'sku') as skus,
             sum(objetivo)::float8 as objetivo,
             sum(vendido)::float8 as vendido,
             case when sum(objetivo) = 0 then null
