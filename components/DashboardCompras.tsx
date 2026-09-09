@@ -91,8 +91,11 @@ function bajar(contenido: BlobPart, nombre: string, tipo: string) {
 
 export default function DashboardComprasPage({
   puedeEnviar,
+  usuarioSigma,
 }: {
   puedeEnviar: boolean;
+  /** Nombre en Sigma de quien va a firmar la orden. `null` fuera de la lista. */
+  usuarioSigma: string | null;
 }) {
   const inicial: FiltrosCompras = {
     ventana: VENTANA_POR_DEFECTO,
@@ -1290,6 +1293,10 @@ export default function DashboardComprasPage({
                     A pagar con descuento, sin IVA
                   </span>
                   <strong>{fmtMoneda(resumen.neto)}</strong>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted">Queda a nombre de</span>
+                  <strong>{usuarioSigma ?? "—"}</strong>
                 </div>
                 {RESUMEN_CABECERA.map((c) => (
                   <div key={c.campo} className="flex justify-between gap-3">

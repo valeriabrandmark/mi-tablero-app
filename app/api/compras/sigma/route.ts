@@ -4,10 +4,15 @@ import {
   UNIDADES_COMPRA,
   type RenglonOrden,
 } from "@/lib/compras";
-import { permisoDelUsuario, puedeEscribirEnElERP } from "@/lib/permisos";
+import {
+  permisoDelUsuario,
+  puedeEscribirEnElERP,
+  usuarioSigmaDe,
+} from "@/lib/permisos";
 import { getArticulosParaOrden } from "@/lib/queries-compras";
 import { guardarOrdenEnviada } from "@/lib/queries-ordenes";
 import {
+  USUARIO_SIGMA,
   armarOrdenSigma,
   problemasDeLaOrden,
   type ArticuloParaOrden,
@@ -155,20 +160,29 @@ function leerRenglones(crudo: unknown): Map<string, RenglonOrden> {
 
 export async function POST(request: NextRequest) {
   let usuario: string | null = null;
+  // CON QUIÉN SE FIRMA LA ORDEN EN SIGMA. Sale de la sesión y nunca del cuerpo
+  // del pedido: si viajara desde el navegador, cualquiera con la consola
+  // abierta podría cargar una orden a nombre de otra persona.
+  let usuarioSigma = USUARIO_SIGMA;
 
   if (authConfigurada) {
     const quien = await getUsuario();
     usuario = quien?.email ?? null;
     const permiso = permisoDelUsuario(quien);
-    if (!puedeEscribirEnElERP(permiso)) {
+    if (!puedeEscribirEnElERP(permiso, usuario)) {
       return NextResponse.json(
         {
-          error: "Mandar órdenes al ERP requiere el rol superadmin.",
+          error:
+            "Tu usuario no está habilitado para cargar órdenes en el ERP. Se " +
+            "habilita en USUARIOS_ERP (lib/permisos.ts), junto con su número de " +
+            "usuario de Sigma.",
           mandado: false,
         },
         { status: 403 },
       );
     }
+    // El `!` es seguro: `puedeEscribirEnElERP` ya comprobó que está en la lista.
+    usuarioSigma = usuarioSigmaDe(usuario)!.sigma;
   }
 
   let cuerpo: { renglones?: unknown; mes?: unknown; nota?: unknown };
@@ -214,7 +228,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const payload = armarOrdenSigma(articulos, orden, nota);
+    const payload = armarOrdenSigma(
+      articulos,
+      orden,
+      nota,
+      new Date(),
+      usuarioSigma,
+    );
 
     // A PARTIR DE ACÁ YA NO SE PUEDE PROMETER QUE NO PASÓ NADA.
     //
