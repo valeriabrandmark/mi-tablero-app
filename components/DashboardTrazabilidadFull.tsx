@@ -6,7 +6,12 @@ import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { contarSkus, sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
-import { fmtFechaCorta, fmtFechaCortaConAnio, fmtMoneda, fmtNumero } from "@/lib/format";
+import {
+  fmtFechaCorta,
+  fmtFechaCortaConAnio,
+  fmtMoneda,
+  fmtNumero,
+} from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
 import {
   DIAS_PARA_LLEGAR_A_FULL,
@@ -56,6 +61,7 @@ function columnas(filas: FilaTrazabilidad[]): Columna<FilaTrazabilidad>[] {
     },
     {
       titulo: "Proveedor",
+      ayuda: "El proveedor del artículo según el maestro de Sigma.",
       celda: (f) => (
         <span className="block max-w-[110px] truncate sm:max-w-[180px]">
           {f.proveedor ?? "—"}
@@ -65,6 +71,7 @@ function columnas(filas: FilaTrazabilidad[]): Columna<FilaTrazabilidad>[] {
     },
     {
       titulo: "Enviado",
+      ayuda: "Unidades que se mandaron a Full en el período.",
       celda: (f) => fmtNumero(f.enviado),
       numerica: true,
       orden: (f) => f.enviado,
@@ -72,6 +79,7 @@ function columnas(filas: FilaTrazabilidad[]): Columna<FilaTrazabilidad>[] {
     },
     {
       titulo: "Vendido",
+      ayuda: "Unidades vendidas desde Full en el período.",
       celda: (f) => fmtNumero(f.vendido),
       numerica: true,
       orden: (f) => f.vendido,
@@ -79,6 +87,7 @@ function columnas(filas: FilaTrazabilidad[]): Columna<FilaTrazabilidad>[] {
     },
     {
       titulo: "En Full hoy",
+      ayuda: "Unidades disponibles hoy en el depósito de Mercado Libre.",
       celda: (f) => fmtNumero(f.declaradoHoy),
       numerica: true,
       orden: (f) => f.declaradoHoy,
@@ -86,6 +95,7 @@ function columnas(filas: FilaTrazabilidad[]): Columna<FilaTrazabilidad>[] {
     },
     {
       titulo: "Viajando",
+      ayuda: "Unidades ya despachadas a Full que todavía no llegaron.",
       // Lo despachado hace poco. Un saldo negativo con este número al lado casi
       // siempre es mercadería en camino, no un faltante.
       celda: (f) =>
@@ -100,6 +110,8 @@ function columnas(filas: FilaTrazabilidad[]): Columna<FilaTrazabilidad>[] {
     },
     {
       titulo: "Saldo",
+      ayuda:
+        "Lo enviado menos lo vendido, lo que está en Full y lo que viaja. Si no da cero, hay unidades sin explicar.",
       celda: (f) => {
         const s = saldoReclamable(f);
         return (
@@ -129,13 +141,19 @@ function columnas(filas: FilaTrazabilidad[]): Columna<FilaTrazabilidad>[] {
     },
     {
       titulo: "Estado",
+      ayuda:
+        "Si el saldo cierra o no. Un saldo que no cierra suele ser un envío mal informado, no mercadería perdida.",
       celda: (f) => (
-        <span style={{ color: color(f) }}>{ETIQUETA_ESTADO[estadoDelSaldo(saldoReclamable(f))]}</span>
+        <span style={{ color: color(f) }}>
+          {ETIQUETA_ESTADO[estadoDelSaldo(saldoReclamable(f))]}
+        </span>
       ),
       orden: (f) => saldoReclamable(f),
     },
     {
       titulo: "A costo",
+      ayuda:
+        "El saldo sin explicar valorizado a costo neto: cuánta plata representa la diferencia.",
       // Sólo para los que faltan: valorizar un sobrante no significa nada, no
       // es plata que se pueda pedir.
       celda: (f) =>
@@ -146,10 +164,13 @@ function columnas(filas: FilaTrazabilidad[]): Columna<FilaTrazabilidad>[] {
         ),
       numerica: true,
       orden: (f) => (saldoReclamable(f) < 0 ? f.plata : 0),
-      total: fmtMoneda(sumar(filas, (f) => (saldoReclamable(f) < 0 ? f.plata : 0))),
+      total: fmtMoneda(
+        sumar(filas, (f) => (saldoReclamable(f) < 0 ? f.plata : 0)),
+      ),
     },
     {
       titulo: "Última caída",
+      ayuda: "Fecha del último movimiento que bajó stock de Full.",
       celda: (f) => (f.ultimaCaida ? fmtFechaCortaConAnio(f.ultimaCaida) : "—"),
       orden: (f) => f.ultimaCaida,
     },
@@ -160,9 +181,8 @@ export default function DashboardTrazabilidadFull() {
   const [filtros, setFiltros] = useState<FiltrosTrazabilidad>({});
   const [buscado, setBuscado] = useState("");
 
-  const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
-    "/api/trazabilidad-full",
-    {
+  const { data, cargando, error, recargar, empezarCarga } =
+    useDatosTablero<Respuesta>("/api/trazabilidad-full", {
       proveedor: filtros.proveedor,
       grupo: filtros.grupo,
       sku: filtros.sku,
@@ -171,8 +191,10 @@ export default function DashboardTrazabilidadFull() {
       todos: filtros.todos ? "1" : undefined,
       soloReclamables: filtros.soloReclamables ? "1" : undefined,
       // Ver la nota en DashboardStock: obliga a que estén todas las claves.
-    } satisfies Record<keyof FiltrosTrazabilidad, string | string[] | undefined>,
-  );
+    } satisfies Record<
+      keyof FiltrosTrazabilidad,
+      string | string[] | undefined
+    >);
 
   const cambiar = (f: FiltrosTrazabilidad) => {
     empezarCarga();
@@ -196,7 +218,8 @@ export default function DashboardTrazabilidadFull() {
         <div>
           <h1 className="text-lg font-medium">Trazabilidad de Full</h1>
           <p className="text-muted mt-0.5 text-xs">
-            Lo que mandamos, lo que se vendió y lo que Mercado Libre declara tener.
+            Lo que mandamos, lo que se vendió y lo que Mercado Libre declara
+            tener.
           </p>
         </div>
         {data?.desde && (
@@ -215,8 +238,9 @@ export default function DashboardTrazabilidadFull() {
           contrario de "todavía no sabemos". */}
       {data && data.diasDeFoto < 2 && (
         <Aviso tono="info">
-          La foto diaria del stock de Full recién se está juntando. Con un solo día no
-          hay movimiento que comparar: mañana ya se puede leer el primer saldo.
+          La foto diaria del stock de Full recién se está juntando. Con un solo
+          día no hay movimiento que comparar: mañana ya se puede leer el primer
+          saldo.
         </Aviso>
       )}
 
@@ -256,7 +280,10 @@ export default function DashboardTrazabilidadFull() {
         <button
           type="button"
           onClick={() =>
-            cambiar({ ...filtros, soloReclamables: filtros.soloReclamables ? undefined : true })
+            cambiar({
+              ...filtros,
+              soloReclamables: filtros.soloReclamables ? undefined : true,
+            })
           }
           aria-pressed={filtros.soloReclamables ?? false}
           className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
@@ -270,7 +297,9 @@ export default function DashboardTrazabilidadFull() {
 
         <button
           type="button"
-          onClick={() => cambiar({ ...filtros, todos: filtros.todos ? undefined : true })}
+          onClick={() =>
+            cambiar({ ...filtros, todos: filtros.todos ? undefined : true })
+          }
           aria-pressed={filtros.todos ?? false}
           className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
             filtros.todos
@@ -294,7 +323,9 @@ export default function DashboardTrazabilidadFull() {
       {!data && cargando && <Esqueleto className="h-64" />}
 
       {data && k && (
-        <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
+        <div
+          className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
+        >
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <TarjetaKpi
               titulo="Para reclamar"
@@ -330,14 +361,14 @@ export default function DashboardTrazabilidadFull() {
                 que alguien vea una caída diaria va a salir a reclamar algo que
                 se corrige solo, y a la tercera vez deja de creerle al tablero. */}
             <p className="text-muted mt-3 text-[11px] leading-relaxed">
-              Lo que se mira es la <strong className="text-ink">forma</strong>, no el
-              día suelto. En el período medido hubo{" "}
+              Lo que se mira es la <strong className="text-ink">forma</strong>,
+              no el día suelto. En el período medido hubo{" "}
               {fmtNumero(-k.brutoCaidas)} unidades de caídas diarias, pero{" "}
               {fmtNumero(-k.brutoCaidas + Math.min(0, k.neto))} volvieron al día
-              siguiente: la foto de Mercado Libre se toma a una hora fija y las ventas
-              se cuentan por día calendario, así que una venta del límite cae de un lado
-              y su descuento de stock del otro. Eso se corrige solo. Una unidad que
-              Mercado Libre sacó, no.
+              siguiente: la foto de Mercado Libre se toma a una hora fija y las
+              ventas se cuentan por día calendario, así que una venta del límite
+              cae de un lado y su descuento de stock del otro. Eso se corrige
+              solo. Una unidad que Mercado Libre sacó, no.
             </p>
           </Panel>
 
@@ -352,18 +383,23 @@ export default function DashboardTrazabilidadFull() {
             <Tabla
               filas={data.filas}
               columnas={columnas(data.filas)}
-              etiquetaTotal={data.recortada ? `Total (los ${TOPE_TEXTO} mostrados)` : "Total"}
+              etiquetaTotal={
+                data.recortada ? `Total (los ${TOPE_TEXTO} mostrados)` : "Total"
+              }
               clave={(f) => f.sku}
               onClickFila={(f) => alternarEn("sku")(f.sku)}
-              activa={(f) => (filtros.sku?.length ? filtros.sku.includes(f.sku) : false)}
+              activa={(f) =>
+                filtros.sku?.length ? filtros.sku.includes(f.sku) : false
+              }
               vacio="No hay artículos con diferencias para el filtro elegido."
             />
 
             <p className="text-muted mt-3 text-[11px] leading-relaxed">
               El saldo ya tiene descontado lo despachado en los últimos{" "}
-              {DIAS_PARA_LLEGAR_A_FULL} días —la columna “Viajando”—, que es mercadería
-              que todavía puede estar en camino. Sin ese descuento la lista tendría{" "}
-              seis veces más artículos, casi todos envíos viajando.
+              {DIAS_PARA_LLEGAR_A_FULL} días —la columna “Viajando”—, que es
+              mercadería que todavía puede estar en camino. Sin ese descuento la
+              lista tendría seis veces más artículos, casi todos envíos
+              viajando.
             </p>
           </Panel>
         </div>

@@ -102,6 +102,8 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
   return [
     {
       titulo: "%margen bruto de la venta",
+      ayuda:
+        "El tramo de margen en el que cae la venta. Es la variable que se está analizando.",
       celda: (b) => (
         <span style={{ color: COLOR_BANDA[b.banda] }}>
           {labelBanda(b.banda)}
@@ -114,6 +116,7 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
     },
     {
       titulo: "Unidades",
+      ayuda: "Unidades vendidas en ese tramo de margen.",
       celda: (b) => fmtNumero(b.unidades),
       numerica: true,
       orden: (b) => b.unidades,
@@ -121,6 +124,7 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
     },
     {
       titulo: "Margen bruto $",
+      ayuda: "Margen bruto acumulado del tramo.",
       celda: (b) => (
         <strong style={{ color: COLOR_BANDA[b.banda] }}>
           {fmtMoneda(b.margen)}
@@ -134,6 +138,8 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
       // El desempate: entre dos bandas que dejan lo mismo conviene la que mueve
       // menos mercadería para lograrlo.
       titulo: "Margen bruto por unidad",
+      ayuda:
+        "El margen bruto dividido por las unidades: cuánto deja cada unidad vendida en ese tramo.",
       celda: (b) =>
         b.margenPorUnidad == null ? "—" : fmtMoneda(b.margenPorUnidad),
       numerica: true,
@@ -141,6 +147,7 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
     },
     {
       titulo: "Facturación",
+      ayuda: "Venta neta del tramo, sin IVA.",
       celda: (b) => fmtMoneda(b.facturacion),
       numerica: true,
       orden: (b) => b.facturacion,
@@ -148,6 +155,8 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
     },
     {
       titulo: "%margen bruto real",
+      ayuda:
+        "El margen bruto sobre la facturación del tramo, que puede no coincidir con el tramo nominal.",
       // El del conjunto, no el promedio de los porcentajes de cada línea.
       celda: (b) => fmtPct(b.margenPct),
       numerica: true,
@@ -165,6 +174,7 @@ function columnasBanda(bandas: ResumenBanda[]): Columna<ResumenBanda>[] {
     },
     {
       titulo: "Artículos",
+      ayuda: "Cuántos SKU distintos cayeron en ese tramo.",
       celda: (b) => fmtNumero(b.skus),
       numerica: true,
       orden: (b) => b.skus,
@@ -196,6 +206,7 @@ function columnasArticulo(
     },
     {
       titulo: "Uds",
+      ayuda: "Unidades vendidas del artículo.",
       celda: (f) => fmtNumero(f.unidades),
       numerica: true,
       orden: (f) => f.unidades,
@@ -203,6 +214,7 @@ function columnasArticulo(
     },
     {
       titulo: "Margen bruto",
+      ayuda: "Margen bruto acumulado del artículo.",
       celda: (f) => fmtMoneda(f.margen),
       numerica: true,
       orden: (f) => f.margen,
@@ -210,6 +222,7 @@ function columnasArticulo(
     },
     {
       titulo: "%margen bruto",
+      ayuda: "El margen bruto sobre la facturación del artículo.",
       celda: (f) => fmtPct(f.facturacion > 0 ? f.margen / f.facturacion : null),
       numerica: true,
       orden: (f) => (f.facturacion > 0 ? f.margen / f.facturacion : null),
@@ -234,6 +247,7 @@ function columnasArticulo(
       return [
         {
           titulo: `${banda.label} · uds`,
+          ayuda: `Unidades del artículo vendidas con un margen en el tramo ${banda.label}.`,
           celda: (f) =>
             f.unidadesPorBanda[banda.clave] == null ? (
               <span className="text-muted">—</span>
@@ -250,6 +264,7 @@ function columnasArticulo(
         },
         {
           titulo: `${banda.label} · margen`,
+          ayuda: `Margen bruto que dejó el artículo vendiendo en el tramo ${banda.label}.`,
           celda: (f) =>
             f.margenPorBanda[banda.clave] == null ? (
               <span className="text-muted">—</span>
@@ -264,6 +279,7 @@ function columnasArticulo(
         },
         {
           titulo: `${banda.label} · %`,
+          ayuda: `El margen bruto real sobre la facturación del artículo en el tramo ${banda.label}.`,
           celda: (f) => (
             <span style={resalte(f)}>
               {fmtPct(f.margenPctPorBanda[banda.clave])}
@@ -283,6 +299,8 @@ function columnasArticulo(
     }),
     {
       titulo: "Mejor",
+      ayuda:
+        "El tramo de margen en el que ese artículo deja más plata en total, que no siempre es el de mayor porcentaje.",
       celda: (f) =>
         f.mejor == null ? (
           <span className="text-muted">sin comparar</span>
@@ -303,6 +321,8 @@ function columnasArticulo(
       // permite descontar un resultado falso — un artículo que "vendió poco" en
       // una banda porque estuvo cuatro días sin stock no vendió poco por caro.
       titulo: `Días sin stock (de ${fmtNumero(diasMirados)})`,
+      ayuda:
+        "Días en que el artículo no tuvo stock. Sirve para no leer como falta de demanda lo que fue falta de mercadería.",
       // EL DENOMINADOR VA EN EL TÍTULO, y no es decorativo. La historia de
       // disponibilidad arrancó el 21/08: si el período elegido son 30 días pero
       // sólo se midieron 3, un "0 días sin stock" no significa "nunca quebró",
@@ -334,6 +354,8 @@ function columnasArticulo(
       // así que el nombre estaba mal. Dice si ESTE artículo tiene suficientes
       // ventas como para que su columna "Mejor" signifique algo, o si es ruido.
       titulo: "¿Alcanza el volumen?",
+      ayuda:
+        "Si en ese tramo hubo suficientes ventas como para que la conclusión signifique algo. Con pocas ventas, el mejor tramo puede ser casualidad.",
       celda: (f) =>
         f.confiable ? (
           <span

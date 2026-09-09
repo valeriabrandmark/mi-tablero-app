@@ -41,12 +41,16 @@ function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
     {
       titulo: "Cliente",
       celda: (f) => (
-        <span className="block max-w-[116px] sm:max-w-[260px] truncate">{f.razonSocial}</span>
+        <span className="block max-w-[116px] sm:max-w-[260px] truncate">
+          {f.razonSocial}
+        </span>
       ),
       orden: (f) => f.razonSocial,
     },
     {
       titulo: "Categoría",
+      ayuda:
+        "Clasificación de riesgo del cliente, calculada por el orquestador a partir de su deuda y su antigüedad.",
       celda: (f) => (
         <span
           style={{ color: COLOR_CATEGORIA[f.categoria ?? ""] ?? undefined }}
@@ -58,11 +62,14 @@ function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
     },
     {
       titulo: "Vendedor",
+      ayuda:
+        "El vendedor asignado al cliente en Sigma. Viene como código y se traduce al nombre acá.",
       celda: (f) => f.vendedor ?? "—",
       orden: (f) => f.vendedor,
     },
     {
       titulo: "Saldo total",
+      ayuda: "Todo lo que el cliente debe hoy, vencido y a vencer.",
       celda: (f) => fmtMoneda(f.saldoTotal),
       numerica: true,
       orden: (f) => f.saldoTotal,
@@ -70,6 +77,7 @@ function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
     },
     {
       titulo: "Saldo vencido",
+      ayuda: "La parte de la deuda cuyo vencimiento ya pasó.",
       celda: (f) => fmtMoneda(f.saldoVencido),
       numerica: true,
       orden: (f) => f.saldoVencido,
@@ -77,6 +85,8 @@ function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
     },
     {
       titulo: "Atraso máx.",
+      ayuda:
+        "Días del comprobante impago más viejo. Es el peor caso, no el promedio.",
       celda: (f) => (f.atrasoMax == null ? "—" : `${fmtNumero(f.atrasoMax)} d`),
       numerica: true,
       orden: (f) => f.atrasoMax,

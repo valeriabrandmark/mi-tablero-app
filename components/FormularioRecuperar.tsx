@@ -2,7 +2,11 @@
 
 import { useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { BotonEnviar, CLASE_INPUT, Mensaje } from "@/components/CamposContrasena";
+import {
+  BotonEnviar,
+  CLASE_INPUT,
+  Mensaje,
+} from "@/components/CamposContrasena";
 
 export default function FormularioRecuperar() {
   const [email, setEmail] = useState("");
@@ -19,9 +23,12 @@ export default function FormularioRecuperar() {
     // local, en el preview de Vercel y en producción. OJO: cada uno de esos
     // dominios tiene que estar en Supabase → Authentication → URL Configuration
     // → Redirect URLs, si no Supabase ignora el redirect.
-    const { error } = await createClient().auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}/auth/confirmar?next=/nueva-contrasena`,
-    });
+    const { error } = await createClient().auth.resetPasswordForEmail(
+      email.trim(),
+      {
+        redirectTo: `${window.location.origin}/auth/confirmar?next=/nueva-contrasena`,
+      },
+    );
 
     setEnviando(false);
 
@@ -31,7 +38,9 @@ export default function FormularioRecuperar() {
       console.error("[recuperar]", error.message);
     }
     if (error && /rate limit|too many/i.test(error.message)) {
-      setError("Se pidieron demasiados mails seguidos. Esperá unos minutos y probá de nuevo.");
+      setError(
+        "Se pidieron demasiados mails seguidos. Esperá unos minutos y probá de nuevo.",
+      );
       return;
     }
     setEnviado(true);
@@ -42,9 +51,9 @@ export default function FormularioRecuperar() {
       <div className="mt-6 space-y-3">
         <Mensaje tono="ok">Listo, revisá tu correo.</Mensaje>
         <p className="text-muted text-sm leading-relaxed">
-          Si <span className="text-ink">{email.trim()}</span> tiene una cuenta, le llega un
-          link para poner una contraseña nueva. El link vence en una hora y se usa una sola
-          vez.
+          Si <span className="text-ink">{email.trim()}</span> tiene una cuenta,
+          le llega un link para poner una contraseña nueva. El link vence en una
+          hora y se usa una sola vez.
         </p>
         <p className="text-muted text-sm">Si no aparece, fijate en spam.</p>
       </div>

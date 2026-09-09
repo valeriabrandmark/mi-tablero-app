@@ -220,7 +220,9 @@ function Grupo({
   alNavegar?: () => void;
 }) {
   const hijos = item.hijos ?? [];
-  const dentro = hijos.some((h) => pathname === h.href || pathname.startsWith(`${h.href}/`));
+  const dentro = hijos.some(
+    (h) => pathname === h.href || pathname.startsWith(`${h.href}/`),
+  );
   const [abierto, setAbierto] = useState(dentro);
 
   return (
@@ -257,7 +259,8 @@ function Grupo({
             // /objetivos pero no cuelgan una de otra, así que se comparan
             // enteras. Por eso el `===` va primero y el `startsWith` exige la
             // barra: /objetivos/silvio nunca es prefijo de /objetivos/german.
-            const activo = pathname === h.href || pathname.startsWith(`${h.href}/`);
+            const activo =
+              pathname === h.href || pathname.startsWith(`${h.href}/`);
             return (
               <li key={h.href}>
                 <Link
@@ -297,7 +300,9 @@ function Contenido({
   return (
     <div className="flex h-full flex-col">
       <div className="px-5 py-5">
-        <span className="text-base font-semibold tracking-tight">Brandmark</span>
+        <span className="text-base font-semibold tracking-tight">
+          Brandmark
+        </span>
         <span className="text-muted ml-1.5 text-base">negocio</span>
       </div>
 
@@ -409,11 +414,19 @@ export default function BarraLateral(props: {
           aria-label="Abrir menú"
           className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border p-1.5"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="size-5">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            className="size-5"
+          >
             <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
           </svg>
         </button>
-        <span className="text-sm font-semibold tracking-tight">Brandmark negocio</span>
+        <span className="text-sm font-semibold tracking-tight">
+          Brandmark negocio
+        </span>
       </div>
 
       {abierta && (

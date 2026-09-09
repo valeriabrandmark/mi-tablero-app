@@ -97,7 +97,16 @@ compras as (
          bool_or(c."fechaFactura" >= to_char(date_trunc('month', current_date)
                                              - interval '1 month', 'YYYY-MM-DD')
              and c."fechaFactura" <  to_char(date_trunc('month', current_date),
-                                             'YYYY-MM-DD')) as comprado_mes_pasado
+                                             'YYYY-MM-DD')) as comprado_mes_pasado,
+         -- CUÁNTO, no sólo si. Un "sí" no distingue una compra de 12 unidades
+         -- de una de 1.200, y esa es justo la comparación que se quiere hacer
+         -- contra el sugerido de al lado.
+         coalesce(sum((it->>'cantidad')::numeric) filter (
+           where c."fechaFactura" >= to_char(date_trunc('month', current_date)
+                                             - interval '1 month', 'YYYY-MM-DD')
+             and c."fechaFactura" <  to_char(date_trunc('month', current_date),
+                                             'YYYY-MM-DD')
+         ), 0) as unidades_mes_pasado
   from bronze.sigma_compras c
   cross join lateral jsonb_array_elements(c.items::jsonb) it
   where it->>'articuloId' is not null
@@ -246,6 +255,7 @@ base as (
               else v.margen_mes_pasado / v.facturado_mes_pasado
          end                                            as rent_mes_pasado,
          coalesce(co.comprado_mes_pasado, false)        as comprado_mes_pasado,
+         coalesce(co.unidades_mes_pasado, 0)            as unidades_mes_pasado,
          (pmp.proveedor is not null)                    as proveedor_compro,
          hs.historia                                    as hist_sell_in,
          hs.mediana                                     as mediana_sell_in,
@@ -380,7 +390,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<FilaCompra[]> {
             sugerido_base, sugerido_tope, factor_oferta, mediana_sell_in,
             uds_rent, rentabilidad,
             uds_mes_pasado, rent_mes_pasado,
-            comprado_mes_pasado, proveedor_compro,
+            comprado_mes_pasado, unidades_mes_pasado, proveedor_compro,
             hist_sell_in, hist_calculado,
             to_char(ultima_venta, 'YYYY-MM-DD') as ultima_venta,
             ultima_compra
@@ -422,6 +432,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<FilaCompra[]> {
     udsMesPasado: num(r.uds_mes_pasado),
     rentMesPasado: r.rent_mes_pasado == null ? null : num(r.rent_mes_pasado),
     compradoMesPasado: r.comprado_mes_pasado === true,
+    unidadesMesPasado: num(r.unidades_mes_pasado),
     proveedorComproMesPasado: r.proveedor_compro === true,
     histSellIn: historia(r.hist_sell_in),
     histCalculado: historia(r.hist_calculado),

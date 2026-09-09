@@ -505,6 +505,20 @@ export type ArticuloMeli = {
   proveedor: string | null;
   marca: string | null;
   unidades: number;
+  /**
+   * Los tres descuentos, iguales que en Ventas Mayoristas. Ver
+   * `lib/sql-descuentos.ts`: se parecen y son cosas distintas.
+   *
+   *   ofertaProveedorPct  lo que EL PROVEEDOR nos descontó (columna J del Excel)
+   *   ofertaPropiaPct     lo que ponemos NOSOTROS encima (columna K)
+   *
+   * NO está el descuento AL CLIENTE que sí tiene Mayorista: ese sale de la
+   * factura de Sigma y las ventas de ML y TN no lo traen. Ver sql-descuentos.
+   *
+   * `null` es "sin dato", que no es lo mismo que 0.
+   */
+  ofertaProveedorPct: number | null;
+  ofertaPropiaPct: number | null;
   ventaCiva: number;
   ventaSiva: number;
   costo: number;
@@ -614,6 +628,20 @@ export type FilaAlertaMeli = {
   proveedor: string | null;
   marca: string | null;
   cantidad: number;
+  /**
+   * Los tres descuentos, iguales que en Ventas Mayoristas. Ver
+   * `lib/sql-descuentos.ts`: se parecen y son cosas distintas.
+   *
+   *   ofertaProveedorPct  lo que EL PROVEEDOR nos descontó (columna J del Excel)
+   *   ofertaPropiaPct     lo que ponemos NOSOTROS encima (columna K)
+   *
+   * NO está el descuento AL CLIENTE que sí tiene Mayorista: ese sale de la
+   * factura de Sigma y las ventas de ML y TN no lo traen. Ver sql-descuentos.
+   *
+   * `null` es "sin dato", que no es lo mismo que 0.
+   */
+  ofertaProveedorPct: number | null;
+  ofertaPropiaPct: number | null;
   ventaCiva: number;
   ventaSiva: number;
   costoUnitario: number | null;
@@ -732,6 +760,20 @@ export type ArticuloTiendaNube = {
   proveedor: string | null;
   marca: string | null;
   unidades: number;
+  /**
+   * Los tres descuentos, iguales que en Ventas Mayoristas. Ver
+   * `lib/sql-descuentos.ts`: se parecen y son cosas distintas.
+   *
+   *   ofertaProveedorPct  lo que EL PROVEEDOR nos descontó (columna J del Excel)
+   *   ofertaPropiaPct     lo que ponemos NOSOTROS encima (columna K)
+   *
+   * NO está el descuento AL CLIENTE que sí tiene Mayorista: ese sale de la
+   * factura de Sigma y las ventas de ML y TN no lo traen. Ver sql-descuentos.
+   *
+   * `null` es "sin dato", que no es lo mismo que 0.
+   */
+  ofertaProveedorPct: number | null;
+  ofertaPropiaPct: number | null;
   ventaCiva: number;
   ventaSiva: number;
   costo: number;
@@ -1454,6 +1496,11 @@ export type FilaCompra = {
    * `proveedorComproMesPasado`, que sale de la cabecera y no del detalle.
    */
   compradoMesPasado: boolean;
+  /**
+   * Cuántas UNIDADES de este SKU se compraron el mes pasado. 0 cuando no hay
+   * renglón, que --por lo de arriba-- no quiere decir que no se haya comprado.
+   */
+  unidadesMesPasado: number;
   /** Si hubo alguna compra a ese proveedor el mes pasado, por cabecera. */
   proveedorComproMesPasado: boolean;
   /**

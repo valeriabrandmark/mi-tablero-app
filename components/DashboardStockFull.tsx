@@ -16,7 +16,11 @@ import {
 import { PALETA, TEMA } from "@/lib/paleta";
 import { TRAMOS, UMBRALES_TARJETAS, UMBRAL_PARADO } from "@/lib/stock-full";
 import { useDatosTablero } from "@/lib/useDatosTablero";
-import type { DashboardStockFull, FilaStockFull, FiltrosStockFull } from "@/lib/types";
+import type {
+  DashboardStockFull,
+  FilaStockFull,
+  FiltrosStockFull,
+} from "@/lib/types";
 
 type Opciones = { proveedores: string[]; marcas: string[] };
 type Respuesta = DashboardStockFull & { opciones: Opciones | null };
@@ -51,12 +55,16 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
     {
       titulo: "Marca",
       celda: (f) => (
-        <span className="block max-w-[96px] sm:max-w-[130px] truncate">{f.marca ?? "—"}</span>
+        <span className="block max-w-[96px] sm:max-w-[130px] truncate">
+          {f.marca ?? "—"}
+        </span>
       ),
       orden: (f) => f.marca,
     },
     {
       titulo: "Días sin venta",
+      ayuda:
+        "Cuántos días pasaron desde la última venta del artículo. Es lo que decide si conviene retirarlo de Full.",
       // "Nunca" y un número grande son cosas distintas y se escriben distinto:
       // un artículo que jamás rotó puede ser nuevo, y merece otra conversación
       // que uno que vendía y dejó de vender.
@@ -88,11 +96,13 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
     },
     {
       titulo: "Última venta",
+      ayuda: "Fecha de la última venta, en cualquier canal.",
       celda: (f) => (f.ultimaVenta ? fmtFechaCortaConAnio(f.ultimaVenta) : "—"),
       orden: (f) => f.ultimaVenta,
     },
     {
       titulo: "En Full",
+      ayuda: "Unidades disponibles hoy en el depósito de Mercado Libre.",
       celda: (f) => fmtNumero(f.disponible),
       numerica: true,
       orden: (f) => f.disponible,
@@ -100,6 +110,8 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
     },
     {
       titulo: "No disponible",
+      ayuda:
+        "Unidades que están en Full pero que ML no puede vender: dañadas, en revisión o retenidas.",
       celda: (f) => (
         <span style={f.noDisponible > 0 ? { color: TEMA.negativo } : undefined}>
           {fmtNumero(f.noDisponible)}
@@ -111,6 +123,8 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
     },
     {
       titulo: "Vendidas 30d",
+      ayuda:
+        "Unidades vendidas en los últimos 30 días. Es el ritmo con el que se mide si el stock de Full se mueve.",
       celda: (f) => fmtNumero(f.uds30),
       numerica: true,
       orden: (f) => f.uds30,
@@ -118,6 +132,8 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
     },
     {
       titulo: "Valorización",
+      ayuda:
+        "La plata inmovilizada en ese artículo dentro de Full, a costo neto.",
       celda: (f) => fmtMoneda(f.valorizacion),
       numerica: true,
       orden: (f) => f.valorizacion,
@@ -130,24 +146,27 @@ export default function DashboardStockFullPage() {
   const inicial: FiltrosStockFull = {};
   const [filtros, setFiltros] = useState<FiltrosStockFull>(inicial);
 
-  const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
-    "/api/stock-full",
-    {
-      proveedor: filtros.proveedor,
-      marca: filtros.marca,
-      sku: filtros.sku,
-      minDias: filtros.minDias == null ? undefined : [String(filtros.minDias)],
-    },
-    { conOpciones: "1" },
-  );
+  const { data, cargando, error, recargar, empezarCarga } =
+    useDatosTablero<Respuesta>(
+      "/api/stock-full",
+      {
+        proveedor: filtros.proveedor,
+        marca: filtros.marca,
+        sku: filtros.sku,
+        minDias:
+          filtros.minDias == null ? undefined : [String(filtros.minDias)],
+      },
+      { conOpciones: "1" },
+    );
 
   const cambiar = (f: FiltrosStockFull) => {
     empezarCarga();
     setFiltros(f);
   };
 
-  const alternarEn = (clave: "proveedor" | "marca" | "sku") => (valor: string) =>
-    cambiar({ ...filtros, [clave]: alternarValor(filtros[clave], valor) });
+  const alternarEn =
+    (clave: "proveedor" | "marca" | "sku") => (valor: string) =>
+      cambiar({ ...filtros, [clave]: alternarValor(filtros[clave], valor) });
 
   const k = data?.kpis;
   const sinCambios =
@@ -162,7 +181,10 @@ export default function DashboardStockFullPage() {
         <div>
           {/* h2 y no h1: el h1 de la página es el logo, que vive en el layout. */}
           <h2 className="text-lg font-semibold tracking-tight">
-            Stock Full <span className="text-muted text-sm font-normal">· días sin venta</span>
+            Stock Full{" "}
+            <span className="text-muted text-sm font-normal">
+              · días sin venta
+            </span>
           </h2>
           <p className="text-muted mt-1 text-xs">
             {data
@@ -191,7 +213,9 @@ export default function DashboardStockFullPage() {
                 <button
                   key={d}
                   type="button"
-                  onClick={() => cambiar({ ...filtros, minDias: activo ? undefined : d })}
+                  onClick={() =>
+                    cambiar({ ...filtros, minDias: activo ? undefined : d })
+                  }
                   aria-pressed={activo}
                   className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
                     activo
@@ -220,13 +244,17 @@ export default function DashboardStockFullPage() {
             opciones={data?.opciones?.marcas ?? []}
             onChange={(v) => cambiar({ ...filtros, marca: v })}
           />
-          <BotonLimpiar onClick={() => cambiar(inicial)} deshabilitado={sinCambios} />
+          <BotonLimpiar
+            onClick={() => cambiar(inicial)}
+            deshabilitado={sinCambios}
+          />
         </div>
 
         <span className="text-muted text-[11px] leading-tight">
-          Mide <strong>días desde la última venta</strong> de cada SKU con stock en el depósito
-          de Mercado Libre. Toma la historia completa de ventas, sin tope: &ldquo;nunca
-          vendió&rdquo; es su propia categoría y no un número grande.
+          Mide <strong>días desde la última venta</strong> de cada SKU con stock
+          en el depósito de Mercado Libre. Toma la historia completa de ventas,
+          sin tope: &ldquo;nunca vendió&rdquo; es su propia categoría y no un
+          número grande.
         </span>
       </div>
 
@@ -247,7 +275,9 @@ export default function DashboardStockFullPage() {
       {error && (
         <Aviso>
           <p className="font-medium">No se pudieron leer los datos.</p>
-          <p className="mt-1 font-mono text-xs break-words opacity-80">{error}</p>
+          <p className="mt-1 font-mono text-xs break-words opacity-80">
+            {error}
+          </p>
         </Aviso>
       )}
 
@@ -258,7 +288,9 @@ export default function DashboardStockFullPage() {
           ))}
         </div>
       ) : (
-        <div className={`grid grid-cols-2 gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}>
+        <div
+          className={`grid grid-cols-2 gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
+        >
           <TarjetaKpi
             titulo="Unidades en Full"
             valor={fmtNumero(k.disponible)}
@@ -290,7 +322,9 @@ export default function DashboardStockFullPage() {
       )}
 
       {data && (
-        <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
+        <div
+          className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
+        >
           <Panel
             titulo="Cuánto stock hay en cada tramo"
             nota="Valorizado · por días desde la última venta"
@@ -327,7 +361,9 @@ export default function DashboardStockFullPage() {
               }
               clave={(f, i) => `${f.sku ?? "sin-sku"}-${i}`}
               onClickFila={(f) => f.sku && alternarEn("sku")(f.sku)}
-              activa={(f) => (filtros.sku?.length ? filtros.sku.includes(f.sku ?? "") : false)}
+              activa={(f) =>
+                filtros.sku?.length ? filtros.sku.includes(f.sku ?? "") : false
+              }
               vacio="Ningún artículo con stock para el filtro elegido."
             />
           </Panel>
@@ -338,18 +374,19 @@ export default function DashboardStockFullPage() {
           <Aviso tono="info">
             <p className="font-medium">Qué mide exactamente este número.</p>
             <p className="mt-1">
-              <strong>Días desde la última venta del SKU</strong>, no días que la mercadería
-              lleva parada en el depósito. Un artículo que llegó ayer puede figurar con 60 días
-              si ese SKU se vendió por última vez hace 60 desde otra publicación.
+              <strong>Días desde la última venta del SKU</strong>, no días que
+              la mercadería lleva parada en el depósito. Un artículo que llegó
+              ayer puede figurar con 60 días si ese SKU se vendió por última vez
+              hace 60 desde otra publicación.
             </p>
             <p className="mt-1">
-              Para lo segundo hace falta saber si había stock <em>cada día</em>, y esa historia
-              recién{" "}
+              Para lo segundo hace falta saber si había stock <em>cada día</em>,
+              y esa historia recién{" "}
               {data.historiaDesde
                 ? `empezó a guardarse el ${fmtFechaCorta(data.historiaDesde)}`
                 : "va a empezar a guardarse cuando el orquestador corra el catálogo"}
-              . Cuando haya algunas semanas acumuladas, se agrega la métrica buena al lado de
-              ésta.
+              . Cuando haya algunas semanas acumuladas, se agrega la métrica
+              buena al lado de ésta.
             </p>
           </Aviso>
         </div>

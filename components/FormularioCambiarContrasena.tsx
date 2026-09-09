@@ -18,7 +18,11 @@ import {
  * sesión abierta en una máquina prestada para quedarse con la cuenta: se cambia
  * la contraseña y el dueño queda afuera.
  */
-export default function FormularioCambiarContrasena({ email }: { email: string }) {
+export default function FormularioCambiarContrasena({
+  email,
+}: {
+  email: string;
+}) {
   const [actual, setActual] = useState("");
   const [nueva, setNueva] = useState("");
   const [repetida, setRepetida] = useState("");
@@ -30,7 +34,8 @@ export default function FormularioCambiarContrasena({ email }: { email: string }
     e.preventDefault();
     const problema = validarContrasena(nueva, repetida);
     if (problema) return setError(problema);
-    if (actual === nueva) return setError("La contraseña nueva es igual a la actual.");
+    if (actual === nueva)
+      return setError("La contraseña nueva es igual a la actual.");
 
     setError(null);
     setListo(false);
@@ -48,7 +53,9 @@ export default function FormularioCambiarContrasena({ email }: { email: string }
       return;
     }
 
-    const { error: errorCambio } = await supabase.auth.updateUser({ password: nueva });
+    const { error: errorCambio } = await supabase.auth.updateUser({
+      password: nueva,
+    });
     setEnviando(false);
 
     if (errorCambio) {

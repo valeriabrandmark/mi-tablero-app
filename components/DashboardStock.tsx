@@ -75,6 +75,7 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Proveedor",
+      ayuda: "El proveedor del artículo según el maestro de Sigma.",
       celda: (f) => (
         <span className="block max-w-[110px] truncate sm:max-w-[180px]">
           {f.proveedor ?? "—"}
@@ -84,6 +85,7 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Tucumán",
+      ayuda: "Unidades en el depósito propio, según Digip.",
       celda: (f) => fmtNumero(f.tuc),
       numerica: true,
       orden: (f) => f.tuc,
@@ -91,6 +93,7 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Full",
+      ayuda: "Unidades en el depósito de Mercado Libre Full.",
       celda: (f) => fmtNumero(f.full),
       numerica: true,
       orden: (f) => f.full,
@@ -98,6 +101,8 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Total u.",
+      ayuda:
+        "Tucumán más Full. Es stock FÍSICO: no descuenta lo ya pedido y todavía no recibido, porque Digip informa tránsito y recepción en cero.",
       celda: (f) => fmtNumero(f.total),
       numerica: true,
       orden: (f) => f.total,
@@ -105,6 +110,8 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Costo neto",
+      ayuda:
+        "Costo unitario con el que se valoriza el stock, ya descontada la oferta del proveedor.",
       // Cero de verdad y no un guión: son testers y exhibidores, que no se
       // compran. Un "—" haría pensar que falta el dato.
       celda: (f) => fmtMoneda(f.costo),
@@ -113,6 +120,8 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Valor neto",
+      ayuda:
+        "El costo neto por las unidades en stock: la plata inmovilizada en ese artículo.",
       celda: (f) => fmtMoneda(f.valor),
       numerica: true,
       orden: (f) => f.valor,
@@ -120,6 +129,8 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Vendidas",
+      ayuda:
+        "Unidades vendidas en la ventana del ritmo que está elegida arriba.",
       celda: (f) => fmtNumero(f.uds),
       numerica: true,
       orden: (f) => f.uds,
@@ -127,12 +138,16 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Por día",
+      ayuda:
+        "Las unidades vendidas divididas por los días de la ventana. Es el ritmo con el que se calcula todo lo demás.",
       celda: (f) => (f.ritmoDiario > 0 ? f.ritmoDiario.toFixed(2) : "—"),
       numerica: true,
       orden: (f) => f.ritmoDiario,
     },
     {
       titulo: "Cobertura",
+      ayuda:
+        "Para cuántos días alcanza el stock a ese ritmo. Vacío cuando no hubo ventas: sin ritmo no hay días que estimar, que no es lo mismo que cero.",
       celda: (f) => (
         <span style={{ color: colorCobertura(f.cobertura) }}>
           {textoCobertura(f.cobertura)}
@@ -145,11 +160,13 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
       total: (() => {
         const conVenta = filas.filter((f) => f.cobertura != null);
         const sin = filas.length - conVenta.length;
-        if (conVenta.length === 0) return sin > 0 ? `${fmtNumero(sin)} sin venta` : "—";
+        if (conVenta.length === 0)
+          return sin > 0 ? `${fmtNumero(sin)} sin venta` : "—";
         // El promedio se pondera por unidades: un SKU de una unidad no puede
         // mover la cobertura del conjunto igual que uno de mil.
         const u = sumar(conVenta, (f) => f.total);
-        const prom = u > 0 ? sumar(conVenta, (f) => (f.cobertura ?? 0) * f.total) / u : 0;
+        const prom =
+          u > 0 ? sumar(conVenta, (f) => (f.cobertura ?? 0) * f.total) / u : 0;
         return (
           `${fmtNumero(Math.round(prom))} d prom.` +
           (sin > 0 ? ` · ${fmtNumero(sin)} sin venta` : "")
@@ -158,6 +175,8 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Exceso $",
+      ayuda:
+        "Cuánta plata hay inmovilizada por encima de la cobertura objetivo.",
       celda: (f) => (
         <span style={f.exceso > 0 ? { color: PALETA[2] } : undefined}>
           {f.exceso > 0 ? fmtMoneda(f.exceso) : "—"}
@@ -169,6 +188,8 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Comprar u.",
+      ayuda:
+        "Unidades que faltan para llegar a la cobertura objetivo contando lo que se vende mientras la reposición viaja.",
       celda: (f) => (
         <span style={f.sugerido > 0 ? { color: PALETA[1] } : undefined}>
           {f.sugerido > 0 ? fmtNumero(f.sugerido) : "—"}
@@ -180,11 +201,14 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Última venta",
+      ayuda: "Fecha de la última venta del artículo, en cualquier canal.",
       celda: (f) => (f.ultimaVenta ? fmtFechaCortaConAnio(f.ultimaVenta) : "—"),
       orden: (f) => f.ultimaVenta,
     },
     {
       titulo: "Días en Full",
+      ayuda:
+        "Hace cuántos días está esa mercadería en el depósito de Mercado Libre.",
       // Sólo existe para lo que está en el depósito de Mercado Libre: en
       // Tucumán no hay historia de movimientos con la que reconstruirlo. Un
       // guión es "no se sabe", no "es nuevo".
@@ -209,12 +233,15 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
         const con = filas.filter((f) => f.diasEnFull != null && f.full > 0);
         if (con.length === 0) return "—";
         const u = sumar(con, (f) => f.full);
-        const prom = u > 0 ? sumar(con, (f) => (f.diasEnFull ?? 0) * f.full) / u : 0;
+        const prom =
+          u > 0 ? sumar(con, (f) => (f.diasEnFull ?? 0) * f.full) / u : 0;
         return `${fmtNumero(Math.round(prom))} d prom.`;
       })(),
     },
     {
       titulo: "+120 días u.",
+      ayuda:
+        "Unidades que llevan más de 120 días en Full, que es donde Mercado Libre empieza a cobrar almacenamiento.",
       celda: (f) => (
         <span style={f.uMas120 > 0 ? { color: TEMA.negativo } : undefined}>
           {f.uMas120 > 0 ? fmtNumero(f.uMas120) : "—"}
@@ -226,7 +253,10 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     },
     {
       titulo: "Última compra",
-      celda: (f) => (f.ultimaCompra ? fmtFechaCortaConAnio(f.ultimaCompra) : "—"),
+      ayuda:
+        "Fecha de la última factura de compra en la que aparece el artículo. Sale del detalle de renglones, que no todos los comprobantes traen.",
+      celda: (f) =>
+        f.ultimaCompra ? fmtFechaCortaConAnio(f.ultimaCompra) : "—",
       // Sin fecha ordena al final, que es lo que hace `Tabla` con los `null`:
       // no saber cuándo se compró no es lo mismo que haber comprado hace mucho.
       orden: (f) => f.ultimaCompra,
@@ -247,38 +277,40 @@ export default function DashboardStockPage() {
   // que decide si el botón de limpiar filtros está activo.
   const [enUnidades, setEnUnidades] = useState(false);
 
-  const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
-    "/api/stock",
-    {
-      proveedor: filtros.proveedor,
-      grupo: filtros.grupo,
-      marca: filtros.marca,
-      sku: filtros.sku,
-      tramo: filtros.tramo ? [filtros.tramo] : undefined,
-      buscar: filtros.buscar ? [filtros.buscar] : undefined,
-      ventana: [String(filtros.ventana ?? VENTANA_POR_DEFECTO)],
-      deposito: [filtros.deposito ?? DEPOSITO_POR_DEFECTO],
-      // RED DE SEGURIDAD. `satisfies` obliga a que estén TODAS las claves
-      // de FiltrosStock: si mañana se agrega un filtro y se olvida acá, esto
-      // rompe el build.
-      //
-      // Existe porque ya pasó. El filtro de Empresa se cableó en el tipo, en
-      // la ruta de API, en el SQL y en el selector -- y faltó esta línea, que
-      // es la que lo mete en la query string. Sin ella el filtro cambiaba pero
-      // la URL no, el efecto no se volvía a disparar y la pantalla quedaba
-      // sombreada para siempre. Ni tsc, ni eslint, ni el build lo veían: para
-      // todos ellos era un objeto válido al que le faltaba una clave.
-    } satisfies Record<keyof FiltrosStock, string | string[] | undefined>,
-    { conOpciones: "1" },
-  );
+  const { data, cargando, error, recargar, empezarCarga } =
+    useDatosTablero<Respuesta>(
+      "/api/stock",
+      {
+        proveedor: filtros.proveedor,
+        grupo: filtros.grupo,
+        marca: filtros.marca,
+        sku: filtros.sku,
+        tramo: filtros.tramo ? [filtros.tramo] : undefined,
+        buscar: filtros.buscar ? [filtros.buscar] : undefined,
+        ventana: [String(filtros.ventana ?? VENTANA_POR_DEFECTO)],
+        deposito: [filtros.deposito ?? DEPOSITO_POR_DEFECTO],
+        // RED DE SEGURIDAD. `satisfies` obliga a que estén TODAS las claves
+        // de FiltrosStock: si mañana se agrega un filtro y se olvida acá, esto
+        // rompe el build.
+        //
+        // Existe porque ya pasó. El filtro de Empresa se cableó en el tipo, en
+        // la ruta de API, en el SQL y en el selector -- y faltó esta línea, que
+        // es la que lo mete en la query string. Sin ella el filtro cambiaba pero
+        // la URL no, el efecto no se volvía a disparar y la pantalla quedaba
+        // sombreada para siempre. Ni tsc, ni eslint, ni el build lo veían: para
+        // todos ellos era un objeto válido al que le faltaba una clave.
+      } satisfies Record<keyof FiltrosStock, string | string[] | undefined>,
+      { conOpciones: "1" },
+    );
 
   const cambiar = (f: FiltrosStock) => {
     empezarCarga();
     setFiltros(f);
   };
 
-  const alternarEn = (clave: "proveedor" | "marca" | "sku") => (valor: string) =>
-    cambiar({ ...filtros, [clave]: alternarValor(filtros[clave], valor) });
+  const alternarEn =
+    (clave: "proveedor" | "marca" | "sku") => (valor: string) =>
+      cambiar({ ...filtros, [clave]: alternarValor(filtros[clave], valor) });
 
   const k = data?.kpis;
   const ventana = filtros.ventana ?? VENTANA_POR_DEFECTO;
@@ -409,7 +441,9 @@ export default function DashboardStockPage() {
               id="buscar-stock"
               value={buscado}
               onChange={(e) => setBuscado(e.target.value)}
-              onBlur={() => cambiar({ ...filtros, buscar: buscado.trim() || undefined })}
+              onBlur={() =>
+                cambiar({ ...filtros, buscar: buscado.trim() || undefined })
+              }
               placeholder="SKU o artículo"
               className="border-line bg-panel-2 text-ink placeholder:text-muted focus:border-c1 w-40 rounded-lg border px-2.5 py-1.5 text-xs outline-none"
             />
@@ -425,12 +459,13 @@ export default function DashboardStockPage() {
         </div>
 
         <span className="text-muted text-[11px] leading-tight">
-          La <strong>cobertura</strong> es cuántos días dura el stock al ritmo de los últimos{" "}
-          {ventana} días. El objetivo es <strong>{COBERTURA_OBJETIVO_DIAS} días</strong> y la
-          reposición tarda <strong>{PLAZO_REPOSICION_DIAS}</strong>, así que{" "}
+          La <strong>cobertura</strong> es cuántos días dura el stock al ritmo
+          de los últimos {ventana} días. El objetivo es{" "}
+          <strong>{COBERTURA_OBJETIVO_DIAS} días</strong> y la reposición tarda{" "}
+          <strong>{PLAZO_REPOSICION_DIAS}</strong>, así que{" "}
           <strong>Comprar u.</strong> es lo que falta para cubrir los{" "}
-          {COBERTURA_OBJETIVO_DIAS + PLAZO_REPOSICION_DIAS} días. Todos los pesos son{" "}
-          <strong>netos, a costo</strong>.
+          {COBERTURA_OBJETIVO_DIAS + PLAZO_REPOSICION_DIAS} días. Todos los
+          pesos son <strong>netos, a costo</strong>.
         </span>
       </div>
 
@@ -451,7 +486,9 @@ export default function DashboardStockPage() {
       {error && (
         <Aviso>
           <p className="font-medium">No se pudieron leer los datos.</p>
-          <p className="mt-1 font-mono text-xs break-words opacity-80">{error}</p>
+          <p className="mt-1 font-mono text-xs break-words opacity-80">
+            {error}
+          </p>
         </Aviso>
       )}
 
@@ -506,11 +543,15 @@ export default function DashboardStockPage() {
       )}
 
       {data && (
-        <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
+        <div
+          className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
+        >
           <div className="grid gap-4 xl:grid-cols-2">
             <Panel
               titulo={
-                enUnidades ? "Cuántas unidades hay en cada tramo" : "Cuánta plata hay en cada tramo"
+                enUnidades
+                  ? "Cuántas unidades hay en cada tramo"
+                  : "Cuánta plata hay en cada tramo"
               }
               nota={
                 enUnidades
@@ -559,7 +600,10 @@ export default function DashboardStockPage() {
                 vacio="Sin stock para el filtro elegido."
                 seleccionados={
                   filtros.tramo
-                    ? [TRAMOS_COBERTURA.find((t) => t.clave === filtros.tramo)?.label ?? ""]
+                    ? [
+                        TRAMOS_COBERTURA.find((t) => t.clave === filtros.tramo)
+                          ?.label ?? "",
+                      ]
                     : undefined
                 }
                 onSeleccionar={(label) => {
@@ -579,14 +623,19 @@ export default function DashboardStockPage() {
               <dl className="text-muted mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] sm:grid-cols-3">
                 {TRAMOS_COBERTURA.map((t) => (
                   <div key={t.clave} className="flex items-baseline gap-1.5">
-                    <dt className="text-ink font-medium whitespace-nowrap">{t.label}</dt>
+                    <dt className="text-ink font-medium whitespace-nowrap">
+                      {t.label}
+                    </dt>
                     <dd className="m-0 truncate">{t.desc}</dd>
                   </div>
                 ))}
               </dl>
             </Panel>
 
-            <Panel titulo="Stock por proveedor" nota="Top 15 por valor · click para filtrar">
+            <Panel
+              titulo="Stock por proveedor"
+              nota="Top 15 por valor · click para filtrar"
+            >
               <BarrasCategoria
                 datos={data.proveedores.slice(0, 15).map((p) => ({
                   label: p.proveedor,
@@ -612,10 +661,14 @@ export default function DashboardStockPage() {
             <Tabla
               filas={data.filas}
               columnas={columnas(data.filas)}
-              etiquetaTotal={data.recortada ? `Total (los ${TOPE_TEXTO} mostrados)` : "Total"}
+              etiquetaTotal={
+                data.recortada ? `Total (los ${TOPE_TEXTO} mostrados)` : "Total"
+              }
               clave={(f) => f.sku}
               onClickFila={(f) => alternarEn("sku")(f.sku)}
-              activa={(f) => (filtros.sku?.length ? filtros.sku.includes(f.sku) : false)}
+              activa={(f) =>
+                filtros.sku?.length ? filtros.sku.includes(f.sku) : false
+              }
               vacio="Ningún artículo con stock para el filtro elegido."
             />
           </Panel>
@@ -623,41 +676,55 @@ export default function DashboardStockPage() {
           {/* Lo que el tablero NO sabe todavía, dicho en la pantalla. Sin esto,
               "Comprar u." se leería como una orden de compra cerrada. */}
           <Aviso tono="info">
-            <p className="font-medium">Qué le falta a la sugerencia de compra.</p>
+            <p className="font-medium">
+              Qué le falta a la sugerencia de compra.
+            </p>
             <p className="mt-1">
-              <strong>No descuenta la mercadería en tránsito.</strong> Digip informa las
-              columnas de tránsito y recepción en cero, así que un pedido ya hecho y todavía
-              no recibido no se ve por ningún lado y el sugerido lo vuelve a pedir.
+              <strong>No descuenta la mercadería en tránsito.</strong> Digip
+              informa las columnas de tránsito y recepción en cero, así que un
+              pedido ya hecho y todavía no recibido no se ve por ningún lado y
+              el sugerido lo vuelve a pedir.
             </p>
             <p className="mt-1">
               Tampoco distingue si un artículo vendió <em>porque gusta</em> o{" "}
-              <em>porque estaba en oferta</em>: al ritmo le da lo mismo. Eso sale del
-              descuento propio por mes, que ya está en la base, y es lo próximo que se suma.
+              <em>porque estaba en oferta</em>: al ritmo le da lo mismo. Eso
+              sale del descuento propio por mes, que ya está en la base, y es lo
+              próximo que se suma.
             </p>
             <p className="mt-1">
-              El plazo de reposición es un promedio de {PLAZO_REPOSICION_DIAS} días para
-              todos los proveedores. Con los plazos reales cargados, cada uno usa el suyo.
+              El plazo de reposición es un promedio de {PLAZO_REPOSICION_DIAS}{" "}
+              días para todos los proveedores. Con los plazos reales cargados,
+              cada uno usa el suyo.
             </p>
             <p className="mt-1">
-              <strong>«Días en Full» son días en el depósito, no el cargo de Mercado
-              Libre.</strong> El cargo por almacenamiento prolongado usa un umbral que{" "}
-              <em>depende de la categoría</em> —un perfume puede entrar a los 60 días y
-              una crema a los 120—, y ese umbral no viene por API. Acá el corte es 120
-              para todos, así que en las categorías que cobran antes el número queda
-              corto. Sirve para saber qué mover; no para saber qué te facturaron.
+              <strong>
+                «Días en Full» son días en el depósito, no el cargo de Mercado
+                Libre.
+              </strong>{" "}
+              El cargo por almacenamiento prolongado usa un umbral que{" "}
+              <em>depende de la categoría</em> —un perfume puede entrar a los 60
+              días y una crema a los 120—, y ese umbral no viene por API. Acá el
+              corte es 120 para todos, así que en las categorías que cobran
+              antes el número queda corto. Sirve para saber qué mover; no para
+              saber qué te facturaron.
             </p>
             <p className="mt-1">
-              Sólo existe para <strong>Mercado Libre Full</strong>. En Tucumán no hay
-              historia de movimientos con la que reconstruirlo, así que un artículo que
-              está sólo allá muestra un guión — que es «no se sabe», no «es nuevo».
+              Sólo existe para <strong>Mercado Libre Full</strong>. En Tucumán
+              no hay historia de movimientos con la que reconstruirlo, así que
+              un artículo que está sólo allá muestra un guión — que es «no se
+              sabe», no «es nuevo».
             </p>
             <p className="mt-1">
-              <strong>La columna «Última compra» es un piso, no la verdad.</strong> Sólo
-              hay comprobantes cargados
-              {data.comprasHasta ? ` hasta el ${fmtFechaCorta(data.comprasHasta)}` : ""}, y
-              dos de cada tres llegan sin el detalle de renglones, así que no se sabe qué
-              SKU traían. Un artículo comprado después figura con la fecha vieja o sin
-              fecha. Se arregla del lado del orquestador.
+              <strong>
+                La columna «Última compra» es un piso, no la verdad.
+              </strong>{" "}
+              Sólo hay comprobantes cargados
+              {data.comprasHasta
+                ? ` hasta el ${fmtFechaCorta(data.comprasHasta)}`
+                : ""}
+              , y dos de cada tres llegan sin el detalle de renglones, así que
+              no se sabe qué SKU traían. Un artículo comprado después figura con
+              la fecha vieja o sin fecha. Se arregla del lado del orquestador.
             </p>
           </Aviso>
         </div>

@@ -35,6 +35,7 @@ function columnasComprobantes(
   return [
     {
       titulo: "Comprobante",
+      ayuda: "Comprobante de Sigma que aportó a este objetivo.",
       celda: (f) => f.comprobante ?? "—",
       orden: (f) => f.comprobante,
     },
@@ -42,17 +43,23 @@ function columnasComprobantes(
     {
       titulo: "Cliente",
       celda: (f) => (
-        <span className="block max-w-[126px] sm:max-w-[280px] truncate">{f.cliente ?? "—"}</span>
+        <span className="block max-w-[126px] sm:max-w-[280px] truncate">
+          {f.cliente ?? "—"}
+        </span>
       ),
       orden: (f) => f.cliente,
     },
     {
       titulo: "Empresa",
+      ayuda:
+        "Con qué empresa del grupo se facturó: Quo Marketing, Noa Comercial o sus presupuestos.",
       celda: (f) => f.empresa ?? "—",
       orden: (f) => f.empresa,
     },
     {
       titulo: "Unidades",
+      ayuda:
+        "Unidades de la línea. Con un grupo seleccionado, sólo las de ese grupo.",
       celda: (f) => fmtNumero(f.unidades),
       numerica: true,
       orden: (f) => f.unidades,
@@ -60,6 +67,7 @@ function columnasComprobantes(
     },
     {
       titulo: "Facturación",
+      ayuda: "Venta neta de la línea, sin IVA.",
       celda: (f) => fmtMoneda(f.facturacion),
       numerica: true,
       orden: (f) => f.facturacion,
