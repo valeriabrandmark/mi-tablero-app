@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { descuentoValido, UNIDADES_COMPRA, type RenglonOrden } from "@/lib/compras";
+import {
+  descuentoValido,
+  UNIDADES_COMPRA,
+  type RenglonOrden,
+} from "@/lib/compras";
 import { permisoDelUsuario, puedeEscribirEnElERP } from "@/lib/permisos";
 import { getArticulosParaOrden } from "@/lib/queries-compras";
 import {
@@ -44,12 +48,28 @@ export const dynamic = "force-dynamic";
  * `items` viene vacío, la orden se crea igual, vacía y sin error.
  *
  * ---------------------------------------------------------------------------
- * SOBRE LOS CÓDIGOS DE ERROR
+ * SOBRE LOS CÓDIGOS DE ERROR: EL 500 DE SIGMA NO SIGNIFICA QUE NO ENTRÓ
  *
- * `ImportOrdenDeCompra` contesta 500 tanto para "te falta un campo" como para
- * "se rompió", y 200 para el éxito. Así que un 500 con cuerpo se devuelve tal
- * cual a la pantalla: el mensaje de Sigma está en castellano y dice qué pasó
- * mejor de lo que podríamos resumirlo.
+ * `ImportOrdenDeCompra` contesta 500 para "te falta un campo", para "se rompió"
+ * y TAMBIÉN CUANDO LA ORDEN SE CARGÓ BIEN. El 09/09/2026 Sigma confirmó que las
+ * nueve órdenes que habíamos dado por fallidas --todas con el mismo
+ * `Query with RESPONSE_CODE returned no rows`-- estaban las nueve cargadas.
+ * Quedaron ocho órdenes de prueba vivas en el ERP, varias duplicadas por
+ * reintentos que la pantalla misma invitaba a hacer.
+ *
+ * Sigma dijo que va a arreglar el mensaje. Hasta que lo haga --y también
+ * después, porque desde acá no hay forma de comprobarlo-- la respuesta NO
+ * alcanza para decidir si la orden entró.
+ *
+ * POR ESO CADA RESPUESTA DE ERROR LLEVA `mandado`. No es un detalle de la
+ * pantalla: es la única distinción que importa.
+ *
+ *   mandado: false   nada salió de acá. Se corrige y se reintenta tranquilo.
+ *   mandado: true    ya se le habló a Sigma. PUEDE HABER UNA ORDEN CARGADA, y
+ *                    reintentar es cargar una segunda.
+ *
+ * En una operación sin `undo`, "no sé si pasó" es más honesto --y más seguro--
+ * que un "falló" que suena definitivo.
  */
 
 /** El sobre de Sigma, sacado del entorno. Falla claro si falta algo. */
@@ -98,7 +118,8 @@ function leerRenglones(crudo: unknown): Map<string, RenglonOrden> {
   if (!Array.isArray(crudo)) return orden;
 
   for (const fila of crudo.slice(0, 500) as CuerpoRenglon[]) {
-    const sku = typeof fila?.sku === "string" ? fila.sku.trim().slice(0, 40) : "";
+    const sku =
+      typeof fila?.sku === "string" ? fila.sku.trim().slice(0, 40) : "";
     if (!sku) continue;
 
     const unidad = UNIDADES_COMPRA.find((u) => u.clave === fila?.unidad)?.clave;
@@ -122,7 +143,10 @@ export async function POST(request: NextRequest) {
     const permiso = permisoDelUsuario(await getUsuario());
     if (!puedeEscribirEnElERP(permiso)) {
       return NextResponse.json(
-        { error: "Mandar órdenes al ERP requiere el rol superadmin." },
+        {
+          error: "Mandar órdenes al ERP requiere el rol superadmin.",
+          mandado: false,
+        },
         { status: 403 },
       );
     }
@@ -132,7 +156,10 @@ export async function POST(request: NextRequest) {
   try {
     cuerpo = await request.json();
   } catch {
-    return NextResponse.json({ error: "El cuerpo no es JSON válido." }, { status: 400 });
+    return NextResponse.json(
+      { error: "El cuerpo no es JSON válido.", mandado: false },
+      { status: 400 },
+    );
   }
 
   const orden = leerRenglones(cuerpo.renglones);
@@ -141,26 +168,46 @@ export async function POST(request: NextRequest) {
 
   if (orden.size === 0) {
     return NextResponse.json(
-      { error: "No llegó ningún renglón con cantidad." },
+      { error: "No llegó ningún renglón con cantidad.", mandado: false },
       { status: 400 },
     );
   }
 
+  // Se declara afuera del try para que el catch pueda leerlo: es lo que
+  // distingue "no llegamos a mandar nada" de "puede haber una orden cargada".
+  let yaSalio = false;
+
   try {
     const articulos = new Map<string, ArticuloParaOrden>(
-      (await getArticulosParaOrden([...orden.keys()], mes)).map((a) => [a.sku, a]),
+      (await getArticulosParaOrden([...orden.keys()], mes)).map((a) => [
+        a.sku,
+        a,
+      ]),
     );
 
     const problemas = problemasDeLaOrden(articulos, orden);
     if (problemas.length > 0) {
       // 422 y no 400: el JSON está bien formado, lo que no se puede es mandar
       // ESTA orden. La pantalla las lista todas juntas.
-      return NextResponse.json({ error: "La orden no se puede mandar", problemas }, { status: 422 });
+      return NextResponse.json(
+        { error: "La orden no se puede mandar", problemas, mandado: false },
+        { status: 422 },
+      );
     }
 
     const payload = armarOrdenSigma(articulos, orden, nota);
 
-    const respuesta = await fetch(urlDeSigma(), {
+    // A PARTIR DE ACÁ YA NO SE PUEDE PROMETER QUE NO PASÓ NADA.
+    //
+    // El flag se levanta ANTES del fetch y no después a propósito: si la
+    // conexión se corta a mitad de camino, o el timeout salta, o el proceso se
+    // muere, la orden puede haber entrado igual. Levantarlo después dejaría
+    // justo esos casos --los únicos donde la duda importa-- del lado del "no
+    // se mandó".
+    const url = urlDeSigma();
+    yaSalio = true;
+
+    const respuesta = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -178,7 +225,12 @@ export async function POST(request: NextRequest) {
       console.error("[api/compras/sigma]", respuesta.status, texto);
       return NextResponse.json(
         {
-          error: texto || `Sigma contestó ${respuesta.status} sin explicar por qué.`,
+          error:
+            texto || `Sigma contestó ${respuesta.status} sin explicar por qué.`,
+          // Sigma contesta 500 también cuando la orden se cargó bien, así que
+          // esto NO es "falló": es "no sabemos". La pantalla tiene que decirlo
+          // con esas palabras o alguien reintenta y carga la orden dos veces.
+          mandado: true,
           enviado: payload,
         },
         { status: 502 },
@@ -194,8 +246,14 @@ export async function POST(request: NextRequest) {
       enviado: payload,
     });
   } catch (error) {
-    const mensaje = error instanceof Error ? error.message : "Error desconocido";
+    const mensaje =
+      error instanceof Error ? error.message : "Error desconocido";
     console.error("[api/compras/sigma]", error);
-    return NextResponse.json({ error: mensaje }, { status: 500 });
+    // Leer la base o armar el cuerpo puede fallar antes de hablarle a Sigma;
+    // un timeout, después. `yaSalio` sabe de qué lado del fetch estamos.
+    return NextResponse.json(
+      { error: mensaje, mandado: yaSalio },
+      { status: 500 },
+    );
   }
 }
