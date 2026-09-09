@@ -19,6 +19,7 @@ import {
   BANDAS,
   EXPERIMENTO_FIN,
   EXPERIMENTO_INICIO,
+  EXPERIMENTO_SEMANAS,
   SEMANAS,
   bandaDeMargen,
   diaMes,
@@ -385,7 +386,8 @@ export default function DashboardResultadosPage() {
             las columnas "semana 1, 2 y 3" pasarían a ser una etiqueta que no
             corresponde con lo que muestran. */}
         <span className="text-muted text-[11px] leading-tight">
-          Las tres semanas son fijas y de 7 días cada una. El día de corte
+          Las {EXPERIMENTO_SEMANAS} semanas son fijas y de 7 días cada una. El
+          día de corte
           pertenece a la semana siguiente: lo vendido el{" "}
           {diaMes(SEMANAS[1].desde)} entra en la semana 2, no en la 1, así que
           ninguna venta se cuenta dos veces. Para mirar otro período está la
@@ -453,7 +455,7 @@ export default function DashboardResultadosPage() {
           </ConAlarmaMargen>
 
           <Panel
-            titulo="Las tres semanas"
+            titulo={`Las ${EXPERIMENTO_SEMANAS} semanas`}
             nota="Se llenan solas a medida que entran las ventas"
           >
             <Tabla

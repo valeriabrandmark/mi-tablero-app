@@ -440,11 +440,12 @@ export async function getDashboardElasticidad(
  * El corte de las semanas vive en `lib/elasticidad.ts` (`SEMANAS`), que es
  * también el que dibuja las columnas. Si el SQL volviera a decidir dónde
  * termina cada semana, habría dos definiciones del mismo corte y el día que se
- * agregue una cuarta semana una de las dos se va a quedar atrás — con la tabla
+ * estire el experimento una de las dos se va a quedar atrás — con la tabla
  * mostrando una columna que la consulta no llena.
  *
- * Traer por día cuesta poco: son ~5.000 filas para las tres semanas, y el
- * agrupado lo hace `semanaDe`, una sola función, la misma para todos.
+ * Traer por día cuesta poco: eran ~5.000 filas con tres semanas y son ~10.000
+ * con seis, y el agrupado lo hace `semanaDe`, una sola función, la misma para
+ * todos. El costo crece con las semanas pero la consulta no cambia.
  */
 async function getVentasPorDia(f: FiltrosElasticidad) {
   const params: unknown[] = [CANAL_MELI, EXPERIMENTO_INICIO, EXPERIMENTO_FIN];
