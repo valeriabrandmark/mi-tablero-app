@@ -15,8 +15,12 @@ export default function BarraFiltros({
   onChange: (f: Filtros) => void;
 }) {
   const vacio =
-    sinValores(filtros.vendedor) && sinValores(filtros.empresa) && sinValores(filtros.mes) &&
-    sinValores(filtros.proveedor) && sinValores(filtros.provincia) && !filtros.buscar;
+    sinValores(filtros.vendedor) &&
+    sinValores(filtros.empresa) &&
+    sinValores(filtros.mes) &&
+    sinValores(filtros.proveedor) &&
+    sinValores(filtros.provincia) &&
+    !filtros.buscar;
 
   return (
     <div className="border-line bg-panel flex flex-wrap items-end gap-3 rounded-xl border p-3">
@@ -61,9 +65,9 @@ export default function BarraFiltros({
       </button>
 
       <span className="text-muted ml-auto max-w-md text-[11px] leading-tight">
-        Canal Mayorista, excluyendo <code>AGENCIA</code>. La provincia sale del envío
-        (<code>reporte_logistica</code>), así que al usarla quedan solo las líneas que ya
-        tienen logística cargada.
+        Canal Mayorista, excluyendo <code>AGENCIA</code>. La provincia sale del
+        envío (<code>reporte_logistica</code>), así que al usarla quedan solo
+        las líneas que ya tienen logística cargada.
       </span>
     </div>
   );

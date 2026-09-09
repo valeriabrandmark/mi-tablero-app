@@ -144,7 +144,9 @@ export function SelectorMultiple({
         onClick={() => setAbierto((a) => !a)}
         className={`${CLASE_SELECT} flex min-w-[10rem] items-center gap-2 text-left disabled:opacity-40`}
       >
-        <span className={`flex-1 truncate ${elegidos.length === 0 ? "text-muted" : ""}`}>
+        <span
+          className={`flex-1 truncate ${elegidos.length === 0 ? "text-muted" : ""}`}
+        >
           {resumen}
         </span>
         <svg
@@ -186,7 +188,9 @@ export function SelectorMultiple({
                   onChange={() => alternarUno(v)}
                   className="accent-c1 size-3.5 shrink-0"
                 />
-                <span className={`truncate ${tildado ? "" : "text-muted"}`}>{txt}</span>
+                <span className={`truncate ${tildado ? "" : "text-muted"}`}>
+                  {txt}
+                </span>
               </label>
             );
           })}
