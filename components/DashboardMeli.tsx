@@ -64,6 +64,8 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
   return [
     {
       titulo: "N° orden",
+      ayuda:
+        "Número de orden de Mercado Libre. Se puede copiar y pegar en el buscador de ML.",
       celda: (a) => celdaOrden(a.nroOrden),
       orden: (a) => a.nroOrden,
     },
@@ -80,12 +82,15 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
     {
       titulo: "Marca",
       celda: (a) => (
-        <span className="block max-w-[96px] sm:max-w-[140px] truncate">{a.marca ?? "—"}</span>
+        <span className="block max-w-[96px] sm:max-w-[140px] truncate">
+          {a.marca ?? "—"}
+        </span>
       ),
       orden: (a) => a.marca,
     },
     {
       titulo: "Unid.",
+      ayuda: "Unidades vendidas en el recorte de fechas elegido.",
       celda: (a) => fmtNumero(a.unidades),
       numerica: true,
       orden: (a) => a.unidades,
@@ -93,6 +98,8 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
     },
     {
       titulo: "Venta c/IVA",
+      ayuda:
+        "Lo que pagó el comprador, IVA incluido. Es la cifra que muestra Mercado Libre.",
       celda: (a) => fmtMoneda(a.ventaCiva),
       numerica: true,
       orden: (a) => a.ventaCiva,
@@ -100,6 +107,8 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
     },
     {
       titulo: "Costo s/IVA",
+      ayuda:
+        "Costo de la mercadería sin IVA, del Excel de costos del mes de la venta.",
       celda: (a) => fmtMoneda(a.costo),
       numerica: true,
       orden: (a) => a.costo,
@@ -107,6 +116,7 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
     },
     {
       titulo: "Comisión s/IVA",
+      ayuda: "Lo que se queda Mercado Libre por la venta, sin IVA.",
       celda: (a) => fmtMoneda(a.comision),
       numerica: true,
       orden: (a) => a.comision,
@@ -114,6 +124,8 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
     },
     {
       titulo: "Envío",
+      ayuda:
+        "Costo del envío que absorbemos nosotros. Cero cuando lo paga el comprador.",
       celda: (a) => fmtMoneda(a.envio),
       numerica: true,
       orden: (a) => a.envio,
@@ -121,6 +133,8 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
     },
     {
       titulo: "Rent. bruta",
+      ayuda:
+        "Venta menos costo, comisión y envío. BRUTA: todavía no descuenta IIBB, impuesto al cheque ni municipal.",
       celda: (a) => (
         <span style={a.rentabilidad < 0 ? { color: TEMA.negativo } : undefined}>
           {fmtMoneda(a.rentabilidad)}
@@ -132,6 +146,7 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
     },
     {
       titulo: "Margen bruto",
+      ayuda: "La rentabilidad bruta sobre la venta con IVA.",
       celda: (a) => (
         <span
           style={(a.margenPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}
@@ -174,7 +189,9 @@ function columnasCancelaciones(
     {
       titulo: "Marca",
       celda: (c) => (
-        <span className="block max-w-[96px] sm:max-w-[140px] truncate">{c.marca ?? "—"}</span>
+        <span className="block max-w-[96px] sm:max-w-[140px] truncate">
+          {c.marca ?? "—"}
+        </span>
       ),
       orden: (c) => c.marca,
     },
@@ -187,12 +204,15 @@ function columnasCancelaciones(
     // número. El total de abajo sigue siendo las órdenes DISTINTAS del recorte.
     {
       titulo: "N° orden",
+      ayuda:
+        "Número de orden de Mercado Libre. Se puede copiar y pegar en el buscador de ML.",
       celda: (c) => celdaOrden(c.nroOrden),
       orden: (c) => c.nroOrden,
       total: `${fmtNumero(totales.ordenes)} órdenes`,
     },
     {
       titulo: "Unid.",
+      ayuda: "Unidades vendidas en el recorte de fechas elegido.",
       celda: (c) => fmtNumero(c.unidades),
       numerica: true,
       orden: (c) => c.unidades,
@@ -200,6 +220,8 @@ function columnasCancelaciones(
     },
     {
       titulo: "Monto cancelado",
+      ayuda:
+        "Plata de órdenes canceladas o devueltas. No entra en las ventas del resto de la pantalla.",
       celda: (c) => (
         <span style={{ color: TEMA.negativo }}>{fmtMoneda(c.monto)}</span>
       ),
@@ -229,6 +251,7 @@ function columnasTop(filas: ArticuloMeli[]): Columna<ArticuloMeli>[] {
     },
     {
       titulo: "Unid.",
+      ayuda: "Unidades vendidas en el recorte de fechas elegido.",
       celda: (a) => fmtNumero(a.unidades),
       numerica: true,
       orden: (a) => a.unidades,
@@ -236,6 +259,8 @@ function columnasTop(filas: ArticuloMeli[]): Columna<ArticuloMeli>[] {
     },
     {
       titulo: "Rent. bruta",
+      ayuda:
+        "Venta menos costo, comisión y envío. BRUTA: todavía no descuenta IIBB, impuesto al cheque ni municipal.",
       celda: (a) => (
         <span
           style={
@@ -251,6 +276,7 @@ function columnasTop(filas: ArticuloMeli[]): Columna<ArticuloMeli>[] {
     },
     {
       titulo: "Margen bruto",
+      ayuda: "La rentabilidad bruta sobre la venta con IVA.",
       celda: (a) => fmtPct(a.margenPct),
       numerica: true,
       orden: (a) => a.margenPct,
@@ -342,12 +368,16 @@ function TablaRanking({
     {
       titulo,
       celda: (r) => (
-        <span className="block max-w-[100px] sm:max-w-[220px] truncate">{r.label}</span>
+        <span className="block max-w-[100px] sm:max-w-[220px] truncate">
+          {r.label}
+        </span>
       ),
       orden: (r) => r.label,
     },
     {
       titulo: "Venta c/IVA",
+      ayuda:
+        "Lo que pagó el comprador, IVA incluido. Es la cifra que muestra Mercado Libre.",
       celda: (r) => fmtMoneda(r.venta),
       numerica: true,
       orden: (r) => r.venta,
@@ -355,6 +385,7 @@ function TablaRanking({
     },
     {
       titulo: "Unid.",
+      ayuda: "Unidades vendidas en el recorte de fechas elegido.",
       celda: (r) => fmtNumero(r.unidades),
       numerica: true,
       orden: (r) => r.unidades,
@@ -362,6 +393,8 @@ function TablaRanking({
     },
     {
       titulo: "Rent. bruta",
+      ayuda:
+        "Venta menos costo, comisión y envío. BRUTA: todavía no descuenta IIBB, impuesto al cheque ni municipal.",
       celda: (r) => (
         <span style={r.rentabilidad < 0 ? { color: TEMA.negativo } : undefined}>
           {fmtMoneda(r.rentabilidad)}
@@ -373,6 +406,7 @@ function TablaRanking({
     },
     {
       titulo: "Margen bruto",
+      ayuda: "La rentabilidad bruta sobre la venta con IVA.",
       celda: (r) => (
         <span
           style={(r.margenPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}

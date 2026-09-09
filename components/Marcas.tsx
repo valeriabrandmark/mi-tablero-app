@@ -36,7 +36,9 @@ type Props = {
 
 /** Atributos comunes: o es una imagen con nombre, o no existe para el lector. */
 function accesibilidad(titulo?: string) {
-  return titulo ? { role: "img" as const, "aria-label": titulo } : { "aria-hidden": true };
+  return titulo
+    ? { role: "img" as const, "aria-label": titulo }
+    : { "aria-hidden": true };
 }
 
 /**
@@ -56,7 +58,12 @@ export const NARANJA = "#e8801a";
  */
 export function MarcaUnibrandco({ className, titulo }: Props) {
   return (
-    <svg viewBox="0 0 100 140" fill="none" className={className} {...accesibilidad(titulo)}>
+    <svg
+      viewBox="0 0 100 140"
+      fill="none"
+      className={className}
+      {...accesibilidad(titulo)}
+    >
       <path
         d="M6 34C12 12 30 4 48 16c16 11 28 14 42-6-2 20-18 34-38 22C34 21 20 16 6 34Z"
         fill={NARANJA}
@@ -80,7 +87,12 @@ export function MarcaUnibrandco({ className, titulo }: Props) {
  */
 export function MarcaTiendaNube({ className, titulo }: Props) {
   return (
-    <svg viewBox="0 0 98 94" fill="none" className={className} {...accesibilidad(titulo)}>
+    <svg
+      viewBox="0 0 98 94"
+      fill="none"
+      className={className}
+      {...accesibilidad(titulo)}
+    >
       <g stroke="currentColor" strokeWidth="13">
         <circle cx="32" cy="32" r="20" />
         <circle cx="62" cy="58" r="24" />
@@ -99,8 +111,21 @@ export function MarcaTiendaNube({ className, titulo }: Props) {
  */
 export function MarcaMercadoLibre({ className, titulo }: Props) {
   return (
-    <svg viewBox="0 0 100 68" fill="none" className={className} {...accesibilidad(titulo)}>
-      <ellipse cx="50" cy="34" rx="46" ry="30" fill="#ffe600" stroke="#2d3277" strokeWidth="5" />
+    <svg
+      viewBox="0 0 100 68"
+      fill="none"
+      className={className}
+      {...accesibilidad(titulo)}
+    >
+      <ellipse
+        cx="50"
+        cy="34"
+        rx="46"
+        ry="30"
+        fill="#ffe600"
+        stroke="#2d3277"
+        strokeWidth="5"
+      />
       <clipPath id="ml-elipse">
         <ellipse cx="50" cy="34" rx="46" ry="30" />
       </clipPath>

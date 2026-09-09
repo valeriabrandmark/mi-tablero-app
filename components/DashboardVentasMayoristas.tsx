@@ -105,6 +105,7 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
     },
     {
       titulo: "Unidades",
+      ayuda: "Unidades facturadas, sumadas de las líneas de venta de Sigma.",
       celda: (a) => fmtNumero(a.cantidad),
       numerica: true,
       orden: (a) => a.cantidad,
@@ -115,6 +116,8 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
       // descuento que se le hizo al cliente en la venta; los otros dos salen
       // del Excel de costos y son del proveedor y nuestro.
       titulo: "Dto. venta %",
+      ayuda:
+        "Lo que se le descontó AL CLIENTE en la venta: descuento de línea, general y financiero, combinados. Sale de la factura de Sigma. Promedio de las líneas que tuvieron descuento.",
       celda: (a) => (a.ofertaPct == null ? "—" : fmtPct(a.ofertaPct / 100)),
       numerica: true,
       orden: (a) => a.ofertaPct,
@@ -131,6 +134,8 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
     },
     {
       titulo: "Oferta prov. %",
+      ayuda:
+        "Lo que el proveedor nos descontó a nosotros ese mes (columna J del Excel de costos). Es del COSTO, no de la venta: no confundir con Dto. venta %.",
       celda: (a) =>
         a.ofertaProveedorPct == null ? "—" : fmtPct(a.ofertaProveedorPct / 100),
       numerica: true,
@@ -148,6 +153,8 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
     },
     {
       titulo: "Oferta propia %",
+      ayuda:
+        "Lo que ponemos nosotros encima del descuento del proveedor (columna K del Excel de costos).",
       celda: (a) =>
         a.ofertaPropiaPct == null ? "—" : fmtPct(a.ofertaPropiaPct / 100),
       numerica: true,
@@ -162,6 +169,8 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
     },
     {
       titulo: "Precio prom.",
+      ayuda:
+        "Precio neto promedio por unidad, ponderado por cantidad. No es la suma de precios unitarios dividida por filas: eso no significaría nada.",
       celda: (a) => fmtMoneda(a.precioPromedio),
       numerica: true,
       orden: (a) => a.precioPromedio,
@@ -175,6 +184,8 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
     },
     {
       titulo: "Costo prom. s/IVA",
+      ayuda:
+        "Costo unitario promedio ponderado por cantidad, del Excel de costos del mes de cada venta.",
       celda: (a) => fmtMoneda(a.costoPromedio),
       numerica: true,
       orden: (a) => a.costoPromedio,
@@ -188,6 +199,7 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
     },
     {
       titulo: "Facturación",
+      ayuda: "Venta neta: sin IVA y ya descontadas las notas de crédito.",
       celda: (a) => fmtMoneda(a.facturacion),
       numerica: true,
       orden: (a) => a.facturacion,
@@ -195,6 +207,8 @@ function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
     },
     {
       titulo: "% Rentab. neta",
+      ayuda:
+        "Margen sobre facturación, después de descontar costo de mercadería y flete.",
       celda: (a) => fmtPct(a.rentabilidadPct),
       numerica: true,
       orden: (a) => a.rentabilidadPct,
@@ -219,18 +233,25 @@ function colComprobantes(
     { titulo: "Fecha", celda: (c) => c.fecha ?? "—", orden: (c) => c.fecha },
     {
       titulo: "Comprobante",
+      ayuda:
+        "Número de comprobante de Sigma. Al hacer click, la pantalla se filtra por él.",
       celda: (c) => c.comprobante ?? "—",
       orden: (c) => c.comprobante,
     },
     {
       titulo: "Cliente",
+      ayuda:
+        "Razón social del cliente en Sigma. Al hacer click, la pantalla se filtra por él.",
       celda: (c) => (
-        <span className="block max-w-[116px] sm:max-w-[260px] truncate">{c.cliente ?? "—"}</span>
+        <span className="block max-w-[116px] sm:max-w-[260px] truncate">
+          {c.cliente ?? "—"}
+        </span>
       ),
       orden: (c) => c.cliente,
     },
     {
       titulo: "Unidades",
+      ayuda: "Unidades facturadas, sumadas de las líneas de venta de Sigma.",
       celda: (c) => fmtNumero(c.unidades),
       numerica: true,
       orden: (c) => c.unidades,
@@ -238,6 +259,7 @@ function colComprobantes(
     },
     {
       titulo: "Facturación",
+      ayuda: "Venta neta: sin IVA y ya descontadas las notas de crédito.",
       celda: (c) => fmtMoneda(c.facturacion),
       numerica: true,
       orden: (c) => c.facturacion,

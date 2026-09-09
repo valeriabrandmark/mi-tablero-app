@@ -91,8 +91,11 @@ function bajar(contenido: BlobPart, nombre: string, tipo: string) {
 
 export default function DashboardComprasPage({
   puedeEnviar,
+  usuarioSigma,
 }: {
   puedeEnviar: boolean;
+  /** Nombre en Sigma de quien va a firmar la orden. `null` fuera de la lista. */
+  usuarioSigma: string | null;
 }) {
   const inicial: FiltrosCompras = {
     ventana: VENTANA_POR_DEFECTO,
@@ -230,6 +233,27 @@ export default function DashboardComprasPage({
     setFiltros(f);
   };
 
+  /**
+   * Vuelve al punto de partida sin recargar la página.
+   *
+   * Es lo que hace falta después de mandar una orden: sin esto la pantalla se
+   * queda con el cartel del resultado y con la orden anterior armada, y la
+   * única salida era F5 --que además vuelve a pedir todos los datos.
+   *
+   * Borrar las ediciones NO deja la pantalla vacía: la orden se DERIVA del
+   * sugerido, así que sin ediciones encima cada artículo vuelve a su cantidad
+   * sugerida. Es exactamente el estado en el que estaba al abrir la sección.
+   */
+  const empezarDeNuevo = () => {
+    setResultado(null);
+    setConfirmando(false);
+    setEdiciones(new Map());
+    setComentario("");
+  };
+
+  /** Saca un renglón de la orden. Cantidad 0 es "no lo pidas", no "pedí cero". */
+  const sacarDeLaOrden = (sku: string) => editar(sku, { cantidad: 0 });
+
   const editar = (sku: string, parche: Partial<RenglonOrden>) => {
     const actual = orden.get(sku);
     if (!actual) return;
@@ -311,6 +335,19 @@ export default function DashboardComprasPage({
     }
     return { renglones, unidades, bultos, bruto, neto, recortados, sinCodigo };
   }, [filas, orden]);
+
+  /**
+   * Los renglones que hoy tienen cantidad, con su nombre. Es lo que se manda, y
+   * también lo que se muestra para poder sacar uno cuando Sigma rechaza la
+   * orden por culpa de un artículo concreto.
+   */
+  const renglonesDeLaOrden = useMemo(
+    () =>
+      filas
+        .map((f) => ({ fila: f, renglon: orden.get(f.sku) }))
+        .filter((r) => (r.renglon?.cantidad ?? 0) > 0),
+    [filas, orden],
+  );
 
   // LAS ÓRDENES SON POR PROVEEDOR. Con dos elegidos el archivo mezclaría
   // proveedores en una sola orden, que es algo que no existe.
@@ -441,6 +478,8 @@ export default function DashboardComprasPage({
     },
     {
       titulo: "U. x bulto",
+      ayuda:
+        "Cuántas unidades trae un bulto, según el maestro de Sigma. Es lo que convierte la cantidad cuando se pide por bulto; los artículos que no se compran así figuran en 1.",
       celda: (f) =>
         f.unidadesPorBulto > 1 ? fmtNumero(f.unidadesPorBulto) : "—",
       numerica: true,
@@ -448,6 +487,8 @@ export default function DashboardComprasPage({
     },
     {
       titulo: "Stock",
+      ayuda:
+        "Las unidades que hay hoy: depósito de Tucumán más Mercado Libre Full. Es stock físico, NO descuenta lo ya pedido y todavía no recibido -- Digip informa tránsito y recepción en cero.",
       celda: (f) => fmtNumero(f.total),
       numerica: true,
       orden: (f) => f.total,
@@ -455,6 +496,8 @@ export default function DashboardComprasPage({
     },
     {
       titulo: "Cobertura",
+      ayuda:
+        "Para cuántos días alcanza el stock actual al ritmo al que se vende. Vacío cuando no hubo ventas en la ventana: sin ritmo no hay días que estimar, que no es lo mismo que cero.",
       celda: (f) =>
         f.cobertura == null ? (
           <span className="text-muted">sin venta</span>
@@ -474,6 +517,8 @@ export default function DashboardComprasPage({
     },
     {
       titulo: "Sugerido u.",
+      ayuda:
+        "Las unidades que el cálculo propone comprar: lo que falta para cubrir los días elegidos más el plazo de reposición, movido por la oferta y recortado por el techo. Pasá el mouse por el número para ver de dónde sale.",
       // El número solo no alcanza para firmar una compra: el que decide tiene
       // que poder ver de dónde salió sin preguntarle a nadie. Por eso el
       // tooltip trae la cuenta entera, paso por paso.
@@ -511,6 +556,8 @@ export default function DashboardComprasPage({
       // La decisión que el usuario pidió poder tomar fila por fila: la mayoría
       // se compra por bulto, pero hay excepciones.
       titulo: "Unidad",
+      ayuda:
+        "Si el renglón se pide por bulto o por unidad. Cambia cómo se lee la cantidad de al lado, no lo que se compra.",
       celda: (f) => {
         const r = orden.get(f.sku);
         return (
@@ -548,6 +595,8 @@ export default function DashboardComprasPage({
     },
     {
       titulo: "Cantidad",
+      ayuda:
+        "Lo que se va a pedir, en la unidad de la columna anterior. Arranca en el sugerido y se puede escribir encima; vaciar la celda vuelve al sugerido.",
       celda: (f) => {
         const r = orden.get(f.sku);
         return (
@@ -571,6 +620,8 @@ export default function DashboardComprasPage({
     },
     {
       titulo: "Unidades",
+      ayuda:
+        "La cantidad convertida a unidades sueltas, que es lo que realmente se compra. En un renglón por bulto es la cantidad por las unidades por bulto.",
       // Cuántas unidades físicas son, que es lo único comparable entre una fila
       // en bultos y otra en unidades.
       celda: (f) => {
@@ -587,6 +638,8 @@ export default function DashboardComprasPage({
     },
     {
       titulo: "Desc 1 (Sell in) %",
+      ayuda:
+        "El descuento VIGENTE del proveedor para el mes elegido, cargado desde la planilla de sell in. Es el único que viaja al ERP como descuento 1. Vacío es que todavía no se cargó, que no es lo mismo que cero.",
       celda: (f) => {
         const r = orden.get(f.sku);
         const excedido = (r?.descuento ?? 0) > DESCUENTO_MAXIMO;
@@ -618,6 +671,8 @@ export default function DashboardComprasPage({
       // se negocia por fuera del sell in de lista. Se aplica EN CASCADA sobre
       // lo que quedó del primero, no sumado -- ver factorNeto en lib/compras.
       titulo: "Desc 2 %",
+      ayuda:
+        "Un segundo descuento, a mano y vacío por defecto. Se aplica EN CASCADA sobre el primero: 15 % y 10 % no son 25 % sino 23,5 %.",
       celda: (f) => {
         const r = orden.get(f.sku);
         const excedido = (r?.descuento2 ?? 0) > DESCUENTO_MAXIMO;
@@ -653,6 +708,8 @@ export default function DashboardComprasPage({
       // qué es: puesto como "oferta" a secas se copiaría a la orden pensando
       // que es el descuento con el que se pide.
       titulo: "s/ n. compras %",
+      ayuda:
+        "El descuento que se deduce de lo que efectivamente pagamos en nuestras compras. Se muestra como referencia y NO viaja a la orden: mandarlo sería pedirle al proveedor un descuento que él no ofreció.",
       celda: (f) => (
         <span
           className="text-muted"
@@ -669,6 +726,9 @@ export default function DashboardComprasPage({
       // cargado, el calculado mientras tanto. EL TÍTULO DICE CUÁL, que es lo que
       // evita leer un número como si fuera el otro.
       titulo: sellInHayDatos ? "Sell in últ. 6 m" : "s/ n. compras 6 m",
+      ayuda: sellInHayDatos
+        ? "Los últimos 6 meses del sell in del proveedor, para ver si la oferta de este mes es buena o es la de siempre."
+        : "Los últimos 6 meses del descuento deducido de nuestras compras. Se muestra este porque el sell in del proveedor todavía no está cargado.",
       celda: (f) => {
         const h = sellInHayDatos ? f.histSellIn : f.histCalculado;
         if (h.length === 0) return <span className="text-muted">—</span>;
@@ -693,6 +753,8 @@ export default function DashboardComprasPage({
     },
     {
       titulo: "A pagar",
+      ayuda:
+        "Lo que cuesta este renglón con los dos descuentos ya aplicados en cascada, SIN IVA.",
       celda: (f) => {
         const r = orden.get(f.sku);
         if (!r || r.cantidad <= 0) return <span className="text-muted">—</span>;
@@ -717,6 +779,7 @@ export default function DashboardComprasPage({
       // Para saber si se vende bien o si se estaba liquidando. Son dos motivos
       // distintos para el mismo ritmo de venta, y llevan a comprar distinto.
       titulo: `Rent. ${MESES_RENTABILIDAD} meses`,
+      ayuda: `La rentabilidad del artículo en los últimos ${MESES_RENTABILIDAD} meses. Dice si el artículo deja plata, no si hace falta comprarlo.`,
       celda: (f) =>
         f.rentabilidad == null ? (
           <span className="text-muted">sin venta</span>
@@ -742,6 +805,8 @@ export default function DashboardComprasPage({
       // La del mes que acaba de cerrar, aparte de la ventana móvil: es contra
       // ésta que se mira si la oferta que el proveedor ofrece ahora conviene.
       titulo: `Rent. ${data ? fmtMes(data.mesPasado) : "mes pasado"}`,
+      ayuda:
+        "La rentabilidad del mes que acaba de cerrar, aparte de la ventana móvil. Es contra lo que se mira si la oferta que el proveedor ofrece ahora conviene.",
       celda: (f) =>
         f.rentMesPasado == null ? (
           <span className="text-muted">sin venta</span>
@@ -767,10 +832,36 @@ export default function DashboardComprasPage({
       // TRES ESTADOS Y NO DOS, porque el detalle de renglones casi no viene: de
       // los 173 comprobantes de agosto, 14 traen items. Un "no" a secas sería
       // mentira la mayoría de las veces.
-      titulo: "¿Comprado el mes pasado?",
+      //
+      // Y CUANDO SE SABE, SE DICE CUÁNTO. Un "sí" no distingue una compra de 12
+      // unidades de una de 1.200, y esa es justo la comparación que se quiere
+      // hacer contra el sugerido de al lado.
+      titulo: "Comprado el mes pasado",
+      ayuda:
+        "Cuántas unidades de este artículo entraron en una factura de compra del mes calendario pasado. " +
+        "«No consta» es que se le compró al proveedor pero ese comprobante llegó sin el detalle de renglones. " +
+        "«No» es que no hubo ninguna compra a ese proveedor, y eso sí es seguro.",
       celda: (f) => {
+        if (f.unidadesMesPasado > 0) {
+          const bultos =
+            f.unidadesPorBulto > 1
+              ? f.unidadesMesPasado / f.unidadesPorBulto
+              : null;
+          return (
+            <span style={{ color: PALETA[1] }}>
+              {fmtNumero(f.unidadesMesPasado)} u
+              {/* Los bultos sólo si el artículo se compra así Y la cuenta da
+                  redonda: "25 bultos" es un dato, "24,7 bultos" es ruido de una
+                  compra que no vino en bultos enteros. */}
+              {bultos != null && Number.isInteger(bultos) && (
+                <span className="text-muted"> · {fmtNumero(bultos)} b</span>
+              )}
+            </span>
+          );
+        }
+        // Puede haber renglón sin cantidad: sigue siendo un "sí" sin número.
         if (f.compradoMesPasado)
-          return <span style={{ color: PALETA[1] }}>sí</span>;
+          return <span style={{ color: PALETA[1] }}>sí, sin cantidad</span>;
         if (f.proveedorComproMesPasado)
           return (
             <span
@@ -786,12 +877,24 @@ export default function DashboardComprasPage({
           </span>
         );
       },
-      // Ordena por lo seguro primero: sí (2), no consta (1), no (0).
+      numerica: true,
+      // Ordena por cantidad, y lo que no tiene cantidad va abajo pero en orden:
+      // "sí sin número" (-1) sabe más que "no consta" (-2), que sabe más que
+      // "no" (-3). Sin esto los tres casos empatarían en 0 con los que no se
+      // compraron.
       orden: (f) =>
-        f.compradoMesPasado ? 2 : f.proveedorComproMesPasado ? 1 : 0,
+        f.unidadesMesPasado > 0
+          ? f.unidadesMesPasado
+          : f.compradoMesPasado
+            ? -1
+            : f.proveedorComproMesPasado
+              ? -2
+              : -3,
     },
     {
       titulo: "Última compra",
+      ayuda:
+        "La fecha de la última factura de compra en la que aparece este artículo. Sale del detalle de renglones, así que un artículo comprado en un comprobante sin detalle no la va a tener.",
       celda: (f) =>
         f.ultimaCompra ? fmtFechaCortaConAnio(f.ultimaCompra) : "—",
       orden: (f) => f.ultimaCompra,
@@ -1048,7 +1151,7 @@ export default function DashboardComprasPage({
             }
           />
           <TarjetaKpi
-            titulo="A pagar con descuento"
+            titulo="A pagar con descuento, sin IVA"
             valor={fmtMoneda(resumen.neto)}
             detalle={`Sin descuento serían ${fmtMoneda(resumen.bruto)}`}
             acento={resumen.neto > 0 ? PALETA[1] : undefined}
@@ -1186,8 +1289,14 @@ export default function DashboardComprasPage({
                   <strong>{fmtNumero(resumen.unidades)}</strong>
                 </div>
                 <div className="flex justify-between gap-3">
-                  <span className="text-muted">A pagar con descuento</span>
+                  <span className="text-muted">
+                    A pagar con descuento, sin IVA
+                  </span>
                   <strong>{fmtMoneda(resumen.neto)}</strong>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-muted">Queda a nombre de</span>
+                  <strong>{usuarioSigma ?? "—"}</strong>
                 </div>
                 {RESUMEN_CABECERA.map((c) => (
                   <div key={c.campo} className="flex justify-between gap-3">
@@ -1257,6 +1366,16 @@ export default function DashboardComprasPage({
                       {JSON.stringify(resultado.enviado, null, 2)}
                     </pre>
                   </details>
+                  {/* Sin esto, después de una orden buena la única forma de
+                      armar la siguiente era recargar la página -- y eso vuelve
+                      a pedir todos los datos para nada. */}
+                  <button
+                    type="button"
+                    onClick={empezarDeNuevo}
+                    className="border-line hover:bg-panel-2 text-muted hover:text-ink mt-3 rounded-lg border px-3 py-1.5 text-xs"
+                  >
+                    Formular otra orden
+                  </button>
                 </>
               ) : (
                 <>
@@ -1321,6 +1440,76 @@ export default function DashboardComprasPage({
                       </pre>
                     </details>
                   )}
+
+                  {/* SACAR EL RENGLÓN QUE MOLESTA, SIN VOLVER A LA TABLA.
+                      Sigma rechaza la orden entera por UN artículo --"costo
+                      cero", "no existe"-- y decía cuál, pero había que ir a
+                      buscarlo entre cientos de filas para vaciarle la cantidad.
+                      Acá está la orden como quedó, y cada X lo saca.
+
+                      SÓLO CUANDO NADA SALIÓ. Si ya se le habló a Sigma, editar
+                      y reintentar es cargar una segunda orden; ahí abajo va
+                      "formular otra" en vez de "reintentar". */}
+                  {!resultado.mandado && renglonesDeLaOrden.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-xs font-medium">
+                        La orden como quedó (
+                        {fmtNumero(renglonesDeLaOrden.length)} renglones). Sacá
+                        el que sobra y volvé a mandarla:
+                      </p>
+                      <ul className="border-line mt-1 max-h-48 divide-y divide-white/5 overflow-auto rounded-md border">
+                        {renglonesDeLaOrden.map(({ fila, renglon }) => (
+                          <li
+                            key={fila.sku}
+                            className="flex items-center gap-2 px-2 py-1 text-xs"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => sacarDeLaOrden(fila.sku)}
+                              aria-label={`Sacar ${fila.sku} de la orden`}
+                              title="Sacar este renglón de la orden"
+                              className="border-line text-muted hover:border-rose-500/40 hover:bg-rose-500/10 hover:text-rose-300 shrink-0 rounded border px-1.5 leading-5"
+                            >
+                              ✕
+                            </button>
+                            <span className="font-mono shrink-0">
+                              {fila.sku}
+                            </span>
+                            <span className="text-muted truncate">
+                              {fila.producto ?? "—"}
+                            </span>
+                            <span className="ml-auto shrink-0 tabular-nums">
+                              {fmtNumero(renglon!.cantidad)}{" "}
+                              {UNIDADES_COMPRA.find(
+                                (u) => u.clave === renglon!.unidad,
+                              )?.label ?? renglon!.unidad}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {!resultado.mandado && (
+                      <button
+                        type="button"
+                        onClick={enviarASigma}
+                        disabled={enviando || renglonesDeLaOrden.length === 0}
+                        className="border-c1 bg-c1 text-panel hover:bg-c1/85 rounded-lg border px-3 py-1.5 text-xs font-medium disabled:opacity-40"
+                      >
+                        {enviando ? "Mandando…" : "Reintentar"}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={empezarDeNuevo}
+                      disabled={enviando}
+                      className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40"
+                    >
+                      Formular otra orden
+                    </button>
+                  </div>
                 </>
               )}
             </Aviso>
@@ -1547,14 +1736,23 @@ export default function DashboardComprasPage({
             </p>
             <p className="mt-1">
               <strong>
-                «¿Comprado el mes pasado?» tiene tres respuestas y no dos.
+                «Comprado el mes pasado» tiene tres respuestas y no dos.
               </strong>{" "}
-              <em>Sí</em> es que el artículo aparece en un renglón de compra.{" "}
-              <em>No</em> es que no hubo ninguna compra a ese proveedor, y eso
-              sí es seguro. <em>No consta</em> es que al proveedor se le compró
-              pero ese comprobante llegó sin el detalle de renglones — de los
-              173 comprobantes de agosto, 14 traen items—, así que no se puede
+              Cuando el artículo aparece en un renglón de compra, muestra{" "}
+              <em>cuántas unidades</em> —y los bultos al lado, si la cuenta da
+              redonda—, para poder compararlo con el sugerido. <em>No</em> es
+              que no hubo ninguna compra a ese proveedor, y eso sí es seguro.{" "}
+              <em>No consta</em> es que al proveedor se le compró pero ese
+              comprobante llegó sin el detalle de renglones — de los 173
+              comprobantes de agosto, 14 traen items—, así que no se puede
               saber. Un «no» ahí sería mentira la mayoría de las veces.
+            </p>
+            <p className="mt-1">
+              <strong>El nombre de cada columna se puede consultar.</strong> Los
+              encabezados con subrayado punteado explican, al pasar el mouse, de
+              dónde sale el número y qué quiere decir que esté vacío. No están
+              en todas: donde el título ya lo dice, un cartel que lo repita
+              estorba.
             </p>
             <p className="mt-1">
               La columna de los <strong>últimos 6 meses de descuento</strong> es

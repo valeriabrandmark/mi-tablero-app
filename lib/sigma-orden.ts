@@ -39,7 +39,11 @@
  * error propio en vez de confiar en que Sigma la rechace.
  */
 
-import { descuentoValido, UNIDADES_COMPRA, type RenglonOrden } from "@/lib/compras";
+import {
+  descuentoValido,
+  UNIDADES_COMPRA,
+  type RenglonOrden,
+} from "@/lib/compras";
 import { PLAZO_REPOSICION_DIAS } from "@/lib/stock";
 
 /* -------------------------------------------------------------------------
@@ -84,22 +88,12 @@ export const COTIZACION = 1;
 export const ESTADO_PENDIENTE = "P";
 
 /**
- * EL USUARIO CON EL QUE QUEDA FIRMADA LA ORDEN.
+ * El usuario de Sigma por defecto.
  *
- * La documentación dice que `fusuari` y `usuario` "no se leen" y que el
- * usuario de la cabecera "proviene de la sesión". Pero una llamada por API con
- * token NO TIENE SESIÓN: no hay de dónde sacarlo. Si esa columna es
- * obligatoria en la base, el insert falla adentro del procedimiento y el ERP
- * contesta "Query with RESPONSE_CODE returned no rows" -- que es exactamente
- * el error que quedó cuando ya todos los campos documentados estaban bien.
- *
- * Es la tercera vez que la documentación de este endpoint dice una cosa y el
- * servidor hace otra, después de `frecdia` (declarado numérico, resultó fecha)
- * y de "opcional" (que resultó ser "no lo valido").
- *
- * 3 es ANA.M, la persona que compra. Va acá y no como parámetro de la pantalla
- * porque hoy Compras la ve un solo rol; el día que la vea más de una persona,
- * esto tiene que salir del usuario que apretó el botón y no de una constante.
+ * YA NO ES FIJO: la orden se firma con el número de QUIEN LA MANDA, que sale de
+ * `USUARIOS_ERP` en lib/permisos.ts. Este valor queda como último recurso para
+ * que `armarOrdenSigma` se pueda llamar sin usuario --lo hacen las pruebas--,
+ * pero la ruta de API siempre pasa el de la persona.
  */
 export const USUARIO_SIGMA = 3;
 
@@ -232,7 +226,10 @@ export function masDias(d: Date, dias: number): Date {
  * unidad declarada, y viene funcionando así. Son dos caminos distintos hacia el
  * mismo ERP y no se comportan igual.
  */
-export function unidadesDelRenglon(a: ArticuloParaOrden, r: RenglonOrden): number {
+export function unidadesDelRenglon(
+  a: ArticuloParaOrden,
+  r: RenglonOrden,
+): number {
   const porBulto = a.unidadesPorBulto > 0 ? a.unidadesPorBulto : 1;
   return r.unidad === "bulto" ? r.cantidad * porBulto : r.cantidad;
 }
@@ -287,7 +284,9 @@ export function problemasDeLaOrden(
       continue;
     }
     if (!a.proveedorCodigo) {
-      problemas.push(`${sku}: el artículo no tiene proveedor cargado en Sigma.`);
+      problemas.push(
+        `${sku}: el artículo no tiene proveedor cargado en Sigma.`,
+      );
     } else {
       proveedores.add(a.proveedorCodigo);
     }
@@ -297,7 +296,9 @@ export function problemasDeLaOrden(
     // orden ENTERA, no ese renglón. Hoy hay artículos así: los ACUERDO
     // COMERCIAL y los que nunca tuvieron costo cargado.
     if (!(precioUnitario(a) > 0)) {
-      problemas.push(`${sku}: sin costo cargado, y Sigma exige precio mayor que cero.`);
+      problemas.push(
+        `${sku}: sin costo cargado, y Sigma exige precio mayor que cero.`,
+      );
     }
     if (!Number.isInteger(r.cantidad) || r.cantidad <= 0) {
       problemas.push(`${sku}: la cantidad tiene que ser un entero positivo.`);
@@ -331,6 +332,7 @@ export function armarOrdenSigma(
   orden: Map<string, RenglonOrden>,
   observaciones: string,
   ahora: Date = new Date(),
+  usuarioSigma: number = USUARIO_SIGMA,
 ): OrdenSigma {
   const items: ItemSigma[] = [];
   let proveedorId = "";
@@ -380,7 +382,7 @@ export function armarOrdenSigma(
     fechaCarga: fecha,
     fechaPedido: fecha,
     fusuari: FUSUARI_SIGMA,
-    usuario: USUARIO_SIGMA,
+    usuario: usuarioSigma,
     // Es el campo "Obs. p/Proveedor" de la pantalla de Sigma, el mismo lugar
     // donde hoy se escribe a mano "OFERTAS DE SELL IN ENVIADAS". Por eso lleva
     // la nota de la pantalla y no una leyenda automática.
@@ -436,7 +438,10 @@ export function armarOrdenSigma(
  * "13" no se puede comparar contra nada, "13 · RECEPCIÓN" sí.
  */
 export const RESUMEN_CABECERA: { campo: string; valor: string }[] = [
-  { campo: "Depósito de recepción", valor: `${DEPOSITO_RECEPCION} · RECEPCIÓN` },
+  {
+    campo: "Depósito de recepción",
+    valor: `${DEPOSITO_RECEPCION} · RECEPCIÓN`,
+  },
   { campo: "Tipo de orden", valor: `${TIPO_ORDEN} · Regular` },
   { campo: "Condición de pago", valor: `${CONDICION_PAGO} · 30 días` },
   { campo: "Sucursal", valor: `${CODIGO_SUCURSAL} · BRANDMARK` },

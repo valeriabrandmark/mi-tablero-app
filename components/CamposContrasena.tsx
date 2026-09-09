@@ -16,7 +16,10 @@ export const CLASE_INPUT =
   "border-line bg-panel-2 focus:border-c1 mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none";
 
 /** Devuelve qué está mal con la contraseña, o `null` si está bien. */
-export function validarContrasena(nueva: string, repetida: string): string | null {
+export function validarContrasena(
+  nueva: string,
+  repetida: string,
+): string | null {
   if (nueva.length < LARGO_MINIMO) {
     return `La contraseña tiene que tener al menos ${LARGO_MINIMO} caracteres.`;
   }
@@ -94,8 +97,16 @@ export function BotonEnviar({
 }
 
 /** Mensaje de error o de éxito, con el mismo formato en las tres pantallas. */
-export function Mensaje({ tono, children }: { tono: "error" | "ok"; children: ReactNode }) {
+export function Mensaje({
+  tono,
+  children,
+}: {
+  tono: "error" | "ok";
+  children: ReactNode;
+}) {
   return (
-    <p className={`text-sm ${tono === "error" ? "text-rose-400" : "text-c2"}`}>{children}</p>
+    <p className={`text-sm ${tono === "error" ? "text-rose-400" : "text-c2"}`}>
+      {children}
+    </p>
   );
 }

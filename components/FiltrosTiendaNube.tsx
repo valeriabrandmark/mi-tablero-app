@@ -1,6 +1,10 @@
 "use client";
 
-import { BotonLimpiar, CLASE_SELECT, SelectorMultiple } from "@/components/SelectorFiltro";
+import {
+  BotonLimpiar,
+  CLASE_SELECT,
+  SelectorMultiple,
+} from "@/components/SelectorFiltro";
 import { fmtFechaCorta } from "@/lib/format";
 import { hoyArgentina, PRESETS, type Rango } from "@/lib/tiendanube";
 import type { FiltrosTiendaNube, OpcionesTiendaNube } from "@/lib/types";
@@ -42,7 +46,8 @@ export default function BarraFiltrosTiendaNube({
   const aplicar = (r: Rango) => onChange({ ...filtros, ...r });
 
   /** Un preset está activo cuando el rango elegido es exactamente el suyo. */
-  const activo = (r: Rango) => filtros.desde === r.desde && filtros.hasta === r.hasta;
+  const activo = (r: Rango) =>
+    filtros.desde === r.desde && filtros.hasta === r.hasta;
 
   // "Todo" solo se puede armar cuando ya llegaron las opciones: antes de eso no
   // sabemos cuál fue la primera venta. Mientras tanto el botón no se dibuja, en
@@ -54,9 +59,17 @@ export default function BarraFiltrosTiendaNube({
   // Mover una punta más allá de la otra deja un rango vacío y la página se ve
   // rota sin motivo. Se arrastra la otra punta en vez de permitirlo.
   const cambiarDesde = (v: string) =>
-    onChange({ ...filtros, desde: v, hasta: filtros.hasta && filtros.hasta < v ? v : filtros.hasta });
+    onChange({
+      ...filtros,
+      desde: v,
+      hasta: filtros.hasta && filtros.hasta < v ? v : filtros.hasta,
+    });
   const cambiarHasta = (v: string) =>
-    onChange({ ...filtros, hasta: v, desde: filtros.desde && filtros.desde > v ? v : filtros.desde });
+    onChange({
+      ...filtros,
+      hasta: v,
+      desde: filtros.desde && filtros.desde > v ? v : filtros.desde,
+    });
 
   const boton = (label: string, r: Rango) => {
     const esActivo = activo(r);
@@ -134,7 +147,9 @@ export default function BarraFiltrosTiendaNube({
             ? `Mostrando ${fmtFechaCorta(filtros.desde ?? "")}`
             : `Mostrando ${fmtFechaCorta(filtros.desde ?? "")} a ${fmtFechaCorta(filtros.hasta ?? "")}`}
         </span>
-        <span className="text-muted max-w-xl text-[11px] leading-tight">{nota}</span>
+        <span className="text-muted max-w-xl text-[11px] leading-tight">
+          {nota}
+        </span>
       </div>
     </div>
   );

@@ -6,7 +6,12 @@ import Image from "next/image";
  * blanco para que se lean sobre el fondo del tablero (ver public/encabezados).
  */
 const ENCABEZADOS = {
-  ventas: { src: "/encabezados/ventas.png", ancho: 850, alto: 220, alt: "Brandmark Ventas" },
+  ventas: {
+    src: "/encabezados/ventas.png",
+    ancho: 850,
+    alto: 220,
+    alt: "Brandmark Ventas",
+  },
   logistica: {
     src: "/encabezados/logistica.png",
     ancho: 850,

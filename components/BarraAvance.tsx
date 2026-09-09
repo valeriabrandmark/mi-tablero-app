@@ -110,7 +110,9 @@ export function ListaAvance({
             key={`${valor}-${f.metrica}`}
             fila={f}
             etiqueta={texto}
-            seleccionada={seleccionados?.length ? seleccionados.includes(valor) : undefined}
+            seleccionada={
+              seleccionados?.length ? seleccionados.includes(valor) : undefined
+            }
             onClick={onSeleccionar ? () => onSeleccionar(valor) : undefined}
           />
         );

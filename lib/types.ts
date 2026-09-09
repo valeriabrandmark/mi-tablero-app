@@ -1454,6 +1454,11 @@ export type FilaCompra = {
    * `proveedorComproMesPasado`, que sale de la cabecera y no del detalle.
    */
   compradoMesPasado: boolean;
+  /**
+   * Cuántas UNIDADES de este SKU se compraron el mes pasado. 0 cuando no hay
+   * renglón, que --por lo de arriba-- no quiere decir que no se haya comprado.
+   */
+  unidadesMesPasado: number;
   /** Si hubo alguna compra a ese proveedor el mes pasado, por cabecera. */
   proveedorComproMesPasado: boolean;
   /**

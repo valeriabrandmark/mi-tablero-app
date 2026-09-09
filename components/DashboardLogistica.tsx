@@ -94,24 +94,29 @@ function columnas(filas: FilaComprobante[]): Columna<FilaComprobante>[] {
     },
     {
       titulo: "N° orden",
+      ayuda: "Número de orden de Sigma asociado al comprobante.",
       celda: (f) => f.nroOrden ?? "—",
       orden: (f) => f.nroOrden,
     },
     {
       titulo: "Cliente",
       celda: (f) => (
-        <span className="block max-w-[100px] sm:max-w-[220px] truncate">{f.cliente ?? "—"}</span>
+        <span className="block max-w-[100px] sm:max-w-[220px] truncate">
+          {f.cliente ?? "—"}
+        </span>
       ),
       orden: (f) => f.cliente,
     },
     {
       titulo: "Provincia",
+      ayuda: "Provincia de destino del envío, tomada del reporte de logística.",
       celda: (f) => f.provincia ?? "—",
       orden: (f) => f.provincia,
     },
     { titulo: "Fecha", celda: (f) => f.fecha ?? "—", orden: (f) => f.fecha },
     {
       titulo: "Facturación",
+      ayuda: "Venta neta del comprobante, sin IVA.",
       celda: (f) => fmtMoneda(f.facturacion),
       numerica: true,
       orden: (f) => f.facturacion,
@@ -119,6 +124,8 @@ function columnas(filas: FilaComprobante[]): Columna<FilaComprobante>[] {
     },
     {
       titulo: "Flete",
+      ayuda:
+        "Costo del envío. Puede ser real (factura del transportista ya cargada) o estimado; lo dice la columna Origen.",
       celda: (f) => fmtMoneda(f.flete),
       numerica: true,
       orden: (f) => f.flete,
@@ -126,6 +133,8 @@ function columnas(filas: FilaComprobante[]): Columna<FilaComprobante>[] {
     },
     {
       titulo: "Origen",
+      ayuda:
+        "Si el flete es la factura real del transportista o una estimación. Un comprobante con renglones de los dos tipos aparece como mezcla.",
       celda: (f) => <ChipOrigen fila={f} />,
       // Ordena por qué tan cargado está: primero lo estimado, que es lo que
       // hay que ir a buscar a la planilla de logística.
@@ -137,6 +146,7 @@ function columnas(filas: FilaComprobante[]): Columna<FilaComprobante>[] {
     },
     {
       titulo: "% Flete",
+      ayuda: "Cuánto pesa el flete sobre la facturación de ese comprobante.",
       celda: (f) => fmtPct(f.pctFlete),
       numerica: true,
       orden: (f) => f.pctFlete,
