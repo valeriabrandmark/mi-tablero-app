@@ -6,6 +6,7 @@ import {
 } from "@/lib/compras";
 import { permisoDelUsuario, puedeEscribirEnElERP } from "@/lib/permisos";
 import { getArticulosParaOrden } from "@/lib/queries-compras";
+import { guardarOrdenEnviada } from "@/lib/queries-ordenes";
 import {
   armarOrdenSigma,
   problemasDeLaOrden,
@@ -95,6 +96,20 @@ function urlDeSigma(): string {
   return `https://${cliente}/${alias}/${id}/sigma/api/v10/ImportOrdenDeCompra`;
 }
 
+/**
+ * El nombre del proveedor, para que el historial se pueda leer sin descifrar
+ * un código. El payload sólo lleva el código, que es lo que Sigma pide.
+ */
+function nombreDelProveedor(
+  articulos: Map<string, ArticuloParaOrden>,
+  codigo: string,
+): string | null {
+  for (const a of articulos.values()) {
+    if (a.proveedorCodigo === codigo) return a.proveedorNombre;
+  }
+  return null;
+}
+
 /** Sin esto, un servidor que acepta la conexión y no contesta cuelga la función. */
 const TIMEOUT_MS = 60_000;
 
@@ -139,8 +154,12 @@ function leerRenglones(crudo: unknown): Map<string, RenglonOrden> {
 }
 
 export async function POST(request: NextRequest) {
+  let usuario: string | null = null;
+
   if (authConfigurada) {
-    const permiso = permisoDelUsuario(await getUsuario());
+    const quien = await getUsuario();
+    usuario = quien?.email ?? null;
+    const permiso = permisoDelUsuario(quien);
     if (!puedeEscribirEnElERP(permiso)) {
       return NextResponse.json(
         {
@@ -223,6 +242,14 @@ export async function POST(request: NextRequest) {
       // El mensaje de Sigma va tal cual a la pantalla: está en castellano y
       // dice qué campo falta mejor de lo que podríamos resumirlo.
       console.error("[api/compras/sigma]", respuesta.status, texto);
+      await guardarOrdenEnviada({
+        usuario,
+        mes,
+        payload,
+        resultado: "incierto",
+        respuesta: texto,
+        proveedorNombre: nombreDelProveedor(articulos, payload.proveedorId),
+      });
       return NextResponse.json(
         {
           error:
@@ -236,6 +263,15 @@ export async function POST(request: NextRequest) {
         { status: 502 },
       );
     }
+
+    await guardarOrdenEnviada({
+      usuario,
+      mes,
+      payload,
+      resultado: "ok",
+      respuesta: texto,
+      proveedorNombre: nombreDelProveedor(articulos, payload.proveedorId),
+    });
 
     return NextResponse.json({
       ok: true,
