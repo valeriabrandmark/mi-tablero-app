@@ -22,6 +22,9 @@ import {
   UNIDADES_COMPRA,
   type ClaveUnidadCompra,
   type RenglonOrden,
+  COBERTURAS_COMPRA,
+  COBERTURA_COMPRA_MAXIMA,
+  coberturaValida,
 } from "@/lib/compras";
 import { vacio as sinValores } from "@/lib/filtros";
 import {
@@ -90,7 +93,10 @@ export default function DashboardComprasPage({
 }: {
   puedeEnviar: boolean;
 }) {
-  const inicial: FiltrosCompras = { ventana: VENTANA_POR_DEFECTO };
+  const inicial: FiltrosCompras = {
+    ventana: VENTANA_POR_DEFECTO,
+    cobertura: COBERTURA_OBJETIVO_DIAS,
+  };
   const [filtros, setFiltros] = useState<FiltrosCompras>(inicial);
   const [buscado, setBuscado] = useState("");
 
@@ -149,6 +155,14 @@ export default function DashboardComprasPage({
     | null
   >(null);
 
+  const coberturaElegida = filtros.cobertura ?? COBERTURA_OBJETIVO_DIAS;
+  // Sólo dice si el campo manual está ABIERTO. El valor vive en los filtros,
+  // como todo lo demás: si esto guardara el número, elegir 60 desde un chip y
+  // volver a "Otro" mostraría el valor viejo.
+  const [otroDias, setOtroDias] = useState(
+    !COBERTURAS_COMPRA.some((d) => d === coberturaElegida),
+  );
+
   const { data, cargando, error, recargar, empezarCarga } =
     useDatosTablero<Respuesta>(
       "/api/compras",
@@ -158,6 +172,7 @@ export default function DashboardComprasPage({
         marca: filtros.marca,
         buscar: filtros.buscar ? [filtros.buscar] : undefined,
         ventana: [String(filtros.ventana ?? VENTANA_POR_DEFECTO)],
+        cobertura: [String(filtros.cobertura ?? COBERTURA_OBJETIVO_DIAS)],
         mes: filtros.mes ? [filtros.mes] : undefined,
         todos: filtros.todos ? ["1"] : undefined,
         // RED DE SEGURIDAD. `satisfies` obliga a que estén TODAS las claves
@@ -847,6 +862,72 @@ export default function DashboardComprasPage({
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          {/* PARA CUÁNTOS DÍAS SE COMPRA.
+              Está al lado de "Ritmo medido sobre" y son lo contrario: aquél
+              mira para atrás --sobre cuántos días se midió lo que se vende--,
+              éste para adelante. Por eso las dos leyendas dicen la dirección. */}
+          <div className="flex flex-col gap-1">
+            <span className="text-muted text-[11px]">Comprar para</span>
+            <div className="flex flex-wrap items-center gap-1">
+              {COBERTURAS_COMPRA.map((d) => {
+                const activo = !otroDias && coberturaElegida === d;
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => {
+                      setOtroDias(false);
+                      cambiar({ ...filtros, cobertura: d });
+                    }}
+                    aria-pressed={activo}
+                    className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+                      activo
+                        ? "border-c1 bg-c1/15 text-c1"
+                        : "border-line text-muted hover:bg-panel-2 hover:text-ink"
+                    }`}
+                  >
+                    {d} días
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => setOtroDias(true)}
+                aria-pressed={otroDias}
+                className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+                  otroDias
+                    ? "border-c1 bg-c1/15 text-c1"
+                    : "border-line text-muted hover:bg-panel-2 hover:text-ink"
+                }`}
+              >
+                Otro
+              </button>
+              {otroDias && (
+                <input
+                  type="number"
+                  min={1}
+                  max={COBERTURA_COMPRA_MAXIMA}
+                  step={1}
+                  value={coberturaElegida}
+                  aria-label={`Días de compra, hasta ${COBERTURA_COMPRA_MAXIMA}`}
+                  // Se recorta al salir del campo y no en cada tecla: recortando
+                  // mientras se escribe, tipear "120" pasa por "1" y "12" y el
+                  // campo pelea con los dedos.
+                  onChange={(e) =>
+                    cambiar({ ...filtros, cobertura: Number(e.target.value) })
+                  }
+                  onBlur={(e) =>
+                    cambiar({
+                      ...filtros,
+                      cobertura: coberturaValida(Number(e.target.value)),
+                    })
+                  }
+                  className="border-line bg-panel-2 text-ink focus:border-c1 w-20 rounded-lg border px-2.5 py-1.5 text-xs outline-none"
+                />
+              )}
             </div>
           </div>
 
