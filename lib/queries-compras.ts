@@ -3,6 +3,8 @@ import { agregarFiltro } from "@/lib/filtros";
 import {
   COBERTURA_MAXIMA_COMPRA_DIAS,
   COBERTURA_SIN_INFLAR_DIAS,
+  RENTABILIDAD_COMPRA_DISCRETA,
+  VECES_SOBRE_LA_MEDIANA_PARA_INFLAR,
   FACTOR_OFERTA_MAX,
   MESES_HISTORIA_SELL_IN,
   MESES_RENTABILIDAD,
@@ -313,6 +315,26 @@ con_factor as (
          case
            when c.cobertura is null then 1::numeric
            when c.cobertura > ${COBERTURA_SIN_INFLAR_DIAS} then 1::numeric
+           -- UN ARTÍCULO QUE NO RINDE NO SE COMPRA DE MÁS POR UNA OFERTA.
+           --
+           -- Por debajo de ${RENTABILIDAD_COMPRA_DISCRETA} % de rentabilidad,
+           -- comprar más es más plata quieta en algo que ya no la devuelve. Los
+           -- cuatro Almond Breeze son el caso: sell in del 50 %, y rentabilidad
+           -- de -28 %, -9,6 %, -8,1 % y 5,2 %.
+           --
+           -- CON UNA EXCEPCIÓN, que es la que salva el único caso que sí vale:
+           -- que el descuento de ESTE mes sea algo que antes no teníamos. Se
+           -- mide contra la MEDIANA de su propia historia y no en puntos,
+           -- porque en puntos los dos casos se parecen y no lo son: los Almond
+           -- Breeze están 7,5 puntos sobre una mediana de 42,5 --el proveedor
+           -- les da eso SIEMPRE--, y el Scotch-Brite está 40 puntos sobre una
+           -- mediana de 0. Mediana 0 es "nunca hubo oferta", así que cualquier
+           -- descuento de hoy es nuevo y pasa.
+           when coalesce(c.rentabilidad, 0) < ${RENTABILIDAD_COMPRA_DISCRETA} / 100.0
+                and not (coalesce(c.sell_in_pct, 0)
+                         >= greatest(coalesce(c.mediana_sell_in, 0), 0.0001)
+                            * ${VECES_SOBRE_LA_MEDIANA_PARA_INFLAR})
+             then 1::numeric
            else least(
              ${FACTOR_OFERTA_MAX}::numeric,
              1 + c.ventaja_pp / ${PUNTOS_OFERTA_PARA_DUPLICAR}::numeric
@@ -356,6 +378,14 @@ function where(f: FiltrosCompras, mes: string): Where {
   // importan entre los que no. El switch de "ver todos" está en la pantalla
   // para cuando se quiere agregar algo que el cálculo no pidió.
   if (!f.todos) clauses.push("sugerido > 0");
+
+  // SÓLO LO QUE TIENE OFERTA DEL PROVEEDOR ESTE MES.
+  //
+  // `> 0` y no `is not null`: hoy los 416 artículos con sell in cargado tienen
+  // descuento mayor que cero, así que las dos formas dan lo mismo -- pero el
+  // día que se cargue un 0 %, ese artículo NO tiene oferta y el botón dice
+  // "sólo con oferta".
+  if (f.soloOferta) clauses.push("coalesce(sell_in_pct, 0) > 0");
 
   return {
     sql: clauses.length ? `where ${clauses.join(" and ")}` : "",

@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
     // esto es lo que puede llegar de una URL escrita a mano.
     cobertura: coberturaValida(Number(sp.get("cobertura"))),
     todos: sp.get("todos") === "1",
+    soloOferta: sp.get("soloOferta") === "1",
   };
 
   try {

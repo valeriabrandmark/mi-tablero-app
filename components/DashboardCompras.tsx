@@ -23,6 +23,7 @@ import {
   type ClaveUnidadCompra,
   type RenglonOrden,
   COBERTURAS_COMPRA,
+  RENTABILIDAD_COMPRA_DISCRETA,
   COBERTURA_COMPRA_MAXIMA,
   coberturaValida,
 } from "@/lib/compras";
@@ -199,6 +200,7 @@ export default function DashboardComprasPage({
         cobertura: [String(filtros.cobertura ?? COBERTURA_OBJETIVO_DIAS)],
         mes: filtros.mes ? [filtros.mes] : undefined,
         todos: filtros.todos ? ["1"] : undefined,
+        soloOferta: filtros.soloOferta ? ["1"] : undefined,
         // RED DE SEGURIDAD. `satisfies` obliga a que estén TODAS las claves
         // de FiltrosCompras: si mañana se agrega un filtro y se olvida acá, esto
         // rompe el build.
@@ -1202,6 +1204,26 @@ export default function DashboardComprasPage({
             >
               Vaciar cantidades
             </button>
+            {/* NO ES UN BOTÓN MÁS DE LA FILA: los de al lado tocan la orden
+                --la unidad, las cantidades--, éste toca QUÉ SE VE. Se queda
+                acá igual porque es el mismo gesto ("preparame la tabla para
+                esto") y separarlo en otra fila lo escondería. Por eso se
+                enciende como los chips de filtro y no como los de acción. */}
+            <button
+              type="button"
+              onClick={() =>
+                cambiar({ ...filtros, soloOferta: !filtros.soloOferta })
+              }
+              aria-pressed={filtros.soloOferta ?? false}
+              title="Deja sólo los artículos con sell in del proveedor cargado para el mes elegido."
+              className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+                filtros.soloOferta
+                  ? "border-c1 bg-c1/15 text-c1"
+                  : "border-line text-muted hover:bg-panel-2 hover:text-ink"
+              }`}
+            >
+              Dejar sólo con oferta
+            </button>
 
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <input
@@ -1746,6 +1768,21 @@ export default function DashboardComprasPage({
               comprobante llegó sin el detalle de renglones — de los 173
               comprobantes de agosto, 14 traen items—, así que no se puede
               saber. Un «no» ahí sería mentira la mayoría de las veces.
+            </p>
+            <p className="mt-1">
+              <strong>
+                Un artículo que no rinde no se compra de más por una oferta.
+              </strong>{" "}
+              Por debajo del {RENTABILIDAD_COMPRA_DISCRETA} % de rentabilidad
+              —el cuartil de abajo del catálogo— el sugerido es sólo lo
+              necesario, por buena que esté la oferta: comprar más es plata
+              quieta en algo que ya no la devuelve. La excepción es un descuento
+              que <em>antes no teníamos</em>, y se mide contra la mediana de su
+              propia historia: los cuatro Almond Breeze tienen 50 % de sell in,
+              pero el proveedor les da 42,5 % todos los meses y el artículo
+              igual pierde plata; el Scotch-Brite tiene 40 % contra una mediana
+              de 0, y ese sí es nuevo. Pasá el mouse por el sugerido y lo dice
+              renglón por renglón.
             </p>
             <p className="mt-1">
               <strong>El nombre de cada columna se puede consultar.</strong> Los
