@@ -525,7 +525,12 @@ export default function DashboardComprasPage({
       // que poder ver de dónde salió sin preguntarle a nadie. Por eso el
       // tooltip trae la cuenta entera, paso por paso.
       celda: (f) => {
-        const texto = porQueSugerido(f).join("\n");
+        // La cobertura sale de `data` y no de `filtros`: es la que el servidor
+        // usó para ESTAS filas. Mientras una consulta viaja las dos difieren.
+        const texto = porQueSugerido(
+          f,
+          data?.cobertura ?? coberturaElegida,
+        ).join("\n");
         if (f.sugerido <= 0) {
           return (
             <span className="text-muted" title={texto}>
@@ -1109,12 +1114,13 @@ export default function DashboardComprasPage({
 
         <span className="text-muted text-[11px] leading-tight">
           El <strong>sugerido</strong> es lo que falta para cubrir{" "}
-          {COBERTURA_OBJETIVO_DIAS + PLAZO_REPOSICION_DIAS} días de venta (
-          {COBERTURA_OBJETIVO_DIAS} de objetivo más {PLAZO_REPOSICION_DIAS} que
-          tarda la reposición) al ritmo de los últimos{" "}
-          {filtros.ventana ?? VENTANA_POR_DEFECTO} días, contando el stock de{" "}
-          <strong>los dos depósitos</strong>. El <strong>descuento</strong> es
-          el <strong>sell in vigente del proveedor</strong> del mes elegido y se
+          {(data?.cobertura ?? coberturaElegida) + PLAZO_REPOSICION_DIAS} días
+          de venta ({data?.cobertura ?? coberturaElegida} que elegiste comprar
+          más {PLAZO_REPOSICION_DIAS} que tarda la reposición) al ritmo de los
+          últimos {filtros.ventana ?? VENTANA_POR_DEFECTO} días, contando el
+          stock de <strong>los dos depósitos</strong>. El{" "}
+          <strong>descuento</strong> es el{" "}
+          <strong>sell in vigente del proveedor</strong> del mes elegido y se
           puede corregir fila por fila.
         </span>
       </div>

@@ -87,16 +87,6 @@ export const COTIZACION = 1;
  */
 export const ESTADO_PENDIENTE = "P";
 
-/**
- * El usuario de Sigma por defecto.
- *
- * YA NO ES FIJO: la orden se firma con el número de QUIEN LA MANDA, que sale de
- * `USUARIOS_ERP` en lib/permisos.ts. Este valor queda como último recurso para
- * que `armarOrdenSigma` se pueda llamar sin usuario --lo hacen las pruebas--,
- * pero la ruta de API siempre pasa el de la persona.
- */
-export const USUARIO_SIGMA = 3;
-
 /** El otro campo de usuario del ejemplo. Va en 0, como ahí. */
 export const FUSUARI_SIGMA = 0;
 
@@ -332,7 +322,17 @@ export function armarOrdenSigma(
   orden: Map<string, RenglonOrden>,
   observaciones: string,
   ahora: Date = new Date(),
-  usuarioSigma: number = USUARIO_SIGMA,
+  /**
+   * El usuario de Sigma con el que queda FIRMADA la orden. Sale de
+   * `USUARIOS_ERP` (lib/permisos.ts).
+   *
+   * NO TIENE VALOR POR DEFECTO, Y ESO ES EL PUNTO. Antes era `USUARIO_SIGMA = 3`
+   * y esta función lo usaba cuando no le pasaban uno: una llamada que se
+   * olvidara del usuario no fallaba, firmaba la orden como ANA.M. En un ERP la
+   * firma es lo que dice quién autorizó la compra, así que ahora el compilador
+   * no deja olvidarlo.
+   */
+  usuarioSigma: number,
 ): OrdenSigma {
   const items: ItemSigma[] = [];
   let proveedorId = "";

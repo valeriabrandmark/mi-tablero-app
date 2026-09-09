@@ -12,7 +12,6 @@ import {
 import { getArticulosParaOrden } from "@/lib/queries-compras";
 import { guardarOrdenEnviada } from "@/lib/queries-ordenes";
 import {
-  USUARIO_SIGMA,
   armarOrdenSigma,
   problemasDeLaOrden,
   type ArticuloParaOrden,
@@ -163,7 +162,11 @@ export async function POST(request: NextRequest) {
   // CON QUIÉN SE FIRMA LA ORDEN EN SIGMA. Sale de la sesión y nunca del cuerpo
   // del pedido: si viajara desde el navegador, cualquiera con la consola
   // abierta podría cargar una orden a nombre de otra persona.
-  let usuarioSigma = USUARIO_SIGMA;
+  //
+  // ARRANCA EN null Y NO EN UN NÚMERO. Un valor por defecto haría que un camino
+  // que se olvide de resolverlo firme igual, a nombre de quien haya quedado en
+  // la constante. En un ERP la firma es lo que dice quién autorizó la compra.
+  let usuarioSigma: number | null = null;
 
   if (authConfigurada) {
     const quien = await getUsuario();
@@ -183,6 +186,23 @@ export async function POST(request: NextRequest) {
     }
     // El `!` es seguro: `puedeEscribirEnElERP` ya comprobó que está en la lista.
     usuarioSigma = usuarioSigmaDe(usuario)!.sigma;
+  }
+
+  // SIN SESIÓN NO SE MANDA, NI SIQUIERA EN LOCAL. La pantalla deja apretar el
+  // botón con `authConfigurada` en false para poder desarrollarla, pero mandar
+  // de verdad es otra cosa: crearía una orden REAL en Sigma firmada por alguien
+  // que el sistema no sabe quién es. Se corta acá, con el motivo escrito.
+  if (usuarioSigma == null) {
+    return NextResponse.json(
+      {
+        error:
+          "No hay sesión con la que firmar la orden. Cargar órdenes en el ERP " +
+          "requiere estar identificado: configurá la autenticación o entrá con " +
+          "un usuario de USUARIOS_ERP.",
+        mandado: false,
+      },
+      { status: 403 },
+    );
   }
 
   let cuerpo: { renglones?: unknown; mes?: unknown; nota?: unknown };

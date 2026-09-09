@@ -98,7 +98,16 @@ export async function getOrdenesEnviadas(limite = 50): Promise<OrdenEnviada[]> {
             usuario, proveedor_codigo, proveedor_nombre, empresa, mes, nota,
             renglones, unidades, total_bruto, resultado, respuesta, payload
      from app.ordenes_compra_enviadas
-     order by enviada_en desc
+     -- Por id y no por enviada_en. OJO CON LOS BACKTICKS ACÁ ADENTRO: esto es
+     -- un template literal y uno solo parte la cadena (misma trampa que avisa
+     -- queries-objetivos.ts).
+     --
+     -- En el select, enviada_en es el alias del to_char, o sea TEXTO, y
+     -- Postgres prefiere el alias sobre la columna. Ordenaba bien de casualidad
+     -- --el formato YYYY-MM-DD ordena igual como texto-- y dejaba de hacerlo el
+     -- día que alguien cambie ese formato. El id es identity, así que crece con
+     -- el tiempo y no tiene ese problema.
+     order by id desc
      limit $1`,
     [Math.min(Math.max(Math.round(limite), 1), 200)],
   );
