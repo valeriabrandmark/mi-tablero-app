@@ -320,6 +320,11 @@ export type FilaObjetivo = {
   vendido: number;
   avancePct: number | null;
   faltan: number;
+  /**
+   * Los SKU que componen el grupo, ya unidos con " + ". Null en los grupos que
+   * no se miden por SKU (los de empresa), donde el nombre ya lo dice todo.
+   */
+  skus: string | null;
 };
 
 /** Un comprobante del vendedor dentro del recorte elegido. */
