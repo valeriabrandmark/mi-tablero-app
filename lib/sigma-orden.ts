@@ -135,24 +135,40 @@ export type ItemSigma = {
   unidadDeCompra: string;
 };
 
+/**
+ * La cabecera, EN EL ORDEN EXACTO DEL EJEMPLO DE LA DOCUMENTACIÓN.
+ *
+ * En JSON el orden de las claves no significa nada: `{"a":1,"b":2}` y
+ * `{"b":2,"a":1}` son el mismo objeto para cualquier parser que cumpla la
+ * especificación. Así que esto NO debería cambiar nada.
+ *
+ * Va igual porque lo pidió soporte y porque no cuesta nada -- y porque este
+ * endpoint ya contradijo su propia documentación tres veces (`frecdia`
+ * declarado numérico que resulta fecha, "opcional" que resulta "no lo valido",
+ * un ejemplo con códigos de otro sistema). Con ese antecedente, "el parser
+ * lee el cuerpo en orden" dejó de ser descartable sin probarlo.
+ *
+ * Si alguna vez se agrega un campo, va en la posición que tenga en el ejemplo
+ * oficial y no al final.
+ */
 export type OrdenSigma = {
-  empresa: string;
   proveedorId: string;
-  fusuari: number;
-  usuario: number;
   fechaCarga: string;
   fechaPedido: string;
-  depositoRecepcion: string;
-  tipoOrden: string;
+  fusuari: number;
+  usuario: number;
+  observaciones: string;
   estado: string;
+  tipoOrden: string;
+  depositoRecepcion: string;
   condicionPago: string;
+  vencimiento: string | null;
+  observacionInterna: string;
   codigoSucursal: string;
   moneda: string;
+  empresa: string;
   cotizacion: number;
   frecdia: string;
-  vencimiento: string | null;
-  observaciones: string;
-  observacionInterna: string;
   items: ItemSigma[];
 };
 
@@ -320,42 +336,30 @@ export function armarOrdenSigma(
   }
 
   const fecha = fechaISO(ahora);
+
+  /*
+   * EL ORDEN DE ESTAS CLAVES ES EL DEL EJEMPLO DE LA DOCUMENTACIÓN, y está
+   * puesto a mano. Ver el comentario de `OrdenSigma`: en JSON el orden no
+   * significa nada, pero lo pidió soporte, no cuesta nada, y este endpoint ya
+   * contradijo su propia documentación tres veces.
+   *
+   * Los dos comentarios largos de abajo son de campos que costaron un error
+   * cada uno. No los borres sin leerlos.
+   */
   return {
-    empresa: EMPRESA_POR_GRUPO[grupo ?? ""] ?? EMPRESA_POR_GRUPO["QUO MKT"],
     proveedorId,
-    fusuari: FUSUARI_SIGMA,
-    usuario: USUARIO_SIGMA,
     fechaCarga: fecha,
     fechaPedido: fecha,
-    depositoRecepcion: DEPOSITO_RECEPCION,
-    tipoOrden: TIPO_ORDEN,
+    fusuari: FUSUARI_SIGMA,
+    usuario: USUARIO_SIGMA,
+    // Es el campo "Obs. p/Proveedor" de la pantalla de Sigma, el mismo lugar
+    // donde hoy se escribe a mano "OFERTAS DE SELL IN ENVIADAS". Por eso lleva
+    // la nota de la pantalla y no una leyenda automática.
+    observaciones: observaciones.trim().slice(0, 200),
     estado: ESTADO_PENDIENTE,
+    tipoOrden: TIPO_ORDEN,
+    depositoRecepcion: DEPOSITO_RECEPCION,
     condicionPago: CONDICION_PAGO,
-    codigoSucursal: CODIGO_SUCURSAL,
-    moneda: MONEDA,
-    cotizacion: COTIZACION,
-    /*
-     * NO SE OMITE NINGÚN CAMPO, Y ESO ES LO QUE ARREGLÓ EL SEGUNDO ERROR.
-     *
-     * La historia, porque es la parte que hay que entender antes de tocar esto:
-     *
-     *   frecdia: 10          -> invalid input syntax for type date: "10"
-     *   frecdia omitido      -> Query with RESPONSE_CODE returned no rows
-     *
-     * El primer error dice que ese valor termina en una columna de FECHA -- la
-     * documentación lo declara `numeric` y su ejemplo manda 21, pero el
-     * servidor manda más que la documentación. El segundo aparece recién al
-     * sacarlo, así que la columna además no admite nulos: sin el campo, el
-     * insert falla adentro del procedimiento y no devuelve la fila de estado
-     * que el ERP espera. De ahí el mensaje, que no es de validación sino de
-     * plomería rota.
-     *
-     * Los dos errores se explican con la misma causa, y la conclusión es que
-     * acá "opcional" significa "no lo valido", NO "sé qué hacer si no está".
-     * Por eso ahora va todo lo documentado, con el mismo esqueleto que el
-     * ejemplo oficial: sólo cambian los valores.
-     */
-    frecdia: fechaISO(masDias(ahora, PLAZO_REPOSICION_DIAS)),
     /*
      * VENCIMIENTO IGUAL A LA FECHA DE PEDIDO, y no `null`.
      *
@@ -368,13 +372,27 @@ export function armarOrdenSigma(
      * dicen los dos 31/08/2026. O sea que en una orden de verdad el campo NO
      * está vacío, aunque la condición de pago sea a 30 días. Contra la
      * documentación y contra su ejemplo, gana lo que el sistema tiene cargado.
-     *
-     * Es la misma lección que `frecdia`, aplicada al campo de al lado: acá
-     * "opcional" no quiere decir que el ERP sepa arreglárselas sin el dato.
      */
     vencimiento: fecha,
     observacionInterna: "",
-    observaciones: observaciones.trim().slice(0, 200),
+    codigoSucursal: CODIGO_SUCURSAL,
+    moneda: MONEDA,
+    empresa: EMPRESA_POR_GRUPO[grupo ?? ""] ?? EMPRESA_POR_GRUPO["QUO MKT"],
+    cotizacion: COTIZACION,
+    /*
+     * `frecdia` VA COMO FECHA, contra lo que dice la documentación.
+     *
+     *   frecdia: 10          -> invalid input syntax for type date: "10"
+     *   frecdia omitido      -> Query with RESPONSE_CODE returned no rows
+     *
+     * El primer error dice que ese valor termina en una columna de FECHA -- la
+     * documentación lo declara `numeric` y su ejemplo manda 21. El segundo
+     * aparece recién al sacarlo, así que la columna además no admite nulos.
+     *
+     * De ahí sale la regla de todo este archivo: acá "opcional" significa "no
+     * lo valido", NO "sé qué hacer si no está". Por eso va todo lo documentado.
+     */
+    frecdia: fechaISO(masDias(ahora, PLAZO_REPOSICION_DIAS)),
     items,
   };
 }
