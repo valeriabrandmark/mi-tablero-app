@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 
   // El proxy ya dejó pasar solo a esta ruta, pero el vendedor viene por query
   // string, que desde el middleware no se ve: sin este chequeo, un vendedor con
-  // sesión pediría ?vendedor=RAMON y vería los datos del otro. El middleware
+  // sesión pediría ?vendedor=GERMAN y vería los datos del otro. El middleware
   // protege la página, no el dato.
   if (authConfigurada) {
     const permiso = permisoDelUsuario(await getUsuario());
