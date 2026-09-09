@@ -85,7 +85,11 @@ function bajar(contenido: BlobPart, nombre: string, tipo: string) {
   URL.revokeObjectURL(url);
 }
 
-export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boolean }) {
+export default function DashboardComprasPage({
+  puedeEnviar,
+}: {
+  puedeEnviar: boolean;
+}) {
   const inicial: FiltrosCompras = { ventana: VENTANA_POR_DEFECTO };
   const [filtros, setFiltros] = useState<FiltrosCompras>(inicial);
   const [buscado, setBuscado] = useState("");
@@ -105,7 +109,9 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
    * existe en ningún lado. Va por SKU —y no por posición— para que sobreviva a
    * cambiar un filtro o a reordenar la tabla.
    */
-  const [ediciones, setEdiciones] = useState<Map<string, RenglonOrden>>(new Map());
+  const [ediciones, setEdiciones] = useState<Map<string, RenglonOrden>>(
+    new Map(),
+  );
 
   /**
    * La nota que va en la carátula del Excel del proveedor ("Ofertas agosto").
@@ -131,33 +137,42 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState<
     | { ok: true; enviado: OrdenSigma }
-    | { ok: false; error: string; problemas?: string[]; enviado?: OrdenSigma }
+    // `mandado` parte el fracaso en dos casos que NO se tratan igual: uno se
+    // reintenta, el otro se revisa en Sigma antes de tocar nada.
+    | {
+        ok: false;
+        mandado: boolean;
+        error: string;
+        problemas?: string[];
+        enviado?: OrdenSigma;
+      }
     | null
   >(null);
 
-  const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
-    "/api/compras",
-    {
-      proveedor: filtros.proveedor,
-      grupo: filtros.grupo,
-      marca: filtros.marca,
-      buscar: filtros.buscar ? [filtros.buscar] : undefined,
-      ventana: [String(filtros.ventana ?? VENTANA_POR_DEFECTO)],
-      mes: filtros.mes ? [filtros.mes] : undefined,
-      todos: filtros.todos ? ["1"] : undefined,
-      // RED DE SEGURIDAD. `satisfies` obliga a que estén TODAS las claves
-      // de FiltrosCompras: si mañana se agrega un filtro y se olvida acá, esto
-      // rompe el build.
-      //
-      // Existe porque ya pasó. El filtro de Empresa se cableó en el tipo, en
-      // la ruta de API, en el SQL y en el selector -- y faltó esta línea, que
-      // es la que lo mete en la query string. Sin ella el filtro cambiaba pero
-      // la URL no, el efecto no se volvía a disparar y la pantalla quedaba
-      // sombreada para siempre. Ni tsc, ni eslint, ni el build lo veían: para
-      // todos ellos era un objeto válido al que le faltaba una clave.
-    } satisfies Record<keyof FiltrosCompras, string | string[] | undefined>,
-    { conOpciones: "1" },
-  );
+  const { data, cargando, error, recargar, empezarCarga } =
+    useDatosTablero<Respuesta>(
+      "/api/compras",
+      {
+        proveedor: filtros.proveedor,
+        grupo: filtros.grupo,
+        marca: filtros.marca,
+        buscar: filtros.buscar ? [filtros.buscar] : undefined,
+        ventana: [String(filtros.ventana ?? VENTANA_POR_DEFECTO)],
+        mes: filtros.mes ? [filtros.mes] : undefined,
+        todos: filtros.todos ? ["1"] : undefined,
+        // RED DE SEGURIDAD. `satisfies` obliga a que estén TODAS las claves
+        // de FiltrosCompras: si mañana se agrega un filtro y se olvida acá, esto
+        // rompe el build.
+        //
+        // Existe porque ya pasó. El filtro de Empresa se cableó en el tipo, en
+        // la ruta de API, en el SQL y en el selector -- y faltó esta línea, que
+        // es la que lo mete en la query string. Sin ella el filtro cambiaba pero
+        // la URL no, el efecto no se volvía a disparar y la pantalla quedaba
+        // sombreada para siempre. Ni tsc, ni eslint, ni el build lo veían: para
+        // todos ellos era un objeto válido al que le faltaba una clave.
+      } satisfies Record<keyof FiltrosCompras, string | string[] | undefined>,
+      { conOpciones: "1" },
+    );
 
   const filas = useMemo(() => data?.filas ?? [], [data]);
 
@@ -168,7 +183,9 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
    */
   const orden = useMemo(
     () =>
-      new Map(filas.map((f) => [f.sku, ediciones.get(f.sku) ?? renglonInicial(f)])),
+      new Map(
+        filas.map((f) => [f.sku, ediciones.get(f.sku) ?? renglonInicial(f)]),
+      ),
     [filas, ediciones],
   );
 
@@ -197,7 +214,11 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
         // La cantidad se recalcula desde las UNIDADES que ya había pedido, no
         // desde el sugerido: si pidió 5 bultos y pasa a unidades, tiene que ver
         // esas mismas unidades, no volver al cálculo original.
-        const unidades = aUnidades(actual.cantidad, actual.unidad, f.unidadesPorBulto);
+        const unidades = aUnidades(
+          actual.cantidad,
+          actual.unidad,
+          f.unidadesPorBulto,
+        );
         siguiente.set(f.sku, {
           ...actual,
           unidad,
@@ -247,7 +268,8 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
       unidades += u;
       if (r.unidad === "bulto") bultos += r.cantidad;
       const lista = f.costoLista > 0 ? f.costoLista : f.costo;
-      if (r.descuento > DESCUENTO_MAXIMO || r.descuento2 > DESCUENTO_MAXIMO) recortados += 1;
+      if (r.descuento > DESCUENTO_MAXIMO || r.descuento2 > DESCUENTO_MAXIMO)
+        recortados += 1;
       bruto += u * lista;
       neto += u * lista * factorNeto(r.descuento, r.descuento2);
     }
@@ -264,7 +286,12 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
     if (formato === "xlsx") {
       // El Excel se arma de las FILAS y no de las líneas de Sigma: necesita el
       // costo, el EAN y el nombre del artículo, que a ese archivo no van.
-      const libro = excelParaProveedor(filas, orden, proveedorUnico, comentario);
+      const libro = excelParaProveedor(
+        filas,
+        orden,
+        proveedorUnico,
+        comentario,
+      );
       if (libro.filas.length === 0) return;
       bajar(
         aXlsx(libro),
@@ -276,9 +303,17 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
     const lineas = lineasParaExportar(filas, orden);
     if (lineas.length === 0) return;
     if (formato === "txt") {
-      bajar(aTxt(lineas), nombreArchivo(proveedorUnico, "txt"), "text/plain;charset=utf-8");
+      bajar(
+        aTxt(lineas),
+        nombreArchivo(proveedorUnico, "txt"),
+        "text/plain;charset=utf-8",
+      );
     } else {
-      bajar(aCsv(lineas), nombreArchivo(proveedorUnico, "csv"), "text/csv;charset=utf-8");
+      bajar(
+        aCsv(lineas),
+        nombreArchivo(proveedorUnico, "csv"),
+        "text/csv;charset=utf-8",
+      );
     }
   };
 
@@ -311,6 +346,10 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
       } else {
         setResultado({
           ok: false,
+          // Ante la duda, "puede haber entrado". Un falso "revisá en Sigma"
+          // cuesta treinta segundos; un falso "no se mandó" cuesta una orden
+          // de compra duplicada en el ERP de un proveedor.
+          mandado: json.mandado !== false,
           error: json.error ?? `Error ${r.status}`,
           problemas: json.problemas,
           // El cuerpo exacto que salió, para poder mirarlo cuando el ERP
@@ -319,7 +358,13 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
         });
       }
     } catch (e) {
-      setResultado({ ok: false, error: e instanceof Error ? e.message : "Error de red" });
+      // Si el fetch se cortó, no sabemos si el pedido llegó a salir del
+      // navegador. Se asume que sí, por lo mismo de arriba.
+      setResultado({
+        ok: false,
+        mandado: true,
+        error: e instanceof Error ? e.message : "Error de red",
+      });
     } finally {
       setEnviando(false);
     }
@@ -356,7 +401,8 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
     },
     {
       titulo: "U. x bulto",
-      celda: (f) => (f.unidadesPorBulto > 1 ? fmtNumero(f.unidadesPorBulto) : "—"),
+      celda: (f) =>
+        f.unidadesPorBulto > 1 ? fmtNumero(f.unidadesPorBulto) : "—",
       numerica: true,
       orden: (f) => f.unidadesPorBulto,
     },
@@ -375,7 +421,9 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
         ) : (
           <span
             style={
-              f.cobertura < PLAZO_REPOSICION_DIAS ? { color: TEMA.negativo } : undefined
+              f.cobertura < PLAZO_REPOSICION_DIAS
+                ? { color: TEMA.negativo }
+                : undefined
             }
           >
             {fmtNumero(Math.round(f.cobertura))} d
@@ -432,10 +480,18 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
               const unidad = e.target.value as ClaveUnidadCompra;
               const actual = orden.get(f.sku);
               if (!actual) return;
-              const unidades = aUnidades(actual.cantidad, actual.unidad, f.unidadesPorBulto);
+              const unidades = aUnidades(
+                actual.cantidad,
+                actual.unidad,
+                f.unidadesPorBulto,
+              );
               editar(f.sku, {
                 unidad,
-                cantidad: cantidadSugerida(unidades, unidad, f.unidadesPorBulto),
+                cantidad: cantidadSugerida(
+                  unidades,
+                  unidad,
+                  f.unidadesPorBulto,
+                ),
               });
             }}
             className="border-line bg-panel-2 text-ink focus:border-c1 rounded-md border px-1.5 py-1 text-xs outline-none"
@@ -461,7 +517,9 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
             step={1}
             value={sinCero(r?.cantidad)}
             onChange={(e) =>
-              editar(f.sku, { cantidad: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
+              editar(f.sku, {
+                cantidad: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+              })
             }
             className={CLASE_CELDA_EDITABLE}
             aria-label={`Cantidad a comprar de ${f.sku}`}
@@ -499,7 +557,9 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
             max={DESCUENTO_MAXIMO}
             step={0.5}
             value={sinCero(r?.descuento)}
-            onChange={(e) => editar(f.sku, { descuento: Number(e.target.value) || 0 })}
+            onChange={(e) =>
+              editar(f.sku, { descuento: Number(e.target.value) || 0 })
+            }
             className={`${CLASE_CELDA_EDITABLE} ${excedido ? "border-rose-500/60" : ""}`}
             title={
               f.sellInPct == null
@@ -530,7 +590,9 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
             max={DESCUENTO_MAXIMO}
             step={0.5}
             value={sinCero(r?.descuento2)}
-            onChange={(e) => editar(f.sku, { descuento2: Number(e.target.value) || 0 })}
+            onChange={(e) =>
+              editar(f.sku, { descuento2: Number(e.target.value) || 0 })
+            }
             className={`${CLASE_CELDA_EDITABLE} ${excedido ? "border-rose-500/60" : ""}`}
             title={
               d2 > 0
@@ -552,7 +614,10 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
       // que es el descuento con el que se pide.
       titulo: "s/ n. compras %",
       celda: (f) => (
-        <span className="text-muted" title="Sell in calculado con nuestras compras. No va al archivo.">
+        <span
+          className="text-muted"
+          title="Sell in calculado con nuestras compras. No va al archivo."
+        >
           {f.ofertaCalculadaPct == null ? "—" : f.ofertaCalculadaPct.toFixed(2)}
         </span>
       ),
@@ -570,7 +635,9 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
         return (
           <span
             className="tabular-nums whitespace-nowrap"
-            title={h.map((x) => `${fmtMes(x.mes)}: ${x.pct.toFixed(2)} %`).join("\n")}
+            title={h
+              .map((x) => `${fmtMes(x.mes)}: ${x.pct.toFixed(2)} %`)
+              .join("\n")}
           >
             {h.map((x) => Math.round(x.pct)).join(" · ")}
           </span>
@@ -616,7 +683,12 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
         ) : (
           <span
             style={{
-              color: f.rentabilidad < 0 ? TEMA.negativo : f.rentabilidad < 0.1 ? PALETA[3] : undefined,
+              color:
+                f.rentabilidad < 0
+                  ? TEMA.negativo
+                  : f.rentabilidad < 0.1
+                    ? PALETA[3]
+                    : undefined,
             }}
             title={`${fmtNumero(f.udsRentabilidad)} unidades vendidas`}
           >
@@ -669,15 +741,19 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
             </span>
           );
         return (
-          <span title="No hubo ninguna compra a este proveedor el mes pasado.">no</span>
+          <span title="No hubo ninguna compra a este proveedor el mes pasado.">
+            no
+          </span>
         );
       },
       // Ordena por lo seguro primero: sí (2), no consta (1), no (0).
-      orden: (f) => (f.compradoMesPasado ? 2 : f.proveedorComproMesPasado ? 1 : 0),
+      orden: (f) =>
+        f.compradoMesPasado ? 2 : f.proveedorComproMesPasado ? 1 : 0,
     },
     {
       titulo: "Última compra",
-      celda: (f) => (f.ultimaCompra ? fmtFechaCortaConAnio(f.ultimaCompra) : "—"),
+      celda: (f) =>
+        f.ultimaCompra ? fmtFechaCortaConAnio(f.ultimaCompra) : "—",
       orden: (f) => f.ultimaCompra,
     },
   ];
@@ -788,7 +864,9 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
               id="buscar-compras"
               value={buscado}
               onChange={(e) => setBuscado(e.target.value)}
-              onBlur={() => cambiar({ ...filtros, buscar: buscado.trim() || undefined })}
+              onBlur={() =>
+                cambiar({ ...filtros, buscar: buscado.trim() || undefined })
+              }
               placeholder="SKU o artículo"
               className="border-line bg-panel-2 text-ink placeholder:text-muted focus:border-c1 w-40 rounded-lg border px-2.5 py-1.5 text-xs outline-none"
             />
@@ -804,7 +882,9 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
                 : "border-line text-muted hover:bg-panel-2 hover:text-ink"
             }`}
           >
-            {filtros.todos ? "Todos los artículos" : "Sólo los que hay que comprar"}
+            {filtros.todos
+              ? "Todos los artículos"
+              : "Sólo los que hay que comprar"}
           </button>
 
           <BotonLimpiar
@@ -818,19 +898,22 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
 
         <span className="text-muted text-[11px] leading-tight">
           El <strong>sugerido</strong> es lo que falta para cubrir{" "}
-          {COBERTURA_OBJETIVO_DIAS + PLAZO_REPOSICION_DIAS} días de venta
-          ({COBERTURA_OBJETIVO_DIAS} de objetivo más {PLAZO_REPOSICION_DIAS} que tarda la
-          reposición) al ritmo de los últimos {filtros.ventana ?? VENTANA_POR_DEFECTO} días,
-          contando el stock de <strong>los dos depósitos</strong>. El{" "}
-          <strong>descuento</strong> es el <strong>sell in vigente del proveedor</strong> del
-          mes elegido y se puede corregir fila por fila.
+          {COBERTURA_OBJETIVO_DIAS + PLAZO_REPOSICION_DIAS} días de venta (
+          {COBERTURA_OBJETIVO_DIAS} de objetivo más {PLAZO_REPOSICION_DIAS} que
+          tarda la reposición) al ritmo de los últimos{" "}
+          {filtros.ventana ?? VENTANA_POR_DEFECTO} días, contando el stock de{" "}
+          <strong>los dos depósitos</strong>. El <strong>descuento</strong> es
+          el <strong>sell in vigente del proveedor</strong> del mes elegido y se
+          puede corregir fila por fila.
         </span>
       </div>
 
       {error && (
         <Aviso>
           <p className="font-medium">No se pudieron leer los datos.</p>
-          <p className="mt-1 font-mono text-xs break-words opacity-80">{error}</p>
+          <p className="mt-1 font-mono text-xs break-words opacity-80">
+            {error}
+          </p>
         </Aviso>
       )}
 
@@ -853,7 +936,9 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
             titulo="Unidades a pedir"
             valor={fmtNumero(resumen.unidades)}
             detalle={
-              resumen.bultos > 0 ? `${fmtNumero(resumen.bultos)} bultos` : "todo por unidad"
+              resumen.bultos > 0
+                ? `${fmtNumero(resumen.bultos)} bultos`
+                : "todo por unidad"
             }
           />
           <TarjetaKpi
@@ -876,7 +961,9 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
       )}
 
       {data && (
-        <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
+        <div
+          className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
+        >
           {/* La barra de la orden: acciones sobre todo lo que se ve, y la
               descarga. Va arriba de la tabla porque es lo que se hace al final
               y tiene que estar a mano sin scrollear 500 filas. */}
@@ -936,18 +1023,18 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
                   API-- pero ofrecer un botón que va a contestar 403 es peor
                   que no ofrecerlo. */}
               {puedeEnviar && (
-              <button
-                type="button"
-                onClick={() => {
-                  setResultado(null);
-                  setConfirmando((v) => !v);
-                }}
-                disabled={!proveedorUnico || resumen.renglones === 0}
-                title="Carga la orden directamente en Sigma. Pide confirmar antes."
-                className="border-c1 bg-c1 text-panel hover:bg-c1/85 rounded-lg border px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Enviar a Sigma
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResultado(null);
+                    setConfirmando((v) => !v);
+                  }}
+                  disabled={!proveedorUnico || resumen.renglones === 0}
+                  title="Carga la orden directamente en Sigma. Pide confirmar antes."
+                  className="border-c1 bg-c1 text-panel hover:bg-c1/85 rounded-lg border px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Enviar a Sigma
+                </button>
               )}
               <button
                 type="button"
@@ -976,8 +1063,8 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
           {puedeEnviar && confirmando && (
             <div className="border-c1 bg-panel space-y-3 rounded-xl border p-4">
               <p className="text-ink text-sm font-medium">
-                Se va a cargar una orden de compra en Sigma. No se puede deshacer desde
-                acá: si sale mal, hay que anularla en Sigma.
+                Se va a cargar una orden de compra en Sigma. No se puede
+                deshacer desde acá: si sale mal, hay que anularla en Sigma.
               </p>
               <div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
                 <div className="flex justify-between gap-3">
@@ -1005,14 +1092,16 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
                 <div className="flex justify-between gap-3 sm:col-span-2">
                   <span className="text-muted">Obs. para el proveedor</span>
                   <span className="text-right">
-                    {comentario.trim() || <em className="text-muted">sin nota</em>}
+                    {comentario.trim() || (
+                      <em className="text-muted">sin nota</em>
+                    )}
                   </span>
                 </div>
               </div>
               <p className="text-muted text-[11px]">
-                La orden entra en estado <strong>Pendiente</strong>: queda cargada pero no
-                aprobada. El precio de cada renglón lo vuelve a leer el servidor de la base,
-                no se manda desde esta pantalla.
+                La orden entra en estado <strong>Pendiente</strong>: queda
+                cargada pero no aprobada. El precio de cada renglón lo vuelve a
+                leer el servidor de la base, no se manda desde esta pantalla.
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -1036,21 +1125,28 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
           )}
 
           {resultado && (
-            <Aviso tono={resultado.ok ? "info" : "error"}>
+            <Aviso
+              tono={
+                resultado.ok ? "info" : resultado.mandado ? "alerta" : "error"
+              }
+            >
               {resultado.ok ? (
                 <>
                   <p className="font-medium">La orden se cargó en Sigma.</p>
                   <p className="mt-1">
-                    Proveedor <strong>{resultado.enviado.proveedorId}</strong> · empresa{" "}
-                    <strong>{resultado.enviado.empresa}</strong> ·{" "}
-                    {fmtNumero(resultado.enviado.items.length)} renglones · estado{" "}
-                    <strong>Pendiente</strong>. Buscala en Sigma para aprobarla.
+                    Proveedor <strong>{resultado.enviado.proveedorId}</strong> ·
+                    empresa <strong>{resultado.enviado.empresa}</strong> ·{" "}
+                    {fmtNumero(resultado.enviado.items.length)} renglones ·
+                    estado <strong>Pendiente</strong>. Buscala en Sigma para
+                    aprobarla.
                   </p>
                   {/* Se muestra lo que se mandó, y no un "listo" a secas: en una
                       operación sin deshacer, la constancia de qué se cargó vale
                       más que el mensaje de éxito. */}
                   <details className="mt-2">
-                    <summary className="cursor-pointer text-xs">Ver lo que se mandó</summary>
+                    <summary className="cursor-pointer text-xs">
+                      Ver lo que se mandó
+                    </summary>
                     <pre className="bg-panel-2 mt-1 max-h-64 overflow-auto rounded-md p-2 text-[11px]">
                       {JSON.stringify(resultado.enviado, null, 2)}
                     </pre>
@@ -1058,8 +1154,45 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
                 </>
               ) : (
                 <>
-                  <p className="font-medium">No se mandó la orden.</p>
-                  <p className="mt-1">{resultado.error}</p>
+                  {/* DOS FRACASOS DISTINTOS, Y LA DIFERENCIA NO ES DE TONO.
+                      Si nada salió de acá, se corrige y se vuelve a apretar.
+                      Si ya se le habló a Sigma, apretar de nuevo puede cargar
+                      la orden por segunda vez -- y Sigma contesta 500 hasta
+                      cuando la cargó bien, así que este cartel aparece también
+                      en los envíos que salieron perfectos. */}
+                  {resultado.mandado ? (
+                    <>
+                      <p className="font-medium">
+                        Sigma contestó con un error, pero la orden puede haber
+                        quedado cargada igual.
+                      </p>
+                      <p className="mt-1">
+                        <strong>
+                          No vuelvas a mandarla sin revisar primero en Sigma.
+                        </strong>{" "}
+                        Su API contesta un error también cuando la orden entra
+                        bien, así que este mensaje no distingue una cosa de la
+                        otra. Buscá la orden en «Órdenes de compra» del
+                        proveedor
+                        {resultado.enviado ? (
+                          <>
+                            {" "}
+                            <strong>{resultado.enviado.proveedorId}</strong>
+                          </>
+                        ) : null}
+                        : si está, listo; si no está, recién ahí volvé a
+                        mandarla.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="font-medium">
+                      No se mandó la orden. Nada salió del tablero, así que
+                      podés corregir y volver a intentar.
+                    </p>
+                  )}
+                  <p className="mt-1 font-mono text-xs break-words opacity-80">
+                    {resultado.error}
+                  </p>
                   {resultado.problemas && resultado.problemas.length > 0 && (
                     <ul className="mt-1 list-disc space-y-0.5 pl-5">
                       {resultado.problemas.map((p) => (
@@ -1111,84 +1244,105 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
           </Panel>
 
           <Aviso tono="info">
-            <p className="font-medium">Qué lleva el archivo, y qué mirar antes de mandarlo.</p>
+            <p className="font-medium">
+              Qué lleva el archivo, y qué mirar antes de mandarlo.
+            </p>
             <p className="mt-1">
-              El archivo tiene las {COLUMNAS_SIGMA.length} columnas de la grilla de Sigma —
-              <span className="font-mono text-xs">{COLUMNAS_SIGMA.join(" · ")}</span>— y
-              sólo los renglones con cantidad: un cero no es «comprar cero», es un artículo
-              que decidiste no pedir. El <strong>TXT va separado por tabulaciones</strong> y
-              el CSV por punto y coma, porque el descuento lleva coma decimal («15,00») y
+              El archivo tiene las {COLUMNAS_SIGMA.length} columnas de la grilla
+              de Sigma —
+              <span className="font-mono text-xs">
+                {COLUMNAS_SIGMA.join(" · ")}
+              </span>
+              — y sólo los renglones con cantidad: un cero no es «comprar cero»,
+              es un artículo que decidiste no pedir. El{" "}
+              <strong>TXT va separado por tabulaciones</strong> y el CSV por
+              punto y coma, porque el descuento lleva coma decimal («15,00») y
               con coma separadora Excel lo parte al medio.
             </p>
             <p className="mt-1">
-              <strong>Los dos descuentos se aplican en cascada, no se suman.</strong>{" "}
+              <strong>
+                Los dos descuentos se aplican en cascada, no se suman.
+              </strong>{" "}
               <span className="font-mono text-xs">FDESCU1</span> es el sell in y{" "}
-              <span className="font-mono text-xs">FDESCU2</span> el segundo, que arranca
-              vacío y se pone a mano. Un 15 % y un 10 %{" "}
-              <strong>no son 25 %</strong>: el segundo se calcula sobre lo que quedó
-              después del primero, así que el neto es 0,85 × 0,90 = 76,5 % del costo, o sea{" "}
-              <strong>23,5 %</strong>. Así los liquida el proveedor y así los aplica Sigma;
-              en una orden grande la diferencia es plata. El{" "}
-              <span className="font-mono text-xs">FDESCU2</span> viaja siempre, aunque esté
-              en cero: una grilla con la última columna vacía se importa, una a la que le
-              falta una columna no.
+              <span className="font-mono text-xs">FDESCU2</span> el segundo, que
+              arranca vacío y se pone a mano. Un 15 % y un 10 %{" "}
+              <strong>no son 25 %</strong>: el segundo se calcula sobre lo que
+              quedó después del primero, así que el neto es 0,85 × 0,90 = 76,5 %
+              del costo, o sea <strong>23,5 %</strong>. Así los liquida el
+              proveedor y así los aplica Sigma; en una orden grande la
+              diferencia es plata. El{" "}
+              <span className="font-mono text-xs">FDESCU2</span> viaja siempre,
+              aunque esté en cero: una grilla con la última columna vacía se
+              importa, una a la que le falta una columna no.
             </p>
             <p className="mt-1">
-              En <span className="font-mono text-xs">UNICOM</span> va exactamente{" "}
+              En <span className="font-mono text-xs">UNICOM</span> va
+              exactamente{" "}
               {UNIDADES_COMPRA.map((u, i) => (
                 <span key={u.clave}>
                   {i > 0 ? " o " : ""}
                   <span className="font-mono text-xs">{u.unicom}</span>
                 </span>
               ))}
-              . Está escrito acá para poder compararlo con lo que espera Sigma sin abrir el
-              archivo: si alguna vez rechaza la importación, es lo primero para mirar.
+              . Está escrito acá para poder compararlo con lo que espera Sigma
+              sin abrir el archivo: si alguna vez rechaza la importación, es lo
+              primero para mirar.
             </p>
             <p className="mt-1">
-              <strong>Una orden, un proveedor.</strong> Por eso la descarga pide que haya
-              exactamente uno elegido: no existe la orden que mezcla dos.
+              <strong>Una orden, un proveedor.</strong> Por eso la descarga pide
+              que haya exactamente uno elegido: no existe la orden que mezcla
+              dos.
             </p>
             <p className="mt-1">
-              <strong>El Excel para el proveedor es otro archivo, no otro formato.</strong>{" "}
-              Sale de los mismos renglones —si acá está en cero, no está en ninguno de los
-              dos— pero habla el idioma del que lo recibe: lleva su{" "}
-              <strong>código de compra</strong> y el <strong>EAN</strong> en vez de nuestro
-              SKU, el nombre del artículo, y el costo <em>de la unidad que se le pide</em>:
-              si el renglón va por bulto, el costo que se muestra es el del bulto. Arriba
-              de todo lleva la carátula —<strong>quién compra, la fecha y a quién</strong>,
-              más la nota que escribas al lado del botón— y cierra con el total. La empresa
-              que emite sale del <strong>grupo del proveedor</strong>: una orden de un
-              proveedor de NOA no la firma Quo. Es para adjuntar a un mail, no para
-              importar en ningún lado.
+              <strong>
+                El Excel para el proveedor es otro archivo, no otro formato.
+              </strong>{" "}
+              Sale de los mismos renglones —si acá está en cero, no está en
+              ninguno de los dos— pero habla el idioma del que lo recibe: lleva
+              su <strong>código de compra</strong> y el <strong>EAN</strong> en
+              vez de nuestro SKU, el nombre del artículo, y el costo{" "}
+              <em>de la unidad que se le pide</em>: si el renglón va por bulto,
+              el costo que se muestra es el del bulto. Arriba de todo lleva la
+              carátula —<strong>quién compra, la fecha y a quién</strong>, más
+              la nota que escribas al lado del botón— y cierra con el total. La
+              empresa que emite sale del <strong>grupo del proveedor</strong>:
+              una orden de un proveedor de NOA no la firma Quo. Es para adjuntar
+              a un mail, no para importar en ningún lado.
               {resumen.sinCodigo > 0 && (
                 <>
                   {" "}
                   <strong>
-                    {fmtNumero(resumen.sinCodigo)} de los {fmtNumero(resumen.renglones)}{" "}
-                    renglones no tienen cargado el código de compra del proveedor
+                    {fmtNumero(resumen.sinCodigo)} de los{" "}
+                    {fmtNumero(resumen.renglones)} renglones no tienen cargado
+                    el código de compra del proveedor
                   </strong>{" "}
-                  en el maestro de Sigma, así que en el Excel esa celda va vacía. El
-                  artículo se pide igual —el proveedor lo va a reconocer por el EAN y por
-                  el nombre— pero es algo para cargar en Sigma, no acá.
+                  en el maestro de Sigma, así que en el Excel esa celda va
+                  vacía. El artículo se pide igual —el proveedor lo va a
+                  reconocer por el EAN y por el nombre— pero es algo para cargar
+                  en Sigma, no acá.
                 </>
               )}
             </p>
             <p className="mt-1">
               <strong>
-                El Desc 1 es el sell in VIGENTE DEL PROVEEDOR, y hoy no está cargado.
+                El Desc 1 es el sell in VIGENTE DEL PROVEEDOR, y hoy no está
+                cargado.
               </strong>{" "}
-              Vive en la planilla de Google y todavía no se sincroniza sola, así que la
-              columna arranca en <strong>0 y hay que ponerla a mano</strong>. Cero acá
-              quiere decir «no lo sabemos», no «sin descuento».
+              Vive en la planilla de Google y todavía no se sincroniza sola, así
+              que la columna arranca en{" "}
+              <strong>0 y hay que ponerla a mano</strong>. Cero acá quiere decir
+              «no lo sabemos», no «sin descuento».
             </p>
             <p className="mt-1">
               La columna <strong>«s/ n. compras %»</strong> es otra cosa y{" "}
               <strong>no va al archivo</strong>: es el sell in{" "}
               <em>calculado con nuestras compras</em> (
-              <span className="font-mono text-xs">costos_historicos.oferta_pct</span>), el
-              que se usa para valorizar el costo real y trasladarlo a las ofertas del mes.
-              Sirve para comparar, no para pedir: mandarlo en una orden sería pedirle al
-              proveedor con un descuento inventado.
+              <span className="font-mono text-xs">
+                costos_historicos.oferta_pct
+              </span>
+              ), el que se usa para valorizar el costo real y trasladarlo a las
+              ofertas del mes. Sirve para comparar, no para pedir: mandarlo en
+              una orden sería pedirle al proveedor con un descuento inventado.
               {resumen.recortados > 0 && (
                 <>
                   {" "}
@@ -1196,45 +1350,57 @@ export default function DashboardComprasPage({ puedeEnviar }: { puedeEnviar: boo
                     Hay {fmtNumero(resumen.recortados)} con descuento mayor a{" "}
                     {DESCUENTO_MAXIMO} %
                   </strong>
-                  : se recortan a {DESCUENTO_MAXIMO} antes de exportar. Un descuento así es
-                  un error de carga, y en una orden de compra deja de ser un número raro en
-                  una pantalla.
+                  : se recortan a {DESCUENTO_MAXIMO} antes de exportar. Un
+                  descuento así es un error de carga, y en una orden de compra
+                  deja de ser un número raro en una pantalla.
                 </>
               )}
             </p>
             <p className="mt-1">
-              <strong>El sugerido no descuenta la mercadería en tránsito.</strong> Digip
-              informa las columnas de tránsito y recepción en cero, así que un pedido ya
-              hecho y todavía no recibido no se ve por ningún lado y el sugerido lo vuelve a
-              pedir. Es lo primero para revisar antes de mandar la orden.
+              <strong>
+                El sugerido no descuenta la mercadería en tránsito.
+              </strong>{" "}
+              Digip informa las columnas de tránsito y recepción en cero, así
+              que un pedido ya hecho y todavía no recibido no se ve por ningún
+              lado y el sugerido lo vuelve a pedir. Es lo primero para revisar
+              antes de mandar la orden.
             </p>
             <p className="mt-1">
-              <strong>«¿Comprado el mes pasado?» tiene tres respuestas y no dos.</strong>{" "}
-              <em>Sí</em> es que el artículo aparece en un renglón de compra. <em>No</em> es
-              que no hubo ninguna compra a ese proveedor, y eso sí es seguro.{" "}
-              <em>No consta</em> es que al proveedor se le compró pero ese comprobante llegó
-              sin el detalle de renglones — de los 173 comprobantes de agosto, 14 traen
-              items—, así que no se puede saber. Un «no» ahí sería mentira la mayoría de las
-              veces.
+              <strong>
+                «¿Comprado el mes pasado?» tiene tres respuestas y no dos.
+              </strong>{" "}
+              <em>Sí</em> es que el artículo aparece en un renglón de compra.{" "}
+              <em>No</em> es que no hubo ninguna compra a ese proveedor, y eso
+              sí es seguro. <em>No consta</em> es que al proveedor se le compró
+              pero ese comprobante llegó sin el detalle de renglones — de los
+              173 comprobantes de agosto, 14 traen items—, así que no se puede
+              saber. Un «no» ahí sería mentira la mayoría de las veces.
             </p>
             <p className="mt-1">
-              La columna de los <strong>últimos 6 meses de descuento</strong> es para ver si
-              la oferta de este mes es buena o es la de siempre. Muestra el{" "}
+              La columna de los <strong>últimos 6 meses de descuento</strong> es
+              para ver si la oferta de este mes es buena o es la de siempre.
+              Muestra el{" "}
               {sellInHayDatos
                 ? "sell in del proveedor"
                 : "sell in calculado con nuestras compras, porque el del proveedor todavía no está cargado"}
               , y el título de la columna dice cuál de los dos se está viendo.
             </p>
             <p className="mt-1">
-              <strong>La rentabilidad es de los últimos {MESES_RENTABILIDAD} meses</strong>,
-              de todos los canales, sobre la facturación neta y sin descontar flete. Sirve
-              para separar «se vende porque gusta» de «se vendía porque estaba liquidado»:
-              son el mismo ritmo y llevan a comprar distinto.
+              <strong>
+                La rentabilidad es de los últimos {MESES_RENTABILIDAD} meses
+              </strong>
+              , de todos los canales, sobre la facturación neta y sin descontar
+              flete. Sirve para separar «se vende porque gusta» de «se vendía
+              porque estaba liquidado»: son el mismo ritmo y llevan a comprar
+              distinto.
             </p>
             <p className="mt-1">
-              La columna «Última compra» es un piso: sólo hay comprobantes cargados
-              {data.comprasHasta ? ` hasta el ${fmtFechaCorta(data.comprasHasta)}` : ""}, y
-              dos de cada tres llegan sin el detalle de renglones.
+              La columna «Última compra» es un piso: sólo hay comprobantes
+              cargados
+              {data.comprasHasta
+                ? ` hasta el ${fmtFechaCorta(data.comprasHasta)}`
+                : ""}
+              , y dos de cada tres llegan sin el detalle de renglones.
             </p>
           </Aviso>
         </div>
