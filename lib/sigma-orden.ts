@@ -205,24 +205,51 @@ export function masDias(d: Date, dias: number): Date {
 }
 
 /**
- * El precio de UN renglón, en la unidad con la que se pide.
+ * `cantidad` Y `precio` VIAJAN SIEMPRE POR UNIDAD, NUNCA POR BULTO.
+ *
+ * Esto NO es lo que parecía, y la orden 00000373 de ALGABO lo demuestra. Se
+ * pidieron 2 bultos de AL10032 --6 unidades por bulto, costo unitario
+ * 3.699,675-- y en el ERP quedó:
+ *
+ *     Unid.  Cant.  $Unit         Pres.  Total
+ *     Bultos  0,33  133.188,3000    6    35.849,85
+ *
+ * Los dos números están 6 veces corridos, cada uno para su lado. Se mandó
+ * `cantidad: 2` con `unidadDeCompra: "B"` y Sigma lo leyó como 2 UNIDADES, que
+ * son 0,33 bultos. Se mandó `precio: 22.198,05` --el del bulto-- y Sigma lo
+ * leyó como precio POR UNIDAD, que por bulto son 133.188,30.
+ *
+ * `unidadDeCompra` NO cambia lo que se manda: cambia cómo se muestra. Sigma
+ * divide la cantidad por `Pres.` y multiplica el precio por `Pres.`, y nada
+ * más.
+ *
+ * POR QUÉ NO SALTÓ ANTES: los dos errores se cancelan en el total. Seis veces
+ * menos cantidad por seis veces más precio da exactamente la misma plata, y el
+ * total era lo único que mirábamos. Lo que no se cancela es lo que llega: el
+ * proveedor manda 2 unidades donde se pidieron 12.
+ *
+ * OJO, EL TXT NO SE TOCA. El importador de la grilla sí toma la cantidad en la
+ * unidad declarada, y viene funcionando así. Son dos caminos distintos hacia el
+ * mismo ERP y no se comportan igual.
+ */
+export function unidadesDelRenglon(a: ArticuloParaOrden, r: RenglonOrden): number {
+  const porBulto = a.unidadesPorBulto > 0 ? a.unidadesPorBulto : 1;
+  return r.unidad === "bulto" ? r.cantidad * porBulto : r.cantidad;
+}
+
+/**
+ * El precio de UNA unidad.
  *
  * Es el costo de LISTA, sin descuentos: Sigma aplica `descuento1` y
  * `descuento2` por su cuenta, en cascada, igual que la pantalla. Mandar el
  * costo ya descontado y ADEMÁS los descuentos los aplicaría dos veces.
- *
- * Y va en la unidad pedida: si el renglón es por bulto, el precio es el del
- * bulto. `unidadDeCompra: "B"` con un precio unitario sería una orden por la
- * sexta parte de lo que corresponde.
  */
-export function precioDelRenglon(a: ArticuloParaOrden, r: RenglonOrden): number {
-  const porBulto = a.unidadesPorBulto > 0 ? a.unidadesPorBulto : 1;
-  const bruto = r.unidad === "bulto" ? a.costoLista * porBulto : a.costoLista;
+export function precioUnitario(a: ArticuloParaOrden): number {
   // A DOS DECIMALES, que es lo que es un precio. El costo de la base tiene
-  // cuatro (15.698,5776) y por bulto se van a seis; mandarlos así es pedirle al
-  // ERP que redondee por su cuenta y que su total no cierre con el que la
-  // pantalla mostró antes de confirmar.
-  return Math.round(bruto * 100) / 100;
+  // cuatro (15.698,5776); mandarlos así es pedirle al ERP que redondee por su
+  // cuenta y que su total no cierre con el que la pantalla mostró antes de
+  // confirmar.
+  return Math.round(a.costoLista * 100) / 100;
 }
 
 /**
@@ -269,7 +296,7 @@ export function problemasDeLaOrden(
     // Sigma rechaza el precio en cero ("precio mayor que cero") y se cae la
     // orden ENTERA, no ese renglón. Hoy hay artículos así: los ACUERDO
     // COMERCIAL y los que nunca tuvieron costo cargado.
-    if (!(precioDelRenglon(a, r) > 0)) {
+    if (!(precioUnitario(a) > 0)) {
       problemas.push(`${sku}: sin costo cargado, y Sigma exige precio mayor que cero.`);
     }
     if (!Number.isInteger(r.cantidad) || r.cantidad <= 0) {
@@ -317,8 +344,10 @@ export function armarOrdenSigma(
     grupo = grupo ?? a.grupo;
     items.push({
       articuloId: sku,
-      cantidad: r.cantidad,
-      precio: precioDelRenglon(a, r),
+      // En UNIDADES aunque el renglón se haya pedido por bulto: ver la nota de
+      // `unidadesDelRenglon`. `unidadDeCompra` de abajo es sólo presentación.
+      cantidad: unidadesDelRenglon(a, r),
+      precio: precioUnitario(a),
       descuento1: descuentoValido(r.descuento),
       descuento2: descuentoValido(r.descuento2),
       // Del 3 al 5 son OBLIGATORIOS aunque no se usen: sin ellos Sigma corta
