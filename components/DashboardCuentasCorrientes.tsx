@@ -5,7 +5,7 @@ import EncabezadoPagina from "@/components/EncabezadoPagina";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
-import { nombreEmpresa } from "@/lib/constantes";
+import { nombreEmpresa, nombreVendedor } from "@/lib/constantes";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
@@ -63,9 +63,11 @@ function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
     {
       titulo: "Vendedor",
       ayuda:
-        "El vendedor asignado al cliente en Sigma. Viene como código y se traduce al nombre acá.",
-      celda: (f) => f.vendedor ?? "—",
-      orden: (f) => f.vendedor,
+        "El vendedor asignado al cliente en Sigma. La tabla lo guarda como código (007) y se traduce al nombre acá.",
+      celda: (f) => nombreVendedor(f.vendedor),
+      // Ordena por el NOMBRE que se ve y no por el código: una lista alfabética
+      // que sale en el orden 006, 007, 004 se lee como si no estuviera ordenada.
+      orden: (f) => nombreVendedor(f.vendedor),
     },
     {
       titulo: "Saldo total",
@@ -325,6 +327,10 @@ export default function DashboardCuentasPage() {
           etiqueta="Vendedor"
           valores={filtros.vendedor}
           opciones={opciones?.vendedores ?? []}
+          // El valor que viaja al filtro sigue siendo el CÓDIGO, que es lo que
+          // guarda la tabla; `formato` sólo cambia lo que se lee. Igual que
+          // Empresa, dos selectores más allá.
+          formato={nombreVendedor}
           onChange={(v) => cambiar({ ...filtros, vendedor: v })}
         />
         <SelectorMultiple

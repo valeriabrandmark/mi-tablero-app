@@ -1263,6 +1263,12 @@ export type DashboardStock = {
 
 export type FiltrosAntiguedad = {
   proveedor?: string[];
+  /**
+   * Empresa del grupo a la que pertenece el proveedor ("NOA COMERCIAL" o
+   * "QUO MKT"). Sale de `bronze.proveedores_grupo`, igual que en Stock y en
+   * Compras.
+   */
+  grupo?: string[];
   marca?: string[];
   sku?: string[];
   /** Deja los artículos con alguna unidad en ese tramo de antigüedad en Full. */

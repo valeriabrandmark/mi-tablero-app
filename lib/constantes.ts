@@ -228,6 +228,44 @@ export const EMPRESAS: Record<string, string> = {
   "0004": "Presupuesto Noa",
 };
 
+/**
+ * Nombre de cada vendedor de Sigma, por código.
+ *
+ * ES LA VUELTA DE `CODIGO_SIGMA`, y existe aparte por dos motivos. El primero
+ * es que cubre TODOS los códigos y no sólo los cuatro que tienen página de
+ * objetivos: cuentas corrientes trae clientes de IGNACIO (004), que no es uno
+ * de ellos, y sin él ese filtro mostraba "004" pelado.
+ *
+ * El segundo es que la fuente de verdad de esta tabla vive en el orquestador
+ * (`VENDEDORES` en modelo.py), que es quien traduce el código a nombre al
+ * construir `gold.fact_ventas`. Acá se repite porque las tablas de cuentas
+ * corrientes guardan el CÓDIGO y el tablero las lee directo, sin pasar por
+ * gold. Si se renombra a alguien --como RAMON a GERMAN-- hay que tocar las dos.
+ */
+export const VENDEDORES_SIGMA: Record<string, string> = {
+  "001": "CASA CENTRAL",
+  "002": "AGENCIA",
+  "003": "ECOMMERCE",
+  "004": "IGNACIO",
+  "005": "IVANA",
+  "006": "SILVIO",
+  "007": "GERMAN",
+  "008": "PABLO",
+  "009": "MELI",
+  "010": "ALEJANDRO",
+  "011": "TRADE",
+  "012": "BTL",
+  "013": "PROYECTOS ESPECIALES",
+  "014": "RICARDO",
+  WEB: "VENDEDOR WEB",
+};
+
+/** `'007'` -> `'GERMAN'`. Devuelve el código si no está mapeado. */
+export function nombreVendedor(codigo: string | null | undefined): string {
+  if (!codigo) return "—";
+  return VENDEDORES_SIGMA[codigo.trim()] ?? codigo;
+}
+
 /** `'0001'` -> `'Quo Marketing SRL'`. Devuelve el código si no está mapeado. */
 export function nombreEmpresa(codigo: string): string {
   return EMPRESAS[codigo] ?? codigo;

@@ -6,7 +6,12 @@ import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { contarSkus, sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
-import { fmtFechaCorta, fmtMoneda, fmtNumero } from "@/lib/format";
+import {
+  fmtFechaCorta,
+  fmtFechaCortaConAnio,
+  fmtMoneda,
+  fmtNumero,
+} from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
 import {
   DIAS_ANTIGUEDAD_ALERTA,
@@ -25,7 +30,7 @@ import type {
 /** El tope lo aplica el servidor (`TOPE` en lib/queries-stock-antiguedad.ts). */
 const TOPE_TEXTO = 500;
 
-type Opciones = { proveedores: string[]; marcas: string[] };
+type Opciones = { proveedores: string[]; marcas: string[]; grupos: string[] };
 type Respuesta = DashboardAntiguedad & { opciones: Opciones | null };
 
 /**
@@ -175,11 +180,12 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
     },
     {
       titulo: "Próximo vto.",
-      ayuda: "Cuándo la próxima tanda de unidades va a pasar ese plazo.",
+      ayuda:
+        "Cuándo la próxima tanda de unidades va a pasar ese plazo. Lleva el año porque un vencimiento puede caer en el año que viene y un dd/mm pelado no lo distingue.",
       celda: (f) =>
         f.proxVto ? (
           <span style={{ color: colorVencimiento(f.diasAVencer) }}>
-            {fmtFechaCorta(f.proxVto)}
+            {fmtFechaCortaConAnio(f.proxVto)}
           </span>
         ) : (
           <span className="text-muted">—</span>
@@ -232,6 +238,7 @@ export default function DashboardAntiguedadPage() {
       "/api/stock-antiguedad",
       {
         proveedor: filtros.proveedor,
+        grupo: filtros.grupo,
         marca: filtros.marca,
         sku: filtros.sku,
         tramo: filtros.tramo ? [filtros.tramo] : undefined,
@@ -299,6 +306,12 @@ export default function DashboardAntiguedadPage() {
             valores={filtros.proveedor}
             opciones={data?.opciones?.proveedores ?? []}
             onChange={(v) => cambiar({ ...filtros, proveedor: v })}
+          />
+          <SelectorMultiple
+            etiqueta="Empresa"
+            valores={filtros.grupo}
+            opciones={data?.opciones?.grupos ?? []}
+            onChange={(v) => cambiar({ ...filtros, grupo: v })}
           />
           <SelectorMultiple
             etiqueta="Marca"
