@@ -256,7 +256,7 @@ function Grupo({
             // La excepción son las páginas de objetivos: comparten el prefijo
             // /objetivos pero no cuelgan una de otra, así que se comparan
             // enteras. Por eso el `===` va primero y el `startsWith` exige la
-            // barra: /objetivos/silvio nunca es prefijo de /objetivos/ramon.
+            // barra: /objetivos/silvio nunca es prefijo de /objetivos/german.
             const activo = pathname === h.href || pathname.startsWith(`${h.href}/`);
             return (
               <li key={h.href}>

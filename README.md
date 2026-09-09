@@ -161,7 +161,7 @@ vista está vacía para la mayoría de los proveedores y no se puede asumir dato
 
 ## Definición de la página "Objetivos"
 
-Hay **una página por vendedor** (`/objetivos/silvio`, `/objetivos/ramon`,
+Hay **una página por vendedor** (`/objetivos/silvio`, `/objetivos/german`,
 `/objetivos/pablo`, `/objetivos/ricardo`): el vendedor lo fija la ruta y no un
 selector, para poder dar permiso sobre una sola página y que cada vendedor entre
 directo a la suya. Un slug que no esté en `VENDEDORES_OBJETIVOS` da 404, y la
@@ -236,7 +236,7 @@ Usa la misma fórmula que la página de Cuentas Corrientes
 (`saldo_vencido / saldo_total`) para que el mismo número no dé distinto en dos
 pantallas.
 
-Hoy solo SILVIO (43 %) y RAMON (52 %) tienen cartera cargada; PABLO y RICARDO no
+Hoy solo SILVIO (43 %) y GERMAN (52 %) tienen cartera cargada; PABLO y RICARDO no
 tienen ninguna cuenta corriente y la tarjeta muestra "Sin cuenta corriente".
 **RICARDO además no tiene código de SIGMA** porque nunca facturó: cuando lo haga
 hay que agregarlo a `CODIGO_SIGMA` o su deuda no va a aparecer nunca.
@@ -426,7 +426,7 @@ cambio se ve al recargar.
 ```sql
 update gold.objetivos
 set cantidad = 300
-where mes_comercial = '2026-08' and vendedor = 'RAMON'
+where mes_comercial = '2026-08' and vendedor = 'GERMAN'
   and grupo = 'IMPULSE TRUE LOVE 150 ML';
 ```
 
@@ -436,7 +436,7 @@ where mes_comercial = '2026-08' and vendedor = 'RAMON'
 update gold.objetivos r
 set cantidad = round(s.cantidad / 2)
 from gold.objetivos s
-where s.vendedor = 'SILVIO' and r.vendedor = 'RAMON'
+where s.vendedor = 'SILVIO' and r.vendedor = 'GERMAN'
   and r.grupo = s.grupo and r.mes_comercial = s.mes_comercial;
 ```
 
@@ -463,7 +463,7 @@ values ('SEDAL SHAMPOO', 'XX00001'), ('SEDAL SHAMPOO', 'XX00002');
 -- 3. El objetivo de cada vendedor
 insert into gold.objetivos (mes_comercial, vendedor, grupo, cantidad)
 select '2026-08', v, 'SEDAL SHAMPOO', 240
-from unnest(array['SILVIO','RAMON','PABLO','RICARDO']) as v;
+from unnest(array['SILVIO','GERMAN','PABLO','RICARDO']) as v;
 ```
 
 **Sacar un grupo**: `delete from gold.objetivos_grupo where grupo = '...'`. Los
@@ -601,7 +601,7 @@ Silvio): los cinco grupos de producto, la facturación de las dos empresas
 
 ## Pendientes / decisiones abiertas
 
-- **Vendedores** — la página usa la lista blanca `PABLO`, `RAMON`, `SILVIO`,
+- **Vendedores** — la página usa la lista blanca `PABLO`, `GERMAN`, `SILVIO`,
   igual que el filtro de página del `.pbit`. Se cambia en
   `VENDEDORES_INCLUIDOS` de [lib/constantes.ts](lib/constantes.ts) y aplica a
   todas las consultas y selectores de una.
