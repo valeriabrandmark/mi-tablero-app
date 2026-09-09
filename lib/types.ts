@@ -1400,6 +1400,12 @@ export type FiltrosCompras = {
   mes?: string;
   /** `true` para ver también los artículos que el cálculo no pidió comprar. */
   todos?: boolean;
+  /**
+   * `true` deja sólo los artículos con oferta del proveedor vigente en el mes
+   * elegido. Es para armar la orden de una campaña de ofertas sin tener que
+   * mirar el resto del catálogo.
+   */
+  soloOferta?: boolean;
   buscar?: string;
 };
 
