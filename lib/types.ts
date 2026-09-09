@@ -1294,8 +1294,16 @@ export type KpisAntiguedad = {
   skusParciales: number;
 };
 
-export type TramoAntiguedad = { tramo: string; unidades: number; valor: number };
-export type TramoVencimiento = { tramo: string; unidades: number; valor: number };
+export type TramoAntiguedad = {
+  tramo: string;
+  unidades: number;
+  valor: number;
+};
+export type TramoVencimiento = {
+  tramo: string;
+  unidades: number;
+  valor: number;
+};
 
 export type DashboardAntiguedad = {
   kpis: KpisAntiguedad;
@@ -1338,6 +1346,14 @@ export type FiltrosCompras = {
   grupo?: string[];
   /** Sobre cuántos días se mide el ritmo de venta. Ver lib/stock.ts. */
   ventana?: number;
+  /**
+   * Para cuántos días de venta se quiere comprar en ESTA orden.
+   *
+   * No confundir con `ventana`, que se le parece y es lo contrario:
+   * `ventana` mira para atrás (sobre cuántos días se midió lo que se vende),
+   * `cobertura` mira para adelante (cuántos días se quiere tener cubiertos).
+   */
+  cobertura?: number;
   /** Mes comercial del que sale la oferta del proveedor (`YYYY-MM`). */
   mes?: string;
   /** `true` para ver también los artículos que el cálculo no pidió comprar. */

@@ -74,6 +74,34 @@ export const COBERTURA_MAXIMA_COMPRA_DIAS = 90;
 export const COBERTURA_SIN_INFLAR_DIAS = 120;
 
 /**
+ * PARA CUÁNTOS DÍAS SE ESTÁ COMPRANDO.
+ *
+ * `COBERTURA_OBJETIVO_DIAS` (30) es el objetivo permanente del negocio y sigue
+ * siendo el valor por defecto. Esto es otra cosa: la decisión de ESTA orden.
+ * No es lo mismo la reposición de todas las semanas que la compra de una
+ * oferta que no vuelve hasta marzo, y hasta ahora las dos daban el mismo
+ * número.
+ *
+ * EL TOPE ES 120 Y NO ES REDONDO: es `COBERTURA_SIN_INFLAR_DIAS`, el borde a
+ * partir del cual el propio cálculo considera que un artículo YA SOBRA. Pedir
+ * más días que eso sería comprar para quedar, por definición, excedido.
+ */
+export const COBERTURAS_COMPRA = [30, 60, 90] as const;
+export const COBERTURA_COMPRA_MAXIMA = COBERTURA_SIN_INFLAR_DIAS;
+
+/**
+ * Los días pedidos, o el objetivo de siempre si el número no sirve.
+ *
+ * Se recorta y no se rechaza: viene de una URL, y una orden de compra no es el
+ * lugar para que un parámetro raro tire la pantalla. Entero, porque medio día
+ * de cobertura no significa nada.
+ */
+export function coberturaValida(dias: number | null | undefined): number {
+  if (dias == null || !Number.isFinite(dias)) return COBERTURA_OBJETIVO_DIAS;
+  return Math.min(Math.max(Math.round(dias), 1), COBERTURA_COMPRA_MAXIMA);
+}
+
+/**
  * Las dos formas de comprar, con los tres nombres que tiene cada una.
  *
  * SON TRES Y NO UNO, y no es redundancia: cada camino habla distinto.
@@ -171,7 +199,10 @@ export type RenglonOrden = {
  * verdad.
  */
 export function factorNeto(descuento1: number, descuento2: number): number {
-  return (1 - descuentoValido(descuento1) / 100) * (1 - descuentoValido(descuento2) / 100);
+  return (
+    (1 - descuentoValido(descuento1) / 100) *
+    (1 - descuentoValido(descuento2) / 100)
+  );
 }
 
 /**
@@ -381,7 +412,11 @@ export const RAZON_SOCIAL_POR_GRUPO: Record<string, string> = {
 };
 
 export function razonSocial(grupo: string | null | undefined): string {
-  if (!grupo) return RAZON_SOCIAL_POR_GRUPO[GRUPO_PROVEEDOR_POR_DEFECTO] ?? GRUPO_PROVEEDOR_POR_DEFECTO;
+  if (!grupo)
+    return (
+      RAZON_SOCIAL_POR_GRUPO[GRUPO_PROVEEDOR_POR_DEFECTO] ??
+      GRUPO_PROVEEDOR_POR_DEFECTO
+    );
   return RAZON_SOCIAL_POR_GRUPO[grupo] ?? grupo;
 }
 
@@ -481,7 +516,20 @@ export function excelParaProveedor(
     // LA FILA DE CIERRE NO SUMA "Cantidad", y no es un olvido: sumar bultos con
     // unidades da un número que no significa nada. Las unidades físicas —que sí
     // se pueden sumar— están arriba, en la carátula.
-    total: ["TOTAL", null, null, null, null, null, null, null, null, null, null, total],
+    total: [
+      "TOTAL",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      total,
+    ],
   };
 }
 

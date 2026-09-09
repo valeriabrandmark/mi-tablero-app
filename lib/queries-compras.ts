@@ -7,6 +7,7 @@ import {
   MESES_HISTORIA_SELL_IN,
   MESES_RENTABILIDAD,
   PUNTOS_OFERTA_PARA_DUPLICAR,
+  coberturaValida,
 } from "@/lib/compras";
 import {
   COBERTURA_OBJETIVO_DIAS,
@@ -33,6 +34,7 @@ import type { DashboardCompras, FilaCompra, FiltrosCompras } from "@/lib/types";
  *                               liquidando, que es una decisión distinta
  *
  * $1 ventana del ritmo · $2 proveedores que no son mercadería · $3 mes de oferta
+ * $4 días de cobertura que se quieren comprar
  */
 const BASE = `
 with por_inv as (
@@ -270,10 +272,20 @@ con_base as (
          -- Lo mismo que en el tablero de Stock, con las mismas constantes:
          -- lo que falta para cubrir el objetivo contando lo que se vende
          -- mientras la reposición viaja. Es "cuánto necesito".
-         greatest(0, b.ritmo_diario * ${COBERTURA_OBJETIVO_DIAS + PLAZO_REPOSICION_DIAS} - b.total) as sugerido_base,
+         -- $4 son los días que se eligieron en pantalla; por defecto
+         -- ${COBERTURA_OBJETIVO_DIAS}, el objetivo de siempre.
+         greatest(0, b.ritmo_diario * ($4::numeric + ${PLAZO_REPOSICION_DIAS}) - b.total) as sugerido_base,
          -- El techo duro: nunca pasar de esta cobertura, por buena que esté la
          -- oferta. Separa "aprovechar un descuento" de "comprar un año".
-         greatest(0, b.ritmo_diario * ${COBERTURA_MAXIMA_COMPRA_DIAS} - b.total)                    as sugerido_tope,
+         --
+         -- PERO NUNCA POR DEBAJO DE LO QUE SE PIDIÓ A MANO. El tope existe para
+         -- que el multiplicador de oferta no se dispare solo, no para discutirle
+         -- a una persona que eligió comprar para 90 días: si lo dejáramos fijo,
+         -- elegir 90 o 120 no cambiaría nada y el selector se leería roto.
+         greatest(0, b.ritmo_diario * greatest(
+           ${COBERTURA_MAXIMA_COMPRA_DIAS},
+           $4::numeric + ${PLAZO_REPOSICION_DIAS}
+         ) - b.total)                                                                     as sugerido_tope,
          -- Cuánto está EL DESCUENTO DE ESTE MES por encima de lo habitual, en
          -- puntos. Sin sell in vigente cargado no hay ventaja que medir: queda
          -- en 0 y el factor da 1, o sea el sugerido de siempre.
@@ -314,6 +326,7 @@ function where(f: FiltrosCompras, mes: string): Where {
     f.ventana ?? VENTANA_POR_DEFECTO,
     PROVEEDORES_NO_MERCADERIA,
     mes,
+    coberturaValida(f.cobertura),
   ];
   const clauses: string[] = [];
 
@@ -323,7 +336,9 @@ function where(f: FiltrosCompras, mes: string): Where {
 
   if (f.buscar) {
     params.push(`%${f.buscar}%`);
-    clauses.push(`(sku ilike $${params.length} or producto ilike $${params.length})`);
+    clauses.push(
+      `(sku ilike $${params.length} or producto ilike $${params.length})`,
+    );
   }
 
   // POR DEFECTO SÓLO LO QUE HAY QUE COMPRAR. Son ~3.300 SKU con stock y la
@@ -332,7 +347,10 @@ function where(f: FiltrosCompras, mes: string): Where {
   // para cuando se quiere agregar algo que el cálculo no pidió.
   if (!f.todos) clauses.push("sugerido > 0");
 
-  return { sql: clauses.length ? `where ${clauses.join(" and ")}` : "", params };
+  return {
+    sql: clauses.length ? `where ${clauses.join(" and ")}` : "",
+    params,
+  };
 }
 
 const num = (v: unknown): number => Number(v ?? 0);
@@ -447,7 +465,15 @@ async function getSellInCargado(mes: string): Promise<number> {
 }
 
 export async function getOpcionesCompras() {
-  const params = [VENTANA_POR_DEFECTO, PROVEEDORES_NO_MERCADERIA, ""];
+  // Las opciones de los selectores no dependen de la cobertura elegida --son
+  // la lista de proveedores, marcas y grupos que existen--, así que va el
+  // objetivo de siempre.
+  const params = [
+    VENTANA_POR_DEFECTO,
+    PROVEEDORES_NO_MERCADERIA,
+    "",
+    COBERTURA_OBJETIVO_DIAS,
+  ];
   const [proveedores, marcas, grupos, meses] = await Promise.all([
     query<{ v: string }>(
       `${BASE} select distinct proveedor as v from calculada
@@ -502,7 +528,9 @@ export async function getDashboardCompras(
   // nombre sin volver a deducirlo —y sin la chance de que los dos no coincidan
   // el día 1 de un mes.
   const hoy = new Date();
-  const mesPasado = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - 1, 1))
+  const mesPasado = new Date(
+    Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - 1, 1),
+  )
     .toISOString()
     .slice(0, 7);
 
