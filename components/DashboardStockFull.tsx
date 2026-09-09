@@ -18,6 +18,7 @@ import { TRAMOS, UMBRALES_TARJETAS, UMBRAL_PARADO } from "@/lib/stock-full";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
   DashboardStockFull,
+  FilaNoDisponible,
   FilaStockFull,
   FiltrosStockFull,
 } from "@/lib/types";
@@ -142,6 +143,77 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
   ];
 }
 
+/**
+ * Los artículos con unidades que Mercado Libre no puede vender.
+ *
+ * Es el detalle de la tarjeta de "No disponible", que hasta ahora era un número
+ * sin forma de abrirlo.
+ */
+function columnasNoDisponible(
+  filas: FilaNoDisponible[],
+): Columna<FilaNoDisponible>[] {
+  return [
+    { titulo: "SKU", celda: (f) => f.sku ?? "—", orden: (f) => f.sku },
+    {
+      titulo: "Producto",
+      celda: (f) => (
+        <span className="block max-w-[200px] truncate sm:max-w-[320px]">
+          {f.producto ?? "—"}
+        </span>
+      ),
+      orden: (f) => f.producto,
+    },
+    {
+      titulo: "Proveedor",
+      ayuda: "El proveedor del artículo según el maestro de Sigma.",
+      celda: (f) => (
+        <span className="block max-w-[120px] truncate sm:max-w-[180px]">
+          {f.proveedor ?? "—"}
+        </span>
+      ),
+      orden: (f) => f.proveedor,
+    },
+    {
+      titulo: "No disponible",
+      ayuda:
+        "Unidades que están en Full y Mercado Libre no puede vender: dañadas, en revisión o retenidas.",
+      celda: (f) => (
+        <strong style={{ color: TEMA.negativo }}>
+          {fmtNumero(f.noDisponible)}
+        </strong>
+      ),
+      numerica: true,
+      orden: (f) => f.noDisponible,
+      total: fmtNumero(sumar(filas, (f) => f.noDisponible)),
+    },
+    {
+      titulo: "Disponible",
+      ayuda:
+        "Las que sí se pueden vender. En cero está el peor caso: el artículo está entero trabado y no aparece en el resto de la pantalla.",
+      celda: (f) =>
+        f.disponible === 0 ? (
+          <span style={{ color: TEMA.negativo }} title="Nada vendible">
+            0
+          </span>
+        ) : (
+          fmtNumero(f.disponible)
+        ),
+      numerica: true,
+      orden: (f) => f.disponible,
+      total: fmtNumero(sumar(filas, (f) => f.disponible)),
+    },
+    {
+      titulo: "Trabado a costo",
+      ayuda:
+        "Las unidades no disponibles por el costo neto. Es la plata nuestra que está parada sin poder venderse.",
+      celda: (f) => fmtMoneda(f.valorizacionCosto),
+      numerica: true,
+      orden: (f) => f.valorizacionCosto,
+      total: fmtMoneda(sumar(filas, (f) => f.valorizacionCosto)),
+    },
+  ];
+}
+
 export default function DashboardStockFullPage() {
   const inicial: FiltrosStockFull = {};
   const [filtros, setFiltros] = useState<FiltrosStockFull>(inicial);
@@ -153,6 +225,7 @@ export default function DashboardStockFullPage() {
         proveedor: filtros.proveedor,
         marca: filtros.marca,
         sku: filtros.sku,
+        tramo: filtros.tramo ? [filtros.tramo] : undefined,
         minDias:
           filtros.minDias == null ? undefined : [String(filtros.minDias)],
       },
@@ -312,10 +385,23 @@ export default function DashboardStockFullPage() {
             }
             acento={TEMA.negativo}
           />
+          {/* A COSTO, al lado del valorizado a precio de venta. Son dos
+              preguntas distintas: aquél dice cuánto se dejaría de facturar,
+              éste cuánta plata NUESTRA está parada ahí. Para decidir si
+              conviene retirar mercadería de Full, manda éste. */}
+          <TarjetaKpi
+            titulo="Valorizado a costo"
+            valor={fmtMoneda(k.valorizacionCosto)}
+            detalle="Costo teórico con la oferta del proveedor ya descontada"
+          />
           <TarjetaKpi
             titulo="No disponible"
             valor={fmtNumero(k.noDisponible)}
-            detalle="En el depósito pero ML no las puede vender"
+            detalle={
+              k.noDisponible > 0
+                ? `${fmtMoneda(k.valorizacionCostoNoDisponible)} a costo · el detalle está al pie`
+                : "En el depósito pero ML no las puede vender"
+            }
             acento={k.noDisponible > 0 ? PALETA[2] : undefined}
           />
         </div>
@@ -327,8 +413,11 @@ export default function DashboardStockFullPage() {
         >
           <Panel
             titulo="Cuánto stock hay en cada tramo"
-            nota="Valorizado · por días desde la última venta"
+            nota="Valorizado · por días desde la última venta · click para filtrar"
           >
+            {/* El click filtra la pantalla entera por ese tramo. Los cortes
+                salen de `TRAMOS`, los mismos que dibujan la barra, así que lo
+                que se filtra es exactamente lo que se ve. */}
             <BarrasCategoria
               datos={TRAMOS.map((t) => ({
                 label: t.label,
@@ -341,6 +430,19 @@ export default function DashboardStockFullPage() {
               colorUnico={PALETA[4]}
               alturaMinima={220}
               vacio="Sin stock en Full."
+              seleccionados={
+                filtros.tramo
+                  ? [TRAMOS.find((t) => t.clave === filtros.tramo)?.label ?? ""]
+                  : undefined
+              }
+              onSeleccionar={(label) => {
+                const t = TRAMOS.find((x) => x.label === label);
+                if (!t) return;
+                cambiar({
+                  ...filtros,
+                  tramo: filtros.tramo === t.clave ? undefined : t.clave,
+                });
+              }}
             />
           </Panel>
 
@@ -389,6 +491,31 @@ export default function DashboardStockFullPage() {
               buena al lado de ésta.
             </p>
           </Aviso>
+
+          {/* EL DETALLE DE "NO DISPONIBLE", que era un número sin forma de
+              abrirlo. Va al pie porque es una pregunta aparte de la que ordena
+              la pantalla --qué no rota-- y no todos los días hace falta.
+
+              INCLUYE LOS QUE NO ESTÁN EN LA TABLA DE ARRIBA. El resto de la
+              pantalla mira stock vendible, así que un artículo con cero
+              disponibles y tres trabadas no aparece en ningún otro lado. Son
+              35 de los 54, o sea la mayoría. */}
+          <Panel
+            titulo="Artículos con unidades no disponibles"
+            nota={
+              data.noDisponible.length === 0
+                ? "No hay unidades trabadas"
+                : `${fmtNumero(data.noDisponible.length)} SKU · incluye los que están enteros trabados y no figuran arriba`
+            }
+          >
+            <Tabla
+              filas={data.noDisponible}
+              columnas={columnasNoDisponible(data.noDisponible)}
+              etiquetaTotal="Total trabado"
+              clave={(f, i) => `${f.sku}-${i}`}
+              vacio="Ningún artículo tiene unidades no disponibles."
+            />
+          </Panel>
         </div>
       )}
     </div>
