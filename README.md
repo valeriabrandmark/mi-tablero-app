@@ -371,14 +371,22 @@ Cada usuario de Supabase Auth lleva su rol en `app_metadata`:
 | `supervisor` | Las páginas de objetivos de los cuatro vendedores |
 | `vendedor` | Únicamente su propia página de objetivos |
 | `responsable_meli` | Únicamente la sección Venta minorista |
+| `admin_tn` | Únicamente Operaciones → Precios TN — Comparador |
 | *(sin claim)* | **Nada** |
 
 Dos advertencias que importan:
 
-- **`admin` hoy ve lo mismo que `superadmin`**, porque el tablero no tiene nada
-  editable. El rol existe para que la distinción esté modelada, pero no promete
-  una restricción que todavía no hace falta. El día que se pueda cargar un
-  objetivo desde la pantalla, ahí sí hay que separarlos.
+- **`admin` ya NO ve todo.** Hasta que existió Precios TN, `puedeVer` devolvía
+  `true` para `superadmin` y `admin` sin mirar la ruta, y la distinción entre
+  los dos era sólo teórica. Ese módulo autoriza reescribir los precios de venta
+  de la tienda, así que se separaron: hoy Precios TN lo ven el `superadmin` y el
+  `admin_tn`, y nadie más. Quien aprueba un cambio de precio tiene que ser una
+  decisión explícita y corta, no la consecuencia de tener un rol amplio por
+  otros motivos.
+
+  En el código eso es un bloque que va **arriba** del `admin -> true`. Ese orden
+  es la regla, no estilo: abajo, el módulo quedaría abierto a todos los
+  administradores y no habría forma de notarlo leyendo la función.
 - **Un usuario sin claim no ve nada.** Es a propósito: si alguien crea un
   usuario y se olvida del rol, que se quede afuera y llame, en vez de entrar y
   ver la facturación de la empresa entera. Por eso hay que **cargar el claim
