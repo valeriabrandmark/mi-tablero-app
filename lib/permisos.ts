@@ -26,6 +26,7 @@ import {
  * | `supervisor`       | Las páginas de objetivos de los cuatro vendedores |
  * | `vendedor`         | Únicamente su propia página de objetivos          |
  * | `responsable_meli` | Únicamente la sección Venta minorista             |
+ * | `admin_tn`         | Únicamente Precios TN — Comparador                |
  *
  * `admin` y `superadmin` ven las mismas páginas, pero YA NO ES LO MISMO: las
  * páginas en construcción las ve sólo el `superadmin` (ver `enConstruccion` y
@@ -51,6 +52,7 @@ export const ROLES = [
   "supervisor",
   "vendedor",
   "responsable_meli",
+  "admin_tn",
 ] as const;
 export type Rol = (typeof ROLES)[number];
 
@@ -75,6 +77,7 @@ export type Permiso =
   | { rol: "admin" }
   | { rol: "supervisor" }
   | { rol: "responsable_meli" }
+  | { rol: "admin_tn" }
   | { rol: "vendedor"; vendedor: VendedorObjetivos };
 
 /** Forma mínima del usuario de Supabase que hace falta acá. */
@@ -113,7 +116,7 @@ export function permisoDelUsuario(usuario: UsuarioConClaim): Permiso | null {
   if (rol === "vendedor") {
     return vendedor ? { rol, vendedor } : null;
   }
-  return { rol }; // superadmin | admin | supervisor | responsable_meli
+  return { rol }; // superadmin | admin | supervisor | responsable_meli | admin_tn
 }
 
 const PAGINAS_OBJETIVOS = VENDEDORES_OBJETIVOS.map(
@@ -166,6 +169,35 @@ function esApiMinorista(pathname: string): boolean {
 }
 
 /**
+ * Precios TN — Comparador. La primera sección del tablero que NO ven todos los
+ * administradores.
+ *
+ * POR QUÉ ES DISTINTA. Hasta hoy `admin` veía todo, y el módulo de precios es
+ * lo primero que se aparta de esa regla. No es desconfianza: es que este módulo
+ * autoriza reescribir los precios de venta de la tienda, y quien aprueba tiene
+ * que ser una decisión explícita y corta, no una consecuencia de tener un rol
+ * amplio por otros motivos.
+ *
+ * Hoy la ven el `superadmin` y el `admin_tn`, y nadie más.
+ */
+const RAIZ_PRECIOS_TN = "/precios-tn";
+
+function esDePreciosTn(pathname: string): boolean {
+  return pathname === RAIZ_PRECIOS_TN || pathname.startsWith(`${RAIZ_PRECIOS_TN}/`);
+}
+
+/**
+ * Las APIs del módulo, una por una y no con un prefijo genérico, por lo mismo
+ * que en `APIS_MINORISTA`: una ruta nueva tiene que entrar acá a mano, en vez
+ * de quedar abierta el día que alguien la agregue sin pensar en permisos.
+ */
+const APIS_PRECIOS_TN = ["/api/precios-tn"];
+
+function esApiPreciosTn(pathname: string): boolean {
+  return APIS_PRECIOS_TN.some((r) => pathname === r || pathname.startsWith(`${r}/`));
+}
+
+/**
  * Única regla de acceso del tablero. La usan las TRES barreras —el proxy, la
  * ruta de API y la página— para que no puedan discrepar entre sí.
  *
@@ -175,7 +207,22 @@ function esApiMinorista(pathname: string): boolean {
 export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   if (!permiso) return false;
   if (PAGINAS_DE_CUENTA.includes(pathname)) return true;
+
+  // PRECIOS TN SE RESUELVE ANTES QUE EL PERMISO GENERAL DE LOS ADMINS, y ese
+  // orden ES la regla: abajo hay un `admin -> true` que, si se evaluara
+  // primero, le abriría el módulo a todos los administradores. Que este bloque
+  // esté arriba no es estilo, es lo único que deja a `admin` afuera.
+  if (esDePreciosTn(pathname) || esApiPreciosTn(pathname)) {
+    return permiso.rol === "superadmin" || permiso.rol === "admin_tn";
+  }
+
   if (permiso.rol === "superadmin" || permiso.rol === "admin") return true;
+
+  // El `admin_tn` no ve nada más que lo suyo, que ya se resolvió arriba.
+  // Se corta acá explícitamente y no por descarte: además de ser la regla, es
+  // lo que le permite a TypeScript saber que más abajo el rol restante es
+  // `vendedor` y tiene `permiso.vendedor`.
+  if (permiso.rol === "admin_tn") return false;
 
   const esDeObjetivos =
     pathname === "/objetivos" || PAGINAS_OBJETIVOS.includes(pathname);
@@ -212,7 +259,10 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
  * PARA PUBLICAR UNA: se saca de esta lista. Nada más. Sin tocar permisos, ni
  * el nav, ni la página — que es justamente el punto de tenerlo en un solo lado.
  */
-const PAGINAS_EN_CONSTRUCCION = ["/venta-minorista/tienda-nube/analytics"];
+const PAGINAS_EN_CONSTRUCCION = [
+  "/venta-minorista/tienda-nube/analytics",
+  "/precios-tn",
+];
 
 /** `true` si la página todavía se está construyendo. */
 export function enConstruccion(pathname: string): boolean {
@@ -292,6 +342,9 @@ export function paginaInicial(permiso: Permiso | null): string {
     return `/objetivos/${slugVendedor(permiso.vendedor)}`;
   if (permiso.rol === "supervisor") return PAGINAS_OBJETIVOS[0];
   if (permiso.rol === "responsable_meli") return INICIO_MINORISTA;
+  // El `admin_tn` no tiene permiso sobre ninguna otra página: mandarlo al
+  // tablero de mayoristas sería mandarlo a un 403 apenas entra.
+  if (permiso.rol === "admin_tn") return RAIZ_PRECIOS_TN;
   return "/ventas-mayoristas";
 }
 
