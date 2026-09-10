@@ -33,7 +33,31 @@ function createPool(): Pool {
 
   return new Pool({
     host,
-    port: Number(process.env.DB_PORT ?? 5432),
+    // 6543 = POOLER EN MODO TRANSACCIÓN. No es un detalle: es lo que hace que
+    // esto funcione en serverless.
+    //
+    // Supabase escucha en los dos puertos y hacen cosas distintas:
+    //
+    //   5432  modo SESIÓN. Cada conexión del cliente se queda con una conexión
+    //         de Postgres DE PUNTA A PUNTA, hasta que el cliente se va.
+    //   6543  modo TRANSACCIÓN. La conexión se devuelve al terminar cada
+    //         consulta, así que muchos clientes comparten pocas conexiones.
+    //
+    // En Vercel cada lambda tibia mantiene su propio pool de hasta `max`. Con
+    // el 5432 eso significa que 5 lambdas tibias × 3 conexiones = 15, que es
+    // justo el tope de Supabase, y la lambda 6 se encuentra con:
+    //
+    //     (EMAXCONNSESSION) max clients reached in session mode
+    //
+    // Pasó el 09/09/2026 y volteó la pantalla de Objetivos entera. Lo confuso
+    // del caso es que las 15 conexiones estaban IDLE: no había carga, había
+    // lambdas dormidas sin soltar lo que tenían agarrado.
+    //
+    // Se puede pisar con DB_PORT, pero pensalo dos veces: volver al 5432 hace
+    // falta sólo para cosas de sesión --LISTEN/NOTIFY, prepared statements con
+    // nombre, un SET que tiene que sobrevivir a la consulta siguiente-- y este
+    // módulo no usa ninguna.
+    port: Number(process.env.DB_PORT ?? 6543),
     user,
     password,
     database,

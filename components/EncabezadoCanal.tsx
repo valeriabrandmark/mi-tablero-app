@@ -1,4 +1,8 @@
-import { MarcaMercadoLibre, MarcaTiendaNube, MarcaUnibrandco } from "@/components/Marcas";
+import {
+  MarcaMercadoLibre,
+  MarcaTiendaNube,
+  MarcaUnibrandco,
+} from "@/components/Marcas";
 
 /**
  * El encabezado de los tableros minoristas: Unibrandco junto a la marca del

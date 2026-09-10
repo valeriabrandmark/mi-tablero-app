@@ -19,6 +19,7 @@ import {
   BANDAS,
   EXPERIMENTO_FIN,
   EXPERIMENTO_INICIO,
+  EXPERIMENTO_SEMANAS,
   SEMANAS,
   bandaDeMargen,
   diaMes,
@@ -73,6 +74,7 @@ function columnasResumen(semanas: ResumenSemana[]): Columna<ResumenSemana>[] {
   return [
     {
       titulo: "Semana",
+      ayuda: "La semana calendario que resume la fila.",
       celda: (s) => (
         <span>
           <strong>Semana {s.numero}</strong>{" "}
@@ -83,6 +85,7 @@ function columnasResumen(semanas: ResumenSemana[]): Columna<ResumenSemana>[] {
     },
     {
       titulo: "Artículos con venta",
+      ayuda: "Cuántos SKU distintos se vendieron esa semana.",
       celda: (s) => fmtNumero(s.skus),
       numerica: true,
       orden: (s) => s.skus,
@@ -91,6 +94,7 @@ function columnasResumen(semanas: ResumenSemana[]): Columna<ResumenSemana>[] {
     },
     {
       titulo: "Unidades",
+      ayuda: "Unidades vendidas en la semana.",
       celda: (s) => fmtNumero(s.unidades),
       numerica: true,
       orden: (s) => s.unidades,
@@ -98,6 +102,8 @@ function columnasResumen(semanas: ResumenSemana[]): Columna<ResumenSemana>[] {
     },
     {
       titulo: "Margen bruto $",
+      ayuda:
+        "Venta menos costo de mercadería, sin descontar comisiones ni impuestos.",
       celda: (s) => <strong>{fmtMoneda(s.margen)}</strong>,
       numerica: true,
       orden: (s) => s.margen,
@@ -105,6 +111,7 @@ function columnasResumen(semanas: ResumenSemana[]): Columna<ResumenSemana>[] {
     },
     {
       titulo: "Facturación",
+      ayuda: "Venta neta de la semana, sin IVA.",
       celda: (s) => fmtMoneda(s.facturacion),
       numerica: true,
       orden: (s) => s.facturacion,
@@ -112,6 +119,7 @@ function columnasResumen(semanas: ResumenSemana[]): Columna<ResumenSemana>[] {
     },
     {
       titulo: "%margen bruto",
+      ayuda: "El margen bruto sobre la facturación.",
       celda: (s) => <PctBanda pct={s.margenPct} />,
       numerica: true,
       orden: (s) => s.margenPct,
@@ -127,6 +135,8 @@ function columnasResumen(semanas: ResumenSemana[]): Columna<ResumenSemana>[] {
     },
     {
       titulo: "Días medidos",
+      ayuda:
+        "Cuántos días de esa semana tienen datos. Una semana a medio pasar mide menos días y por eso factura menos.",
       // La columna que hace legible a la semana 1. La historia de stock arrancó
       // el 21/08, así que sus primeros días no se miraron: sus quiebres no se
       // pueden conocer y no hay forma de reconstruirlos.
@@ -140,6 +150,7 @@ function columnasResumen(semanas: ResumenSemana[]): Columna<ResumenSemana>[] {
     },
     {
       titulo: "Quebraron stock",
+      ayuda: "Cuántos SKU se quedaron sin stock durante la semana.",
       celda: (s) => (
         <span
           style={s.skusQuebrados > 0 ? { color: TEMA.negativo } : undefined}
@@ -186,6 +197,7 @@ function columnasArticulo(
       return [
         {
           titulo: `S${s.numero} · uds`,
+          ayuda: `Unidades vendidas del artículo en la semana ${s.numero}.`,
           celda: (f) => (
             <span style={apagado}>
               {fmtNumero(f.semanas[s.numero]?.unidades)}
@@ -197,6 +209,7 @@ function columnasArticulo(
         },
         {
           titulo: `S${s.numero} · margen`,
+          ayuda: `Margen bruto del artículo en la semana ${s.numero}.`,
           celda: (f) => (
             <span style={apagado}>
               {fmtMonedaCorta(f.semanas[s.numero]?.margen)}
@@ -208,6 +221,7 @@ function columnasArticulo(
         },
         {
           titulo: `S${s.numero} · %`,
+          ayuda: `El margen bruto sobre la facturación del artículo en la semana ${s.numero}.`,
           celda: (f) => (
             <span style={apagado}>
               <PctBanda pct={pct(f, s.numero)} />
@@ -225,6 +239,7 @@ function columnasArticulo(
         },
         {
           titulo: `S${s.numero} · s/stock`,
+          ayuda: `Días de la semana ${s.numero} en que el artículo estuvo sin stock. Una semana sin ventas puede ser falta de demanda o falta de mercadería, y esta columna las separa.`,
           celda: (f) => {
             const d = f.semanas[s.numero]?.diasSinStock ?? 0;
             return (
@@ -251,6 +266,7 @@ function columnasArticulo(
     }),
     {
       titulo: "Uds total",
+      ayuda: "Unidades vendidas del artículo en todo el período.",
       celda: (f) => <strong>{fmtNumero(f.unidades)}</strong>,
       numerica: true,
       orden: (f) => f.unidades,
@@ -258,6 +274,7 @@ function columnasArticulo(
     },
     {
       titulo: "Margen bruto total",
+      ayuda: "Margen bruto acumulado del artículo en el período.",
       celda: (f) => <strong>{fmtMoneda(f.margen)}</strong>,
       numerica: true,
       orden: (f) => f.margen,
@@ -369,7 +386,8 @@ export default function DashboardResultadosPage() {
             las columnas "semana 1, 2 y 3" pasarían a ser una etiqueta que no
             corresponde con lo que muestran. */}
         <span className="text-muted text-[11px] leading-tight">
-          Las tres semanas son fijas y de 7 días cada una. El día de corte
+          Las {EXPERIMENTO_SEMANAS} semanas son fijas y de 7 días cada una. El
+          día de corte
           pertenece a la semana siguiente: lo vendido el{" "}
           {diaMes(SEMANAS[1].desde)} entra en la semana 2, no en la 1, así que
           ninguna venta se cuenta dos veces. Para mirar otro período está la
@@ -437,7 +455,7 @@ export default function DashboardResultadosPage() {
           </ConAlarmaMargen>
 
           <Panel
-            titulo="Las tres semanas"
+            titulo={`Las ${EXPERIMENTO_SEMANAS} semanas`}
             nota="Se llenan solas a medida que entran las ventas"
           >
             <Tabla

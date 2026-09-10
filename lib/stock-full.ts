@@ -61,6 +61,30 @@ export function tramoDe(dias: number | null): ClaveTramo {
 }
 
 /**
+ * Los días que abarca un tramo, inclusive en las dos puntas.
+ *
+ * SE DERIVA DE `TRAMOS` Y NO SE ESCRIBE, por el mismo motivo que `tramoDe` es
+ * una sola función: con los cortes en dos lados, el día que se mueva uno el
+ * gráfico y el filtro dejan de decir lo mismo, y una barra de "6 a 10 días"
+ * pasaría a filtrar otra cosa que la que dibuja.
+ *
+ * Devuelve `null` para "nunca vendió", que no es un rango de días sino la
+ * ausencia de venta -- y por eso el filtro lo trata aparte.
+ */
+export function limitesDelTramo(
+  clave: string,
+): { desde: number; hasta: number | null } | null {
+  if (clave === "nunca") return null;
+  let desde = 0;
+  for (const t of TRAMOS) {
+    if (t.clave === "nunca") continue;
+    if (t.clave === clave) return { desde, hasta: t.hasta };
+    desde = (t.hasta ?? desde) + 1;
+  }
+  return null;
+}
+
+/**
  * A partir de cuántos días sin vender se considera plata parada.
  *
  * Sale de los cortes del reporte de Data Studio (+7, +15, +21, +30). El de 20

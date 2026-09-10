@@ -3,11 +3,13 @@ import { agregarFiltro } from "@/lib/filtros";
 import {
   COBERTURA_OBJETIVO_DIAS,
   DEPOSITO_POR_DEFECTO,
+  GRUPO_PROVEEDOR_POR_DEFECTO,
   PLAZO_REPOSICION_DIAS,
   PROVEEDORES_NO_MERCADERIA,
   VENTANA_POR_DEFECTO,
   tramoCobertura,
 } from "@/lib/stock";
+import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import type {
   DashboardStock,
   FilaStock,
@@ -24,7 +26,7 @@ import type {
  *
  *   bronze.digip_stock         unidades en el depósito de Tucumán
  *   bronze.ml_stock_full       unidades en el depósito de Mercado Libre
- *   bronze.ml_publicaciones    el mapa inventory_id -> SKU, que ML no da hecho
+ *   bronze.ml_inventario_sku   el mapa inventory_id -> SKU, ya calculado
  *   bronze.sigma_articulos     proveedor, marca y descripción
  *   bronze.costos_historicos   el costo con el que se valoriza
  *   gold.fact_ventas           el ritmo de venta, que es lo que vuelve
@@ -38,16 +40,6 @@ import type {
  */
 
 /**
- * El SKU de una publicación vive dentro del array `attributes`, no en
- * `seller_custom_field` — que está vacío en casi todas. Mismo rodeo que en
- * queries-stock-full.ts, por el mismo motivo.
- */
-const SKU_DE_PUBLICACION = `(select a->>'value_name'
-     from jsonb_array_elements(p.attributes::jsonb) a
-    where a->>'id' = 'SELLER_SKU'
-    limit 1)`;
-
-/**
  * El armado completo, listo para filtrar. Una sola definición porque la usan
  * los KPIs, los dos gráficos y la tabla: escrita cuatro veces, terminarían
  * midiendo cosas distintas sin que nada avise.
@@ -58,11 +50,7 @@ const BASE = `
 with por_inv as (
   -- Un renglón por INVENTARIO y no por publicación: varias publicaciones
   -- comparten el mismo stock físico, y sumarlas lo contaría de más.
-  select p.inventory_id, max(${SKU_DE_PUBLICACION}) as sku
-  from bronze.ml_publicaciones p
-  where p."shipping.logistic_type" = 'fulfillment'
-    and p.inventory_id is not null
-  group by p.inventory_id
+  ${POR_INVENTARIO_SKU}
 ),
 full_ml as (
   select i.sku, sum(coalesce(f.available_quantity, 0)) as unidades
@@ -160,6 +148,9 @@ base as (
   select s.sku,
          a.descripcion                                  as producto,
          a."proveedorNombre"                            as proveedor,
+         -- QUO MKT por defecto: en la tabla están sólo los de NOA, así que un
+         -- proveedor nuevo entra como QUO sin que nadie lo cargue.
+         coalesce(pg.grupo, '${GRUPO_PROVEEDOR_POR_DEFECTO}') as grupo,
          a."attributes.marca"                           as marca,
          s.tuc,
          s.full_ml,
@@ -185,6 +176,7 @@ base as (
          end                                            as cobertura
   from stock s
   left join bronze.sigma_articulos a on trim(a.id) = s.sku
+  left join bronze.proveedores_grupo pg on pg.proveedor = a."proveedorNombre"
   left join costo c on c.sku = s.sku
   left join ventas v on v.sku = s.sku
   left join compras co on co.sku = s.sku
@@ -216,6 +208,7 @@ function where(f: FiltrosStock): Where {
   const clauses: string[] = [];
 
   agregarFiltro(clauses, params, "proveedor", f.proveedor);
+  agregarFiltro(clauses, params, "grupo", f.grupo);
   agregarFiltro(clauses, params, "marca", f.marca);
   agregarFiltro(clauses, params, "sku", f.sku);
 
@@ -377,19 +370,30 @@ async function getFilas(f: FiltrosStock): Promise<FilaStock[]> {
 
 export async function getOpcionesStock() {
   const params = [VENTANA_POR_DEFECTO, PROVEEDORES_NO_MERCADERIA, DEPOSITO_POR_DEFECTO];
-  const [proveedores, marcas] = await Promise.all([
-    query<{ v: string }>(
-      `${BASE} select distinct proveedor as v from calculada
-       where proveedor is not null order by 1`,
-      params,
-    ),
-    query<{ v: string }>(
-      `${BASE} select distinct marca as v from calculada
-       where marca is not null order by 1`,
-      params,
-    ),
-  ]);
-  return { proveedores: proveedores.map((r) => r.v), marcas: marcas.map((r) => r.v) };
+  // UNA sola consulta y no tres. `BASE` es cara --cruza ocho fuentes-- y antes
+  // se la corría una vez por cada selector, encima de las cuatro que ya hace el
+  // tablero: siete pasadas por pantalla para llenar tres desplegables.
+  //
+  // `array_agg(distinct ...)` las junta en un solo viaje. Los tres selectores
+  // salen del MISMO recorte, que además es lo correcto: son opciones del mismo
+  // conjunto de artículos.
+  const fila = await queryOne<{
+    proveedores: string[] | null;
+    marcas: string[] | null;
+    grupos: string[] | null;
+  }>(
+    `${BASE}
+     select array_agg(distinct proveedor) filter (where proveedor is not null) as proveedores,
+            array_agg(distinct marca)     filter (where marca is not null)     as marcas,
+            array_agg(distinct grupo)     filter (where grupo is not null)     as grupos
+     from calculada`,
+    params,
+  );
+  return {
+    proveedores: (fila?.proveedores ?? []).sort((a, b) => a.localeCompare(b, "es")),
+    marcas: (fila?.marcas ?? []).sort((a, b) => a.localeCompare(b, "es")),
+    grupos: (fila?.grupos ?? []).sort((a, b) => a.localeCompare(b, "es")),
+  };
 }
 
 /**

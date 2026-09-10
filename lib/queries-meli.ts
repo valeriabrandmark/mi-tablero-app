@@ -3,6 +3,11 @@ import { query, queryOne } from "@/lib/db";
 import { agregarFiltro, vacio } from "@/lib/filtros";
 import { hoyArgentina, sumarDias } from "@/lib/rangos";
 import {
+  DESCUENTOS_DE_LINEA,
+  descuentosAgrupados,
+  joinCostos,
+} from "@/lib/sql-descuentos";
+import {
   CANAL_MELI,
   CARGA_IMPOSITIVA,
   TOPE_ARTICULOS,
@@ -428,6 +433,10 @@ function aArticulo(r: Record<string, string>): ArticuloMeli {
     envio: num(r.envio),
     rentabilidad,
     margenPct: pct(rentabilidad, ventaCiva),
+    // `null` y no 0: "sin dato" y "sin descuento" se leen distinto en una
+    // columna de porcentajes.
+    ofertaProveedorPct: r.ofertaProveedorPct == null ? null : num(r.ofertaProveedorPct),
+    ofertaPropiaPct: r.ofertaPropiaPct == null ? null : num(r.ofertaPropiaPct),
   };
 }
 
@@ -485,8 +494,10 @@ async function getTopRentabilidad(f: FiltrosMeli): Promise<ArticuloMeli[]> {
             coalesce(sum(${COSTO}), 0)        as costo,
             coalesce(sum(${COMISION}), 0)     as comision,
             coalesce(sum(${ENVIO}), 0)        as envio,
-            coalesce(sum(${RENTABILIDAD}), 0) as rentabilidad
-     from gold.fact_ventas
+            coalesce(sum(${RENTABILIDAD}), 0) as rentabilidad,
+            ${descuentosAgrupados("fv")}
+     from gold.fact_ventas fv
+     ${joinCostos("fv")}
      where ${w.sql}
      group by sku
      order by rentabilidad desc
@@ -574,8 +585,10 @@ async function getArticulos(f: FiltrosMeli): Promise<LineaVentaMeli[]> {
             coalesce(sum(${COSTO}), 0)        as costo,
             coalesce(sum(${COMISION}), 0)     as comision,
             coalesce(sum(${ENVIO}), 0)        as envio,
-            coalesce(sum(${RENTABILIDAD}), 0) as rentabilidad
-     from gold.fact_ventas
+            coalesce(sum(${RENTABILIDAD}), 0) as rentabilidad,
+            ${descuentosAgrupados("fv")}
+     from gold.fact_ventas fv
+     ${joinCostos("fv")}
      where ${w.sql}
      group by sku, nro_orden
      order by venta_civa desc
@@ -856,6 +869,7 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
             nro_orden::bigint::text          as nro_orden,
             sku, producto, proveedor, marca,
             cantidad,
+            ${DESCUENTOS_DE_LINEA},
             ${VENTA_CIVA}                    as venta_civa,
             ${VENTA_SIVA}                    as venta_siva,
             costo_unitario,
@@ -886,6 +900,7 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
                      where v.id::bigint = fv.nro_orden::bigint
                        and v.status = 'partially_refunded')::text as parcial
      from gold.fact_ventas fv
+     ${joinCostos("fv")}
      where ${w.sql}
      order by (${MARGEN_NETO}) asc nulls first, ${VENTA_SIVA} desc
      limit ${TOPE_ALERTAS}`,
@@ -919,6 +934,8 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
       proveedor: r.proveedor,
       marca: r.marca,
       cantidad: num(r.cantidad),
+      ofertaProveedorPct: r.ofertaProveedorPct == null ? null : num(r.ofertaProveedorPct),
+      ofertaPropiaPct: r.ofertaPropiaPct == null ? null : num(r.ofertaPropiaPct),
       ventaCiva,
       ventaSiva,
       costoUnitario: r.costo_unitario == null ? null : num(r.costo_unitario),

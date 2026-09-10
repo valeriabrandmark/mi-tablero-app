@@ -1,6 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { coberturaValida } from "@/lib/compras";
 import { lista } from "@/lib/filtros";
-import { enConstruccion, permisoDelUsuario, puedeVer, puedeVerBorradores } from "@/lib/permisos";
+import {
+  enConstruccion,
+  permisoDelUsuario,
+  puedeVer,
+  puedeVerBorradores,
+} from "@/lib/permisos";
 import { getDashboardCompras, getOpcionesCompras } from "@/lib/queries-compras";
 import { VENTANAS_RITMO, VENTANA_POR_DEFECTO } from "@/lib/stock";
 import { authConfigurada } from "@/lib/supabase/env";
@@ -25,7 +31,8 @@ export async function GET(request: NextRequest) {
   }
 
   const crudaVentana = Number(sp.get("ventana"));
-  const ventana = VENTANAS_RITMO.find((v) => v === crudaVentana) ?? VENTANA_POR_DEFECTO;
+  const ventana =
+    VENTANAS_RITMO.find((v) => v === crudaVentana) ?? VENTANA_POR_DEFECTO;
 
   // El mes viaja como texto y se valida contra la lista real adentro de
   // `getDashboardCompras`: acá sólo se le pone un largo máximo para que no
@@ -34,11 +41,16 @@ export async function GET(request: NextRequest) {
 
   const filtros: FiltrosCompras = {
     proveedor: lista(sp, "proveedor"),
+    grupo: lista(sp, "grupo"),
     marca: lista(sp, "marca"),
     buscar: sp.get("buscar")?.slice(0, 80) || undefined,
     ventana,
     mes,
+    // Se recorta contra el máximo acá y otra vez en la consulta. No es de más:
+    // esto es lo que puede llegar de una URL escrita a mano.
+    cobertura: coberturaValida(Number(sp.get("cobertura"))),
     todos: sp.get("todos") === "1",
+    soloOferta: sp.get("soloOferta") === "1",
   };
 
   try {
@@ -48,7 +60,8 @@ export async function GET(request: NextRequest) {
     ]);
     return NextResponse.json({ ...data, opciones });
   } catch (error) {
-    const mensaje = error instanceof Error ? error.message : "Error desconocido";
+    const mensaje =
+      error instanceof Error ? error.message : "Error desconocido";
     console.error("[api/compras]", error);
     return NextResponse.json({ error: mensaje }, { status: 500 });
   }

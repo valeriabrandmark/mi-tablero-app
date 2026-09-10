@@ -76,6 +76,7 @@ function columnasPedidos(
     },
     {
       titulo: "N° Pedido",
+      ayuda: "Número de pedido de Tienda Nube.",
       celda: (p) => (
         <span className="font-mono text-[11px]">{p.nroOrden ?? "—"}</span>
       ),
@@ -85,12 +86,15 @@ function columnasPedidos(
     {
       titulo: "Cliente",
       celda: (p) => (
-        <span className="block max-w-[96px] sm:max-w-[200px] truncate">{p.cliente ?? "—"}</span>
+        <span className="block max-w-[96px] sm:max-w-[200px] truncate">
+          {p.cliente ?? "—"}
+        </span>
       ),
       orden: (p) => p.cliente,
     },
     {
       titulo: "Prod.",
+      ayuda: "Cuántos productos distintos trae el pedido.",
       celda: (p) => fmtNumero(p.lineas),
       numerica: true,
       orden: (p) => p.lineas,
@@ -98,6 +102,7 @@ function columnasPedidos(
     },
     {
       titulo: "Unid.",
+      ayuda: "Unidades vendidas en el recorte de fechas elegido.",
       celda: (p) => fmtNumero(p.unidades),
       numerica: true,
       orden: (p) => p.unidades,
@@ -107,12 +112,19 @@ function columnasPedidos(
       // Va ANTES de la venta y no después: se lee "se bonificó tanto, quedó
       // tanto". Al revés obliga a volver sobre la fila para entender el número.
       titulo: "Descuento",
+      ayuda:
+        "Lo que se le descontó al comprador en Tienda Nube: cupones y promociones de la plataforma.",
       celda: (p) =>
         p.descuento > 0 ? (
-          <span className="text-c1" title={p.cupon ? `Cupón ${p.cupon}` : undefined}>
+          <span
+            className="text-c1"
+            title={p.cupon ? `Cupón ${p.cupon}` : undefined}
+          >
             −{fmtMoneda(p.descuento)}
             {p.cupon && (
-              <span className="text-muted ml-1 font-mono text-[10px]">{p.cupon}</span>
+              <span className="text-muted ml-1 font-mono text-[10px]">
+                {p.cupon}
+              </span>
             )}
           </span>
         ) : (
@@ -124,6 +136,7 @@ function columnasPedidos(
     },
     {
       titulo: "Venta c/IVA",
+      ayuda: "Lo que pagó el comprador, IVA incluido.",
       celda: (p) => fmtMoneda(p.ventaCiva),
       numerica: true,
       orden: (p) => p.ventaCiva,
@@ -131,6 +144,8 @@ function columnasPedidos(
     },
     {
       titulo: "Costo s/IVA",
+      ayuda:
+        "Costo de la mercadería sin IVA, del Excel de costos del mes de la venta.",
       celda: (p) => fmtMoneda(p.costo),
       numerica: true,
       orden: (p) => p.costo,
@@ -138,6 +153,7 @@ function columnasPedidos(
     },
     {
       titulo: "Envío",
+      ayuda: "Costo del envío que absorbemos nosotros.",
       celda: (p) => fmtMoneda(p.envio),
       numerica: true,
       orden: (p) => p.envio,
@@ -145,6 +161,8 @@ function columnasPedidos(
     },
     {
       titulo: "Comisión c/IVA",
+      ayuda:
+        "Lo que se queda la pasarela de pago, con IVA. Depende del medio de pago.",
       // Al lado del monto va DE QUIÉN es, igual que el cupón al lado del
       // descuento: la comisión no viene de la API, se calcula con el arancel de
       // esa pasarela y ese medio, y sin verlos el número no se puede auditar.
@@ -170,11 +188,16 @@ function columnasPedidos(
       // se ve lo que sumadas queda escondido — que Pago Nube bonifica ésta y
       // Nave no—, que es justo lo que hace falta para elegir pasarela.
       titulo: "Plataforma",
+      ayuda:
+        "Con qué medio se pagó el pedido, que es lo que determina la comisión.",
       celda: (p) =>
         p.costoTransaccion > 0 ? (
           fmtMoneda(p.costoTransaccion)
         ) : (
-          <span className="text-muted" title="Pago Nube bonifica el costo de plataforma">
+          <span
+            className="text-muted"
+            title="Pago Nube bonifica el costo de plataforma"
+          >
             —
           </span>
         ),
@@ -184,6 +207,7 @@ function columnasPedidos(
     },
     {
       titulo: "Rent. bruta",
+      ayuda: "Venta menos costo y envío, sin descontar comisiones.",
       celda: (p) => <Importe valor={p.rentabilidad} />,
       numerica: true,
       orden: (p) => p.rentabilidad,
@@ -191,6 +215,7 @@ function columnasPedidos(
     },
     {
       titulo: "Rent. neta",
+      ayuda: "La rentabilidad bruta menos la comisión de la pasarela.",
       celda: (p) => <Importe valor={p.rentabilidadNeta} />,
       numerica: true,
       orden: (p) => p.rentabilidadNeta,
@@ -198,6 +223,7 @@ function columnasPedidos(
     },
     {
       titulo: "Margen neto",
+      ayuda: "La rentabilidad neta sobre la venta con IVA.",
       celda: (p) => <Porcentaje valor={p.margenNetoPct} />,
       numerica: true,
       orden: (p) => p.margenNetoPct,
@@ -221,12 +247,15 @@ function columnasClientes(
     {
       titulo: "Cliente",
       celda: (c) => (
-        <span className="block max-w-[100px] sm:max-w-[220px] truncate">{c.cliente}</span>
+        <span className="block max-w-[100px] sm:max-w-[220px] truncate">
+          {c.cliente}
+        </span>
       ),
       orden: (c) => c.cliente,
     },
     {
       titulo: "Pedidos",
+      ayuda: "Cuántos pedidos hizo ese cliente en el recorte.",
       // Un cliente que volvió se marca: en un canal de treinta pedidos, el que
       // compra dos veces es el dato más accionable que hay.
       celda: (c) => (
@@ -241,6 +270,7 @@ function columnasClientes(
     },
     {
       titulo: "Unid.",
+      ayuda: "Unidades vendidas en el recorte de fechas elegido.",
       celda: (c) => fmtNumero(c.unidades),
       numerica: true,
       orden: (c) => c.unidades,
@@ -248,6 +278,7 @@ function columnasClientes(
     },
     {
       titulo: "Venta c/IVA",
+      ayuda: "Lo que pagó el comprador, IVA incluido.",
       celda: (c) => fmtMoneda(c.ventaCiva),
       numerica: true,
       orden: (c) => c.ventaCiva,
@@ -255,6 +286,7 @@ function columnasClientes(
     },
     {
       titulo: "Rent. bruta",
+      ayuda: "Venta menos costo y envío, sin descontar comisiones.",
       celda: (c) => <Importe valor={c.rentabilidad} />,
       numerica: true,
       orden: (c) => c.rentabilidad,
@@ -262,6 +294,7 @@ function columnasClientes(
     },
     {
       titulo: "Margen bruto",
+      ayuda: "La rentabilidad bruta sobre la venta con IVA.",
       celda: (c) => <Porcentaje valor={c.margenPct} />,
       numerica: true,
       orden: (c) => c.margenPct,
@@ -277,6 +310,7 @@ function columnasClientes(
     },
     {
       titulo: "Última",
+      ayuda: "Fecha del último pedido de ese cliente.",
       celda: (c) => (c.ultima ? fmtFechaCorta(c.ultima) : "—"),
       orden: (c) => c.ultima,
     },
@@ -300,19 +334,58 @@ function columnasArticulos(
     {
       titulo: "Marca",
       celda: (a) => (
-        <span className="block max-w-[96px] sm:max-w-[140px] truncate">{a.marca ?? "—"}</span>
+        <span className="block max-w-[96px] sm:max-w-[140px] truncate">
+          {a.marca ?? "—"}
+        </span>
       ),
       orden: (a) => a.marca,
     },
     {
       titulo: "Unid.",
+      ayuda: "Unidades vendidas en el recorte de fechas elegido.",
       celda: (a) => fmtNumero(a.unidades),
       numerica: true,
       orden: (a) => a.unidades,
       total: fmtNumero(sumar(filas, (a) => a.unidades)),
     },
     {
+      titulo: "Oferta prov. %",
+      ayuda:
+        "Lo que el proveedor nos descontó a nosotros ese mes (columna J del Excel de costos). Es del COSTO, no de la venta. Promedio ponderado por unidades; sólo cuentan los SKU con costo cargado.",
+      celda: (a) =>
+        a.ofertaProveedorPct == null ? "—" : fmtPct(a.ofertaProveedorPct / 100),
+      numerica: true,
+      orden: (a) => a.ofertaProveedorPct,
+      // El cero SÍ entra: la oferta del proveedor está cargada para casi todos
+      // los SKU y "0 %" quiere decir que ese mes no hubo oferta, que es un dato.
+      // Sólo quedan afuera los que no tienen el costo cargado.
+      total: fmtPct(
+        promedioPonderado(
+          filas.filter((a) => a.ofertaProveedorPct != null),
+          (a) => ((a.ofertaProveedorPct ?? 0) / 100) * a.unidades,
+          (a) => a.unidades,
+        ),
+      ),
+    },
+    {
+      titulo: "Oferta propia %",
+      ayuda:
+        "Lo que ponemos nosotros encima del descuento del proveedor (columna K del Excel de costos). Mismo promedio ponderado.",
+      celda: (a) =>
+        a.ofertaPropiaPct == null ? "—" : fmtPct(a.ofertaPropiaPct / 100),
+      numerica: true,
+      orden: (a) => a.ofertaPropiaPct,
+      total: fmtPct(
+        promedioPonderado(
+          filas.filter((a) => a.ofertaPropiaPct != null),
+          (a) => ((a.ofertaPropiaPct ?? 0) / 100) * a.unidades,
+          (a) => a.unidades,
+        ),
+      ),
+    },
+    {
       titulo: "Venta c/IVA",
+      ayuda: "Lo que pagó el comprador, IVA incluido.",
       celda: (a) => fmtMoneda(a.ventaCiva),
       numerica: true,
       orden: (a) => a.ventaCiva,
@@ -320,6 +393,8 @@ function columnasArticulos(
     },
     {
       titulo: "Costo s/IVA",
+      ayuda:
+        "Costo de la mercadería sin IVA, del Excel de costos del mes de la venta.",
       celda: (a) => fmtMoneda(a.costo),
       numerica: true,
       orden: (a) => a.costo,
@@ -327,6 +402,7 @@ function columnasArticulos(
     },
     {
       titulo: "Envío",
+      ayuda: "Costo del envío que absorbemos nosotros.",
       celda: (a) => fmtMoneda(a.envio),
       numerica: true,
       orden: (a) => a.envio,
@@ -334,6 +410,7 @@ function columnasArticulos(
     },
     {
       titulo: "Rent. bruta",
+      ayuda: "Venta menos costo y envío, sin descontar comisiones.",
       celda: (a) => <Importe valor={a.rentabilidad} />,
       numerica: true,
       orden: (a) => a.rentabilidad,
@@ -341,6 +418,7 @@ function columnasArticulos(
     },
     {
       titulo: "Margen bruto",
+      ayuda: "La rentabilidad bruta sobre la venta con IVA.",
       celda: (a) => <Porcentaje valor={a.margenPct} />,
       numerica: true,
       orden: (a) => a.margenPct,
@@ -375,6 +453,7 @@ function columnasTop(
     },
     {
       titulo: "Unid.",
+      ayuda: "Unidades vendidas en el recorte de fechas elegido.",
       celda: (a) => fmtNumero(a.unidades),
       numerica: true,
       orden: (a) => a.unidades,
@@ -382,6 +461,7 @@ function columnasTop(
     },
     {
       titulo: "Rent. bruta",
+      ayuda: "Venta menos costo y envío, sin descontar comisiones.",
       celda: (a) => (
         <span
           style={
@@ -397,6 +477,7 @@ function columnasTop(
     },
     {
       titulo: "Margen bruto",
+      ayuda: "La rentabilidad bruta sobre la venta con IVA.",
       celda: (a) => <Porcentaje valor={a.margenPct} />,
       numerica: true,
       orden: (a) => a.margenPct,
@@ -429,12 +510,15 @@ function TablaRanking({
     {
       titulo,
       celda: (r) => (
-        <span className="block max-w-[100px] sm:max-w-[220px] truncate">{r.label}</span>
+        <span className="block max-w-[100px] sm:max-w-[220px] truncate">
+          {r.label}
+        </span>
       ),
       orden: (r) => r.label,
     },
     {
       titulo: "Venta c/IVA",
+      ayuda: "Lo que pagó el comprador, IVA incluido.",
       celda: (r) => fmtMoneda(r.venta),
       numerica: true,
       orden: (r) => r.venta,
@@ -442,6 +526,7 @@ function TablaRanking({
     },
     {
       titulo: "Unid.",
+      ayuda: "Unidades vendidas en el recorte de fechas elegido.",
       celda: (r) => fmtNumero(r.unidades),
       numerica: true,
       orden: (r) => r.unidades,
@@ -449,6 +534,7 @@ function TablaRanking({
     },
     {
       titulo: "Rent. bruta",
+      ayuda: "Venta menos costo y envío, sin descontar comisiones.",
       celda: (r) => <Importe valor={r.rentabilidad} />,
       numerica: true,
       orden: (r) => r.rentabilidad,
@@ -456,6 +542,7 @@ function TablaRanking({
     },
     {
       titulo: "Margen bruto",
+      ayuda: "La rentabilidad bruta sobre la venta con IVA.",
       celda: (r) => <Porcentaje valor={r.margenPct} />,
       numerica: true,
       orden: (r) => r.margenPct,
@@ -807,7 +894,11 @@ export default function DashboardTiendaNubePage({
       )}
 
       {data && (
-        <div className={cargando ? "opacity-50 transition-opacity" : "transition-opacity"}>
+        <div
+          className={
+            cargando ? "opacity-50 transition-opacity" : "transition-opacity"
+          }
+        >
           <PanelEquilibrio
             eq={data.equilibrio}
             filtrado={filtradoPorDimension}
@@ -816,7 +907,11 @@ export default function DashboardTiendaNubePage({
       )}
 
       {data && (
-        <div className={cargando ? "opacity-50 transition-opacity" : "transition-opacity"}>
+        <div
+          className={
+            cargando ? "opacity-50 transition-opacity" : "transition-opacity"
+          }
+        >
           <PanelAdquisicion
             ad={data.adquisicion}
             filtrado={filtradoPorDimension}
@@ -948,7 +1043,6 @@ export default function DashboardTiendaNubePage({
             </Panel>
           </div>
 
-
           {/* Lo que el tablero NO sabe, dicho en la pantalla y no solo en el
               código: un margen que se lee sin esta aclaración es un margen
               equivocado, y quien lo mire no tiene por qué saberlo. */}
@@ -989,7 +1083,8 @@ function PanelEquilibrio({
   // La barra se corta en 100 %: pasado el equilibrio lo que importa es que se
   // llegó, y una barra que sigue creciendo achica visualmente el tramo que de
   // verdad se mira, que es el de abajo.
-  const avance = eq.coberturaPct == null ? 0 : Math.min(Math.max(eq.coberturaPct, 0), 1);
+  const avance =
+    eq.coberturaPct == null ? 0 : Math.min(Math.max(eq.coberturaPct, 0), 1);
   const cubierto = eq.coberturaPct != null && eq.coberturaPct >= 1;
 
   return (
@@ -1012,10 +1107,12 @@ function PanelEquilibrio({
             una falla del tablero, es un dato que falta. */}
           <Aviso tono="info">
             Falta cargar cuánto sale el plan del mes. Va en{" "}
-            <span className="font-mono text-xs">bronze.costos_plataforma_tn</span>,
-            columna <span className="font-mono text-xs">abono_mensual</span>. Hasta
-            entonces no se puede decir si el canal gana o pierde — sólo cuánto
-            genera.
+            <span className="font-mono text-xs">
+              bronze.costos_plataforma_tn
+            </span>
+            , columna <span className="font-mono text-xs">abono_mensual</span>.
+            Hasta entonces no se puede decir si el canal gana o pierde — sólo
+            cuánto genera.
           </Aviso>
         </div>
       ) : (
@@ -1027,11 +1124,15 @@ function PanelEquilibrio({
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div>
               <p className="text-muted text-xs">Contribución bruta</p>
-              <p className="text-lg font-semibold">{fmtMoneda(eq.contribucion)}</p>
+              <p className="text-lg font-semibold">
+                {fmtMoneda(eq.contribucion)}
+              </p>
             </div>
             <div>
               <p className="text-muted text-xs">Costos fijos (pago de plan)</p>
-              <p className="text-lg font-semibold">−{fmtMoneda(eq.costosFijos)}</p>
+              <p className="text-lg font-semibold">
+                −{fmtMoneda(eq.costosFijos)}
+              </p>
             </div>
             <div>
               <p className="text-muted text-xs">Resultado bruto del canal</p>
@@ -1057,14 +1158,14 @@ function PanelEquilibrio({
             <p className="text-sm">
               {cubierto ? (
                 <>
-                  Cubre el <strong>{fmtPct(eq.coberturaPct)}</strong> del pago del
-                  plan: el canal ya pasó el equilibrio.
+                  Cubre el <strong>{fmtPct(eq.coberturaPct)}</strong> del pago
+                  del plan: el canal ya pasó el equilibrio.
                 </>
               ) : (
                 <>
-                  Cubre el <strong>{fmtPct(eq.coberturaPct)}</strong> del pago del
-                  plan. Faltan {fmtMoneda(eq.costosFijos - eq.contribucion)} para
-                  empatar.
+                  Cubre el <strong>{fmtPct(eq.coberturaPct)}</strong> del pago
+                  del plan. Faltan {fmtMoneda(eq.costosFijos - eq.contribucion)}{" "}
+                  para empatar.
                 </>
               )}
             </p>
@@ -1115,20 +1216,24 @@ function PanelAdquisicion({
     >
       {!ad.gastoCargado ? (
         <div className="space-y-2">
-          <p className="text-2xl font-semibold">{fmtNumero(ad.clientesNuevos)}</p>
+          <p className="text-2xl font-semibold">
+            {fmtNumero(ad.clientesNuevos)}
+          </p>
           <p className="text-muted text-sm">
             {ad.clientesNuevos === 1
               ? "cliente nuevo en el recorte"
               : "clientes nuevos en el recorte"}
-            {deja != null && <> · dejaron {fmtMoneda(deja)} de contribución cada uno</>}
+            {deja != null && (
+              <> · dejaron {fmtMoneda(deja)} de contribución cada uno</>
+            )}
           </p>
           {/* Tono informativo: el dato falta, no falla nada. */}
           <Aviso tono="info">
             Falta cargar la inversión en marketing del período —agencia, pauta,
             influencers— en{" "}
-            <span className="font-mono text-xs">bronze.gastos_marketing</span>. No
-            viene de ninguna API: ni Tienda Nube ni Google Analytics saben lo que se
-            paga por la pauta. Con ese dato sale el costo por cliente.
+            <span className="font-mono text-xs">bronze.gastos_marketing</span>.
+            No viene de ninguna API: ni Tienda Nube ni Google Analytics saben lo
+            que se paga por la pauta. Con ese dato sale el costo por cliente.
           </Aviso>
         </div>
       ) : (
@@ -1140,7 +1245,9 @@ function PanelAdquisicion({
             </div>
             <div>
               <p className="text-muted text-xs">Clientes nuevos</p>
-              <p className="text-lg font-semibold">{fmtNumero(ad.clientesNuevos)}</p>
+              <p className="text-lg font-semibold">
+                {fmtNumero(ad.clientesNuevos)}
+              </p>
             </div>
             <div>
               <p className="text-muted text-xs">Costo por cliente</p>
@@ -1161,8 +1268,10 @@ function PanelAdquisicion({
               {conviene ? (
                 <>
                   Cada cliente nuevo deja{" "}
-                  <strong style={{ color: PALETA[1] }}>{fmtMoneda(margen)}</strong> más
-                  de lo que costó traerlo.
+                  <strong style={{ color: PALETA[1] }}>
+                    {fmtMoneda(margen)}
+                  </strong>{" "}
+                  más de lo que costó traerlo.
                 </>
               ) : (
                 <>
@@ -1177,8 +1286,9 @@ function PanelAdquisicion({
             </p>
           )}
           <p className="text-muted text-[11px] leading-tight">
-            La contribución por cliente es bruta —antes de impuestos— y no descuenta
-            el abono del plan, que se mira aparte en Equilibrio del canal.
+            La contribución por cliente es bruta —antes de impuestos— y no
+            descuenta el abono del plan, que se mira aparte en Equilibrio del
+            canal.
           </p>
         </div>
       )}

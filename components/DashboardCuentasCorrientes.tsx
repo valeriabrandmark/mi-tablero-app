@@ -5,7 +5,7 @@ import EncabezadoPagina from "@/components/EncabezadoPagina";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
-import { nombreEmpresa } from "@/lib/constantes";
+import { nombreEmpresa, nombreVendedor } from "@/lib/constantes";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
@@ -41,12 +41,16 @@ function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
     {
       titulo: "Cliente",
       celda: (f) => (
-        <span className="block max-w-[116px] sm:max-w-[260px] truncate">{f.razonSocial}</span>
+        <span className="block max-w-[116px] sm:max-w-[260px] truncate">
+          {f.razonSocial}
+        </span>
       ),
       orden: (f) => f.razonSocial,
     },
     {
       titulo: "Categoría",
+      ayuda:
+        "Clasificación de riesgo del cliente, calculada por el orquestador a partir de su deuda y su antigüedad.",
       celda: (f) => (
         <span
           style={{ color: COLOR_CATEGORIA[f.categoria ?? ""] ?? undefined }}
@@ -58,11 +62,16 @@ function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
     },
     {
       titulo: "Vendedor",
-      celda: (f) => f.vendedor ?? "—",
-      orden: (f) => f.vendedor,
+      ayuda:
+        "El vendedor asignado al cliente en Sigma. La tabla lo guarda como código (007) y se traduce al nombre acá.",
+      celda: (f) => nombreVendedor(f.vendedor),
+      // Ordena por el NOMBRE que se ve y no por el código: una lista alfabética
+      // que sale en el orden 006, 007, 004 se lee como si no estuviera ordenada.
+      orden: (f) => nombreVendedor(f.vendedor),
     },
     {
       titulo: "Saldo total",
+      ayuda: "Todo lo que el cliente debe hoy, vencido y a vencer.",
       celda: (f) => fmtMoneda(f.saldoTotal),
       numerica: true,
       orden: (f) => f.saldoTotal,
@@ -70,6 +79,7 @@ function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
     },
     {
       titulo: "Saldo vencido",
+      ayuda: "La parte de la deuda cuyo vencimiento ya pasó.",
       celda: (f) => fmtMoneda(f.saldoVencido),
       numerica: true,
       orden: (f) => f.saldoVencido,
@@ -77,6 +87,8 @@ function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
     },
     {
       titulo: "Atraso máx.",
+      ayuda:
+        "Días del comprobante impago más viejo. Es el peor caso, no el promedio.",
       celda: (f) => (f.atrasoMax == null ? "—" : `${fmtNumero(f.atrasoMax)} d`),
       numerica: true,
       orden: (f) => f.atrasoMax,
@@ -315,6 +327,10 @@ export default function DashboardCuentasPage() {
           etiqueta="Vendedor"
           valores={filtros.vendedor}
           opciones={opciones?.vendedores ?? []}
+          // El valor que viaja al filtro sigue siendo el CÓDIGO, que es lo que
+          // guarda la tabla; `formato` sólo cambia lo que se lee. Igual que
+          // Empresa, dos selectores más allá.
+          formato={nombreVendedor}
           onChange={(v) => cambiar({ ...filtros, vendedor: v })}
         />
         <SelectorMultiple

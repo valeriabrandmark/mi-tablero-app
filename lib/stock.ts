@@ -70,6 +70,20 @@ export const VENTANA_POR_DEFECTO: VentanaRitmo = 120;
 export const PROVEEDORES_NO_MERCADERIA = ["AGENCIA PROVEEDORES", "PROVEEDOR INICIAL"];
 
 /**
+ * A qué empresa del grupo le compra cada proveedor.
+ *
+ * La lista vive en `bronze.proveedores_grupo` y NO acá: es un dato del
+ * negocio que cambia cuando cambian los acuerdos, y tenerlo en el código
+ * obligaría a un deploy para mover un proveedor de un lado al otro.
+ *
+ * En la tabla están SOLO los de NOA. Todo el resto cae en este valor por
+ * defecto, que es la regla tal como la dio el negocio ("todo el resto ->
+ * QUO MKT"): un proveedor nuevo entra como QUO sin que nadie tenga que
+ * acordarse de cargarlo.
+ */
+export const GRUPO_PROVEEDOR_POR_DEFECTO = "QUO MKT";
+
+/**
  * Los dos depósitos, y la opción de mirarlos juntos.
  *
  * EL FILTRO CAMBIA EL STOCK, NO LA DEMANDA. Al elegir "Full", la cobertura pasa
@@ -100,7 +114,11 @@ export const DEPOSITO_POR_DEFECTO: ClaveDeposito = "ambos";
  *   sin_venta  no vendió una unidad en toda la ventana
  */
 export const TRAMOS_COBERTURA = [
-  { clave: "quiebre", label: "Quiebre", desc: `Menos de ${PLAZO_REPOSICION_DIAS} días` },
+  {
+    clave: "quiebre",
+    label: "Próximo a quiebre",
+    desc: `Menos de ${PLAZO_REPOSICION_DIAS} días`,
+  },
   { clave: "ajustado", label: "Ajustado", desc: `${PLAZO_REPOSICION_DIAS} a ${COBERTURA_OBJETIVO_DIAS} días` },
   { clave: "objetivo", label: "En objetivo", desc: `${COBERTURA_OBJETIVO_DIAS} a 60 días` },
   { clave: "sobra", label: "De sobra", desc: "60 a 120 días" },

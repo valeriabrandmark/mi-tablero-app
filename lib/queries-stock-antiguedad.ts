@@ -1,6 +1,10 @@
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
-import { PROVEEDORES_NO_MERCADERIA } from "@/lib/stock";
+import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
+import {
+  GRUPO_PROVEEDOR_POR_DEFECTO,
+  PROVEEDORES_NO_MERCADERIA,
+} from "@/lib/stock";
 import {
   DIAS_POR_VENCER_ALERTA,
   TRAMOS_ANTIGUEDAD,
@@ -31,10 +35,6 @@ import type {
  */
 
 /** El SKU vive dentro de `attributes`. Mismo rodeo que en queries-stock.ts. */
-const SKU_DE_PUBLICACION = `(select a->>'value_name'
-     from jsonb_array_elements(p.attributes::jsonb) a
-    where a->>'id' = 'SELLER_SKU'
-    limit 1)`;
 
 /**
  * Las unidades de Tucumán que cuentan.
@@ -79,11 +79,7 @@ const BASE = `
 with por_inv as (
   -- Un renglón por INVENTARIO y no por publicación: varias publicaciones
   -- comparten el mismo stock físico y sumarlas lo contaría de más.
-  select p.inventory_id, max(${SKU_DE_PUBLICACION}) as sku
-  from bronze.ml_publicaciones p
-  where p."shipping.logistic_type" = 'fulfillment'
-    and p.inventory_id is not null
-  group by p.inventory_id
+  ${POR_INVENTARIO_SKU}
 ),
 full_ml as (
   select i.sku,
@@ -179,6 +175,10 @@ base as (
          s.no_aptas,
          s.tuc,
          s.aptas + s.tuc                       as total,
+         -- La empresa del grupo que le compra a ese proveedor. Sale de la misma
+         -- tabla que en Stock y en Compras, con el mismo valor por defecto,
+         -- así que un proveedor cae en la misma empresa en las tres pantallas.
+         coalesce(pg.grupo, '${GRUPO_PROVEEDOR_POR_DEFECTO}') as grupo,
          coalesce(c.costo_real, 0)             as costo,
          (s.aptas + s.tuc) * coalesce(c.costo_real, 0) as valor,
          a.dias                                as dias_en_full,
@@ -209,6 +209,7 @@ base as (
          end                                   as dias_agotar
   from stock s
   left join bronze.sigma_articulos ar on trim(ar.id) = s.sku
+  left join bronze.proveedores_grupo pg on pg.proveedor = ar."proveedorNombre"
   left join costo c on c.sku = s.sku
   left join ventas v on v.sku = s.sku
   left join ant a on a.sku = s.sku
@@ -224,6 +225,7 @@ function where(f: FiltrosAntiguedad): Where {
   const clauses: string[] = [];
 
   agregarFiltro(clauses, params, "proveedor", f.proveedor);
+  agregarFiltro(clauses, params, "grupo", f.grupo);
   agregarFiltro(clauses, params, "marca", f.marca);
   agregarFiltro(clauses, params, "sku", f.sku);
 
@@ -405,7 +407,7 @@ async function getFilas(f: FiltrosAntiguedad): Promise<FilaAntiguedad[]> {
 
 export async function getOpcionesAntiguedad() {
   const params = [PROVEEDORES_NO_MERCADERIA];
-  const [proveedores, marcas] = await Promise.all([
+  const [proveedores, marcas, grupos] = await Promise.all([
     query<{ v: string }>(
       `${BASE} select distinct proveedor as v from base where proveedor is not null order by 1`,
       params,
@@ -414,8 +416,18 @@ export async function getOpcionesAntiguedad() {
       `${BASE} select distinct marca as v from base where marca is not null order by 1`,
       params,
     ),
+    // Igual que en Stock: salen de los datos, así que una empresa nueva en la
+    // tabla aparece en el selector sin tocar código.
+    query<{ v: string }>(
+      `${BASE} select distinct grupo as v from base where grupo is not null order by 1`,
+      params,
+    ),
   ]);
-  return { proveedores: proveedores.map((r) => r.v), marcas: marcas.map((r) => r.v) };
+  return {
+    proveedores: proveedores.map((r) => r.v),
+    marcas: marcas.map((r) => r.v),
+    grupos: grupos.map((r) => r.v),
+  };
 }
 
 /**
@@ -440,11 +452,7 @@ async function getFotoAntiguedad(): Promise<{
   // propósito: es una medida de la foto, no del recorte que se está mirando.
   const enFull = await queryOne<{ v: string }>(
     `with por_inv as (
-       select p.inventory_id, max(${SKU_DE_PUBLICACION}) as sku
-       from bronze.ml_publicaciones p
-       where p."shipping.logistic_type" = 'fulfillment'
-         and p.inventory_id is not null
-       group by p.inventory_id
+       ${POR_INVENTARIO_SKU}
      )
      select count(distinct i.sku) as v
      from bronze.ml_stock_full f
