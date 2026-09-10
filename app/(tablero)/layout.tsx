@@ -64,7 +64,15 @@ const NAV: ItemNav[] = [
     clave: "operaciones",
     label: "Operaciones",
     icono: "operaciones",
-    hijos: [{ href: "/stock", label: "Stock", icono: "stock" }],
+    hijos: [
+      { href: "/stock", label: "Stock", icono: "stock" },
+      // Precios TN va en Operaciones y no en Ventas minoristas -> Tienda Nube,
+      // aunque hable de esa tienda: lo de allá es MIRAR lo que se vendió, esto
+      // es DECIDIR a cuánto se vende. Son cosas distintas y las mira gente
+      // distinta — de hecho es la única entrada del tablero que no ven todos
+      // los administradores (ver `admin_tn` en lib/permisos.ts).
+      { href: "/precios-tn", label: "Precios TN — Comparador", icono: "precios" },
+    ],
   },
 ];
 
@@ -75,6 +83,7 @@ const NOMBRE_ROL: Record<Rol, string> = {
   supervisor: "Supervisor",
   vendedor: "Vendedor",
   responsable_meli: "Responsable Mercado Libre",
+  admin_tn: "Administrador Tienda Nube",
 };
 
 /**
