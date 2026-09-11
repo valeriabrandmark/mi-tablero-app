@@ -1705,3 +1705,49 @@ export type DashboardTrazabilidad = {
   hasta: string | null;
   diasDeFoto: number;
 };
+
+/* -------------------------------------------------------------------------
+   Precios TN — Comparador (Operaciones)
+
+   Lo que produce el proyecto `precios` y este tablero sólo muestra. Los montos
+   vienen como `float8` desde Postgres porque son para mostrar; las cuentas que
+   importan --piso de margen, precio propuesto-- ya se hicieron allá con
+   Decimal, y acá no se recalcula ninguna.
+   ------------------------------------------------------------------------- */
+
+/** Un competidor concreto, con su precio y el link para ir a verlo. */
+export type CompetidorPrecioTn = {
+  fuente: string;
+  precio: number;
+  dia: string;
+  disponible: boolean;
+  url: string | null;
+};
+
+export type FilaPrecioTn = {
+  id: number;
+  sku: string;
+  descripcion: string;
+  marca: string | null;
+  accion: "mantener" | "subir" | "bajar" | "omitir";
+  estado: "pendiente" | "aprobada" | "rechazada" | "aplicada" | "vencida";
+  precioActual: number | null;
+  precioPropuesto: number | null;
+  piso: number | null;
+  mejorCompetencia: number | null;
+  /** Fracción: 0,22 = estamos 22 % arriba del más barato del mercado. */
+  difMercado: number | null;
+  grupo: string;
+  motivos: string[];
+  competidores: CompetidorPrecioTn[];
+  stock: number | null;
+  costo: number | null;
+};
+
+export type ResumenPreciosTn = {
+  corridaId: number | null;
+  corridaFecha: string | null;
+  grupos: Record<string, number>;
+  pendientes: number;
+  decididas: number;
+};
