@@ -1,10 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { fmtMoneda, fmtPct } from "@/lib/format";
 import { Tabla, type Columna } from "@/components/Tabla";
 import { ALERTAS, nombreFuente, type ClaveAlerta } from "@/lib/precios-tn";
-import type { FilaPrecioTn, ResumenPreciosTn } from "@/lib/types";
+import type {
+  CatalogosPreciosTn,
+  FilaPrecioTn,
+  FiltrosPreciosTn,
+  ResumenPreciosTn,
+} from "@/lib/types";
 
 /**
  * Precios TN — Comparador.
@@ -16,6 +21,10 @@ import type { FilaPrecioTn, ResumenPreciosTn } from "@/lib/types";
  *
  * CADA COMPETIDOR SE MUESTRA CON NOMBRE, PRECIO Y LINK. Aprobar un cambio de
  * precio sin poder abrir la ficha del otro y verla es aprobar a ciegas.
+ *
+ * LOS FILTROS VIVEN EN EL SERVIDOR, no en el navegador. La lista está limitada
+ * a 200 filas: filtrar acá mostraría "las 3 de Chicco que había entre las
+ * primeras 200" en vez de las de Chicco, y nadie se enteraría de la diferencia.
  */
 
 const TONOS: Record<string, string> = {
@@ -23,6 +32,34 @@ const TONOS: Record<string, string> = {
   aviso: "border-c3/40 bg-c3/15 text-c3",
   neutro: "border-line bg-panel-2 text-muted",
 };
+
+const SIN_FILTRO: FiltrosPreciosTn = {
+  grupo: null,
+  proveedor: null,
+  marca: null,
+  busqueda: null,
+};
+
+/** Los filtros como query string, en el único lugar donde se traducen. */
+function aParams(f: FiltrosPreciosTn): Record<string, string> {
+  const p: Record<string, string> = {};
+  if (f.grupo) p.grupo = f.grupo;
+  if (f.proveedor) p.proveedor = f.proveedor;
+  if (f.marca) p.marca = f.marca;
+  if (f.busqueda) p.q = f.busqueda;
+  return p;
+}
+
+/** "hace 3 horas". El dato crudo importa; la distancia se lee de un vistazo. */
+function haceCuanto(iso: string): string {
+  const minutos = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutos < 2) return "recién";
+  if (minutos < 60) return `hace ${minutos} min`;
+  const horas = Math.round(minutos / 60);
+  if (horas < 24) return `hace ${horas} h`;
+  const dias = Math.round(horas / 24);
+  return dias === 1 ? "hace 1 día" : `hace ${dias} días`;
+}
 
 function Diferencia({ valor }: { valor: number | null }) {
   if (valor === null) return <span className="text-muted">—</span>;
@@ -61,12 +98,12 @@ function Competidores({ lista }: { lista: FilaPrecioTn["competidores"] }) {
             target="_blank"
             rel="noopener noreferrer"
             className={`${clases} hover:border-c1/50 hover:text-c1`}
-            title="Abrir la ficha en su sitio"
+            title={`Abrir la ficha en ${nombreFuente(c.fuente)} para verificar el precio`}
           >
             {contenido} ↗
           </a>
         ) : (
-          <span key={`${c.fuente}-${c.precio}`} className={clases}>
+          <span key={`${c.fuente}-${c.precio}`} className={clases} title="Sin link guardado">
             {contenido}
           </span>
         );
@@ -74,7 +111,6 @@ function Competidores({ lista }: { lista: FilaPrecioTn["competidores"] }) {
     </div>
   );
 }
-
 
 /**
  * Las columnas, con su ayuda.
@@ -91,7 +127,7 @@ function columnas(
     {
       titulo: "Producto",
       ayuda:
-        "Descripción, SKU y marca según Sigma, más las unidades disponibles en Digip. " +
+        "Descripción, SKU, marca y proveedor según Sigma, más las unidades disponibles en Digip. " +
         "Debajo van los motivos que escribió el motor: por qué llegó a ese precio y qué lo limitó.",
       celda: (f) => (
         <div>
@@ -101,6 +137,7 @@ function columnas(
           <span className="text-muted font-mono text-[10px]">
             {f.sku}
             {f.marca ? ` · ${f.marca}` : ""}
+            {f.proveedor ? ` · ${f.proveedor}` : ""}
             {f.stock !== null ? ` · ${f.stock} u.` : ""}
           </span>
           {f.motivos?.length > 0 && (
@@ -195,30 +232,54 @@ function columnas(
   ];
 }
 
+type Aprobables = { total: number; bajan: number; suben: number };
+type EstadoCorrida = {
+  disponible?: boolean;
+  estado: "en_cola" | "corriendo" | "termino" | "fallo" | "sin_datos";
+  log?: string | null;
+};
+
+const CLASE_SELECT =
+  "border-line bg-panel-2 text-ink rounded-lg border px-2.5 py-1.5 text-xs focus:border-c1/50 focus:outline-none";
+
 export default function DashboardPreciosTn() {
   const [resumen, setResumen] = useState<ResumenPreciosTn | null>(null);
   const [filas, setFilas] = useState<FilaPrecioTn[]>([]);
-  const [grupo, setGrupo] = useState<ClaveAlerta | null>(null);
+  const [catalogos, setCatalogos] = useState<CatalogosPreciosTn>({ proveedores: [], marcas: [] });
+  const [aprobables, setAprobables] = useState<Aprobables>({ total: 0, bajan: 0, suben: 0 });
+  const [filtros, setFiltros] = useState<FiltrosPreciosTn>(SIN_FILTRO);
+  // El texto del buscador va aparte del filtro: se escribe letra por letra y
+  // consultar la base en cada tecla sería una consulta por pulsación.
+  const [texto, setTexto] = useState("");
   const [cargando, setCargando] = useState(true);
   const [aviso, setAviso] = useState<string | null>(null);
+  const [confirmando, setConfirmando] = useState(false);
+  const [corrida, setCorrida] = useState<EstadoCorrida | null>(null);
+  const [recarga, setRecarga] = useState(0);
+
+  // Medio segundo de quietud antes de consultar. Es el mínimo que se siente
+  // instantáneo y el máximo que evita una consulta por letra.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setFiltros((f) => (f.busqueda === (texto.trim() || null) ? f : { ...f, busqueda: texto.trim() || null }));
+    }, 500);
+    return () => clearTimeout(t);
+  }, [texto]);
 
   // El efecto NO toca el estado antes del await, y por eso `cargando` arranca
-  // en true y lo vuelve a poner en true quien cambia de grupo (que es un
+  // en true y lo vuelve a poner en true quien cambia de filtro (que es un
   // manejador de evento, no un efecto). Escribir estado sincronicamente dentro
   // de un efecto es lo que marca react-hooks/set-state-in-effect, y con razon:
   // provoca un render de mas en cada montaje.
   //
-  // `vigente` evita la carrera clasica: si alguien clickea dos grupos rapido,
+  // `vigente` evita la carrera clasica: si alguien clickea dos filtros rapido,
   // la respuesta lenta de la primera no puede pisar a la segunda.
-  const [recarga, setRecarga] = useState(0);
-
   useEffect(() => {
     let vigente = true;
     (async () => {
       try {
-        const r = await fetch(`/api/precios-tn${grupo ? `?grupo=${grupo}` : ""}`, {
-          cache: "no-store",
-        });
+        const qs = new URLSearchParams(aParams(filtros)).toString();
+        const r = await fetch(`/api/precios-tn${qs ? `?${qs}` : ""}`, { cache: "no-store" });
         if (!r.ok) {
           throw new Error((await r.json().catch(() => null))?.error ?? `HTTP ${r.status}`);
         }
@@ -226,6 +287,8 @@ export default function DashboardPreciosTn() {
         if (!vigente) return;
         setResumen(datos.resumen);
         setFilas(datos.filas);
+        setCatalogos(datos.catalogos);
+        setAprobables(datos.aprobables);
         setAviso(null);
       } catch (e) {
         if (vigente) setAviso(e instanceof Error ? e.message : "No se pudieron traer los datos");
@@ -236,17 +299,50 @@ export default function DashboardPreciosTn() {
     return () => {
       vigente = false;
     };
-  }, [grupo, recarga]);
+  }, [filtros, recarga]);
+
+  // El estado del workflow. Se consulta al entrar y, MIENTRAS ESTÁ CORRIENDO,
+  // cada 15 segundos: una bajada tarda unos 6 minutos y un botón que no cuenta
+  // nada durante 6 minutos se clickea de nuevo.
+  useEffect(() => {
+    let vigente = true;
+    const mirar = async () => {
+      const r = await fetch("/api/precios-tn/correr", { cache: "no-store" }).catch(() => null);
+      if (!r?.ok || !vigente) return;
+      const datos = await r.json();
+      if (vigente) setCorrida(datos);
+    };
+    void mirar();
+    const enMarcha = corrida?.estado === "corriendo" || corrida?.estado === "en_cola";
+    const t = enMarcha ? setInterval(mirar, 15000) : null;
+    return () => {
+      vigente = false;
+      if (t) clearInterval(t);
+    };
+  }, [corrida?.estado, recarga]);
 
   const recargar = useCallback(() => {
     setCargando(true);
     setRecarga((n) => n + 1);
   }, []);
 
-  const cambiarGrupo = useCallback((g: ClaveAlerta | null) => {
+  const cambiarFiltro = useCallback((cambio: Partial<FiltrosPreciosTn>) => {
     setCargando(true);
-    setGrupo(g);
+    setConfirmando(false);
+    setFiltros((f) => ({ ...f, ...cambio }));
   }, []);
+
+  const limpiar = useCallback(() => {
+    setCargando(true);
+    setConfirmando(false);
+    setTexto("");
+    setFiltros(SIN_FILTRO);
+  }, []);
+
+  const hayFiltro = useMemo(
+    () => Boolean(filtros.grupo || filtros.proveedor || filtros.marca || filtros.busqueda),
+    [filtros],
+  );
 
   async function decidir(id: number, decision: "aprobada" | "rechazada") {
     setAviso(null);
@@ -262,29 +358,105 @@ export default function DashboardPreciosTn() {
       recargar();
       return;
     }
-    setFilas((previas) =>
-      previas.map((f) => (f.id === id ? { ...f, estado: decision } : f)),
+    setFilas((previas) => previas.map((f) => (f.id === id ? { ...f, estado: decision } : f)));
+    setAprobables((a) => ({ ...a, total: Math.max(0, a.total - 1) }));
+  }
+
+  async function autorizarTodo() {
+    setAviso(null);
+    setConfirmando(false);
+    const r = await fetch("/api/precios-tn/decidir", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ todas: true, filtros: aParams(filtros) }),
+    });
+    if (!r.ok) {
+      setAviso((await r.json().catch(() => null))?.error ?? "No se pudo autorizar");
+      return;
+    }
+    const { aprobadas } = await r.json();
+    setAviso(`${aprobadas} propuestas autorizadas. Se escriben cuando corra \`precios aplicar\`.`);
+    recargar();
+  }
+
+  async function correrAhora() {
+    setAviso(null);
+    setCorrida({ estado: "en_cola" });
+    const r = await fetch("/api/precios-tn/correr", { method: "POST" });
+    const datos = await r.json().catch(() => null);
+    if (!r.ok) {
+      setCorrida(null);
+      setAviso(datos?.error ?? "No se pudo arrancar la comparación");
+      return;
+    }
+    setAviso(
+      datos?.yaCorria
+        ? "Ya había una comparación en curso: no se encoló otra."
+        : "Comparación arrancada. Tarda unos 6 minutos; la pantalla se actualiza sola.",
     );
   }
 
   const alertas = ALERTAS.filter((a) => (resumen?.grupos?.[a.clave] ?? 0) > 0);
+  const corriendo = corrida?.estado === "corriendo" || corrida?.estado === "en_cola";
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h1 className="text-xl font-semibold tracking-tight">Precios TN — Comparador</h1>
-        {resumen?.corridaFecha && (
-          <p className="text-muted text-xs">
-            Última comparación: {new Date(resumen.corridaFecha).toLocaleString("es-AR")} ·{" "}
-            {resumen.pendientes} pendientes · {resumen.decididas} decididas
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Precios TN — Comparador</h1>
+          {/* CUÁNDO SE MIRÓ A LA COMPETENCIA, que no es cuándo corrió el motor.
+              El motor puede correr hoy sobre precios de hace tres días sin
+              avisarlo: para él son datos vigentes según la política. Esta línea
+              es la que dice si la pantalla habla del mercado de hoy. */}
+          <p className="text-muted mt-1 text-xs">
+            {resumen?.comparadoEn ? (
+              <>
+                Última comparación:{" "}
+                <span className="text-ink font-medium">
+                  {new Date(resumen.comparadoEn).toLocaleString("es-AR")}
+                </span>{" "}
+                ({haceCuanto(resumen.comparadoEn)})
+              </>
+            ) : (
+              "Todavía no hay ninguna bajada de competencia terminada."
+            )}
           </p>
-        )}
+          {resumen && (
+            <p className="text-muted mt-0.5 text-[11px]">
+              {resumen.pendientes} pendientes · {resumen.decididas} decididas ·{" "}
+              {resumen.aprobadasSinAplicar} autorizadas esperando escritura
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-col items-end gap-1">
+          <button
+            onClick={correrAhora}
+            disabled={corriendo || corrida?.disponible === false}
+            className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+            title={
+              corrida?.disponible === false
+                ? "Falta configurar GITHUB_TOKEN_PRECIOS en el entorno"
+                : "Vuelve a leer los precios de la competencia y de nuestra tienda, y recalcula las propuestas"
+            }
+          >
+            {corriendo ? "Comparando…" : "↻ Comparar ahora"}
+          </button>
+          {corrida?.log && (
+            <a
+              href={corrida.log}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-muted hover:text-c1 text-[10px]"
+            >
+              {corrida.estado === "fallo" ? "⚠ la última corrida falló — ver log" : "ver el log ↗"}
+            </a>
+          )}
+        </div>
       </div>
 
       {aviso && (
-        <p className="border-negativo/40 bg-negativo/10 text-negativo rounded-lg border px-3 py-2 text-sm">
-          {aviso}
-        </p>
+        <p className="border-c3/40 bg-c3/10 text-c3 rounded-lg border px-3 py-2 text-sm">{aviso}</p>
       )}
 
       {/* Las alertas. No son tramos de un mismo eje: son situaciones que se
@@ -292,11 +464,11 @@ export default function DashboardPreciosTn() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {alertas.map((a) => {
           const total = resumen?.grupos?.[a.clave] ?? 0;
-          const activo = grupo === a.clave;
+          const activo = filtros.grupo === a.clave;
           return (
             <button
               key={a.clave}
-              onClick={() => cambiarGrupo(activo ? null : (a.clave as ClaveAlerta))}
+              onClick={() => cambiarFiltro({ grupo: activo ? null : (a.clave as ClaveAlerta) })}
               className={`rounded-xl border p-3 text-left transition ${TONOS[a.tono]} ${
                 activo ? "ring-c1/60 ring-2" : "hover:opacity-80"
               }`}
@@ -309,13 +481,95 @@ export default function DashboardPreciosTn() {
         })}
       </div>
 
-      {grupo && (
-        <button
-          onClick={() => cambiarGrupo(null)}
-          className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs"
+      {/* Los filtros. Se resuelven en el servidor sobre las 845 filas, no sobre
+          las 200 que bajaron: filtrar en el navegador mostraría "las de Chicco
+          que había entre las primeras 200" y nadie notaría la diferencia. */}
+      <div className="border-line bg-panel-2/40 flex flex-wrap items-center gap-2 rounded-xl border p-3">
+        <input
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          placeholder="Buscar por SKU o descripción…"
+          className={`${CLASE_SELECT} min-w-[220px] flex-1`}
+        />
+        <select
+          value={filtros.proveedor ?? ""}
+          onChange={(e) => cambiarFiltro({ proveedor: e.target.value || null })}
+          className={CLASE_SELECT}
         >
-          ← Ver todos
-        </button>
+          <option value="">Todos los proveedores</option>
+          {catalogos.proveedores.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filtros.marca ?? ""}
+          onChange={(e) => cambiarFiltro({ marca: e.target.value || null })}
+          className={CLASE_SELECT}
+        >
+          <option value="">Todas las marcas</option>
+          {catalogos.marcas.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        {hayFiltro && (
+          <button
+            onClick={limpiar}
+            className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1.5 text-xs"
+          >
+            Limpiar filtros
+          </button>
+        )}
+
+        <div className="ml-auto">
+          {/* AUTORIZAR TODO LO FILTRADO, nunca "todo" a secas.
+              Un botón que aprueba las 845 convierte una decisión en un reflejo:
+              el día que una corrida salga rara --un costo mal cargado, una
+              fuente que devolvió el precio de otro producto-- se aprueba la
+              corrida rara entera de un click. Atado al filtro significa algo
+              concreto: "todo lo de esta marca, que acabo de mirar". */}
+          <button
+            onClick={() => setConfirmando(true)}
+            disabled={aprobables.total === 0 || confirmando}
+            className="border-c1/40 bg-c1/10 text-c1 hover:bg-c1/20 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Autorizar {hayFiltro ? "lo filtrado" : "todo"} ({aprobables.total})
+          </button>
+        </div>
+      </div>
+
+      {confirmando && (
+        <div className="border-c1/40 bg-c1/5 space-y-2 rounded-xl border p-4">
+          <p className="text-sm font-medium">
+            Vas a autorizar {aprobables.total} propuestas
+            {hayFiltro ? " del filtro actual" : " (sin filtro: la cola entera)"}.
+          </p>
+          <p className="text-muted text-xs leading-relaxed">
+            {aprobables.bajan} bajan de precio y {aprobables.suben} suben. Quedan{" "}
+            <b>fuera</b> las de “no se puede competir sin perder”: ésas no son un precio a
+            corregir sino una decisión de si seguir vendiendo el producto, y se aprueban de
+            a una. Autorizar no cambia nada en Tienda Nube todavía — la escritura la hace{" "}
+            <code>precios aplicar</code>, que vuelve a verificar cada precio contra la
+            tienda y escribe como máximo 50 por corrida.
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={autorizarTodo}
+              className="border-c1/40 bg-c1/15 text-c1 hover:bg-c1/25 rounded-lg border px-3 py-1.5 text-xs font-medium"
+            >
+              Sí, autorizar {aprobables.total}
+            </button>
+            <button
+              onClick={() => setConfirmando(false)}
+              className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
       )}
 
       {cargando ? (
@@ -325,7 +579,7 @@ export default function DashboardPreciosTn() {
           filas={filas}
           columnas={columnas(decidir)}
           clave={(f) => String(f.id)}
-          vacio="No hay propuestas para revisar."
+          vacio={hayFiltro ? "Nada coincide con el filtro." : "No hay propuestas para revisar."}
         />
       )}
 
