@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { fmtMoneda, fmtPct } from "@/lib/format";
+import { Tabla, type Columna } from "@/components/Tabla";
 import { ALERTAS, nombreFuente, type ClaveAlerta } from "@/lib/precios-tn";
 import type { FilaPrecioTn, ResumenPreciosTn } from "@/lib/types";
 
@@ -72,6 +73,126 @@ function Competidores({ lista }: { lista: FilaPrecioTn["competidores"] }) {
       })}
     </div>
   );
+}
+
+
+/**
+ * Las columnas, con su ayuda.
+ *
+ * LOS TOOLTIPS NO ESTAN EN TODAS, y ese es el criterio que ya trae `Tabla`: si
+ * el texto solo repite el titulo, estorba y ademas entrena a no leer los que si
+ * dicen algo. Van donde el nombre no alcanza -- y en esta pantalla no alcanza
+ * casi nunca, porque cada numero sale de una cuenta que nadie puede adivinar.
+ */
+function columnas(
+  decidir: (id: number, decision: "aprobada" | "rechazada") => void,
+): Columna<FilaPrecioTn>[] {
+  return [
+    {
+      titulo: "Producto",
+      ayuda:
+        "Descripción, SKU y marca según Sigma, más las unidades disponibles en Digip. " +
+        "Debajo van los motivos que escribió el motor: por qué llegó a ese precio y qué lo limitó.",
+      celda: (f) => (
+        <div>
+          <span className="block max-w-[260px] truncate font-medium" title={f.descripcion}>
+            {f.descripcion}
+          </span>
+          <span className="text-muted font-mono text-[10px]">
+            {f.sku}
+            {f.marca ? ` · ${f.marca}` : ""}
+            {f.stock !== null ? ` · ${f.stock} u.` : ""}
+          </span>
+          {f.motivos?.length > 0 && (
+            <ul className="text-muted mt-1 space-y-0.5 text-[10px]">
+              {f.motivos.map((m, i) => (
+                <li key={i}>· {m}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ),
+      orden: (f) => f.descripcion,
+    },
+    {
+      titulo: "Hoy",
+      ayuda:
+        "El precio que ve el cliente ahora mismo en la tienda, leído de la API de Tienda Nube " +
+        "en la última corrida. Si el producto tiene promoción activa, es el promocional y no el de lista.",
+      celda: (f) => fmtMoneda(f.precioActual),
+      numerica: true,
+      orden: (f) => f.precioActual,
+    },
+    {
+      titulo: "Propuesto",
+      ayuda:
+        "A dónde llevaría el precio el motor. Sale de igualar al competidor más barato, " +
+        "subirlo al piso si quedaba por debajo, y después limitar el movimiento a ±10 % del precio de hoy. " +
+        "Vacío = el motor no propone nada (sin stock, sin costo o sin competencia).",
+      celda: (f) =>
+        f.precioPropuesto ? fmtMoneda(f.precioPropuesto) : <span className="text-muted">—</span>,
+      numerica: true,
+      orden: (f) => f.precioPropuesto,
+    },
+    {
+      titulo: "Piso",
+      ayuda:
+        "El precio final más bajo que todavía deja 15 % de margen de contribución. " +
+        "Parte del costo de compra con el descuento del proveedor ya aplicado, y le descuenta " +
+        "el IVA del artículo, el arancel de la pasarela más cara (3,62 % sobre el total cobrado) " +
+        "y el 7,4 % de IIBB, cheque y municipal sobre la venta sin IVA. " +
+        "No es costo × 1,15: a ese precio se perdería plata, porque el IVA solo ya se lleva 21 %.",
+      celda: (f) => <span className="text-muted">{fmtMoneda(f.piso)}</span>,
+      numerica: true,
+      orden: (f) => f.piso,
+    },
+    {
+      titulo: "vs mercado",
+      ayuda:
+        "Cuánto nos separa del competidor más barato: positivo = estamos más caros. " +
+        "Es lo que ordena la cola, porque lo que hay que priorizar es la distancia al mercado, " +
+        "no cuánto alcanzó a corregir el motor dentro de su banda.",
+      celda: (f) => <Diferencia valor={f.difMercado} />,
+      numerica: true,
+      orden: (f) => f.difMercado,
+    },
+    {
+      titulo: "Competencia",
+      ayuda:
+        "Las tiendas que tienen este mismo código de barras, de la más barata a la más cara. " +
+        "Cada una abre su ficha en el sitio del competidor para verificarlo con tus propios ojos. " +
+        "Las marcadas sin stock no cuentan para la referencia: su precio es una ficción.",
+      celda: (f) => <Competidores lista={f.competidores} />,
+      orden: (f) => f.mejorCompetencia,
+    },
+    {
+      titulo: "",
+      ayuda:
+        "Autorizar NO cambia el precio en Tienda Nube: marca la propuesta como aprobada, " +
+        "firmada con tu mail. La escritura la hace el proyecto `precios` desde su workflow.",
+      celda: (f) =>
+        f.estado !== "pendiente" ? (
+          <span className="text-muted text-xs">{f.estado}</span>
+        ) : f.precioPropuesto === null ? (
+          <span className="text-muted text-xs">sin propuesta</span>
+        ) : (
+          <div className="flex justify-end gap-1.5">
+            <button
+              onClick={() => decidir(f.id, "aprobada")}
+              className="border-c1/40 bg-c1/10 text-c1 hover:bg-c1/20 rounded-lg border px-2.5 py-1 text-xs"
+            >
+              Autorizar
+            </button>
+            <button
+              onClick={() => decidir(f.id, "rechazada")}
+              className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1 text-xs"
+            >
+              No
+            </button>
+          </div>
+        ),
+    },
+  ];
 }
 
 export default function DashboardPreciosTn() {
@@ -199,81 +320,13 @@ export default function DashboardPreciosTn() {
 
       {cargando ? (
         <p className="text-muted text-sm">Cargando…</p>
-      ) : filas.length === 0 ? (
-        <p className="text-muted text-sm">No hay propuestas para revisar.</p>
       ) : (
-        <div className="border-line bg-panel overflow-x-auto rounded-xl border">
-          <table className="w-full min-w-[900px] text-sm">
-            <thead className="border-line text-muted border-b text-left text-xs">
-              <tr>
-                <th className="p-3">Producto</th>
-                <th className="p-3 text-right">Hoy</th>
-                <th className="p-3 text-right">Propuesto</th>
-                <th className="p-3 text-right">Piso</th>
-                <th className="p-3 text-right">vs mercado</th>
-                <th className="p-3">Competencia</th>
-                <th className="p-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filas.map((f) => (
-                <tr key={f.id} className="border-line border-b last:border-0 align-top">
-                  <td className="p-3">
-                    <span className="block max-w-[260px] truncate font-medium" title={f.descripcion}>
-                      {f.descripcion}
-                    </span>
-                    <span className="text-muted font-mono text-[10px]">
-                      {f.sku}
-                      {f.marca ? ` · ${f.marca}` : ""}
-                      {f.stock !== null ? ` · ${f.stock} u.` : ""}
-                    </span>
-                    {/* El PORQUÉ, que es lo que vuelve aprobable a una propuesta. */}
-                    {f.motivos?.length > 0 && (
-                      <ul className="text-muted mt-1 space-y-0.5 text-[10px]">
-                        {f.motivos.map((m, i) => (
-                          <li key={i}>· {m}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </td>
-                  <td className="p-3 text-right font-mono">{fmtMoneda(f.precioActual)}</td>
-                  <td className="p-3 text-right font-mono">
-                    {f.precioPropuesto ? fmtMoneda(f.precioPropuesto) : <span className="text-muted">—</span>}
-                  </td>
-                  <td className="text-muted p-3 text-right font-mono">{fmtMoneda(f.piso)}</td>
-                  <td className="p-3 text-right font-mono">
-                    <Diferencia valor={f.difMercado} />
-                  </td>
-                  <td className="p-3">
-                    <Competidores lista={f.competidores} />
-                  </td>
-                  <td className="p-3 text-right">
-                    {f.estado !== "pendiente" ? (
-                      <span className="text-muted text-xs">{f.estado}</span>
-                    ) : f.precioPropuesto === null ? (
-                      <span className="text-muted text-xs">sin propuesta</span>
-                    ) : (
-                      <div className="flex justify-end gap-1.5">
-                        <button
-                          onClick={() => decidir(f.id, "aprobada")}
-                          className="border-c1/40 bg-c1/10 text-c1 hover:bg-c1/20 rounded-lg border px-2.5 py-1 text-xs"
-                        >
-                          Autorizar
-                        </button>
-                        <button
-                          onClick={() => decidir(f.id, "rechazada")}
-                          className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1 text-xs"
-                        >
-                          No
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Tabla
+          filas={filas}
+          columnas={columnas(decidir)}
+          clave={(f) => String(f.id)}
+          vacio="No hay propuestas para revisar."
+        />
       )}
 
       <p className="text-muted text-[11px]">
