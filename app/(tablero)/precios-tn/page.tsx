@@ -1,3 +1,4 @@
+import DashboardPreciosTn from "@/components/DashboardPreciosTn";
 import EnProduccion from "@/components/EnProduccion";
 import { permisoDelUsuario, puedeVerBorradores } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
@@ -38,5 +39,7 @@ export default async function PreciosTnPage() {
     return <EnProduccion titulo="Precios TN — Comparador" />;
   }
 
-  return <EnProduccion titulo="Precios TN — Comparador" />;
+  // EL BORRADOR. Hasta que "/precios-tn" salga de PAGINAS_EN_CONSTRUCCION, esto
+  // lo ve unicamente el superadmin; el `admin_tn` ve el cartel de arriba.
+  return <DashboardPreciosTn />;
 }
