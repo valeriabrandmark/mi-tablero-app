@@ -261,7 +261,6 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
  */
 const PAGINAS_EN_CONSTRUCCION = [
   "/venta-minorista/tienda-nube/analytics",
-  "/precios-tn",
 ];
 
 /** `true` si la página todavía se está construyendo. */
