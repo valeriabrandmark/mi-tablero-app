@@ -1,3 +1,5 @@
+import { joinCostoDelDia } from "@/lib/sql-costos";
+
 /**
  * Los descuentos DE COSTO de un artículo, en SQL, para que las pantallas que
  * los muestran usen LA MISMA cuenta.
@@ -9,8 +11,9 @@
  *                     del Excel de costos.
  *   Oferta propia %   lo que ponemos NOSOTROS encima. Columna K del mismo Excel.
  *
- * Viven en `bronze.costos_historicos` por (sku, mes_comercial), no por línea de
- * venta, así que valen para cualquier canal: son del COSTO, no de la venta.
+ * Viven en `bronze.costos_historicos` por (sku, mes_comercial, vigente_desde),
+ * no por línea de venta, así que valen para cualquier canal: son del COSTO, no
+ * de la venta.
  *
  * EL TERCERO --"Dto. venta %", lo que se le descontó al cliente-- NO ESTÁ ACÁ
  * a propósito. Sale de `gold.fact_ventas.oferta_pct`, que lo llena modelo.py
@@ -27,19 +30,24 @@
  * por esas columnas SIN calificar la tabla (`where sku = ...`), así que un join
  * a secas las volvería ambiguas y rompería la pantalla entera.
  *
- * Con el subselect que las renombra, `sku` a secas sigue resolviendo a
+ * Con el lateral que las renombra, `sku` a secas sigue resolviendo a
  * `fact_ventas` y no hay que tocar ni un `where`.
  */
 
-/** El join, con las columnas renombradas para no chocar. `t` es la tabla de ventas. */
+/**
+ * El join, con las columnas renombradas para no chocar. `t` es la tabla de
+ * ventas.
+ *
+ * Trae el tramo de costo que regía EL DÍA DE LA VENTA (ver `sql-costos.ts`).
+ * Desde que un mes puede tener más de un costo, un join por (sku, mes) a secas
+ * devolvería una fila por tramo y duplicaría las unidades de cada artículo.
+ */
 export function joinCostos(t: string): string {
-  return `left join (
-       select sku             as ch_sku,
-              mes_comercial   as ch_mes,
-              oferta_pct      as ch_oferta_prov,
-              desc_propio_pct as ch_oferta_propia
-       from bronze.costos_historicos
-     ) ch on ch.ch_sku = ${t}.sku and ch.ch_mes = ${t}.mes_comercial`;
+  return joinCostoDelDia(
+    t,
+    `c.oferta_pct      as ch_oferta_prov,
+              c.desc_propio_pct as ch_oferta_propia`,
+  );
 }
 
 /**

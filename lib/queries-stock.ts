@@ -10,6 +10,7 @@ import {
   tramoCobertura,
 } from "@/lib/stock";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
+import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import type {
   DashboardStock,
   FilaStock,
@@ -67,12 +68,9 @@ tuc as (
   group by 1
 ),
 costo as (
-  -- El costo del último mes que lo tenga cargado. Los artículos sin costo
-  -- quedan en 0 a propósito: son testers y exhibidores, que no se compran.
-  select distinct on (sku) sku, costo_real
-  from bronze.costos_historicos
-  where costo_real > 0
-  order by sku, mes_comercial desc
+  -- El último costo conocido de cada SKU, el mismo criterio en todas las
+  -- pantallas que valorizan stock. Ver lib/sql-costos.ts.
+  ${ULTIMO_COSTO_VIGENTE}
 ),
 compras as (
   -- La última compra de cada SKU. El detalle de renglones viaja como JSON
