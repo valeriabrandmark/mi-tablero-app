@@ -366,6 +366,8 @@ export default function DashboardPreciosTn() {
   const [aviso, setAviso] = useState<string | null>(null);
   const [confirmando, setConfirmando] = useState(false);
   const [corrida, setCorrida] = useState<EstadoCorrida | null>(null);
+  const [escritura, setEscritura] = useState<EstadoCorrida | null>(null);
+  const [confirmandoEscritura, setConfirmandoEscritura] = useState(false);
   const [recarga, setRecarga] = useState(0);
   // Dos vistas: la cola de lo que falta decidir, y el registro de lo que ya se
   // escribió. Separadas porque se usan en momentos distintos: una es trabajo
@@ -417,25 +419,30 @@ export default function DashboardPreciosTn() {
     };
   }, [filtros, recarga]);
 
-  // El estado del workflow. Se consulta al entrar y, MIENTRAS ESTÁ CORRIENDO,
-  // cada 15 segundos: una bajada tarda unos 6 minutos y un botón que no cuenta
-  // nada durante 6 minutos se clickea de nuevo.
+  // El estado de los DOS workflows. Se consulta al entrar y, MIENTRAS ALGUNO
+  // ESTÁ CORRIENDO, cada 15 segundos: una bajada tarda unos 6 minutos y un
+  // botón que no cuenta nada durante 6 minutos se clickea de nuevo.
   useEffect(() => {
     let vigente = true;
     const mirar = async () => {
-      const r = await fetch("/api/precios-tn/correr", { cache: "no-store" }).catch(() => null);
-      if (!r?.ok || !vigente) return;
-      const datos = await r.json();
-      if (vigente) setCorrida(datos);
+      const [c, e] = await Promise.all([
+        fetch("/api/precios-tn/correr?que=comparar", { cache: "no-store" }).catch(() => null),
+        fetch("/api/precios-tn/correr?que=escribir", { cache: "no-store" }).catch(() => null),
+      ]);
+      if (!vigente) return;
+      if (c?.ok) setCorrida(await c.json());
+      if (e?.ok) setEscritura(await e.json());
     };
     void mirar();
-    const enMarcha = corrida?.estado === "corriendo" || corrida?.estado === "en_cola";
+    const enMarcha = [corrida?.estado, escritura?.estado].some(
+      (s) => s === "corriendo" || s === "en_cola",
+    );
     const t = enMarcha ? setInterval(mirar, 15000) : null;
     return () => {
       vigente = false;
       if (t) clearInterval(t);
     };
-  }, [corrida?.estado, recarga]);
+  }, [corrida?.estado, escritura?.estado, recarga]);
 
   // El historial se trae siempre, no sólo al abrir la solapa: el contador del
   // título tiene que ser cierto desde el primer render, y son pocas filas.
@@ -529,25 +536,48 @@ export default function DashboardPreciosTn() {
     );
   }
 
-  async function correrAhora() {
+  /**
+   * Dispara un workflow. `que` es una llave, no el nombre de un archivo: la
+   * ruta tiene un mapa cerrado y no acepta otra cosa (ver su comentario).
+   */
+  async function correrAhora(que: "comparar" | "escribir") {
     setAviso(null);
-    setCorrida({ estado: "en_cola" });
-    const r = await fetch("/api/precios-tn/correr", { method: "POST" });
+    setConfirmandoEscritura(false);
+    const marcar = que === "comparar" ? setCorrida : setEscritura;
+    marcar({ estado: "en_cola" });
+
+    const r = await fetch("/api/precios-tn/correr", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ que }),
+    });
     const datos = await r.json().catch(() => null);
     if (!r.ok) {
-      setCorrida(null);
-      setAviso(datos?.error ?? "No se pudo arrancar la comparación");
+      marcar(null);
+      setAviso(datos?.error ?? "No se pudo arrancar");
+      return;
+    }
+
+    if (que === "comparar") {
+      setAviso(
+        datos?.yaCorria
+          ? "Ya había una comparación en curso: no se encoló otra."
+          : "Comparación arrancada. Tarda unos 6 minutos; la pantalla se actualiza sola.",
+      );
       return;
     }
     setAviso(
       datos?.yaCorria
-        ? "Ya había una comparación en curso: no se encoló otra."
-        : "Comparación arrancada. Tarda unos 6 minutos; la pantalla se actualiza sola.",
+        ? "Ya había una escritura en curso: no se encoló otra."
+        : "Escritura arrancada. Cada precio se vuelve a verificar contra la tienda antes " +
+            "de tocarlo; lo que se escriba aparece en «Cambios aplicados».",
     );
   }
 
   const alertas = ALERTAS.filter((a) => (resumen?.grupos?.[a.clave] ?? 0) > 0);
   const corriendo = corrida?.estado === "corriendo" || corrida?.estado === "en_cola";
+  const escribiendo = escritura?.estado === "corriendo" || escritura?.estado === "en_cola";
+  const esperandoEscritura = resumen?.aprobadasSinAplicar ?? 0;
 
   return (
     <div className="space-y-5">
@@ -580,18 +610,42 @@ export default function DashboardPreciosTn() {
         </div>
 
         <div className="flex flex-col items-end gap-1">
-          <button
-            onClick={correrAhora}
-            disabled={corriendo || corrida?.disponible === false}
-            className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-            title={
-              corrida?.disponible === false
-                ? "Falta configurar GITHUB_TOKEN_PRECIOS en el entorno"
-                : "Vuelve a leer los precios de la competencia y de nuestra tienda, y recalcula las propuestas"
-            }
-          >
-            {corriendo ? "Comparando…" : "↻ Comparar ahora"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => correrAhora("comparar")}
+              disabled={corriendo || corrida?.disponible === false}
+              className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              title={
+                corrida?.disponible === false
+                  ? "Falta configurar GITHUB_TOKEN_PRECIOS en el entorno"
+                  : "Vuelve a leer los precios de la competencia y de nuestra tienda, y recalcula las propuestas"
+              }
+            >
+              {corriendo ? "Comparando…" : "↻ Comparar ahora"}
+            </button>
+
+            {/* ESCRIBIR NO CORRE SOLO NUNCA. `aplicar.yml` no tiene cron y no
+                va a tenerlo: la comparación es automática, la publicación de un
+                precio se pide. Este botón sólo aparece cuando hay algo
+                autorizado esperando, porque si no, no hay nada que pedir. */}
+            {esperandoEscritura > 0 && (
+              <button
+                onClick={() => setConfirmandoEscritura(true)}
+                disabled={escribiendo || escritura?.disponible === false || confirmandoEscritura}
+                className="border-c1/40 bg-c1/10 text-c1 hover:bg-c1/20 rounded-lg border px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                title={
+                  escritura?.disponible === false
+                    ? "Falta configurar GITHUB_TOKEN_PRECIOS en el entorno"
+                    : "Escribe en Tienda Nube las propuestas que autorizaste"
+                }
+              >
+                {escribiendo
+                  ? "Escribiendo…"
+                  : `Escribir en Tienda Nube (${esperandoEscritura})`}
+              </button>
+            )}
+          </div>
+
           {corrida?.log && (
             <a
               href={corrida.log}
@@ -599,7 +653,21 @@ export default function DashboardPreciosTn() {
               rel="noopener noreferrer"
               className="text-muted hover:text-c1 text-[10px]"
             >
-              {corrida.estado === "fallo" ? "⚠ la última corrida falló — ver log" : "ver el log ↗"}
+              {corrida.estado === "fallo"
+                ? "⚠ la última comparación falló — ver log"
+                : "ver el log de la comparación ↗"}
+            </a>
+          )}
+          {escritura?.log && (
+            <a
+              href={escritura.log}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-muted hover:text-c1 text-[10px]"
+            >
+              {escritura.estado === "fallo"
+                ? "⚠ la última escritura falló — ver log"
+                : "ver el log de la escritura ↗"}
             </a>
           )}
         </div>
@@ -607,6 +675,48 @@ export default function DashboardPreciosTn() {
 
       {aviso && (
         <p className="border-c3/40 bg-c3/10 text-c3 rounded-lg border px-3 py-2 text-sm">{aviso}</p>
+      )}
+
+      {/* LA UNICA CONFIRMACION QUE PROTEGE ALGO IRREVERSIBLE.
+          Autorizar se deshace cambiando un estado en una fila; un precio
+          escrito en Tienda Nube ya lo vio un cliente. Por eso esta pantalla
+          dice qué va a pasar en vez de preguntar "¿estás seguro?". */}
+      {confirmandoEscritura && (
+        <div className="border-c1/40 bg-c1/5 space-y-2 rounded-xl border p-4">
+          <p className="text-sm font-medium">
+            Vas a escribir {esperandoEscritura} precios en Tienda Nube.
+          </p>
+          <ul className="text-muted space-y-1 text-xs leading-relaxed">
+            <li>
+              · Cada uno se <b>vuelve a verificar</b> contra la tienda antes de tocarlo: si
+              alguien lo cambió a mano desde que lo autorizaste, no se pisa, y si quedó debajo
+              del piso de hoy tampoco se escribe.
+            </li>
+            <li>
+              · Donde haya <b>oferta vigente, la oferta sigue</b>: se mueve el precio regular
+              por debajo para que el descuento que muestra la tienda no cambie.
+            </li>
+            <li>
+              · Se escriben <b>50 como máximo</b> por corrida. Si autorizaste más, el resto
+              queda para la siguiente.
+            </li>
+            <li>· Esto sí cambia lo que ve un cliente. Tarda menos de un minuto.</li>
+          </ul>
+          <div className="flex gap-2">
+            <button
+              onClick={() => correrAhora("escribir")}
+              className="border-c1/40 bg-c1/15 text-c1 hover:bg-c1/25 rounded-lg border px-3 py-1.5 text-xs font-medium"
+            >
+              Sí, escribir en la tienda
+            </button>
+            <button
+              onClick={() => setConfirmandoEscritura(false)}
+              className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Dos momentos distintos: decidir lo que falta, y controlar lo hecho.

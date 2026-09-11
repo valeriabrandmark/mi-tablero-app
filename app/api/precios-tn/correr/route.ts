@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { enConstruccion, permisoDelUsuario, puedeVer, puedeVerBorradores } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
@@ -7,33 +7,61 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Disparar a mano la comparación de precios, desde el tablero.
+ * Disparar a mano los workflows del proyecto `precios`, desde el tablero.
  *
  * ---------------------------------------------------------------------------
- * EL WORKFLOW ESTÁ ESCRITO ACÁ Y NO LLEGA EN EL PEDIDO. Es la regla más
- * importante de este archivo.
+ * EL PEDIDO ELIGE UNA LLAVE, NO UN ARCHIVO. Es la regla más importante de este
+ * archivo, y sobrevivió a que el tablero también pueda escribir precios.
  *
- * El proyecto `precios` tiene tres workflows y uno de ellos --`aplicar.yml`--
- * escribe precios en Tienda Nube. Si esta ruta aceptara el nombre del workflow
- * como parámetro, cualquiera que consiguiera una sesión del tablero podría
- * pedirle que dispare la escritura de precios: el tablero se convertiría en el
- * camino corto para saltear la aprobación humana, que es justo lo que todo
- * este diseño evita.
+ * `precios` tiene tres workflows y uno de ellos escribe en Tienda Nube. Si esta
+ * ruta aceptara el nombre del workflow como parámetro, cualquier cosa que
+ * llegue desde el navegador podría nombrar el que quiera — hoy, o el que se
+ * agregue el año que viene sin que nadie se acuerde de esta ruta. Con un mapa
+ * cerrado, lo único que se puede pedir es lo que está acá escrito.
  *
- * Con el nombre fijo, lo peor que puede hacer una sesión robada es pedirle a
- * un runner que lea precios públicos de la competencia. Molesto, no grave.
+ * Y SÍ, AHORA SE PUEDE DISPARAR LA ESCRITURA DESDE LA WEB. Es un cambio
+ * deliberado y tiene un costo que conviene decir en voz alta: antes una sesión
+ * robada del tablero sólo podía aprobar, y para publicar hacía falta entrar a
+ * GitHub. Ahora también puede pedir que se escriba.
  *
- * Por lo mismo el token (`GITHUB_TOKEN_PRECIOS`) tiene que ser fine-grained,
- * del repo `precios` únicamente, y con permiso de Actions y nada más. El
- * candado del nombre fijo y el del alcance del token protegen de lo mismo por
- * dos caminos distintos; tener los dos es barato.
+ * Lo que sigue protegiendo, que no es poco:
+ *
+ *   - sólo se escriben propuestas que el motor calculó y que una persona marcó
+ *     como aprobadas; no hay forma de dictar un precio arbitrario desde acá;
+ *   - `aplicar` vuelve a verificar cada una contra la tienda antes de tocarla
+ *     (piso de hoy, precio no movido, variante publicada) y escribe 50 como
+ *     máximo por corrida;
+ *   - el workflow corre en el environment `produccion`, donde se pueden exigir
+ *     revisores: con eso puesto, el dispatch queda esperando aprobación humana
+ *     en GitHub aunque el pedido haya salido del tablero.
+ *
+ * Lo que se gana a cambio es que el ciclo termine donde empieza: autorizar y
+ * escribir desde la misma pantalla. Un control que obliga a abrir GitHub cada
+ * vez es un control que se termina dejando permanentemente abierto.
  * ---------------------------------------------------------------------------
  */
 const REPO = "valeriabrandmark/precios";
-const WORKFLOW = "competencia.yml";
 const RAMA = "main";
 
-const API = `https://api.github.com/repos/${REPO}/actions/workflows/${WORKFLOW}`;
+/** Lo único que el navegador puede pedir. La llave no es el nombre del archivo. */
+const WORKFLOWS = {
+  comparar: { archivo: "competencia.yml", inputs: {} as Record<string, unknown> },
+  escribir: {
+    archivo: "aplicar.yml",
+    // `confirmar: true` es lo que pone PRECIOS_APLICAR=si en el workflow. Sin
+    // esto el job corre el simulacro y no escribe nada — que es su default.
+    inputs: { confirmar: true, limite: "50" } as Record<string, unknown>,
+  },
+} as const;
+
+type Llave = keyof typeof WORKFLOWS;
+
+function esLlave(v: unknown): v is Llave {
+  return v === "comparar" || v === "escribir";
+}
+
+const apiDe = (llave: Llave) =>
+  `https://api.github.com/repos/${REPO}/actions/workflows/${WORKFLOWS[llave].archivo}`;
 
 type CorridaGitHub = {
   estado: "en_cola" | "corriendo" | "termino" | "fallo" | "sin_datos";
@@ -49,9 +77,9 @@ function cabeceras(token: string) {
   };
 }
 
-/** Cómo salió (o cómo va) la última corrida de comparación. */
-async function ultimaCorrida(token: string): Promise<CorridaGitHub> {
-  const r = await fetch(`${API}/runs?per_page=1`, {
+/** Cómo salió (o cómo va) la última corrida de ese workflow. */
+async function ultimaCorrida(token: string, llave: Llave): Promise<CorridaGitHub> {
+  const r = await fetch(`${apiDe(llave)}/runs?per_page=1`, {
     headers: cabeceras(token),
     cache: "no-store",
   });
@@ -72,7 +100,11 @@ async function ultimaCorrida(token: string): Promise<CorridaGitHub> {
           ? "termino"
           : "fallo";
 
-  return { estado, arrancada: run.run_started_at ?? run.created_at ?? null, log: run.html_url ?? null };
+  return {
+    estado,
+    arrancada: run.run_started_at ?? run.created_at ?? null,
+    log: run.html_url ?? null,
+  };
 }
 
 async function autorizar() {
@@ -87,19 +119,25 @@ async function autorizar() {
   return null;
 }
 
-/** El estado, para que el botón pueda decir "corriendo" en vez de no decir nada. */
-export async function GET() {
+/** El estado, para que los botones puedan decir "corriendo" en vez de nada. */
+export async function GET(request: NextRequest) {
   const rechazo = await autorizar();
   if (rechazo) return rechazo;
 
   const token = process.env.GITHUB_TOKEN_PRECIOS;
   if (!token) return NextResponse.json({ disponible: false, estado: "sin_datos" });
 
-  return NextResponse.json({ disponible: true, ...(await ultimaCorrida(token)) });
+  const crudo = request.nextUrl.searchParams.get("que");
+  const llave: Llave = esLlave(crudo) ? crudo : "comparar";
+  return NextResponse.json({
+    disponible: true,
+    que: llave,
+    ...(await ultimaCorrida(token, llave)),
+  });
 }
 
-/** Dispara la comparación. */
-export async function POST() {
+/** Dispara uno de los dos workflows. */
+export async function POST(request: NextRequest) {
   const rechazo = await autorizar();
   if (rechazo) return rechazo;
 
@@ -111,23 +149,24 @@ export async function POST() {
     );
   }
 
-  // NO ENCOLAR UNA SEGUNDA CORRIDA SOBRE UNA QUE YA ESTÁ. El workflow tiene su
-  // propia `concurrency`, así que no correrían dos a la vez; lo que evita esto
-  // es la cola de veinte corridas que deja un botón clickeado veinte veces, y
-  // que después le pega veinte veces seguidas a los sitios de la competencia.
-  // Esos sitios no nos deben nada.
-  const actual = await ultimaCorrida(token);
+  const cuerpo = await request.json().catch(() => null);
+  const llave: Llave = esLlave(cuerpo?.que) ? cuerpo.que : "comparar";
+
+  // NO ENCOLAR UNA SEGUNDA CORRIDA SOBRE UNA QUE YA ESTÁ.
+  //
+  // Cada workflow ya tiene su `concurrency`, así que no correrían dos a la vez.
+  // Lo que evita esto es la cola que deja un botón clickeado veinte veces: en
+  // `comparar`, veinte bajadas seguidas contra sitios que no nos deben nada; en
+  // `escribir`, veinte corridas pisándose sobre las mismas propuestas.
+  const actual = await ultimaCorrida(token, llave);
   if (actual.estado === "corriendo" || actual.estado === "en_cola") {
-    return NextResponse.json(
-      { ok: true, yaCorria: true, ...actual },
-      { status: 200 },
-    );
+    return NextResponse.json({ ok: true, yaCorria: true, que: llave, ...actual });
   }
 
-  const r = await fetch(`${API}/dispatches`, {
+  const r = await fetch(`${apiDe(llave)}/dispatches`, {
     method: "POST",
     headers: { ...cabeceras(token), "content-type": "application/json" },
-    body: JSON.stringify({ ref: RAMA }),
+    body: JSON.stringify({ ref: RAMA, inputs: WORKFLOWS[llave].inputs }),
   });
 
   if (!r.ok) {
@@ -144,5 +183,5 @@ export async function POST() {
   // El dispatch contesta 204 sin cuerpo y la corrida tarda unos segundos en
   // aparecer en la API. No se consulta el estado acá: daría "sin_datos" y la
   // pantalla mostraría que no pasó nada justo después de que sí pasó.
-  return NextResponse.json({ ok: true, yaCorria: false, estado: "en_cola" });
+  return NextResponse.json({ ok: true, yaCorria: false, que: llave, estado: "en_cola" });
 }
