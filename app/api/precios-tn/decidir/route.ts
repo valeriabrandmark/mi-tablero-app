@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { enConstruccion, permisoDelUsuario, puedeVer, puedeVerBorradores } from "@/lib/permisos";
-import { decidirPropuesta } from "@/lib/queries-precios-tn";
+import { aprobarFiltradas, decidirPropuesta } from "@/lib/queries-precios-tn";
+import { leerFiltros } from "@/lib/precios-tn";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
 
@@ -8,13 +9,24 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Aprobar o rechazar una propuesta. LO ÚNICO QUE ESTA APLICACIÓN ESCRIBE.
+ * Aprobar o rechazar propuestas. LO ÚNICO QUE ESTA APLICACIÓN ESCRIBE.
  *
- * NO TOCA TIENDA NUBE, y no puede: cambia `estado` en una fila de Postgres y
- * nada más. La escritura del precio la hace el workflow del proyecto `precios`
- * con un token que esta aplicación no tiene. Por eso una sesión robada del
- * tablero no puede publicar un precio — lo peor que puede hacer es aprobar
- * algo, que queda firmado con el mail de quien lo hizo.
+ * NO TOCA TIENDA NUBE, y no puede: cambia `estado` en filas de Postgres y nada
+ * más. La escritura del precio la hace el workflow del proyecto `precios` con
+ * un token que esta aplicación no tiene. Por eso una sesión robada del tablero
+ * no puede publicar un precio — lo peor que puede hacer es aprobar algo, que
+ * queda firmado con el mail de quien lo hizo.
+ *
+ * Dos formas de pedirlo:
+ *
+ *   { id, decision }        una propuesta.
+ *   { todas: true, ...f }   todo lo que cumple el filtro `f`.
+ *
+ * EL BLOQUE VIAJA COMO FILTRO Y NO COMO LISTA DE IDs, a propósito. Si el
+ * navegador mandara los IDs, estaría aprobando lo que su pantalla recordaba —
+ * que puede ser de hace media hora, de antes de que otra persona decidiera la
+ * mitad. Mandando el filtro, el servidor vuelve a resolver "todo lo de esta
+ * marca" contra la base de ahora, que es lo que la persona quiso decir.
  */
 export async function POST(request: NextRequest) {
   let quien = "desconocido";
@@ -32,6 +44,13 @@ export async function POST(request: NextRequest) {
   }
 
   const cuerpo = await request.json().catch(() => null);
+
+  if (cuerpo?.todas === true) {
+    const filtros = leerFiltros(new URLSearchParams(cuerpo?.filtros ?? {}));
+    const total = await aprobarFiltradas(filtros, quien);
+    return NextResponse.json({ ok: true, aprobadas: total, quien });
+  }
+
   const id = Number(cuerpo?.id);
   const decision = cuerpo?.decision;
 

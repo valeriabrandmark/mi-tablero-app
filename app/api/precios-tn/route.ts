@@ -1,7 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { enConstruccion, permisoDelUsuario, puedeVer, puedeVerBorradores } from "@/lib/permisos";
-import { getFilasPreciosTn, getResumenPreciosTn } from "@/lib/queries-precios-tn";
-import { ALERTAS, type ClaveAlerta } from "@/lib/precios-tn";
+import {
+  contarAprobables,
+  getCatalogosPreciosTn,
+  getFilasPreciosTn,
+  getResumenPreciosTn,
+} from "@/lib/queries-precios-tn";
+import { leerFiltros } from "@/lib/precios-tn";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
 
@@ -22,16 +27,17 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // El grupo se valida contra la lista y no se pasa crudo: un valor inventado
-  // no encontraría clasificación y el filtro caería silencioso en "todo", que
-  // es justo lo que el usuario no pidió.
-  const crudo = request.nextUrl.searchParams.get("grupo");
-  const grupo = (ALERTAS.find((a) => a.clave === crudo)?.clave ?? null) as ClaveAlerta | null;
+  const filtros = leerFiltros(request.nextUrl.searchParams);
 
-  const [resumen, filas] = await Promise.all([
+  const [resumen, filas, catalogos, aprobables] = await Promise.all([
     getResumenPreciosTn(),
-    getFilasPreciosTn(grupo),
+    getFilasPreciosTn(filtros),
+    getCatalogosPreciosTn(),
+    // Cuántas aprobaría el botón de bloque con ESTE filtro. Se calcula acá y no
+    // contando las filas de la pantalla: la lista está limitada a 200 y el
+    // botón no lo está, así que contarlas en el navegador mentiría por lo bajo.
+    contarAprobables(filtros),
   ]);
 
-  return NextResponse.json({ resumen, filas, grupo });
+  return NextResponse.json({ resumen, filas, catalogos, aprobables, filtros });
 }

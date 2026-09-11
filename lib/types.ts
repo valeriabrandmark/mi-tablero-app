@@ -1729,6 +1729,7 @@ export type FilaPrecioTn = {
   sku: string;
   descripcion: string;
   marca: string | null;
+  proveedor: string | null;
   accion: "mantener" | "subir" | "bajar" | "omitir";
   estado: "pendiente" | "aprobada" | "rechazada" | "aplicada" | "vencida";
   precioActual: number | null;
@@ -1746,8 +1747,34 @@ export type FilaPrecioTn = {
 
 export type ResumenPreciosTn = {
   corridaId: number | null;
+  /** Cuándo corrió el motor que produjo estas propuestas. */
   corridaFecha: string | null;
+  /**
+   * Cuándo se miró a la competencia por última vez, que NO es lo mismo.
+   *
+   * El motor puede correr hoy sobre observaciones de hace tres días: para él
+   * son datos vigentes según la política, y no tiene forma de avisar. Quien
+   * aprueba necesita este otro número, porque es el que dice si la pantalla
+   * está hablando del mercado de hoy o del de la semana pasada.
+   */
+  comparadoEn: string | null;
   grupos: Record<string, number>;
   pendientes: number;
   decididas: number;
+  /** Aprobadas y todavía sin escribir en la tienda, de todas las corridas. */
+  aprobadasSinAplicar: number;
+};
+
+/** Los filtros de la pantalla. `null` = sin filtrar por eso. */
+export type FiltrosPreciosTn = {
+  grupo: string | null;
+  proveedor: string | null;
+  marca: string | null;
+  busqueda: string | null;
+};
+
+/** Los valores que existen hoy para llenar los desplegables. */
+export type CatalogosPreciosTn = {
+  proveedores: string[];
+  marcas: string[];
 };

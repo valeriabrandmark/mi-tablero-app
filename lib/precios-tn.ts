@@ -13,6 +13,8 @@
  * ---------------------------------------------------------------------------
  */
 
+import type { FiltrosPreciosTn } from "@/lib/types";
+
 /** Vive en `precios`, no acá. Se repite el nombre para poder tipar. */
 export const ESTADOS = ["pendiente", "aprobada", "rechazada", "aplicada", "vencida"] as const;
 export type EstadoPropuesta = (typeof ESTADOS)[number];
@@ -99,4 +101,36 @@ export const NOMBRE_FUENTE: Record<string, string> = {
 
 export function nombreFuente(codigo: string): string {
   return NOMBRE_FUENTE[codigo] ?? codigo;
+}
+
+/**
+ * Lee los filtros de la query string.
+ *
+ * VIVE ACÁ Y NO EN CADA RUTA porque la ruta que LISTA y la que APRUEBA EN
+ * BLOQUE tienen que entender exactamente los mismos parámetros. Si cada una
+ * los leyera a su manera, el día que difieran el botón de "autorizar todo"
+ * aprobaría un conjunto distinto del que la persona tiene delante — y eso no
+ * daría ningún error, sólo precios aprobados que nadie miró.
+ */
+export function leerFiltros(params: URLSearchParams): FiltrosPreciosTn {
+  // El grupo se valida contra la lista y no se pasa crudo: un valor inventado
+  // no encontraría clasificación y el filtro caería silencioso en "todo", que
+  // es justo lo que no se pidió.
+  const crudo = params.get("grupo");
+  const grupo = (ALERTAS.find((a) => a.clave === crudo)?.clave ?? null) as ClaveAlerta | null;
+
+  const texto = (nombre: string, largoMaximo: number) => {
+    const v = params.get(nombre)?.trim() ?? "";
+    return v ? v.slice(0, largoMaximo) : null;
+  };
+
+  return {
+    grupo,
+    // Van parametrizados en el SQL, así que el recorte no es contra inyección
+    // sino contra una query string absurda de 8 kB que no puede coincidir con
+    // ningún proveedor real.
+    proveedor: texto("proveedor", 120),
+    marca: texto("marca", 120),
+    busqueda: texto("q", 60),
+  };
 }
