@@ -1,6 +1,7 @@
 import { query, queryOne } from "@/lib/db";
 import { DIFERENCIA_MINIMA_VISIBLE, type ClaveAlerta } from "@/lib/precios-tn";
 import type {
+  CambioPrecioTn,
   CatalogosPreciosTn,
   FilaPrecioTn,
   FiltrosPreciosTn,
@@ -403,4 +404,140 @@ export async function contarAprobables(filtros: FiltrosPreciosTn): Promise<{
     params,
   );
   return fila ?? { total: 0, bajan: 0, suben: 0 };
+}
+
+/* -------------------------------------------------------------------------
+   Cambios aplicados: qué se escribió de verdad en la tienda.
+   ------------------------------------------------------------------------- */
+
+/**
+ * El historial de precios escritos, del más reciente al más viejo.
+ *
+ * SALE DE `precios.cambio`, QUE ES LA ÚNICA VERDAD SOBRE ESTO. Esa tabla la
+ * escribe el comando `aplicar` en la misma transacción en la que cierra la
+ * propuesta, y tiene un trigger que prohíbe `update` y `delete`: un registro de
+ * auditoría que se puede editar no es un registro de auditoría. El precio
+ * anterior queda guardado ahí, que es lo que permite volver atrás sin depender
+ * de que Tienda Nube recuerde nada.
+ *
+ * El link a nuestra propia ficha sale de `bronze.tn_productos.canonical_url`.
+ * Esa tabla está desactualizada para los PRECIOS --el error que originó medio
+ * proyecto-- pero la dirección de un producto no cambia cuando cambia su
+ * precio, que es la misma razón por la que se puede completar desde ahí la URL
+ * de un competidor.
+ */
+export async function getCambiosPreciosTn(limite = 200): Promise<CambioPrecioTn[]> {
+  return query<CambioPrecioTn>(
+    `select c.id,
+            c.sku,
+            coalesce(a.descripcion, c.sku)          as descripcion,
+            coalesce(a.marca, a."attributes.marca") as marca,
+            c.precio_anterior::float8               as "precioAnterior",
+            c.precio_nuevo::float8                  as "precioNuevo",
+            case when c.precio_anterior > 0
+                 then ((c.precio_nuevo - c.precio_anterior) / c.precio_anterior)::float8
+            end                                     as variacion,
+            c.aplicado_en                           as "aplicadoEn",
+            p.decidida_por                          as "autorizadoPor",
+            t.canonical_url                         as url,
+            -- Si ya se deshizo, no se puede deshacer de nuevo. Se mira si
+            -- existe una propuesta que revierta ESTE cambio y que siga viva
+            -- (aprobada = en cola, aplicada = ya revertido).
+            exists (
+              select 1 from precios.propuesta r
+               where r.revierte_cambio_id = c.id
+                 and r.estado in ('aprobada', 'aplicada')
+            )                                       as "yaSeDeshizo"
+       from precios.cambio c
+       left join precios.propuesta p       on p.id = c.propuesta_id
+       left join bronze.sigma_articulos a  on a.id = c.sku
+       left join bronze.tn_productos t     on t.id = c.producto_id
+      order by c.aplicado_en desc
+      limit $1`,
+    [limite],
+  );
+}
+
+/**
+ * Deshacer un cambio: vuelve al precio anterior, que quedó guardado.
+ *
+ * NO ESCRIBE EN TIENDA NUBE, y no puede. Crea una PROPUESTA en sentido
+ * contrario, ya aprobada, que escribe `precios aplicar` como cualquier otra.
+ * Esa vuelta larga es el punto: le hace pasar por los mismos controles, que
+ * resultan ser exactamente los que un "deshacer" necesita.
+ *
+ *   - Si alguien tocó ese precio a mano después del cambio, no se pisa: el
+ *     precio de la tienda ya no coincide con el que dejamos, y `revisar()`
+ *     lo rechaza con el motivo escrito.
+ *   - Si el precio viejo quedó debajo del piso de HOY --que suele ser POR QUÉ
+ *     se cambió-- tampoco se escribe, y queda dicho.
+ *   - Y la vuelta atrás queda en `precios.cambio` como un cambio más, con su
+ *     propio precio anterior. Se puede deshacer el deshacer.
+ *
+ * Devuelve el id de la propuesta creada, o null si ese cambio ya tenía una.
+ */
+export async function deshacerCambio(
+  cambioId: number,
+  quien: string,
+): Promise<number | null> {
+  const cambio = await queryOne<{
+    id: number;
+    sku: string;
+    producto_id: string;
+    variante_id: string;
+    precio_anterior: string;
+    precio_nuevo: string;
+  }>(
+    `select c.id, c.sku, c.producto_id, c.variante_id, c.precio_anterior, c.precio_nuevo
+       from precios.cambio c
+      where c.id = $1
+        and not exists (
+          select 1 from precios.propuesta r
+           where r.revierte_cambio_id = c.id
+             and r.estado in ('aprobada', 'aplicada')
+        )`,
+    [cambioId],
+  );
+  if (!cambio) return null;
+
+  // Una corrida propia por cada deshacer. Las propuestas necesitan una y ésta
+  // no viene del motor; además deja quién lo pidió, que es justo lo que
+  // después hay que poder contestar.
+  const corrida = await queryOne<{ id: number }>(
+    `insert into precios.corrida (tipo, estado, terminada_en, detalle)
+     values ('deshacer', 'ok', now(), jsonb_build_object('quien', $1::text, 'cambio_id', $2::bigint))
+     returning id`,
+    [quien, cambioId],
+  );
+  if (!corrida) return null;
+
+  // `precio_actual` es lo que ESCRIBIMOS nosotros, no lo que haya hoy en la
+  // tienda. Es a propósito: `aplicar` compara ese número contra el precio real
+  // antes de escribir, y si no coinciden es porque alguien lo movió en el
+  // medio -- y entonces deshacer borraría su corrección.
+  const propuesta = await queryOne<{ id: number }>(
+    `insert into precios.propuesta
+         (corrida_id, sku, accion, precio_actual, precio_propuesto,
+          motivos, entradas, estado, decidida_por, decidida_en, revierte_cambio_id)
+     values ($1, $2,
+             case when $3::numeric < $4::numeric then 'bajar' else 'subir' end,
+             $4::numeric, $3::numeric,
+             jsonb_build_array(
+               format('deshacer el cambio #%s: volver de %s a %s', $5::text, $4::text, $3::text),
+               'pedido a mano desde el tablero, no lo propuso el motor'),
+             jsonb_build_object('producto_id', $6::bigint, 'variante_id', $7::bigint),
+             'aprobada', $8::text, now(), $5::bigint)
+     returning id`,
+    [
+      corrida.id,
+      cambio.sku,
+      cambio.precio_anterior,
+      cambio.precio_nuevo,
+      cambioId,
+      cambio.producto_id,
+      cambio.variante_id,
+      quien,
+    ],
+  );
+  return propuesta?.id ?? null;
 }

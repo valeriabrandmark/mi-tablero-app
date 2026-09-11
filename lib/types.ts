@@ -1778,3 +1778,26 @@ export type CatalogosPreciosTn = {
   proveedores: string[];
   marcas: string[];
 };
+
+/**
+ * Un precio efectivamente escrito en Tienda Nube.
+ *
+ * Sale de `precios.cambio`, que es append-only por trigger: un registro de
+ * auditoría que se puede editar no es un registro de auditoría. `precioAnterior`
+ * es lo que permite volver atrás sin depender de que Tienda Nube recuerde nada.
+ */
+export type CambioPrecioTn = {
+  id: number;
+  sku: string;
+  descripcion: string;
+  marca: string | null;
+  precioAnterior: number;
+  precioNuevo: number;
+  /** Fracción: 0,12 = el precio subió 12 %. */
+  variacion: number | null;
+  aplicadoEn: string;
+  autorizadoPor: string | null;
+  /** La ficha en NUESTRA tienda, para ir a verlo. */
+  url: string | null;
+  yaSeDeshizo: boolean;
+};
