@@ -256,6 +256,13 @@ export async function POST(request: NextRequest) {
       usuarioSigma,
     );
 
+    // La URL viaja a la pantalla junto con el error. NO LLEVA CREDENCIALES: el
+    // token va en la cabecera `X-Auth-Token`, no acá. Y sirve para lo único
+    // que no se puede resolver mirando el JSON -- soporte dijo "fijate que la
+    // URL tiene que ser tal", y esto deja compararla carácter por carácter en
+    // vez de deducirla de tres variables de entorno que nadie ve juntas.
+    const url = urlDeSigma();
+
     // A PARTIR DE ACÁ YA NO SE PUEDE PROMETER QUE NO PASÓ NADA.
     //
     // El flag se levanta ANTES del fetch y no después a propósito: si la
@@ -263,7 +270,6 @@ export async function POST(request: NextRequest) {
     // muere, la orden puede haber entrado igual. Levantarlo después dejaría
     // justo esos casos --los únicos donde la duda importa-- del lado del "no
     // se mandó".
-    const url = urlDeSigma();
     yaSalio = true;
 
     const respuesta = await fetch(url, {
@@ -294,6 +300,7 @@ export async function POST(request: NextRequest) {
         {
           error:
             texto || `Sigma contestó ${respuesta.status} sin explicar por qué.`,
+          url,
           // Sigma contesta 500 también cuando la orden se cargó bien, así que
           // esto NO es "falló": es "no sabemos". La pantalla tiene que decirlo
           // con esas palabras o alguien reintenta y carga la orden dos veces.
