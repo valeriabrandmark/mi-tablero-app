@@ -5,6 +5,7 @@ import { fmtMoneda, fmtPct } from "@/lib/format";
 import { Tabla, type Columna } from "@/components/Tabla";
 import { ALERTAS, nombreFuente, type ClaveAlerta } from "@/lib/precios-tn";
 import type {
+  CambioPrecioTn,
   CatalogosPreciosTn,
   FilaPrecioTn,
   FiltrosPreciosTn,
@@ -14,10 +15,9 @@ import type {
 /**
  * Precios TN — Comparador.
  *
- * LA COLA SE ORDENA POR DISTANCIA AL MERCADO, no por el tamaño del cambio que
- * propone el motor. Un producto 60 % caro que la banda sólo deja bajar 10 %
- * tiene que salir primero: lo que hay que priorizar es cuánto nos separa de la
- * competencia, no cuánto alcanzó a corregir el motor en una corrida.
+ * LA COLA SE ORDENA POR DISTANCIA AL MERCADO. Lo que hay que priorizar es
+ * cuánto nos separa de la competencia: un producto 60 % caro es más urgente que
+ * uno 5 % caro, aunque el segundo sea más fácil de arreglar.
  *
  * CADA COMPETIDOR SE MUESTRA CON NOMBRE, PRECIO Y LINK. Aprobar un cambio de
  * precio sin poder abrir la ficha del otro y verla es aprobar a ciegas.
@@ -163,8 +163,10 @@ function columnas(
     {
       titulo: "Propuesto",
       ayuda:
-        "A dónde llevaría el precio el motor. Sale de igualar al competidor más barato, " +
-        "subirlo al piso si quedaba por debajo, y después limitar el movimiento a ±10 % del precio de hoy. " +
+        "A dónde llevaría el precio el motor: iguala al competidor más barato, y si eso " +
+        "quedaba por debajo del piso, lo sube al piso. NO HAY TOPE DE SUBA — el único límite " +
+        "es hacia abajo, y es el piso. Cuando el movimiento pasa del 50 % el motor lo avisa en " +
+        "los motivos, para que abras la ficha del competidor antes de autorizar. " +
         "Vacío = el motor no propone nada (sin stock, sin costo o sin competencia).",
       celda: (f) =>
         f.precioPropuesto ? fmtMoneda(f.precioPropuesto) : <span className="text-muted">—</span>,
@@ -232,6 +234,115 @@ function columnas(
   ];
 }
 
+/**
+ * Las columnas de "Cambios aplicados".
+ *
+ * ESTA TABLA ES EL CONTROL, y por eso muestra el precio anterior aunque ya no
+ * exista en ningún lado más que acá: `precios.cambio` lo guarda justamente para
+ * poder volver atrás sin depender de que Tienda Nube recuerde nada. La tabla es
+ * append-only por trigger — un registro de auditoría que se puede editar no es
+ * un registro de auditoría.
+ */
+function columnasCambios(
+  deshacer: (id: number) => void,
+): Columna<CambioPrecioTn>[] {
+  return [
+    {
+      titulo: "Cuándo",
+      ayuda:
+        "Cuándo se escribió el precio en Tienda Nube de verdad. No es cuándo lo autorizaste: " +
+        "entre una cosa y la otra corrió `precios aplicar`, que vuelve a verificar cada precio " +
+        "contra la tienda antes de tocarlo.",
+      celda: (c) => (
+        <div>
+          <span className="block text-xs">
+            {new Date(c.aplicadoEn).toLocaleString("es-AR")}
+          </span>
+          <span className="text-muted text-[10px]">{haceCuanto(c.aplicadoEn)}</span>
+        </div>
+      ),
+      orden: (c) => c.aplicadoEn,
+    },
+    {
+      titulo: "Producto",
+      ayuda: "Abre la ficha en NUESTRA tienda para verificar que el precio quedó como esperabas.",
+      celda: (c) => (
+        <div>
+          {c.url ? (
+            <a
+              href={c.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-c1 block max-w-[260px] truncate font-medium"
+              title="Abrir la ficha en unibrandco.com.ar"
+            >
+              {c.descripcion} ↗
+            </a>
+          ) : (
+            <span className="block max-w-[260px] truncate font-medium">{c.descripcion}</span>
+          )}
+          <span className="text-muted font-mono text-[10px]">
+            {c.sku}
+            {c.marca ? ` · ${c.marca}` : ""}
+          </span>
+        </div>
+      ),
+      orden: (c) => c.descripcion,
+    },
+    {
+      titulo: "Antes",
+      ayuda:
+        "El precio que tenía la tienda justo antes de que lo escribiéramos. Está guardado en " +
+        "`precios.cambio`: es lo que hace posible volver atrás.",
+      celda: (c) => <span className="text-muted line-through">{fmtMoneda(c.precioAnterior)}</span>,
+      numerica: true,
+      orden: (c) => c.precioAnterior,
+    },
+    {
+      titulo: "Ahora",
+      ayuda: "El precio que escribimos.",
+      celda: (c) => <span className="font-medium">{fmtMoneda(c.precioNuevo)}</span>,
+      numerica: true,
+      orden: (c) => c.precioNuevo,
+    },
+    {
+      titulo: "Cambio",
+      celda: (c) => <Diferencia valor={c.variacion} />,
+      numerica: true,
+      orden: (c) => c.variacion,
+    },
+    {
+      titulo: "Autorizó",
+      ayuda: "Quién aprobó la propuesta que produjo este cambio.",
+      celda: (c) => (
+        <span className="text-muted text-[11px]">{c.autorizadoPor ?? "—"}</span>
+      ),
+      orden: (c) => c.autorizadoPor,
+    },
+    {
+      titulo: "",
+      ayuda:
+        "Deshacer NO escribe en Tienda Nube desde acá: deja pedida una propuesta de vuelta al " +
+        "precio anterior, que escribe `precios aplicar` en la próxima corrida. Eso la hace pasar " +
+        "por los mismos controles, incluido el que impide pisar una corrección que alguien haya " +
+        "hecho a mano en el medio.",
+      celda: (c) =>
+        c.yaSeDeshizo ? (
+          <span className="text-muted text-xs">vuelta pedida</span>
+        ) : (
+          <div className="flex justify-end">
+            <button
+              onClick={() => deshacer(c.id)}
+              className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1 text-xs"
+            >
+              ↩ Deshacer
+            </button>
+          </div>
+        ),
+    },
+  ];
+}
+
 type Aprobables = { total: number; bajan: number; suben: number };
 type EstadoCorrida = {
   disponible?: boolean;
@@ -256,6 +367,11 @@ export default function DashboardPreciosTn() {
   const [confirmando, setConfirmando] = useState(false);
   const [corrida, setCorrida] = useState<EstadoCorrida | null>(null);
   const [recarga, setRecarga] = useState(0);
+  // Dos vistas: la cola de lo que falta decidir, y el registro de lo que ya se
+  // escribió. Separadas porque se usan en momentos distintos: una es trabajo
+  // pendiente y la otra es control de lo hecho.
+  const [vista, setVista] = useState<"cola" | "cambios">("cola");
+  const [cambios, setCambios] = useState<CambioPrecioTn[]>([]);
 
   // Medio segundo de quietud antes de consultar. Es el mínimo que se siente
   // instantáneo y el máximo que evita una consulta por letra.
@@ -321,6 +437,21 @@ export default function DashboardPreciosTn() {
     };
   }, [corrida?.estado, recarga]);
 
+  // El historial se trae siempre, no sólo al abrir la solapa: el contador del
+  // título tiene que ser cierto desde el primer render, y son pocas filas.
+  useEffect(() => {
+    let vigente = true;
+    (async () => {
+      const r = await fetch("/api/precios-tn/cambios", { cache: "no-store" }).catch(() => null);
+      if (!r?.ok || !vigente) return;
+      const datos = await r.json();
+      if (vigente) setCambios(datos.cambios ?? []);
+    })();
+    return () => {
+      vigente = false;
+    };
+  }, [recarga]);
+
   const recargar = useCallback(() => {
     setCargando(true);
     setRecarga((n) => n + 1);
@@ -377,6 +508,25 @@ export default function DashboardPreciosTn() {
     const { aprobadas } = await r.json();
     setAviso(`${aprobadas} propuestas autorizadas. Se escriben cuando corra \`precios aplicar\`.`);
     recargar();
+  }
+
+  async function deshacer(id: number) {
+    setAviso(null);
+    const r = await fetch("/api/precios-tn/cambios", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    if (!r.ok) {
+      setAviso((await r.json().catch(() => null))?.error ?? "No se pudo pedir la vuelta atrás");
+      recargar();
+      return;
+    }
+    setCambios((previos) => previos.map((c) => (c.id === id ? { ...c, yaSeDeshizo: true } : c)));
+    setAviso(
+      "Vuelta atrás pedida. El precio anterior se escribe en la próxima corrida de " +
+        "`aplicar`, después de verificar que nadie lo haya tocado en el medio.",
+    );
   }
 
   async function correrAhora() {
@@ -459,6 +609,33 @@ export default function DashboardPreciosTn() {
         <p className="border-c3/40 bg-c3/10 text-c3 rounded-lg border px-3 py-2 text-sm">{aviso}</p>
       )}
 
+      {/* Dos momentos distintos: decidir lo que falta, y controlar lo hecho.
+          Mezclarlos en una sola tabla haría que el trabajo pendiente quede
+          sepultado bajo el historial apenas se apliquen unas semanas. */}
+      <div className="border-line flex gap-1 border-b">
+        {(
+          [
+            ["cola", "Para revisar", resumen?.pendientes ?? null],
+            ["cambios", "Cambios aplicados", cambios.length],
+          ] as const
+        ).map(([clave, titulo, total]) => (
+          <button
+            key={clave}
+            onClick={() => setVista(clave)}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm transition ${
+              vista === clave
+                ? "border-c1 text-ink font-medium"
+                : "text-muted hover:text-ink border-transparent"
+            }`}
+          >
+            {titulo}
+            {total !== null && <span className="text-muted ml-1.5 text-xs">{total}</span>}
+          </button>
+        ))}
+      </div>
+
+      {vista === "cola" && (
+        <>
       {/* Las alertas. No son tramos de un mismo eje: son situaciones que se
           resuelven de formas distintas, por eso van separadas y en este orden. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -582,11 +759,41 @@ export default function DashboardPreciosTn() {
           vacio={hayFiltro ? "Nada coincide con el filtro." : "No hay propuestas para revisar."}
         />
       )}
+        </>
+      )}
+
+      {vista === "cambios" && (
+        <>
+          {/* EL REGISTRO DE LO QUE SE ESCRIBIO DE VERDAD.
+              No sale de las propuestas aprobadas --que son intenciones-- sino
+              de precios.cambio, que escribe `aplicar` en la misma transaccion
+              en la que cierra la propuesta. Si algo figura aca, se escribio. */}
+          {cambios.length === 0 ? (
+            <div className="border-line bg-panel-2/40 rounded-xl border p-6 text-center">
+              <p className="text-sm font-medium">Todavía no se escribió ningún precio.</p>
+              <p className="text-muted mx-auto mt-2 max-w-lg text-xs leading-relaxed">
+                Acá va a aparecer cada precio que el proyecto <code>precios</code> escriba en
+                Tienda Nube, con el valor anterior guardado para poder volver atrás. Autorizar
+                una propuesta no alcanza: la escritura la hace el workflow{" "}
+                <em>Aplicar precios en Tienda Nube</em>, con <code>confirmar</code> tildado.
+              </p>
+            </div>
+          ) : (
+            <Tabla
+              filas={cambios}
+              columnas={columnasCambios(deshacer)}
+              clave={(c) => String(c.id)}
+              vacio="Todavía no se escribió ningún precio."
+            />
+          )}
+        </>
+      )}
 
       <p className="text-muted text-[11px]">
-        Autorizar acá NO cambia el precio en Tienda Nube: marca la propuesta como
-        aprobada. La escritura la hace el proyecto <code>precios</code> desde su
-        workflow, con un token que este tablero no tiene.
+        Ni autorizar ni deshacer cambian un precio en Tienda Nube desde acá: las dos
+        cosas dejan una propuesta en la base. La escritura la hace el proyecto{" "}
+        <code>precios</code> desde su workflow, con un token que este tablero no tiene
+        y no debe tener.
       </p>
     </div>
   );
