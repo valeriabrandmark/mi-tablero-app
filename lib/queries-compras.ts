@@ -1,5 +1,6 @@
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
+import { COSTOS_VIGENTES_POR_MES, ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import {
   COBERTURA_MAXIMA_COMPRA_DIAS,
   COBERTURA_SIN_INFLAR_DIAS,
@@ -57,12 +58,10 @@ tuc as (
   from bronze.digip_stock
   group by 1
 ),
--- El costo con el que se valoriza: el del último mes que lo tenga cargado.
+-- El costo con el que se valoriza: el último que tenga cargado (ver
+-- lib/sql-costos.ts).
 costo as (
-  select distinct on (sku) sku, costo_real, costo_teorico
-  from bronze.costos_historicos
-  where costo_real > 0
-  order by sku, mes_comercial desc
+  ${ULTIMO_COSTO_VIGENTE}
 ),
 -- El sell in VIGENTE DEL PROVEEDOR en el mes elegido: el descuento con el que
 -- se le pide, y el único que puede ir a FDESCU1.
@@ -87,8 +86,11 @@ sell_in as (
 -- MUESTRA como referencia —es con lo que venimos costeando— pero no viaja al
 -- archivo.
 oferta as (
+  -- UNA fila por SKU: el tramo que rige hoy dentro de ese mes. Desde que un
+  -- mes puede tener varios costos, traerlos todos duplicaría cada artículo de
+  -- la tabla. Ver lib/sql-costos.ts.
   select sku, oferta_pct, costo_teorico
-  from bronze.costos_historicos
+  from (${COSTOS_VIGENTES_POR_MES}) cv
   where mes_comercial = $3::text
 ),
 compras as (
@@ -174,7 +176,10 @@ hist_calculado as (
                    order by m.mes desc) as historia
   from (select distinct sku from bronze.costos_historicos) s
   cross join meses_hist m
-  left join bronze.costos_historicos c on c.sku = s.sku and c.mes_comercial = m.mes
+  -- Un solo costo por mes, el que rigió al final (lib/sql-costos.ts): si no,
+  -- un mes con dos tramos aparecería dos veces en la historia del artículo.
+  left join (${COSTOS_VIGENTES_POR_MES}) c
+         on c.sku = s.sku and c.mes_comercial = m.mes
   group by s.sku
 ),
 ventas as (
@@ -623,15 +628,10 @@ export async function getArticulosParaOrden(
      left join bronze.proveedores_grupo pg on pg.proveedor = a."proveedorNombre"
      left join (
        select sku, costo_teorico
-       from bronze.costos_historicos
+       from (${COSTOS_VIGENTES_POR_MES}) cv
        where mes_comercial = $2::text
      ) o on o.sku = trim(a.id)
-     left join (
-       select distinct on (sku) sku, costo_real, costo_teorico
-       from bronze.costos_historicos
-       where costo_real > 0
-       order by sku, mes_comercial desc
-     ) c on c.sku = trim(a.id)
+     left join (${ULTIMO_COSTO_VIGENTE}) c on c.sku = trim(a.id)
      where trim(a.id) = any($1::text[])`,
     [skus, mes],
   );

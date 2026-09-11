@@ -19,6 +19,7 @@ import type {
   SerieDiaria,
 } from "@/lib/types";
 import { agregarFiltro, vacio, type ClaveLista } from "@/lib/filtros";
+import { joinCostoDelDia } from "@/lib/sql-costos";
 
 type Where = { sql: string; params: unknown[] };
 
@@ -450,10 +451,11 @@ async function getArticulos(f: Filtros, conFlete: boolean): Promise<FilaArticulo
        on fv.proveedor = fpm.proveedor and fv.mes_comercial = fpm.mes_aplicable
      ${JOIN_FLETE}
      ${JOIN_HUERFANAS}
-     -- (sku, mes_comercial) es único en costos_historicos: el join no multiplica
-     -- filas. Verificado: 31.446 filas, 31.446 pares distintos.
-     left join bronze.costos_historicos ch
-       on ch.sku = fv.sku and ch.mes_comercial = fv.mes_comercial
+     -- El costo que regía EL DÍA de cada venta. Es un lateral y no un join por
+     -- (sku, mes_comercial) porque desde que un mes puede tener varios tramos
+     -- de costo ese join devolvería una fila por tramo, y las unidades de cada
+     -- artículo se contarían dos veces. Ver lib/sql-costos.ts.
+     ${joinCostoDelDia("fv", "c.oferta_pct, c.desc_propio_pct")}
      where ${w.sql}
      group by fv.sku
      order by facturacion desc nulls last

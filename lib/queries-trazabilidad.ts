@@ -1,6 +1,7 @@
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
+import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import { PROVEEDORES_NO_MERCADERIA } from "@/lib/stock";
 import {
   DIAS_PARA_LLEGAR_A_FULL,
@@ -112,12 +113,8 @@ calculada as (
   from dia d
   left join bronze.sigma_articulos a on trim(a.id) = d.sku
   left join bronze.proveedores_grupo pg on pg.proveedor = a."proveedorNombre"
-  left join (
-    select distinct on (sku) sku, costo_real
-    from bronze.costos_historicos
-    where costo_real > 0
-    order by sku, mes_comercial desc
-  ) c on c.sku = d.sku
+  -- El último costo conocido de cada SKU (lib/sql-costos.ts).
+  left join (${ULTIMO_COSTO_VIGENTE}) c on c.sku = d.sku
   where coalesce(a."proveedorNombre", '') <> all($2::text[])
   group by d.sku, a.descripcion, a."proveedorNombre", a."attributes.marca",
            pg.grupo, c.costo_real

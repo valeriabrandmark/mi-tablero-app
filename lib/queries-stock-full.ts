@@ -1,6 +1,7 @@
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
+import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import { CANAL_MELI } from "@/lib/meli";
 import {
   UMBRAL_PARADO,
@@ -93,17 +94,10 @@ stock as (
 ),
 costo as (
   -- El costo NETO del último mes que lo tenga cargado: costo_real ya es el
-  -- teórico con la oferta del proveedor descontada. (Sin backticks: esto vive
-  -- adentro de un template literal y uno solo parte la cadena.) Es la misma fuente y el
-  -- mismo criterio que usa Antigüedad, así que un artículo vale lo mismo en
+  -- teórico con la oferta del proveedor descontada. Sale del mismo lugar que
+  -- en Antigüedad --lib/sql-costos.ts-- así que un artículo vale lo mismo en
   -- las dos pantallas.
-  --
-  -- Los artículos sin costo quedan en 0 a propósito: son testers y
-  -- exhibidores, que no se compran.
-  select distinct on (sku) sku, costo_real
-  from bronze.costos_historicos
-  where costo_real > 0
-  order by sku, mes_comercial desc
+  ${ULTIMO_COSTO_VIGENTE}
 ),
 ventas as (
   select sku,
