@@ -39,7 +39,11 @@
  * error propio en vez de confiar en que Sigma la rechace.
  */
 
-import { descuentoValido, UNIDADES_COMPRA, type RenglonOrden } from "@/lib/compras";
+import {
+  descuentoValido,
+  UNIDADES_COMPRA,
+  type RenglonOrden,
+} from "@/lib/compras";
 import { PLAZO_REPOSICION_DIAS } from "@/lib/stock";
 
 /* -------------------------------------------------------------------------
@@ -83,26 +87,6 @@ export const COTIZACION = 1;
  */
 export const ESTADO_PENDIENTE = "P";
 
-/**
- * EL USUARIO CON EL QUE QUEDA FIRMADA LA ORDEN.
- *
- * La documentación dice que `fusuari` y `usuario` "no se leen" y que el
- * usuario de la cabecera "proviene de la sesión". Pero una llamada por API con
- * token NO TIENE SESIÓN: no hay de dónde sacarlo. Si esa columna es
- * obligatoria en la base, el insert falla adentro del procedimiento y el ERP
- * contesta "Query with RESPONSE_CODE returned no rows" -- que es exactamente
- * el error que quedó cuando ya todos los campos documentados estaban bien.
- *
- * Es la tercera vez que la documentación de este endpoint dice una cosa y el
- * servidor hace otra, después de `frecdia` (declarado numérico, resultó fecha)
- * y de "opcional" (que resultó ser "no lo valido").
- *
- * 3 es ANA.M, la persona que compra. Va acá y no como parámetro de la pantalla
- * porque hoy Compras la ve un solo rol; el día que la vea más de una persona,
- * esto tiene que salir del usuario que apretó el botón y no de una constante.
- */
-export const USUARIO_SIGMA = 3;
-
 /** El otro campo de usuario del ejemplo. Va en 0, como ahí. */
 export const FUSUARI_SIGMA = 0;
 
@@ -135,24 +119,40 @@ export type ItemSigma = {
   unidadDeCompra: string;
 };
 
+/**
+ * La cabecera, EN EL ORDEN EXACTO DEL EJEMPLO DE LA DOCUMENTACIÓN.
+ *
+ * En JSON el orden de las claves no significa nada: `{"a":1,"b":2}` y
+ * `{"b":2,"a":1}` son el mismo objeto para cualquier parser que cumpla la
+ * especificación. Así que esto NO debería cambiar nada.
+ *
+ * Va igual porque lo pidió soporte y porque no cuesta nada -- y porque este
+ * endpoint ya contradijo su propia documentación tres veces (`frecdia`
+ * declarado numérico que resulta fecha, "opcional" que resulta "no lo valido",
+ * un ejemplo con códigos de otro sistema). Con ese antecedente, "el parser
+ * lee el cuerpo en orden" dejó de ser descartable sin probarlo.
+ *
+ * Si alguna vez se agrega un campo, va en la posición que tenga en el ejemplo
+ * oficial y no al final.
+ */
 export type OrdenSigma = {
-  empresa: string;
   proveedorId: string;
-  fusuari: number;
-  usuario: number;
   fechaCarga: string;
   fechaPedido: string;
-  depositoRecepcion: string;
-  tipoOrden: string;
+  fusuari: number;
+  usuario: number;
+  observaciones: string;
   estado: string;
+  tipoOrden: string;
+  depositoRecepcion: string;
   condicionPago: string;
+  vencimiento: string | null;
+  observacionInterna: string;
   codigoSucursal: string;
   moneda: string;
+  empresa: string;
   cotizacion: number;
   frecdia: string;
-  vencimiento: string | null;
-  observaciones: string;
-  observacionInterna: string;
   items: ItemSigma[];
 };
 
@@ -189,24 +189,54 @@ export function masDias(d: Date, dias: number): Date {
 }
 
 /**
- * El precio de UN renglón, en la unidad con la que se pide.
+ * `cantidad` Y `precio` VIAJAN SIEMPRE POR UNIDAD, NUNCA POR BULTO.
+ *
+ * Esto NO es lo que parecía, y la orden 00000373 de ALGABO lo demuestra. Se
+ * pidieron 2 bultos de AL10032 --6 unidades por bulto, costo unitario
+ * 3.699,675-- y en el ERP quedó:
+ *
+ *     Unid.  Cant.  $Unit         Pres.  Total
+ *     Bultos  0,33  133.188,3000    6    35.849,85
+ *
+ * Los dos números están 6 veces corridos, cada uno para su lado. Se mandó
+ * `cantidad: 2` con `unidadDeCompra: "B"` y Sigma lo leyó como 2 UNIDADES, que
+ * son 0,33 bultos. Se mandó `precio: 22.198,05` --el del bulto-- y Sigma lo
+ * leyó como precio POR UNIDAD, que por bulto son 133.188,30.
+ *
+ * `unidadDeCompra` NO cambia lo que se manda: cambia cómo se muestra. Sigma
+ * divide la cantidad por `Pres.` y multiplica el precio por `Pres.`, y nada
+ * más.
+ *
+ * POR QUÉ NO SALTÓ ANTES: los dos errores se cancelan en el total. Seis veces
+ * menos cantidad por seis veces más precio da exactamente la misma plata, y el
+ * total era lo único que mirábamos. Lo que no se cancela es lo que llega: el
+ * proveedor manda 2 unidades donde se pidieron 12.
+ *
+ * OJO, EL TXT NO SE TOCA. El importador de la grilla sí toma la cantidad en la
+ * unidad declarada, y viene funcionando así. Son dos caminos distintos hacia el
+ * mismo ERP y no se comportan igual.
+ */
+export function unidadesDelRenglon(
+  a: ArticuloParaOrden,
+  r: RenglonOrden,
+): number {
+  const porBulto = a.unidadesPorBulto > 0 ? a.unidadesPorBulto : 1;
+  return r.unidad === "bulto" ? r.cantidad * porBulto : r.cantidad;
+}
+
+/**
+ * El precio de UNA unidad.
  *
  * Es el costo de LISTA, sin descuentos: Sigma aplica `descuento1` y
  * `descuento2` por su cuenta, en cascada, igual que la pantalla. Mandar el
  * costo ya descontado y ADEMÁS los descuentos los aplicaría dos veces.
- *
- * Y va en la unidad pedida: si el renglón es por bulto, el precio es el del
- * bulto. `unidadDeCompra: "B"` con un precio unitario sería una orden por la
- * sexta parte de lo que corresponde.
  */
-export function precioDelRenglon(a: ArticuloParaOrden, r: RenglonOrden): number {
-  const porBulto = a.unidadesPorBulto > 0 ? a.unidadesPorBulto : 1;
-  const bruto = r.unidad === "bulto" ? a.costoLista * porBulto : a.costoLista;
+export function precioUnitario(a: ArticuloParaOrden): number {
   // A DOS DECIMALES, que es lo que es un precio. El costo de la base tiene
-  // cuatro (15.698,5776) y por bulto se van a seis; mandarlos así es pedirle al
-  // ERP que redondee por su cuenta y que su total no cierre con el que la
-  // pantalla mostró antes de confirmar.
-  return Math.round(bruto * 100) / 100;
+  // cuatro (15.698,5776); mandarlos así es pedirle al ERP que redondee por su
+  // cuenta y que su total no cierre con el que la pantalla mostró antes de
+  // confirmar.
+  return Math.round(a.costoLista * 100) / 100;
 }
 
 /**
@@ -244,7 +274,9 @@ export function problemasDeLaOrden(
       continue;
     }
     if (!a.proveedorCodigo) {
-      problemas.push(`${sku}: el artículo no tiene proveedor cargado en Sigma.`);
+      problemas.push(
+        `${sku}: el artículo no tiene proveedor cargado en Sigma.`,
+      );
     } else {
       proveedores.add(a.proveedorCodigo);
     }
@@ -253,8 +285,10 @@ export function problemasDeLaOrden(
     // Sigma rechaza el precio en cero ("precio mayor que cero") y se cae la
     // orden ENTERA, no ese renglón. Hoy hay artículos así: los ACUERDO
     // COMERCIAL y los que nunca tuvieron costo cargado.
-    if (!(precioDelRenglon(a, r) > 0)) {
-      problemas.push(`${sku}: sin costo cargado, y Sigma exige precio mayor que cero.`);
+    if (!(precioUnitario(a) > 0)) {
+      problemas.push(
+        `${sku}: sin costo cargado, y Sigma exige precio mayor que cero.`,
+      );
     }
     if (!Number.isInteger(r.cantidad) || r.cantidad <= 0) {
       problemas.push(`${sku}: la cantidad tiene que ser un entero positivo.`);
@@ -288,6 +322,17 @@ export function armarOrdenSigma(
   orden: Map<string, RenglonOrden>,
   observaciones: string,
   ahora: Date = new Date(),
+  /**
+   * El usuario de Sigma con el que queda FIRMADA la orden. Sale de
+   * `USUARIOS_ERP` (lib/permisos.ts).
+   *
+   * NO TIENE VALOR POR DEFECTO, Y ESO ES EL PUNTO. Antes era `USUARIO_SIGMA = 3`
+   * y esta función lo usaba cuando no le pasaban uno: una llamada que se
+   * olvidara del usuario no fallaba, firmaba la orden como ANA.M. En un ERP la
+   * firma es lo que dice quién autorizó la compra, así que ahora el compilador
+   * no deja olvidarlo.
+   */
+  usuarioSigma: number,
 ): OrdenSigma {
   const items: ItemSigma[] = [];
   let proveedorId = "";
@@ -301,8 +346,10 @@ export function armarOrdenSigma(
     grupo = grupo ?? a.grupo;
     items.push({
       articuloId: sku,
-      cantidad: r.cantidad,
-      precio: precioDelRenglon(a, r),
+      // En UNIDADES aunque el renglón se haya pedido por bulto: ver la nota de
+      // `unidadesDelRenglon`. `unidadDeCompra` de abajo es sólo presentación.
+      cantidad: unidadesDelRenglon(a, r),
+      precio: precioUnitario(a),
       descuento1: descuentoValido(r.descuento),
       descuento2: descuentoValido(r.descuento2),
       // Del 3 al 5 son OBLIGATORIOS aunque no se usen: sin ellos Sigma corta
@@ -320,42 +367,30 @@ export function armarOrdenSigma(
   }
 
   const fecha = fechaISO(ahora);
+
+  /*
+   * EL ORDEN DE ESTAS CLAVES ES EL DEL EJEMPLO DE LA DOCUMENTACIÓN, y está
+   * puesto a mano. Ver el comentario de `OrdenSigma`: en JSON el orden no
+   * significa nada, pero lo pidió soporte, no cuesta nada, y este endpoint ya
+   * contradijo su propia documentación tres veces.
+   *
+   * Los dos comentarios largos de abajo son de campos que costaron un error
+   * cada uno. No los borres sin leerlos.
+   */
   return {
-    empresa: EMPRESA_POR_GRUPO[grupo ?? ""] ?? EMPRESA_POR_GRUPO["QUO MKT"],
     proveedorId,
-    fusuari: FUSUARI_SIGMA,
-    usuario: USUARIO_SIGMA,
     fechaCarga: fecha,
     fechaPedido: fecha,
-    depositoRecepcion: DEPOSITO_RECEPCION,
-    tipoOrden: TIPO_ORDEN,
+    fusuari: FUSUARI_SIGMA,
+    usuario: usuarioSigma,
+    // Es el campo "Obs. p/Proveedor" de la pantalla de Sigma, el mismo lugar
+    // donde hoy se escribe a mano "OFERTAS DE SELL IN ENVIADAS". Por eso lleva
+    // la nota de la pantalla y no una leyenda automática.
+    observaciones: observaciones.trim().slice(0, 200),
     estado: ESTADO_PENDIENTE,
+    tipoOrden: TIPO_ORDEN,
+    depositoRecepcion: DEPOSITO_RECEPCION,
     condicionPago: CONDICION_PAGO,
-    codigoSucursal: CODIGO_SUCURSAL,
-    moneda: MONEDA,
-    cotizacion: COTIZACION,
-    /*
-     * NO SE OMITE NINGÚN CAMPO, Y ESO ES LO QUE ARREGLÓ EL SEGUNDO ERROR.
-     *
-     * La historia, porque es la parte que hay que entender antes de tocar esto:
-     *
-     *   frecdia: 10          -> invalid input syntax for type date: "10"
-     *   frecdia omitido      -> Query with RESPONSE_CODE returned no rows
-     *
-     * El primer error dice que ese valor termina en una columna de FECHA -- la
-     * documentación lo declara `numeric` y su ejemplo manda 21, pero el
-     * servidor manda más que la documentación. El segundo aparece recién al
-     * sacarlo, así que la columna además no admite nulos: sin el campo, el
-     * insert falla adentro del procedimiento y no devuelve la fila de estado
-     * que el ERP espera. De ahí el mensaje, que no es de validación sino de
-     * plomería rota.
-     *
-     * Los dos errores se explican con la misma causa, y la conclusión es que
-     * acá "opcional" significa "no lo valido", NO "sé qué hacer si no está".
-     * Por eso ahora va todo lo documentado, con el mismo esqueleto que el
-     * ejemplo oficial: sólo cambian los valores.
-     */
-    frecdia: fechaISO(masDias(ahora, PLAZO_REPOSICION_DIAS)),
     /*
      * VENCIMIENTO IGUAL A LA FECHA DE PEDIDO, y no `null`.
      *
@@ -368,13 +403,27 @@ export function armarOrdenSigma(
      * dicen los dos 31/08/2026. O sea que en una orden de verdad el campo NO
      * está vacío, aunque la condición de pago sea a 30 días. Contra la
      * documentación y contra su ejemplo, gana lo que el sistema tiene cargado.
-     *
-     * Es la misma lección que `frecdia`, aplicada al campo de al lado: acá
-     * "opcional" no quiere decir que el ERP sepa arreglárselas sin el dato.
      */
     vencimiento: fecha,
     observacionInterna: "",
-    observaciones: observaciones.trim().slice(0, 200),
+    codigoSucursal: CODIGO_SUCURSAL,
+    moneda: MONEDA,
+    empresa: EMPRESA_POR_GRUPO[grupo ?? ""] ?? EMPRESA_POR_GRUPO["QUO MKT"],
+    cotizacion: COTIZACION,
+    /*
+     * `frecdia` VA COMO FECHA, contra lo que dice la documentación.
+     *
+     *   frecdia: 10          -> invalid input syntax for type date: "10"
+     *   frecdia omitido      -> Query with RESPONSE_CODE returned no rows
+     *
+     * El primer error dice que ese valor termina en una columna de FECHA -- la
+     * documentación lo declara `numeric` y su ejemplo manda 21. El segundo
+     * aparece recién al sacarlo, así que la columna además no admite nulos.
+     *
+     * De ahí sale la regla de todo este archivo: acá "opcional" significa "no
+     * lo valido", NO "sé qué hacer si no está". Por eso va todo lo documentado.
+     */
+    frecdia: fechaISO(masDias(ahora, PLAZO_REPOSICION_DIAS)),
     items,
   };
 }
@@ -389,7 +438,10 @@ export function armarOrdenSigma(
  * "13" no se puede comparar contra nada, "13 · RECEPCIÓN" sí.
  */
 export const RESUMEN_CABECERA: { campo: string; valor: string }[] = [
-  { campo: "Depósito de recepción", valor: `${DEPOSITO_RECEPCION} · RECEPCIÓN` },
+  {
+    campo: "Depósito de recepción",
+    valor: `${DEPOSITO_RECEPCION} · RECEPCIÓN`,
+  },
   { campo: "Tipo de orden", valor: `${TIPO_ORDEN} · Regular` },
   { campo: "Condición de pago", valor: `${CONDICION_PAGO} · 30 días` },
   { campo: "Sucursal", valor: `${CODIGO_SUCURSAL} · BRANDMARK` },

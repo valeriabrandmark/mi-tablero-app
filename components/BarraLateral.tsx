@@ -32,7 +32,8 @@ export type ClaveIcono =
   | "mercadolibre"
   | "tiendanube"
   | "stock"
-  | "operaciones";
+  | "operaciones"
+  | "precios";
 
 /** Subpágina de un grupo. Lleva su propia marca porque es la que se mira. */
 export type ItemHijo = {
@@ -87,7 +88,8 @@ type ClaveTrazo =
   | "cuentas"
   | "objetivos"
   | "stock"
-  | "operaciones";
+  | "operaciones"
+  | "precios";
 
 const TRAZOS: Record<ClaveTrazo, ReactNode> = {
   ventas: (
@@ -128,6 +130,16 @@ const TRAZOS: Record<ClaveTrazo, ReactNode> = {
     <>
       <circle cx="12" cy="12" r="3" stroke={NARANJA} />
       <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" />
+    </>
+  ),
+  // Etiqueta de precio. No lleva ni caja ni engranaje a propósito: las cajas
+  // son la mercadería y el engranaje es la sección entera. Lo que este módulo
+  // mira no es el producto sino lo que dice su etiqueta, que además es lo único
+  // del tablero que se puede reescribir para afuera.
+  precios: (
+    <>
+      <path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0l-7.2-7.2A2 2 0 0 1 3 12V4a1 1 0 0 1 1-1h8a2 2 0 0 1 1.4.6l7.2 7.2a2 2 0 0 1 0 2.8Z" />
+      <circle cx="7.5" cy="7.5" r="1.3" stroke={NARANJA} />
     </>
   ),
   // Cajas apiladas. No se repite el cubo de Logística: ése es el paquete que
@@ -220,7 +232,9 @@ function Grupo({
   alNavegar?: () => void;
 }) {
   const hijos = item.hijos ?? [];
-  const dentro = hijos.some((h) => pathname === h.href || pathname.startsWith(`${h.href}/`));
+  const dentro = hijos.some(
+    (h) => pathname === h.href || pathname.startsWith(`${h.href}/`),
+  );
   const [abierto, setAbierto] = useState(dentro);
 
   return (
@@ -256,8 +270,9 @@ function Grupo({
             // La excepción son las páginas de objetivos: comparten el prefijo
             // /objetivos pero no cuelgan una de otra, así que se comparan
             // enteras. Por eso el `===` va primero y el `startsWith` exige la
-            // barra: /objetivos/silvio nunca es prefijo de /objetivos/ramon.
-            const activo = pathname === h.href || pathname.startsWith(`${h.href}/`);
+            // barra: /objetivos/silvio nunca es prefijo de /objetivos/german.
+            const activo =
+              pathname === h.href || pathname.startsWith(`${h.href}/`);
             return (
               <li key={h.href}>
                 <Link
@@ -297,7 +312,9 @@ function Contenido({
   return (
     <div className="flex h-full flex-col">
       <div className="px-5 py-5">
-        <span className="text-base font-semibold tracking-tight">Brandmark</span>
+        <span className="text-base font-semibold tracking-tight">
+          Brandmark
+        </span>
         <span className="text-muted ml-1.5 text-base">negocio</span>
       </div>
 
@@ -409,11 +426,19 @@ export default function BarraLateral(props: {
           aria-label="Abrir menú"
           className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border p-1.5"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="size-5">
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            className="size-5"
+          >
             <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
           </svg>
         </button>
-        <span className="text-sm font-semibold tracking-tight">Brandmark negocio</span>
+        <span className="text-sm font-semibold tracking-tight">
+          Brandmark negocio
+        </span>
       </div>
 
       {abierta && (

@@ -6,7 +6,12 @@ import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { contarSkus, sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
-import { fmtFechaCorta, fmtMoneda, fmtNumero } from "@/lib/format";
+import {
+  fmtFechaCorta,
+  fmtFechaCortaConAnio,
+  fmtMoneda,
+  fmtNumero,
+} from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
 import {
   DIAS_ANTIGUEDAD_ALERTA,
@@ -16,12 +21,16 @@ import {
   VENTANA_VENTAS_DIAS,
 } from "@/lib/stock-antiguedad";
 import { useDatosTablero } from "@/lib/useDatosTablero";
-import type { DashboardAntiguedad, FilaAntiguedad, FiltrosAntiguedad } from "@/lib/types";
+import type {
+  DashboardAntiguedad,
+  FilaAntiguedad,
+  FiltrosAntiguedad,
+} from "@/lib/types";
 
 /** El tope lo aplica el servidor (`TOPE` en lib/queries-stock-antiguedad.ts). */
 const TOPE_TEXTO = 500;
 
-type Opciones = { proveedores: string[]; marcas: string[] };
+type Opciones = { proveedores: string[]; marcas: string[]; grupos: string[] };
 type Respuesta = DashboardAntiguedad & { opciones: Opciones | null };
 
 /**
@@ -56,6 +65,7 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
     },
     {
       titulo: "Proveedor",
+      ayuda: "El proveedor del artículo según el maestro de Sigma.",
       celda: (f) => (
         <span className="block max-w-[110px] truncate sm:max-w-[180px]">
           {f.proveedor ?? "—"}
@@ -65,6 +75,7 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
     },
     {
       titulo: "Full aptas",
+      ayuda: "Unidades en Full que todavía se pueden vender.",
       celda: (f) => (f.aptas > 0 ? fmtNumero(f.aptas) : "—"),
       numerica: true,
       orden: (f) => f.aptas,
@@ -75,6 +86,8 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
       // interno o esperando un retiro. No es antigüedad, pero es stock que
       // figura y no se puede vender, así que se cuenta acá.
       titulo: "No aptas",
+      ayuda:
+        "Unidades en Full que Mercado Libre no puede vender: dañadas, en revisión o retenidas.",
       celda: (f) => (
         <span style={f.noAptas > 0 ? { color: TEMA.negativo } : undefined}>
           {f.noAptas > 0 ? fmtNumero(f.noAptas) : "—"}
@@ -86,6 +99,8 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
     },
     {
       titulo: "Días en Full",
+      ayuda:
+        "Hace cuántos días está esa mercadería en el depósito de Mercado Libre. A partir de 120 ML cobra almacenamiento.",
       // Un guión es "no se sabe", no "es nuevo": o el SKU no está en Full, o la
       // foto de antigüedad todavía no se calculó.
       celda: (f) =>
@@ -94,9 +109,15 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
         ) : (
           <span
             style={
-              f.diasEnFull >= DIAS_ANTIGUEDAD_ALERTA ? { color: TEMA.negativo } : undefined
+              f.diasEnFull >= DIAS_ANTIGUEDAD_ALERTA
+                ? { color: TEMA.negativo }
+                : undefined
             }
-            title={f.parcial ? "El libro de operaciones no explicaba todas las unidades: es un piso." : undefined}
+            title={
+              f.parcial
+                ? "El libro de operaciones no explicaba todas las unidades: es un piso."
+                : undefined
+            }
           >
             {fmtNumero(Math.round(f.diasEnFull))} d{f.parcial ? " *" : ""}
           </span>
@@ -107,12 +128,14 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
         const con = filas.filter((f) => f.diasEnFull != null && f.uMedidas > 0);
         if (con.length === 0) return "—";
         const u = sumar(con, (f) => f.uMedidas);
-        const prom = u > 0 ? sumar(con, (f) => (f.diasEnFull ?? 0) * f.uMedidas) / u : 0;
+        const prom =
+          u > 0 ? sumar(con, (f) => (f.diasEnFull ?? 0) * f.uMedidas) / u : 0;
         return `${fmtNumero(Math.round(prom))} d prom.`;
       })(),
     },
     {
       titulo: `+${DIAS_ANTIGUEDAD_ALERTA} días u.`,
+      ayuda: `Unidades que llevan más de ${DIAS_ANTIGUEDAD_ALERTA} días en Full, que es donde Mercado Libre empieza a cobrar almacenamiento.`,
       celda: (f) => (
         <span style={f.uMas120 > 0 ? { color: TEMA.negativo } : undefined}>
           {f.uMas120 > 0 ? fmtNumero(f.uMas120) : "—"}
@@ -124,6 +147,7 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
     },
     {
       titulo: "Tucumán",
+      ayuda: "Unidades en el depósito propio, según Digip.",
       celda: (f) => (f.tuc > 0 ? fmtNumero(f.tuc) : "—"),
       numerica: true,
       orden: (f) => f.tuc,
@@ -131,6 +155,8 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
     },
     {
       titulo: "Vencidas u.",
+      ayuda:
+        "Unidades que ya pasaron el plazo a partir del cual Mercado Libre cobra almacenamiento.",
       celda: (f) => (
         <span style={f.uVencido > 0 ? { color: TEMA.negativo } : undefined}>
           {f.uVencido > 0 ? fmtNumero(f.uVencido) : "—"}
@@ -142,6 +168,7 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
     },
     {
       titulo: `Vencen en ${DIAS_POR_VENCER_ALERTA} d`,
+      ayuda: `Unidades que van a pasar ese plazo dentro de los próximos ${DIAS_POR_VENCER_ALERTA} días. Es la lista para actuar antes de que empiecen a costar.`,
       celda: (f) => (
         <span style={f.uPorVencer > 0 ? { color: PALETA[2] } : undefined}>
           {f.uPorVencer > 0 ? fmtNumero(f.uPorVencer) : "—"}
@@ -153,10 +180,12 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
     },
     {
       titulo: "Próximo vto.",
+      ayuda:
+        "Cuándo la próxima tanda de unidades va a pasar ese plazo. Lleva el año porque un vencimiento puede caer en el año que viene y un dd/mm pelado no lo distingue.",
       celda: (f) =>
         f.proxVto ? (
           <span style={{ color: colorVencimiento(f.diasAVencer) }}>
-            {fmtFechaCorta(f.proxVto)}
+            {fmtFechaCortaConAnio(f.proxVto)}
           </span>
         ) : (
           <span className="text-muted">—</span>
@@ -166,6 +195,7 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
     },
     {
       titulo: "Vendidas",
+      ayuda: "Unidades vendidas en la ventana elegida.",
       celda: (f) => fmtNumero(f.uds),
       numerica: true,
       orden: (f) => f.uds,
@@ -173,6 +203,7 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
     },
     {
       titulo: "Hasta agotar",
+      ayuda: "Cuántos días faltan para que se agote el stock al ritmo actual.",
       celda: (f) =>
         f.diasAgotar == null ? (
           <span className="text-muted">sin venta</span>
@@ -188,6 +219,7 @@ function columnas(filas: FilaAntiguedad[]): Columna<FilaAntiguedad>[] {
     },
     {
       titulo: "Valor neto",
+      ayuda: "La plata inmovilizada en ese artículo, a costo neto.",
       celda: (f) => fmtMoneda(f.valor),
       numerica: true,
       orden: (f) => f.valor,
@@ -201,26 +233,29 @@ export default function DashboardAntiguedadPage() {
   const [filtros, setFiltros] = useState<FiltrosAntiguedad>(inicial);
   const [buscado, setBuscado] = useState("");
 
-  const { data, cargando, error, recargar, empezarCarga } = useDatosTablero<Respuesta>(
-    "/api/stock-antiguedad",
-    {
-      proveedor: filtros.proveedor,
-      marca: filtros.marca,
-      sku: filtros.sku,
-      tramo: filtros.tramo ? [filtros.tramo] : undefined,
-      vencimiento: filtros.vencimiento ? [filtros.vencimiento] : undefined,
-      buscar: filtros.buscar ? [filtros.buscar] : undefined,
-    },
-    { conOpciones: "1" },
-  );
+  const { data, cargando, error, recargar, empezarCarga } =
+    useDatosTablero<Respuesta>(
+      "/api/stock-antiguedad",
+      {
+        proveedor: filtros.proveedor,
+        grupo: filtros.grupo,
+        marca: filtros.marca,
+        sku: filtros.sku,
+        tramo: filtros.tramo ? [filtros.tramo] : undefined,
+        vencimiento: filtros.vencimiento ? [filtros.vencimiento] : undefined,
+        buscar: filtros.buscar ? [filtros.buscar] : undefined,
+      },
+      { conOpciones: "1" },
+    );
 
   const cambiar = (f: FiltrosAntiguedad) => {
     empezarCarga();
     setFiltros(f);
   };
 
-  const alternarEn = (clave: "proveedor" | "marca" | "sku") => (valor: string) =>
-    cambiar({ ...filtros, [clave]: alternarValor(filtros[clave], valor) });
+  const alternarEn =
+    (clave: "proveedor" | "marca" | "sku") => (valor: string) =>
+      cambiar({ ...filtros, [clave]: alternarValor(filtros[clave], valor) });
 
   const k = data?.kpis;
   // DOS MANERAS DE NO TENER ANTIGÜEDAD, y la pantalla las dice distinto: o el
@@ -228,7 +263,8 @@ export default function DashboardAntiguedadPage() {
   // Mercado Libre sin enlazar a nuestro SKU. En los dos casos mostrar ceros
   // sería peor que no mostrar nada: se leen como "no hay mercadería vieja".
   const sinCalcular = data != null && data.antiguedadAl == null;
-  const sinEnlazar = data != null && data.antiguedadAl != null && data.antiguedadSkus === 0;
+  const sinEnlazar =
+    data != null && data.antiguedadAl != null && data.antiguedadSkus === 0;
   const sinFoto = sinCalcular || sinEnlazar;
   const sinCambios =
     sinValores(filtros.proveedor) &&
@@ -272,6 +308,12 @@ export default function DashboardAntiguedadPage() {
             onChange={(v) => cambiar({ ...filtros, proveedor: v })}
           />
           <SelectorMultiple
+            etiqueta="Empresa"
+            valores={filtros.grupo}
+            opciones={data?.opciones?.grupos ?? []}
+            onChange={(v) => cambiar({ ...filtros, grupo: v })}
+          />
+          <SelectorMultiple
             etiqueta="Marca"
             valores={filtros.marca}
             opciones={data?.opciones?.marcas ?? []}
@@ -285,14 +327,19 @@ export default function DashboardAntiguedadPage() {
             }}
             className="flex flex-col gap-1"
           >
-            <label className="text-muted text-[11px]" htmlFor="buscar-antiguedad">
+            <label
+              className="text-muted text-[11px]"
+              htmlFor="buscar-antiguedad"
+            >
               Buscar
             </label>
             <input
               id="buscar-antiguedad"
               value={buscado}
               onChange={(e) => setBuscado(e.target.value)}
-              onBlur={() => cambiar({ ...filtros, buscar: buscado.trim() || undefined })}
+              onBlur={() =>
+                cambiar({ ...filtros, buscar: buscado.trim() || undefined })
+              }
               placeholder="SKU o artículo"
               className="border-line bg-panel-2 text-ink placeholder:text-muted focus:border-c1 w-40 rounded-lg border px-2.5 py-1.5 text-xs outline-none"
             />
@@ -309,10 +356,12 @@ export default function DashboardAntiguedadPage() {
 
         <span className="text-muted text-[11px] leading-tight">
           Cada depósito contesta una pregunta distinta:{" "}
-          <strong>en Full, hace cuánto que la mercadería está parada</strong> —Mercado Libre
-          no informa vencimientos— y <strong>en Tucumán, cuándo se vence</strong> —Digip no
-          guarda la historia de movimientos—. Las unidades de Tucumán son las de ubicaciones
-          activas sin apartar para un pedido. Todos los pesos son <strong>netos, a costo</strong>.
+          <strong>en Full, hace cuánto que la mercadería está parada</strong>{" "}
+          —Mercado Libre no informa vencimientos— y{" "}
+          <strong>en Tucumán, cuándo se vence</strong> —Digip no guarda la
+          historia de movimientos—. Las unidades de Tucumán son las de
+          ubicaciones activas sin apartar para un pedido. Todos los pesos son{" "}
+          <strong>netos, a costo</strong>.
         </span>
       </div>
 
@@ -333,7 +382,9 @@ export default function DashboardAntiguedadPage() {
       {error && (
         <Aviso>
           <p className="font-medium">No se pudieron leer los datos.</p>
-          <p className="mt-1 font-mono text-xs break-words opacity-80">{error}</p>
+          <p className="mt-1 font-mono text-xs break-words opacity-80">
+            {error}
+          </p>
         </Aviso>
       )}
 
@@ -381,7 +432,9 @@ export default function DashboardAntiguedadPage() {
           <TarjetaKpi
             titulo="Antigüedad promedio en Full"
             valor={
-              k.diasPromedio == null ? "—" : `${fmtNumero(Math.round(k.diasPromedio))} d`
+              k.diasPromedio == null
+                ? "—"
+                : `${fmtNumero(Math.round(k.diasPromedio))} d`
             }
             detalle={
               k.diasPromedio == null
@@ -395,7 +448,9 @@ export default function DashboardAntiguedadPage() {
       )}
 
       {data && (
-        <div className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}>
+        <div
+          className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
+        >
           <div className="grid gap-4 xl:grid-cols-2">
             <Panel
               titulo="Hace cuánto que está en Full"
@@ -420,7 +475,9 @@ export default function DashboardAntiguedadPage() {
                   <BarrasCategoria
                     datos={TRAMOS_ANTIGUEDAD.map((t) => ({
                       label: t.label,
-                      valor: data.antiguedad.find((x) => x.tramo === t.clave)?.valor ?? 0,
+                      valor:
+                        data.antiguedad.find((x) => x.tramo === t.clave)
+                          ?.valor ?? 0,
                     }))}
                     formato={fmtMoneda}
                     horizontal={false}
@@ -428,11 +485,17 @@ export default function DashboardAntiguedadPage() {
                     vacio="Sin stock en Full para el filtro elegido."
                     seleccionados={
                       filtros.tramo
-                        ? [TRAMOS_ANTIGUEDAD.find((t) => t.clave === filtros.tramo)?.label ?? ""]
+                        ? [
+                            TRAMOS_ANTIGUEDAD.find(
+                              (t) => t.clave === filtros.tramo,
+                            )?.label ?? "",
+                          ]
                         : undefined
                     }
                     onSeleccionar={(label) => {
-                      const t = TRAMOS_ANTIGUEDAD.find((x) => x.label === label);
+                      const t = TRAMOS_ANTIGUEDAD.find(
+                        (x) => x.label === label,
+                      );
                       if (!t) return;
                       cambiar({
                         ...filtros,
@@ -444,11 +507,17 @@ export default function DashboardAntiguedadPage() {
                       cuántas unidades hay que mover es otra pregunta. */}
                   <dl className="text-muted mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] sm:grid-cols-3">
                     {TRAMOS_ANTIGUEDAD.map((t) => (
-                      <div key={t.clave} className="flex items-baseline gap-1.5">
-                        <dt className="text-ink font-medium whitespace-nowrap">{t.label}</dt>
+                      <div
+                        key={t.clave}
+                        className="flex items-baseline gap-1.5"
+                      >
+                        <dt className="text-ink font-medium whitespace-nowrap">
+                          {t.label}
+                        </dt>
                         <dd className="m-0 truncate">
                           {fmtNumero(
-                            data.antiguedad.find((x) => x.tramo === t.clave)?.unidades ?? 0,
+                            data.antiguedad.find((x) => x.tramo === t.clave)
+                              ?.unidades ?? 0,
                           )}{" "}
                           u.
                         </dd>
@@ -467,10 +536,14 @@ export default function DashboardAntiguedadPage() {
                   Con el "más de 180 días" adentro, las barras que importan
                   quedan pegadas al piso. */}
               <BarrasCategoria
-                datos={TRAMOS_VENCIMIENTO.filter((t) => t.accionable).map((t) => ({
-                  label: t.label,
-                  valor: data.vencimiento.find((x) => x.tramo === t.clave)?.valor ?? 0,
-                }))}
+                datos={TRAMOS_VENCIMIENTO.filter((t) => t.accionable).map(
+                  (t) => ({
+                    label: t.label,
+                    valor:
+                      data.vencimiento.find((x) => x.tramo === t.clave)
+                        ?.valor ?? 0,
+                  }),
+                )}
                 formato={fmtMoneda}
                 horizontal={false}
                 alturaMinima={220}
@@ -478,8 +551,9 @@ export default function DashboardAntiguedadPage() {
                 seleccionados={
                   filtros.vencimiento
                     ? [
-                        TRAMOS_VENCIMIENTO.find((t) => t.clave === filtros.vencimiento)
-                          ?.label ?? "",
+                        TRAMOS_VENCIMIENTO.find(
+                          (t) => t.clave === filtros.vencimiento,
+                        )?.label ?? "",
                       ]
                     : undefined
                 }
@@ -488,17 +562,21 @@ export default function DashboardAntiguedadPage() {
                   if (!t) return;
                   cambiar({
                     ...filtros,
-                    vencimiento: filtros.vencimiento === t.clave ? undefined : t.clave,
+                    vencimiento:
+                      filtros.vencimiento === t.clave ? undefined : t.clave,
                   });
                 }}
               />
               <dl className="text-muted mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] sm:grid-cols-3">
                 {TRAMOS_VENCIMIENTO.map((t) => (
                   <div key={t.clave} className="flex items-baseline gap-1.5">
-                    <dt className="text-ink font-medium whitespace-nowrap">{t.label}</dt>
+                    <dt className="text-ink font-medium whitespace-nowrap">
+                      {t.label}
+                    </dt>
                     <dd className="m-0 truncate">
                       {fmtNumero(
-                        data.vencimiento.find((x) => x.tramo === t.clave)?.unidades ?? 0,
+                        data.vencimiento.find((x) => x.tramo === t.clave)
+                          ?.unidades ?? 0,
                       )}{" "}
                       u.
                     </dd>
@@ -520,10 +598,14 @@ export default function DashboardAntiguedadPage() {
             <Tabla
               filas={data.filas}
               columnas={columnas(data.filas)}
-              etiquetaTotal={data.recortada ? `Total (los ${TOPE_TEXTO} mostrados)` : "Total"}
+              etiquetaTotal={
+                data.recortada ? `Total (los ${TOPE_TEXTO} mostrados)` : "Total"
+              }
               clave={(f) => f.sku}
               onClickFila={(f) => alternarEn("sku")(f.sku)}
-              activa={(f) => (filtros.sku?.length ? filtros.sku.includes(f.sku) : false)}
+              activa={(f) =>
+                filtros.sku?.length ? filtros.sku.includes(f.sku) : false
+              }
               vacio="Ningún artículo con stock para el filtro elegido."
             />
           </Panel>
@@ -531,57 +613,65 @@ export default function DashboardAntiguedadPage() {
           <Aviso tono="info">
             <p className="font-medium">Qué mide cada número, y qué no.</p>
             <p className="mt-1">
-              <strong>«Días en Full» son días en el depósito, no el cargo de Mercado
-              Libre.</strong> El cargo por almacenamiento prolongado usa un umbral que{" "}
-              <em>depende de la categoría</em> —un perfume puede entrar a los 60 días y una
-              crema a los 120—, y ese umbral no viene por API. Acá el corte es{" "}
-              {DIAS_ANTIGUEDAD_ALERTA} para todos, así que en las categorías que cobran
-              antes el número queda corto. Sirve para saber qué mover; no para saber qué te
-              facturaron.
+              <strong>
+                «Días en Full» son días en el depósito, no el cargo de Mercado
+                Libre.
+              </strong>{" "}
+              El cargo por almacenamiento prolongado usa un umbral que{" "}
+              <em>depende de la categoría</em> —un perfume puede entrar a los 60
+              días y una crema a los 120—, y ese umbral no viene por API. Acá el
+              corte es {DIAS_ANTIGUEDAD_ALERTA} para todos, así que en las
+              categorías que cobran antes el número queda corto. Sirve para
+              saber qué mover; no para saber qué te facturaron.
             </p>
             <p className="mt-1">
-              La antigüedad no es un dato de Mercado Libre: se reconstruye por FIFO desde el
-              libro de operaciones de cada inventario. Cuando el libro no explica todas las
-              unidades, las que sobran se cuentan como viejas —el lado conservador— y el
-              artículo queda marcado con un asterisco: ese número es un piso.
+              La antigüedad no es un dato de Mercado Libre: se reconstruye por
+              FIFO desde el libro de operaciones de cada inventario. Cuando el
+              libro no explica todas las unidades, las que sobran se cuentan
+              como viejas —el lado conservador— y el artículo queda marcado con
+              un asterisco: ese número es un piso.
               {k && k.skusParciales > 0
                 ? ` Hoy son ${fmtNumero(k.skusParciales)} artículos.`
                 : ""}
             </p>
-            {data.antiguedadSkusFull > data.antiguedadSkus && data.antiguedadSkus > 0 && (
-              <p className="mt-1">
-                <strong>
-                  La foto de antigüedad cubre {fmtNumero(data.antiguedadSkus)} de los{" "}
-                  {fmtNumero(data.antiguedadSkusFull)} artículos con stock en Full.
-                </strong>{" "}
-                Los {fmtNumero(data.antiguedadSkusFull - data.antiguedadSkus)} que faltan
-                son inventarios que Mercado Libre no contestó ese día. Muestran un guión
-                en «Días en Full», que acá quiere decir «no se pudo medir» — no «recién
-                llegó».
-              </p>
-            )}
+            {data.antiguedadSkusFull > data.antiguedadSkus &&
+              data.antiguedadSkus > 0 && (
+                <p className="mt-1">
+                  <strong>
+                    La foto de antigüedad cubre {fmtNumero(data.antiguedadSkus)}{" "}
+                    de los {fmtNumero(data.antiguedadSkusFull)} artículos con
+                    stock en Full.
+                  </strong>{" "}
+                  Los {fmtNumero(data.antiguedadSkusFull - data.antiguedadSkus)}{" "}
+                  que faltan son inventarios que Mercado Libre no contestó ese
+                  día. Muestran un guión en «Días en Full», que acá quiere decir
+                  «no se pudo medir» — no «recién llegó».
+                </p>
+              )}
             <p className="mt-1">
-              <strong>Los vencimientos son sólo de Tucumán.</strong> Mercado Libre no informa
-              la fecha de vencimiento de lo que guarda en Full, así que de esas unidades no
-              se sabe. Un guión en «Próximo vto.» es «no se sabe», no «no vence».
+              <strong>Los vencimientos son sólo de Tucumán.</strong> Mercado
+              Libre no informa la fecha de vencimiento de lo que guarda en Full,
+              así que de esas unidades no se sabe. Un guión en «Próximo vto.» es
+              «no se sabe», no «no vence».
             </p>
             <p className="mt-1">
-              <strong>Lo vencido no está en el tablero de Stock.</strong> Digip lo descuenta
-              del stock disponible sin decirlo: la diferencia entre lo que hay en las
-              ubicaciones activas y lo que declara disponible son, unidad por unidad, las
-              vencidas. Acá se ven porque siguen ocupando lugar y ya costaron plata.
+              <strong>Lo vencido no está en el tablero de Stock.</strong> Digip
+              lo descuenta del stock disponible sin decirlo: la diferencia entre
+              lo que hay en las ubicaciones activas y lo que declara disponible
+              son, unidad por unidad, las vencidas. Acá se ven porque siguen
+              ocupando lugar y ya costaron plata.
             </p>
             <p className="mt-1">
-              La columna <strong>«No aptas»</strong> son unidades que están en Full y
-              Mercado Libre no deja vender: perdidas, en un proceso interno o esperando un
-              retiro.
-              {k && k.noAptas > 0 ? ` Hoy son ${fmtNumero(k.noAptas)}.` : ""} No es
-              antigüedad, pero es stock que figura y no se puede vender.
+              La columna <strong>«No aptas»</strong> son unidades que están en
+              Full y Mercado Libre no deja vender: perdidas, en un proceso
+              interno o esperando un retiro.
+              {k && k.noAptas > 0 ? ` Hoy son ${fmtNumero(k.noAptas)}.` : ""} No
+              es antigüedad, pero es stock que figura y no se puede vender.
             </p>
             <p className="mt-1">
-              Quedan afuera las ubicaciones bloqueadas (SCRAP y «eliminar») y lo que ya está
-              apartado para un pedido: esa mercadería tiene dueño y su vencimiento no es una
-              decisión de compras.
+              Quedan afuera las ubicaciones bloqueadas (SCRAP y «eliminar») y lo
+              que ya está apartado para un pedido: esa mercadería tiene dueño y
+              su vencimiento no es una decisión de compras.
             </p>
           </Aviso>
         </div>

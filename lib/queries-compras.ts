@@ -1,12 +1,16 @@
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
+import { COSTOS_VIGENTES_POR_MES, ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import {
   COBERTURA_MAXIMA_COMPRA_DIAS,
   COBERTURA_SIN_INFLAR_DIAS,
+  RENTABILIDAD_COMPRA_DISCRETA,
+  VECES_SOBRE_LA_MEDIANA_PARA_INFLAR,
   FACTOR_OFERTA_MAX,
   MESES_HISTORIA_SELL_IN,
   MESES_RENTABILIDAD,
   PUNTOS_OFERTA_PARA_DUPLICAR,
+  coberturaValida,
 } from "@/lib/compras";
 import {
   COBERTURA_OBJETIVO_DIAS,
@@ -33,6 +37,7 @@ import type { DashboardCompras, FilaCompra, FiltrosCompras } from "@/lib/types";
  *                               liquidando, que es una decisión distinta
  *
  * $1 ventana del ritmo · $2 proveedores que no son mercadería · $3 mes de oferta
+ * $4 días de cobertura que se quieren comprar
  */
 const BASE = `
 with por_inv as (
@@ -53,12 +58,10 @@ tuc as (
   from bronze.digip_stock
   group by 1
 ),
--- El costo con el que se valoriza: el del último mes que lo tenga cargado.
+-- El costo con el que se valoriza: el último que tenga cargado (ver
+-- lib/sql-costos.ts).
 costo as (
-  select distinct on (sku) sku, costo_real, costo_teorico
-  from bronze.costos_historicos
-  where costo_real > 0
-  order by sku, mes_comercial desc
+  ${ULTIMO_COSTO_VIGENTE}
 ),
 -- El sell in VIGENTE DEL PROVEEDOR en el mes elegido: el descuento con el que
 -- se le pide, y el único que puede ir a FDESCU1.
@@ -83,8 +86,11 @@ sell_in as (
 -- MUESTRA como referencia —es con lo que venimos costeando— pero no viaja al
 -- archivo.
 oferta as (
+  -- UNA fila por SKU: el tramo que rige hoy dentro de ese mes. Desde que un
+  -- mes puede tener varios costos, traerlos todos duplicaría cada artículo de
+  -- la tabla. Ver lib/sql-costos.ts.
   select sku, oferta_pct, costo_teorico
-  from bronze.costos_historicos
+  from (${COSTOS_VIGENTES_POR_MES}) cv
   where mes_comercial = $3::text
 ),
 compras as (
@@ -95,7 +101,16 @@ compras as (
          bool_or(c."fechaFactura" >= to_char(date_trunc('month', current_date)
                                              - interval '1 month', 'YYYY-MM-DD')
              and c."fechaFactura" <  to_char(date_trunc('month', current_date),
-                                             'YYYY-MM-DD')) as comprado_mes_pasado
+                                             'YYYY-MM-DD')) as comprado_mes_pasado,
+         -- CUÁNTO, no sólo si. Un "sí" no distingue una compra de 12 unidades
+         -- de una de 1.200, y esa es justo la comparación que se quiere hacer
+         -- contra el sugerido de al lado.
+         coalesce(sum((it->>'cantidad')::numeric) filter (
+           where c."fechaFactura" >= to_char(date_trunc('month', current_date)
+                                             - interval '1 month', 'YYYY-MM-DD')
+             and c."fechaFactura" <  to_char(date_trunc('month', current_date),
+                                             'YYYY-MM-DD')
+         ), 0) as unidades_mes_pasado
   from bronze.sigma_compras c
   cross join lateral jsonb_array_elements(c.items::jsonb) it
   where it->>'articuloId' is not null
@@ -161,7 +176,10 @@ hist_calculado as (
                    order by m.mes desc) as historia
   from (select distinct sku from bronze.costos_historicos) s
   cross join meses_hist m
-  left join bronze.costos_historicos c on c.sku = s.sku and c.mes_comercial = m.mes
+  -- Un solo costo por mes, el que rigió al final (lib/sql-costos.ts): si no,
+  -- un mes con dos tramos aparecería dos veces en la historia del artículo.
+  left join (${COSTOS_VIGENTES_POR_MES}) c
+         on c.sku = s.sku and c.mes_comercial = m.mes
   group by s.sku
 ),
 ventas as (
@@ -244,6 +262,7 @@ base as (
               else v.margen_mes_pasado / v.facturado_mes_pasado
          end                                            as rent_mes_pasado,
          coalesce(co.comprado_mes_pasado, false)        as comprado_mes_pasado,
+         coalesce(co.unidades_mes_pasado, 0)            as unidades_mes_pasado,
          (pmp.proveedor is not null)                    as proveedor_compro,
          hs.historia                                    as hist_sell_in,
          hs.mediana                                     as mediana_sell_in,
@@ -270,10 +289,20 @@ con_base as (
          -- Lo mismo que en el tablero de Stock, con las mismas constantes:
          -- lo que falta para cubrir el objetivo contando lo que se vende
          -- mientras la reposición viaja. Es "cuánto necesito".
-         greatest(0, b.ritmo_diario * ${COBERTURA_OBJETIVO_DIAS + PLAZO_REPOSICION_DIAS} - b.total) as sugerido_base,
+         -- $4 son los días que se eligieron en pantalla; por defecto
+         -- ${COBERTURA_OBJETIVO_DIAS}, el objetivo de siempre.
+         greatest(0, b.ritmo_diario * ($4::numeric + ${PLAZO_REPOSICION_DIAS}) - b.total) as sugerido_base,
          -- El techo duro: nunca pasar de esta cobertura, por buena que esté la
          -- oferta. Separa "aprovechar un descuento" de "comprar un año".
-         greatest(0, b.ritmo_diario * ${COBERTURA_MAXIMA_COMPRA_DIAS} - b.total)                    as sugerido_tope,
+         --
+         -- PERO NUNCA POR DEBAJO DE LO QUE SE PIDIÓ A MANO. El tope existe para
+         -- que el multiplicador de oferta no se dispare solo, no para discutirle
+         -- a una persona que eligió comprar para 90 días: si lo dejáramos fijo,
+         -- elegir 90 o 120 no cambiaría nada y el selector se leería roto.
+         greatest(0, b.ritmo_diario * greatest(
+           ${COBERTURA_MAXIMA_COMPRA_DIAS},
+           $4::numeric + ${PLAZO_REPOSICION_DIAS}
+         ) - b.total)                                                                     as sugerido_tope,
          -- Cuánto está EL DESCUENTO DE ESTE MES por encima de lo habitual, en
          -- puntos. Sin sell in vigente cargado no hay ventaja que medir: queda
          -- en 0 y el factor da 1, o sea el sugerido de siempre.
@@ -291,6 +320,26 @@ con_factor as (
          case
            when c.cobertura is null then 1::numeric
            when c.cobertura > ${COBERTURA_SIN_INFLAR_DIAS} then 1::numeric
+           -- UN ARTÍCULO QUE NO RINDE NO SE COMPRA DE MÁS POR UNA OFERTA.
+           --
+           -- Por debajo de ${RENTABILIDAD_COMPRA_DISCRETA} % de rentabilidad,
+           -- comprar más es más plata quieta en algo que ya no la devuelve. Los
+           -- cuatro Almond Breeze son el caso: sell in del 50 %, y rentabilidad
+           -- de -28 %, -9,6 %, -8,1 % y 5,2 %.
+           --
+           -- CON UNA EXCEPCIÓN, que es la que salva el único caso que sí vale:
+           -- que el descuento de ESTE mes sea algo que antes no teníamos. Se
+           -- mide contra la MEDIANA de su propia historia y no en puntos,
+           -- porque en puntos los dos casos se parecen y no lo son: los Almond
+           -- Breeze están 7,5 puntos sobre una mediana de 42,5 --el proveedor
+           -- les da eso SIEMPRE--, y el Scotch-Brite está 40 puntos sobre una
+           -- mediana de 0. Mediana 0 es "nunca hubo oferta", así que cualquier
+           -- descuento de hoy es nuevo y pasa.
+           when coalesce(c.rentabilidad, 0) < ${RENTABILIDAD_COMPRA_DISCRETA} / 100.0
+                and not (coalesce(c.sell_in_pct, 0)
+                         >= greatest(coalesce(c.mediana_sell_in, 0), 0.0001)
+                            * ${VECES_SOBRE_LA_MEDIANA_PARA_INFLAR})
+             then 1::numeric
            else least(
              ${FACTOR_OFERTA_MAX}::numeric,
              1 + c.ventaja_pp / ${PUNTOS_OFERTA_PARA_DUPLICAR}::numeric
@@ -314,6 +363,7 @@ function where(f: FiltrosCompras, mes: string): Where {
     f.ventana ?? VENTANA_POR_DEFECTO,
     PROVEEDORES_NO_MERCADERIA,
     mes,
+    coberturaValida(f.cobertura),
   ];
   const clauses: string[] = [];
 
@@ -323,7 +373,9 @@ function where(f: FiltrosCompras, mes: string): Where {
 
   if (f.buscar) {
     params.push(`%${f.buscar}%`);
-    clauses.push(`(sku ilike $${params.length} or producto ilike $${params.length})`);
+    clauses.push(
+      `(sku ilike $${params.length} or producto ilike $${params.length})`,
+    );
   }
 
   // POR DEFECTO SÓLO LO QUE HAY QUE COMPRAR. Son ~3.300 SKU con stock y la
@@ -332,7 +384,18 @@ function where(f: FiltrosCompras, mes: string): Where {
   // para cuando se quiere agregar algo que el cálculo no pidió.
   if (!f.todos) clauses.push("sugerido > 0");
 
-  return { sql: clauses.length ? `where ${clauses.join(" and ")}` : "", params };
+  // SÓLO LO QUE TIENE OFERTA DEL PROVEEDOR ESTE MES.
+  //
+  // `> 0` y no `is not null`: hoy los 416 artículos con sell in cargado tienen
+  // descuento mayor que cero, así que las dos formas dan lo mismo -- pero el
+  // día que se cargue un 0 %, ese artículo NO tiene oferta y el botón dice
+  // "sólo con oferta".
+  if (f.soloOferta) clauses.push("coalesce(sell_in_pct, 0) > 0");
+
+  return {
+    sql: clauses.length ? `where ${clauses.join(" and ")}` : "",
+    params,
+  };
 }
 
 const num = (v: unknown): number => Number(v ?? 0);
@@ -362,7 +425,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<FilaCompra[]> {
             sugerido_base, sugerido_tope, factor_oferta, mediana_sell_in,
             uds_rent, rentabilidad,
             uds_mes_pasado, rent_mes_pasado,
-            comprado_mes_pasado, proveedor_compro,
+            comprado_mes_pasado, unidades_mes_pasado, proveedor_compro,
             hist_sell_in, hist_calculado,
             to_char(ultima_venta, 'YYYY-MM-DD') as ultima_venta,
             ultima_compra
@@ -404,6 +467,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<FilaCompra[]> {
     udsMesPasado: num(r.uds_mes_pasado),
     rentMesPasado: r.rent_mes_pasado == null ? null : num(r.rent_mes_pasado),
     compradoMesPasado: r.comprado_mes_pasado === true,
+    unidadesMesPasado: num(r.unidades_mes_pasado),
     proveedorComproMesPasado: r.proveedor_compro === true,
     histSellIn: historia(r.hist_sell_in),
     histCalculado: historia(r.hist_calculado),
@@ -447,7 +511,15 @@ async function getSellInCargado(mes: string): Promise<number> {
 }
 
 export async function getOpcionesCompras() {
-  const params = [VENTANA_POR_DEFECTO, PROVEEDORES_NO_MERCADERIA, ""];
+  // Las opciones de los selectores no dependen de la cobertura elegida --son
+  // la lista de proveedores, marcas y grupos que existen--, así que va el
+  // objetivo de siempre.
+  const params = [
+    VENTANA_POR_DEFECTO,
+    PROVEEDORES_NO_MERCADERIA,
+    "",
+    COBERTURA_OBJETIVO_DIAS,
+  ];
   const [proveedores, marcas, grupos, meses] = await Promise.all([
     query<{ v: string }>(
       `${BASE} select distinct proveedor as v from calculada
@@ -502,7 +574,9 @@ export async function getDashboardCompras(
   // nombre sin volver a deducirlo —y sin la chance de que los dos no coincidan
   // el día 1 de un mes.
   const hoy = new Date();
-  const mesPasado = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - 1, 1))
+  const mesPasado = new Date(
+    Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - 1, 1),
+  )
     .toISOString()
     .slice(0, 7);
 
@@ -511,6 +585,7 @@ export async function getDashboardCompras(
     recortada: filas.length === TOPE,
     mesPasado,
     ventana: f.ventana ?? VENTANA_POR_DEFECTO,
+    cobertura: coberturaValida(f.cobertura),
     mes,
     meses,
     sellInCargado,
@@ -553,15 +628,10 @@ export async function getArticulosParaOrden(
      left join bronze.proveedores_grupo pg on pg.proveedor = a."proveedorNombre"
      left join (
        select sku, costo_teorico
-       from bronze.costos_historicos
+       from (${COSTOS_VIGENTES_POR_MES}) cv
        where mes_comercial = $2::text
      ) o on o.sku = trim(a.id)
-     left join (
-       select distinct on (sku) sku, costo_real, costo_teorico
-       from bronze.costos_historicos
-       where costo_real > 0
-       order by sku, mes_comercial desc
-     ) c on c.sku = trim(a.id)
+     left join (${ULTIMO_COSTO_VIGENTE}) c on c.sku = trim(a.id)
      where trim(a.id) = any($1::text[])`,
     [skus, mes],
   );

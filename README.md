@@ -161,7 +161,7 @@ vista está vacía para la mayoría de los proveedores y no se puede asumir dato
 
 ## Definición de la página "Objetivos"
 
-Hay **una página por vendedor** (`/objetivos/silvio`, `/objetivos/ramon`,
+Hay **una página por vendedor** (`/objetivos/silvio`, `/objetivos/german`,
 `/objetivos/pablo`, `/objetivos/ricardo`): el vendedor lo fija la ruta y no un
 selector, para poder dar permiso sobre una sola página y que cada vendedor entre
 directo a la suya. Un slug que no esté en `VENDEDORES_OBJETIVOS` da 404, y la
@@ -236,7 +236,7 @@ Usa la misma fórmula que la página de Cuentas Corrientes
 (`saldo_vencido / saldo_total`) para que el mismo número no dé distinto en dos
 pantallas.
 
-Hoy solo SILVIO (43 %) y RAMON (52 %) tienen cartera cargada; PABLO y RICARDO no
+Hoy solo SILVIO (43 %) y GERMAN (52 %) tienen cartera cargada; PABLO y RICARDO no
 tienen ninguna cuenta corriente y la tarjeta muestra "Sin cuenta corriente".
 **RICARDO además no tiene código de SIGMA** porque nunca facturó: cuando lo haga
 hay que agregarlo a `CODIGO_SIGMA` o su deuda no va a aparecer nunca.
@@ -371,14 +371,22 @@ Cada usuario de Supabase Auth lleva su rol en `app_metadata`:
 | `supervisor` | Las páginas de objetivos de los cuatro vendedores |
 | `vendedor` | Únicamente su propia página de objetivos |
 | `responsable_meli` | Únicamente la sección Venta minorista |
+| `admin_tn` | Únicamente Operaciones → Precios TN — Comparador |
 | *(sin claim)* | **Nada** |
 
 Dos advertencias que importan:
 
-- **`admin` hoy ve lo mismo que `superadmin`**, porque el tablero no tiene nada
-  editable. El rol existe para que la distinción esté modelada, pero no promete
-  una restricción que todavía no hace falta. El día que se pueda cargar un
-  objetivo desde la pantalla, ahí sí hay que separarlos.
+- **`admin` ya NO ve todo.** Hasta que existió Precios TN, `puedeVer` devolvía
+  `true` para `superadmin` y `admin` sin mirar la ruta, y la distinción entre
+  los dos era sólo teórica. Ese módulo autoriza reescribir los precios de venta
+  de la tienda, así que se separaron: hoy Precios TN lo ven el `superadmin` y el
+  `admin_tn`, y nadie más. Quien aprueba un cambio de precio tiene que ser una
+  decisión explícita y corta, no la consecuencia de tener un rol amplio por
+  otros motivos.
+
+  En el código eso es un bloque que va **arriba** del `admin -> true`. Ese orden
+  es la regla, no estilo: abajo, el módulo quedaría abierto a todos los
+  administradores y no habría forma de notarlo leyendo la función.
 - **Un usuario sin claim no ve nada.** Es a propósito: si alguien crea un
   usuario y se olvida del rol, que se quede afuera y llame, en vez de entrar y
   ver la facturación de la empresa entera. Por eso hay que **cargar el claim
@@ -426,7 +434,7 @@ cambio se ve al recargar.
 ```sql
 update gold.objetivos
 set cantidad = 300
-where mes_comercial = '2026-08' and vendedor = 'RAMON'
+where mes_comercial = '2026-08' and vendedor = 'GERMAN'
   and grupo = 'IMPULSE TRUE LOVE 150 ML';
 ```
 
@@ -436,7 +444,7 @@ where mes_comercial = '2026-08' and vendedor = 'RAMON'
 update gold.objetivos r
 set cantidad = round(s.cantidad / 2)
 from gold.objetivos s
-where s.vendedor = 'SILVIO' and r.vendedor = 'RAMON'
+where s.vendedor = 'SILVIO' and r.vendedor = 'GERMAN'
   and r.grupo = s.grupo and r.mes_comercial = s.mes_comercial;
 ```
 
@@ -463,7 +471,7 @@ values ('SEDAL SHAMPOO', 'XX00001'), ('SEDAL SHAMPOO', 'XX00002');
 -- 3. El objetivo de cada vendedor
 insert into gold.objetivos (mes_comercial, vendedor, grupo, cantidad)
 select '2026-08', v, 'SEDAL SHAMPOO', 240
-from unnest(array['SILVIO','RAMON','PABLO','RICARDO']) as v;
+from unnest(array['SILVIO','GERMAN','PABLO','RICARDO']) as v;
 ```
 
 **Sacar un grupo**: `delete from gold.objetivos_grupo where grupo = '...'`. Los
@@ -601,7 +609,7 @@ Silvio): los cinco grupos de producto, la facturación de las dos empresas
 
 ## Pendientes / decisiones abiertas
 
-- **Vendedores** — la página usa la lista blanca `PABLO`, `RAMON`, `SILVIO`,
+- **Vendedores** — la página usa la lista blanca `PABLO`, `GERMAN`, `SILVIO`,
   igual que el filtro de página del `.pbit`. Se cambia en
   `VENDEDORES_INCLUIDOS` de [lib/constantes.ts](lib/constantes.ts) y aplica a
   todas las consultas y selectores de una.

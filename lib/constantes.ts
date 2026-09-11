@@ -11,8 +11,8 @@ export const CANAL_MAYORISTA = "Mayorista";
  * Vendedores que entran en la página de Ventas Mayoristas.
  *
  * Es una lista BLANCA, igual que el filtro de página del tablero de Power BI
- * (`vendedor IN ('PABLO','RAMON','SILVIO')`). Así quedan afuera de una todos
- * los valores de `vendedor` que no son vendedores reales — AGENCIA, BTL,
+ * (`vendedor IN ('PABLO','RAMON','SILVIO')` --RAMON es hoy GERMAN). Así quedan
+ * afuera de una todos los valores de `vendedor` que no son vendedores reales — AGENCIA, BTL,
  * TRADE, PROYECTOS ESPECIALES — y también los canales que no son fuerza de
  * venta mayorista: CASA CENTRAL, MELI, VENDEDOR WEB, IGNACIO, IVANA.
  *
@@ -20,7 +20,7 @@ export const CANAL_MAYORISTA = "Mayorista";
  * consultas y a los selectores, porque todas pasan por `whereBase()` en
  * lib/queries.ts.
  */
-export const VENDEDORES_INCLUIDOS = ["PABLO", "RAMON", "SILVIO"];
+export const VENDEDORES_INCLUIDOS = ["PABLO", "GERMAN", "SILVIO"];
 
 /**
  * Mínimo de unidades para que un proveedor entre al ranking de margen.
@@ -28,6 +28,20 @@ export const VENDEDORES_INCLUIDOS = ["PABLO", "RAMON", "SILVIO"];
  * (por ejemplo "AGENCIA PROVEEDORES").
  */
 export const MIN_UNIDADES_MARGEN = 20;
+
+/**
+ * EL NOMBRE DE UN VENDEDOR ES UNA ETIQUETA NUESTRA, NO UN DATO DE SIGMA.
+ *
+ * SIGMA manda un código ('007'); el nombre se lo pone `tablero_quo/modelo.py`
+ * al construir `gold.fact_ventas`. Por eso renombrar a alguien --RAMON pasó a
+ * GERMAN el 09/09/2026-- se toca en CUATRO lugares y no en uno: el diccionario
+ * de modelo.py, las tres listas de este archivo, y un UPDATE de una sola vez
+ * sobre `gold.fact_ventas` y `gold.objetivos`, porque fact_ventas se reescribe
+ * sólo por la ventana móvil y lo viejo se quedaría con el nombre anterior.
+ *
+ * Y cambia la URL: `/objetivos/ramon` deja de existir y pasa a ser
+ * `/objetivos/german`. Un favorito viejo da 404.
+ */
 
 /**
  * Vendedores que tienen página de objetivos propia.
@@ -39,7 +53,7 @@ export const MIN_UNIDADES_MARGEN = 20;
  *
  * El orden es el del tablero de Data Studio y define el orden del nav.
  */
-export const VENDEDORES_OBJETIVOS = ["SILVIO", "RAMON", "PABLO", "RICARDO"] as const;
+export const VENDEDORES_OBJETIVOS = ["SILVIO", "GERMAN", "PABLO", "RICARDO"] as const;
 
 export type VendedorObjetivos = (typeof VENDEDORES_OBJETIVOS)[number];
 
@@ -178,7 +192,7 @@ const diaAnterior = (fecha: string) => correrDias(fecha, -1);
  *
  * Sale de cruzar `bronze.sigma_ventas` con `gold.fact_ventas` por comprobante y
  * SKU; el cruce es 1 a 1 y sin ambigüedad. El mapeo completo es 001 CASA CENTRAL,
- * 002 AGENCIA, 004 IGNACIO, 005 IVANA, 006 SILVIO, 007 RAMON, 008 PABLO,
+ * 002 AGENCIA, 004 IGNACIO, 005 IVANA, 006 SILVIO, 007 GERMAN, 008 PABLO,
  * 009 MELI, 011 TRADE, 012 BTL, 013 PROYECTOS ESPECIALES, WEB VENDEDOR WEB.
  *
  * RICARDO todavía no tiene código porque nunca facturó: cuando lo haga, hay que
@@ -186,7 +200,7 @@ const diaAnterior = (fecha: string) => correrDias(fecha, -1);
  */
 export const CODIGO_SIGMA: Record<VendedorObjetivos, string | null> = {
   SILVIO: "006",
-  RAMON: "007",
+  GERMAN: "007",
   PABLO: "008",
   RICARDO: null,
 };
@@ -213,6 +227,44 @@ export const EMPRESAS: Record<string, string> = {
   "0003": "Presupuesto QUO",
   "0004": "Presupuesto Noa",
 };
+
+/**
+ * Nombre de cada vendedor de Sigma, por código.
+ *
+ * ES LA VUELTA DE `CODIGO_SIGMA`, y existe aparte por dos motivos. El primero
+ * es que cubre TODOS los códigos y no sólo los cuatro que tienen página de
+ * objetivos: cuentas corrientes trae clientes de IGNACIO (004), que no es uno
+ * de ellos, y sin él ese filtro mostraba "004" pelado.
+ *
+ * El segundo es que la fuente de verdad de esta tabla vive en el orquestador
+ * (`VENDEDORES` en modelo.py), que es quien traduce el código a nombre al
+ * construir `gold.fact_ventas`. Acá se repite porque las tablas de cuentas
+ * corrientes guardan el CÓDIGO y el tablero las lee directo, sin pasar por
+ * gold. Si se renombra a alguien --como RAMON a GERMAN-- hay que tocar las dos.
+ */
+export const VENDEDORES_SIGMA: Record<string, string> = {
+  "001": "CASA CENTRAL",
+  "002": "AGENCIA",
+  "003": "ECOMMERCE",
+  "004": "IGNACIO",
+  "005": "IVANA",
+  "006": "SILVIO",
+  "007": "GERMAN",
+  "008": "PABLO",
+  "009": "MELI",
+  "010": "ALEJANDRO",
+  "011": "TRADE",
+  "012": "BTL",
+  "013": "PROYECTOS ESPECIALES",
+  "014": "RICARDO",
+  WEB: "VENDEDOR WEB",
+};
+
+/** `'007'` -> `'GERMAN'`. Devuelve el código si no está mapeado. */
+export function nombreVendedor(codigo: string | null | undefined): string {
+  if (!codigo) return "—";
+  return VENDEDORES_SIGMA[codigo.trim()] ?? codigo;
+}
 
 /** `'0001'` -> `'Quo Marketing SRL'`. Devuelve el código si no está mapeado. */
 export function nombreEmpresa(codigo: string): string {

@@ -51,6 +51,16 @@ export function BarraAvance({
           {fmt(fila.vendido)} / {fmt(fila.objetivo)}
         </span>
       </div>
+      {/* LOS SKU DEL GRUPO, debajo del nombre.
+          Un grupo puede ser un MIX de varios SKUs que se miden SUMADOS, y el
+          nombre solo no lo dice: "VASELINE LIP 4.8 G" son dos variantes, y sin
+          verlas el vendedor no sabe si le cuentan las dos o una. Va en gris y
+          chico porque es la letra chica del objetivo, no el objetivo. */}
+      {fila.skus && (
+        <p className="text-muted truncate text-[10px]" title={fila.skus}>
+          {fila.skus}
+        </p>
+      )}
       <div className="mt-1.5 flex items-center gap-2">
         <div className="bg-panel-2 h-2 flex-1 overflow-hidden rounded-full">
           <div
@@ -100,7 +110,9 @@ export function ListaAvance({
             key={`${valor}-${f.metrica}`}
             fila={f}
             etiqueta={texto}
-            seleccionada={seleccionados?.length ? seleccionados.includes(valor) : undefined}
+            seleccionada={
+              seleccionados?.length ? seleccionados.includes(valor) : undefined
+            }
             onClick={onSeleccionar ? () => onSeleccionar(valor) : undefined}
           />
         );

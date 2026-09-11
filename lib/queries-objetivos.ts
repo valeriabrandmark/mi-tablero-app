@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
 import type {
+  ComprobanteVencido,
   DashboardObjetivos,
   FilaComprobanteObjetivo,
   FilaObjetivo,
@@ -176,6 +177,20 @@ function getPorGrupo(f: FiltrosObjetivos): Promise<FilaObjetivo[]> {
      select grupo,
             null::text as vendedor,
             metrica,
+            -- LOS SKU DEL GRUPO, para que la barra diga contra qué se mide.
+            --
+            -- Sin esto "VASELINE LIP 4.8 G" no deja ver que son DOS SKUs
+            -- sumados, y el vendedor no sabe si le cuentan las dos variantes o
+            -- una sola. Sale de la misma tabla que usa el match, así que lo que
+            -- se muestra es literalmente lo que se está midiendo.
+            --
+            -- Solo para criterio sku: en los grupos de empresa los items son
+            -- nombres de empresa que el titulo ya dice.
+            (select string_agg(i.valor, ' + ' order by i.valor)
+               from gold.objetivos_grupo_item i
+               join gold.objetivos_grupo g2 on g2.grupo = i.grupo
+              where i.grupo = avance.grupo
+                and g2.criterio = 'sku') as skus,
             sum(objetivo)::float8 as objetivo,
             sum(vendido)::float8 as vendido,
             case when sum(objetivo) = 0 then null
@@ -208,6 +223,20 @@ function cteLineas(f: FiltrosObjetivos): Where {
   // El cliente recorta las ventas y no el objetivo: va acá, en las líneas, y
   // NO en `whereObjetivos`, que es el que arma la meta contra la que se compara.
   agregarFiltro(clauses, params, "fv.cliente", f.cliente);
+
+  // EL BUSCADOR VA CONTRA LAS DOS COLUMNAS A LA VEZ. Quien busca tiene el
+  // nombre del cliente o el número del comprobante a mano, y no quiere elegir
+  // contra cuál compara antes de escribir. Es el mismo criterio que el buscador
+  // de Ventas Mayoristas.
+  //
+  // Recorta las VENTAS y no el objetivo, igual que el filtro de cliente: el
+  // objetivo del mes es el mismo se mire un comprobante o todos.
+  if (f.buscar) {
+    params.push(`%${f.buscar}%`);
+    clauses.push(
+      `(fv.cliente ilike $${params.length} or fv.comprobante ilike $${params.length})`,
+    );
+  }
 
   let join = "";
   if (!vacio(f.grupo)) {
@@ -309,6 +338,71 @@ async function getVencido(
   return filas[0] ?? null;
 }
 
+/**
+ * Los comprobantes vencidos del vendedor, uno por uno.
+ *
+ * ES EL DETALLE DE LA TARJETA DE ARRIBA. La tarjeta dice cuánta plata está
+ * vencida; esto dice de quién y desde cuándo, que es lo que hace falta para ir
+ * a cobrarla.
+ *
+ * SALE DE `aging` Y NO DE `scoring`, y por eso los dos números pueden no dar
+ * exactamente iguales: `scoring` guarda un saldo por CLIENTE ya consolidado, y
+ * `aging` una fila por COMPROBANTE. Un pago a cuenta que todavía no se imputó a
+ * ningún comprobante baja el saldo del cliente y no baja ninguna fila de acá.
+ * La pantalla lo dice en vez de esconder la diferencia.
+ *
+ * NO SE FILTRA POR MES, igual que la tarjeta: es una foto al momento de la
+ * carga, no un acumulado del mes comercial.
+ *
+ * `atraso` ya viene calculado por el orquestador, así que "vencido" es
+ * `atraso > 0` y no una resta de fechas nuestra: si las dos contaran distinto,
+ * un comprobante aparecería vencido en una pantalla y no en la otra.
+ */
+async function getComprobantesVencidos(
+  f: FiltrosObjetivos,
+): Promise<ComprobanteVencido[]> {
+  const codigo = codigoSigmaDe(f.vendedor);
+  if (!codigo) return [];
+
+  const params: unknown[] = [codigo];
+  const clauses = [
+    "a.vendedor = $1",
+    "coalesce(a.atraso, 0) > 0",
+    // Un comprobante saldado no es una deuda vencida aunque su fecha haya
+    // pasado. Sin esto la tabla listaría todo el histórico cobrado.
+    "coalesce(a.pendiente, 0) > 0",
+    // Sólo la última foto: la tabla guarda una por carga y sin esto cada
+    // comprobante saldría repetido una vez por día cargado.
+    "a.fecha_carga = (select max(fecha_carga) from bronze.cuentas_corrientes_aging)",
+  ];
+
+  if (f.buscar) {
+    params.push(`%${f.buscar}%`);
+    clauses.push(
+      `(a.razon_social ilike $${params.length} or a.comprobante ilike $${params.length})`,
+    );
+  }
+
+  return query<ComprobanteVencido>(
+    `select a.comprobante,
+            -- Las fechas vienen como texto dd/mm/yyyy: se dan vuelta acá para
+            -- que la pantalla reciba el mismo formato que el resto del tablero
+            -- y para que ordenen por fecha y no alfabéticamente.
+            to_char(to_date(a.fecha, 'DD/MM/YYYY'), 'YYYY-MM-DD')       as fecha,
+            to_char(to_date(a.vencimiento, 'DD/MM/YYYY'), 'YYYY-MM-DD') as vencimiento,
+            a.razon_social                    as cliente,
+            a.empresa,
+            coalesce(a.total, 0)::float8      as total,
+            coalesce(a.pendiente, 0)::float8  as adeuda,
+            coalesce(a.atraso, 0)::float8     as "diasVencido"
+     from bronze.cuentas_corrientes_aging a
+     where ${clauses.join("\n       and ")}
+     order by a.atraso desc nulls last, a.pendiente desc
+     limit 500`,
+    params,
+  );
+}
+
 // --- Opciones de los selectores ----------------------------------------------
 
 export async function getOpcionesObjetivos(): Promise<OpcionesObjetivos> {
@@ -358,18 +452,26 @@ export async function getMesInicialObjetivos(
 export async function getDashboardObjetivos(
   f: FiltrosObjetivos,
 ): Promise<DashboardObjetivos> {
-  const [resumen, porGrupo, serieFacturacion, comprobantes, vencido] =
-    await Promise.all([
-      getResumen(f),
-      getPorGrupo(f),
-      getSerieFacturacion(f),
-      getComprobantes(f),
-      getVencido(f),
-    ]);
+  const [
+    resumen,
+    porGrupo,
+    serieFacturacion,
+    comprobantes,
+    vencido,
+    comprobantesVencidos,
+  ] = await Promise.all([
+    getResumen(f),
+    getPorGrupo(f),
+    getSerieFacturacion(f),
+    getComprobantes(f),
+    getVencido(f),
+    getComprobantesVencidos(f),
+  ]);
 
   return {
     resumen,
     vencido,
+    comprobantesVencidos,
     porGrupo,
     serieFacturacion,
     comprobantes,

@@ -1,7 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { descuentoValido, UNIDADES_COMPRA, type RenglonOrden } from "@/lib/compras";
-import { permisoDelUsuario, puedeEscribirEnElERP } from "@/lib/permisos";
+import {
+  descuentoValido,
+  UNIDADES_COMPRA,
+  type RenglonOrden,
+} from "@/lib/compras";
+import {
+  permisoDelUsuario,
+  puedeEscribirEnElERP,
+  usuarioSigmaDe,
+} from "@/lib/permisos";
 import { getArticulosParaOrden } from "@/lib/queries-compras";
+import { guardarOrdenEnviada } from "@/lib/queries-ordenes";
 import {
   armarOrdenSigma,
   problemasDeLaOrden,
@@ -44,12 +53,28 @@ export const dynamic = "force-dynamic";
  * `items` viene vacío, la orden se crea igual, vacía y sin error.
  *
  * ---------------------------------------------------------------------------
- * SOBRE LOS CÓDIGOS DE ERROR
+ * SOBRE LOS CÓDIGOS DE ERROR: EL 500 DE SIGMA NO SIGNIFICA QUE NO ENTRÓ
  *
- * `ImportOrdenDeCompra` contesta 500 tanto para "te falta un campo" como para
- * "se rompió", y 200 para el éxito. Así que un 500 con cuerpo se devuelve tal
- * cual a la pantalla: el mensaje de Sigma está en castellano y dice qué pasó
- * mejor de lo que podríamos resumirlo.
+ * `ImportOrdenDeCompra` contesta 500 para "te falta un campo", para "se rompió"
+ * y TAMBIÉN CUANDO LA ORDEN SE CARGÓ BIEN. El 09/09/2026 Sigma confirmó que las
+ * nueve órdenes que habíamos dado por fallidas --todas con el mismo
+ * `Query with RESPONSE_CODE returned no rows`-- estaban las nueve cargadas.
+ * Quedaron ocho órdenes de prueba vivas en el ERP, varias duplicadas por
+ * reintentos que la pantalla misma invitaba a hacer.
+ *
+ * Sigma dijo que va a arreglar el mensaje. Hasta que lo haga --y también
+ * después, porque desde acá no hay forma de comprobarlo-- la respuesta NO
+ * alcanza para decidir si la orden entró.
+ *
+ * POR ESO CADA RESPUESTA DE ERROR LLEVA `mandado`. No es un detalle de la
+ * pantalla: es la única distinción que importa.
+ *
+ *   mandado: false   nada salió de acá. Se corrige y se reintenta tranquilo.
+ *   mandado: true    ya se le habló a Sigma. PUEDE HABER UNA ORDEN CARGADA, y
+ *                    reintentar es cargar una segunda.
+ *
+ * En una operación sin `undo`, "no sé si pasó" es más honesto --y más seguro--
+ * que un "falló" que suena definitivo.
  */
 
 /** El sobre de Sigma, sacado del entorno. Falla claro si falta algo. */
@@ -75,6 +100,20 @@ function urlDeSigma(): string {
   return `https://${cliente}/${alias}/${id}/sigma/api/v10/ImportOrdenDeCompra`;
 }
 
+/**
+ * El nombre del proveedor, para que el historial se pueda leer sin descifrar
+ * un código. El payload sólo lleva el código, que es lo que Sigma pide.
+ */
+function nombreDelProveedor(
+  articulos: Map<string, ArticuloParaOrden>,
+  codigo: string,
+): string | null {
+  for (const a of articulos.values()) {
+    if (a.proveedorCodigo === codigo) return a.proveedorNombre;
+  }
+  return null;
+}
+
 /** Sin esto, un servidor que acepta la conexión y no contesta cuelga la función. */
 const TIMEOUT_MS = 60_000;
 
@@ -98,7 +137,8 @@ function leerRenglones(crudo: unknown): Map<string, RenglonOrden> {
   if (!Array.isArray(crudo)) return orden;
 
   for (const fila of crudo.slice(0, 500) as CuerpoRenglon[]) {
-    const sku = typeof fila?.sku === "string" ? fila.sku.trim().slice(0, 40) : "";
+    const sku =
+      typeof fila?.sku === "string" ? fila.sku.trim().slice(0, 40) : "";
     if (!sku) continue;
 
     const unidad = UNIDADES_COMPRA.find((u) => u.clave === fila?.unidad)?.clave;
@@ -118,21 +158,61 @@ function leerRenglones(crudo: unknown): Map<string, RenglonOrden> {
 }
 
 export async function POST(request: NextRequest) {
+  let usuario: string | null = null;
+  // CON QUIÉN SE FIRMA LA ORDEN EN SIGMA. Sale de la sesión y nunca del cuerpo
+  // del pedido: si viajara desde el navegador, cualquiera con la consola
+  // abierta podría cargar una orden a nombre de otra persona.
+  //
+  // ARRANCA EN null Y NO EN UN NÚMERO. Un valor por defecto haría que un camino
+  // que se olvide de resolverlo firme igual, a nombre de quien haya quedado en
+  // la constante. En un ERP la firma es lo que dice quién autorizó la compra.
+  let usuarioSigma: number | null = null;
+
   if (authConfigurada) {
-    const permiso = permisoDelUsuario(await getUsuario());
-    if (!puedeEscribirEnElERP(permiso)) {
+    const quien = await getUsuario();
+    usuario = quien?.email ?? null;
+    const permiso = permisoDelUsuario(quien);
+    if (!puedeEscribirEnElERP(permiso, usuario)) {
       return NextResponse.json(
-        { error: "Mandar órdenes al ERP requiere el rol superadmin." },
+        {
+          error:
+            "Tu usuario no está habilitado para cargar órdenes en el ERP. Se " +
+            "habilita en USUARIOS_ERP (lib/permisos.ts), junto con su número de " +
+            "usuario de Sigma.",
+          mandado: false,
+        },
         { status: 403 },
       );
     }
+    // El `!` es seguro: `puedeEscribirEnElERP` ya comprobó que está en la lista.
+    usuarioSigma = usuarioSigmaDe(usuario)!.sigma;
+  }
+
+  // SIN SESIÓN NO SE MANDA, NI SIQUIERA EN LOCAL. La pantalla deja apretar el
+  // botón con `authConfigurada` en false para poder desarrollarla, pero mandar
+  // de verdad es otra cosa: crearía una orden REAL en Sigma firmada por alguien
+  // que el sistema no sabe quién es. Se corta acá, con el motivo escrito.
+  if (usuarioSigma == null) {
+    return NextResponse.json(
+      {
+        error:
+          "No hay sesión con la que firmar la orden. Cargar órdenes en el ERP " +
+          "requiere estar identificado: configurá la autenticación o entrá con " +
+          "un usuario de USUARIOS_ERP.",
+        mandado: false,
+      },
+      { status: 403 },
+    );
   }
 
   let cuerpo: { renglones?: unknown; mes?: unknown; nota?: unknown };
   try {
     cuerpo = await request.json();
   } catch {
-    return NextResponse.json({ error: "El cuerpo no es JSON válido." }, { status: 400 });
+    return NextResponse.json(
+      { error: "El cuerpo no es JSON válido.", mandado: false },
+      { status: 400 },
+    );
   }
 
   const orden = leerRenglones(cuerpo.renglones);
@@ -141,24 +221,40 @@ export async function POST(request: NextRequest) {
 
   if (orden.size === 0) {
     return NextResponse.json(
-      { error: "No llegó ningún renglón con cantidad." },
+      { error: "No llegó ningún renglón con cantidad.", mandado: false },
       { status: 400 },
     );
   }
 
+  // Se declara afuera del try para que el catch pueda leerlo: es lo que
+  // distingue "no llegamos a mandar nada" de "puede haber una orden cargada".
+  let yaSalio = false;
+
   try {
     const articulos = new Map<string, ArticuloParaOrden>(
-      (await getArticulosParaOrden([...orden.keys()], mes)).map((a) => [a.sku, a]),
+      (await getArticulosParaOrden([...orden.keys()], mes)).map((a) => [
+        a.sku,
+        a,
+      ]),
     );
 
     const problemas = problemasDeLaOrden(articulos, orden);
     if (problemas.length > 0) {
       // 422 y no 400: el JSON está bien formado, lo que no se puede es mandar
       // ESTA orden. La pantalla las lista todas juntas.
-      return NextResponse.json({ error: "La orden no se puede mandar", problemas }, { status: 422 });
+      return NextResponse.json(
+        { error: "La orden no se puede mandar", problemas, mandado: false },
+        { status: 422 },
+      );
     }
 
-    const payload = armarOrdenSigma(articulos, orden, nota);
+    const payload = armarOrdenSigma(
+      articulos,
+      orden,
+      nota,
+      new Date(),
+      usuarioSigma,
+    );
 
     // La URL viaja a la pantalla junto con el error. NO LLEVA CREDENCIALES: el
     // token va en la cabecera `X-Auth-Token`, no acá. Y sirve para lo único
@@ -166,6 +262,15 @@ export async function POST(request: NextRequest) {
     // URL tiene que ser tal", y esto deja compararla carácter por carácter en
     // vez de deducirla de tres variables de entorno que nadie ve juntas.
     const url = urlDeSigma();
+
+    // A PARTIR DE ACÁ YA NO SE PUEDE PROMETER QUE NO PASÓ NADA.
+    //
+    // El flag se levanta ANTES del fetch y no después a propósito: si la
+    // conexión se corta a mitad de camino, o el timeout salta, o el proceso se
+    // muere, la orden puede haber entrado igual. Levantarlo después dejaría
+    // justo esos casos --los únicos donde la duda importa-- del lado del "no
+    // se mandó".
+    yaSalio = true;
 
     const respuesta = await fetch(url, {
       method: "POST",
@@ -183,15 +288,37 @@ export async function POST(request: NextRequest) {
       // El mensaje de Sigma va tal cual a la pantalla: está en castellano y
       // dice qué campo falta mejor de lo que podríamos resumirlo.
       console.error("[api/compras/sigma]", respuesta.status, texto);
+      await guardarOrdenEnviada({
+        usuario,
+        mes,
+        payload,
+        resultado: "incierto",
+        respuesta: texto,
+        proveedorNombre: nombreDelProveedor(articulos, payload.proveedorId),
+      });
       return NextResponse.json(
         {
-          error: texto || `Sigma contestó ${respuesta.status} sin explicar por qué.`,
+          error:
+            texto || `Sigma contestó ${respuesta.status} sin explicar por qué.`,
           url,
+          // Sigma contesta 500 también cuando la orden se cargó bien, así que
+          // esto NO es "falló": es "no sabemos". La pantalla tiene que decirlo
+          // con esas palabras o alguien reintenta y carga la orden dos veces.
+          mandado: true,
           enviado: payload,
         },
         { status: 502 },
       );
     }
+
+    await guardarOrdenEnviada({
+      usuario,
+      mes,
+      payload,
+      resultado: "ok",
+      respuesta: texto,
+      proveedorNombre: nombreDelProveedor(articulos, payload.proveedorId),
+    });
 
     return NextResponse.json({
       ok: true,
@@ -202,8 +329,14 @@ export async function POST(request: NextRequest) {
       enviado: payload,
     });
   } catch (error) {
-    const mensaje = error instanceof Error ? error.message : "Error desconocido";
+    const mensaje =
+      error instanceof Error ? error.message : "Error desconocido";
     console.error("[api/compras/sigma]", error);
-    return NextResponse.json({ error: mensaje }, { status: 500 });
+    // Leer la base o armar el cuerpo puede fallar antes de hablarle a Sigma;
+    // un timeout, después. `yaSalio` sabe de qué lado del fetch estamos.
+    return NextResponse.json(
+      { error: mensaje, mandado: yaSalio },
+      { status: 500 },
+    );
   }
 }

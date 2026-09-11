@@ -24,7 +24,9 @@ export function ConAlarmaMargen({
   activa: boolean;
   children: ReactNode;
 }) {
-  return <AlarmaMargen.Provider value={activa}>{children}</AlarmaMargen.Provider>;
+  return (
+    <AlarmaMargen.Provider value={activa}>{children}</AlarmaMargen.Provider>
+  );
 }
 
 export function Panel({
@@ -45,7 +47,9 @@ export function Panel({
     // el panel termina más ancho que la pantalla. Al lado de otro panel que sí
     // entra, se lee como que el de abajo "quedó corto", cuando el equivocado
     // es el de arriba.
-    <section className={`border-line bg-panel min-w-0 rounded-xl border p-4 ${className}`}>
+    <section
+      className={`border-line bg-panel min-w-0 rounded-xl border p-4 ${className}`}
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-medium">{titulo}</h2>
         {nota && <span className="text-muted text-xs">{nota}</span>}
@@ -101,7 +105,9 @@ export function TarjetaKpi({
         arriba vuelve al tamaño de siempre, así que en la compu no cambia nada. */}
       <p
         className={`font-semibold tabular-nums tracking-tight ${
-          compacta ? "mt-1.5 text-sm sm:text-base" : "mt-1.5 text-lg sm:mt-2 sm:text-xl"
+          compacta
+            ? "mt-1.5 text-sm sm:text-base"
+            : "mt-1.5 text-lg sm:mt-2 sm:text-xl"
         }`}
         style={color ? { color } : undefined}
       >
@@ -120,18 +126,35 @@ export function TarjetaKpi({
   );
 }
 
-export function Aviso({ children, tono = "error" }: { children: ReactNode; tono?: "error" | "info" }) {
+/**
+ * `alerta` no es un `error` más suave: es OTRA COSA.
+ *
+ * `error` dice "no pasó". `alerta` dice "no sabemos si pasó", que es el caso
+ * que aparece cuando algo se manda a un sistema ajeno y la respuesta no
+ * alcanza para saber si entró. Ahí lo peligroso no es el susto sino
+ * REINTENTAR, y un cartel rojo que dice "falló" invita justo a eso.
+ */
+export function Aviso({
+  children,
+  tono = "error",
+}: {
+  children: ReactNode;
+  tono?: "error" | "info" | "alerta";
+}) {
   const clases =
     tono === "error"
       ? "border-rose-500/30 bg-rose-500/10 text-rose-300"
-      : "border-line bg-panel-2 text-muted";
-  return <div className={`rounded-xl border p-4 text-sm ${clases}`}>{children}</div>;
+      : tono === "alerta"
+        ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
+        : "border-line bg-panel-2 text-muted";
+  return (
+    <div className={`rounded-xl border p-4 text-sm ${clases}`}>{children}</div>
+  );
 }
 
 export function Esqueleto({ className = "" }: { className?: string }) {
   return <div className={`bg-panel-2 animate-pulse rounded-xl ${className}`} />;
 }
-
 
 /**
  * Variación contra el período anterior.

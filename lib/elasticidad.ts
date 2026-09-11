@@ -154,12 +154,24 @@ export const PASOS_PREVIOS = [
  * Cuándo arrancó el experimento y cuántas semanas dura.
  *
  * Los tramos se DERIVAN de estos dos números en vez de estar escritos uno por
- * uno. Si el experimento se estira a cuatro o cinco semanas, se cambia
- * `SEMANAS` y no hay que tocar ni el SQL ni las columnas de la tabla — que es
- * exactamente el tipo de cambio que si no termina hecho a medias en un lado.
+ * uno. Estirar el experimento es cambiar `EXPERIMENTO_SEMANAS` y nada más: ni
+ * el SQL, ni las columnas de la tabla, ni la ventana que se le pide a la base
+ * — que es exactamente el tipo de cambio que si no termina hecho a medias en
+ * un lado.
+ *
+ * ---------------------------------------------------------------------------
+ * SE ESTIRÓ A 6 SEMANAS EL 09/09/2026, y el motivo es una limitación del
+ * experimento y no un capricho: varios artículos pasaron buena parte de sus
+ * tres semanas SIN STOCK. Una banda que no tuvo mercadería para vender no
+ * "vendió poco", no fue medida, y con tres semanas no había forma de
+ * distinguir una cosa de la otra. La columna "días sin stock" de cada semana
+ * es la que dejó eso a la vista.
+ *
+ * Las tres nuevas arrancan el 08/09 --el día siguiente al viejo cierre-- y
+ * llegan al 29/09. No hay hueco ni superposición: 18/08 + 6 x 7 = 29/09.
  */
 export const EXPERIMENTO_INICIO = "2026-08-18";
-export const EXPERIMENTO_SEMANAS = 3;
+export const EXPERIMENTO_SEMANAS = 6;
 
 export type SemanaExperimento = {
   numero: number;

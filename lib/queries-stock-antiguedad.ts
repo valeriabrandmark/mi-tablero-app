@@ -1,7 +1,11 @@
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
-import { PROVEEDORES_NO_MERCADERIA } from "@/lib/stock";
+import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
+import {
+  GRUPO_PROVEEDOR_POR_DEFECTO,
+  PROVEEDORES_NO_MERCADERIA,
+} from "@/lib/stock";
 import {
   DIAS_POR_VENCER_ALERTA,
   TRAMOS_ANTIGUEDAD,
@@ -131,12 +135,9 @@ tuc as (
   group by sku
 ),
 costo as (
-  -- El costo del último mes que lo tenga cargado. Los artículos sin costo
-  -- quedan en 0 a propósito: son testers y exhibidores, que no se compran.
-  select distinct on (sku) sku, costo_real
-  from bronze.costos_historicos
-  where costo_real > 0
-  order by sku, mes_comercial desc
+  -- El último costo conocido de cada SKU, el mismo criterio en todas las
+  -- pantallas que valorizan stock. Ver lib/sql-costos.ts.
+  ${ULTIMO_COSTO_VIGENTE}
 ),
 ventas as (
   select sku,
@@ -172,6 +173,10 @@ base as (
          s.no_aptas,
          s.tuc,
          s.aptas + s.tuc                       as total,
+         -- La empresa del grupo que le compra a ese proveedor. Sale de la misma
+         -- tabla que en Stock y en Compras, con el mismo valor por defecto,
+         -- así que un proveedor cae en la misma empresa en las tres pantallas.
+         coalesce(pg.grupo, '${GRUPO_PROVEEDOR_POR_DEFECTO}') as grupo,
          coalesce(c.costo_real, 0)             as costo,
          (s.aptas + s.tuc) * coalesce(c.costo_real, 0) as valor,
          a.dias                                as dias_en_full,
@@ -202,6 +207,7 @@ base as (
          end                                   as dias_agotar
   from stock s
   left join bronze.sigma_articulos ar on trim(ar.id) = s.sku
+  left join bronze.proveedores_grupo pg on pg.proveedor = ar."proveedorNombre"
   left join costo c on c.sku = s.sku
   left join ventas v on v.sku = s.sku
   left join ant a on a.sku = s.sku
@@ -217,6 +223,7 @@ function where(f: FiltrosAntiguedad): Where {
   const clauses: string[] = [];
 
   agregarFiltro(clauses, params, "proveedor", f.proveedor);
+  agregarFiltro(clauses, params, "grupo", f.grupo);
   agregarFiltro(clauses, params, "marca", f.marca);
   agregarFiltro(clauses, params, "sku", f.sku);
 
@@ -398,7 +405,7 @@ async function getFilas(f: FiltrosAntiguedad): Promise<FilaAntiguedad[]> {
 
 export async function getOpcionesAntiguedad() {
   const params = [PROVEEDORES_NO_MERCADERIA];
-  const [proveedores, marcas] = await Promise.all([
+  const [proveedores, marcas, grupos] = await Promise.all([
     query<{ v: string }>(
       `${BASE} select distinct proveedor as v from base where proveedor is not null order by 1`,
       params,
@@ -407,8 +414,18 @@ export async function getOpcionesAntiguedad() {
       `${BASE} select distinct marca as v from base where marca is not null order by 1`,
       params,
     ),
+    // Igual que en Stock: salen de los datos, así que una empresa nueva en la
+    // tabla aparece en el selector sin tocar código.
+    query<{ v: string }>(
+      `${BASE} select distinct grupo as v from base where grupo is not null order by 1`,
+      params,
+    ),
   ]);
-  return { proveedores: proveedores.map((r) => r.v), marcas: marcas.map((r) => r.v) };
+  return {
+    proveedores: proveedores.map((r) => r.v),
+    marcas: marcas.map((r) => r.v),
+    grupos: grupos.map((r) => r.v),
+  };
 }
 
 /**

@@ -5,6 +5,17 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 export type Columna<T> = {
   titulo: string;
   celda: (fila: T) => ReactNode;
+  /**
+   * Qué significa exactamente esta columna. Aparece al pasar el mouse por el
+   * encabezado, que queda subrayado punteado para que se note que hay algo.
+   *
+   * NO ES PARA TODAS LAS COLUMNAS, y ahí está el criterio: si el texto sólo
+   * repite el título ("Unidades: las unidades"), estorba más de lo que ayuda y
+   * además entrena a no leer los que sí dicen algo. Va donde el nombre no
+   * alcanza -- de dónde sale el número, sobre qué ventana se midió, qué
+   * quiere decir un valor vacío.
+   */
+  ayuda?: string;
   /** Los números van alineados a la derecha y con cifras de ancho fijo. */
   numerica?: boolean;
   /**
@@ -94,7 +105,10 @@ export function promedioPonderado<T>(
 type Direccion = "asc" | "desc";
 
 /** Compara dos valores del mismo tipo. Los `null` van siempre al final. */
-function comparar(a: number | string | null, b: number | string | null): number {
+function comparar(
+  a: number | string | null,
+  b: number | string | null,
+): number {
   if (a == null && b == null) return 0;
   if (a == null) return 1;
   if (b == null) return -1;
@@ -106,9 +120,15 @@ function Flecha({ direccion }: { direccion: Direccion | null }) {
   if (!direccion) {
     // Un indicador tenue en las columnas ordenables: sin esto no hay forma de
     // saber cuáles se pueden clickear hasta que uno prueba.
-    return <span className="ml-1 opacity-0 transition-opacity group-hover:opacity-40">↓</span>;
+    return (
+      <span className="ml-1 opacity-0 transition-opacity group-hover:opacity-40">
+        ↓
+      </span>
+    );
   }
-  return <span className="text-c1 ml-1">{direccion === "asc" ? "↑" : "↓"}</span>;
+  return (
+    <span className="text-c1 ml-1">{direccion === "asc" ? "↑" : "↓"}</span>
+  );
 }
 
 export function Tabla<T>({
@@ -137,7 +157,10 @@ export function Tabla<T>({
 }) {
   // Guarda el TÍTULO y no el índice: si el tablero cambia sus columnas —pasa
   // al filtrar—, un índice apuntaría a otra columna sin avisar.
-  const [orden, setOrden] = useState<{ titulo: string; direccion: Direccion } | null>(null);
+  const [orden, setOrden] = useState<{
+    titulo: string;
+    direccion: Direccion;
+  } | null>(null);
 
   const alClickearEncabezado = (c: Columna<T>) => {
     if (!c.orden) return;
@@ -163,7 +186,9 @@ export function Tabla<T>({
     const signo = orden.direccion === "asc" ? 1 : -1;
     // Copia antes de ordenar: `sort` muta, y `filas` viene del estado del
     // tablero. Ordenar en el lugar lo dejaría desordenado para todo lo demás.
-    return [...filas].sort((a, b) => signo * comparar(col.orden!(a), col.orden!(b)));
+    return [...filas].sort(
+      (a, b) => signo * comparar(col.orden!(a), col.orden!(b)),
+    );
   }, [filas, columnas, orden]);
 
   // Aviso de que la tabla sigue hacia el costado.
@@ -210,7 +235,8 @@ export function Tabla<T>({
             <tr className="border-line border-b">
               {columnas.map((c) => {
                 const ordenable = c.orden != null;
-                const direccion = orden?.titulo === c.titulo ? orden.direccion : null;
+                const direccion =
+                  orden?.titulo === c.titulo ? orden.direccion : null;
                 return (
                   <th
                     key={c.titulo}
@@ -223,6 +249,9 @@ export function Tabla<T>({
                             ? "descending"
                             : "none"
                     }
+                    // El `title` va en el TH y no en el botón para que
+                    // aparezca igual en las columnas que no se pueden ordenar.
+                    title={c.ayuda}
                     className={`text-muted py-2 pr-3 font-medium whitespace-nowrap ${
                       c.numerica ? "text-right" : "text-left"
                     }`}
@@ -233,11 +262,15 @@ export function Tabla<T>({
                         onClick={() => alClickearEncabezado(c)}
                         className={`group hover:text-ink cursor-pointer transition-colors ${
                           direccion ? "text-ink" : ""
-                        }`}
+                        } ${c.ayuda ? "decoration-dotted underline-offset-4 hover:underline" : ""}`}
                       >
                         {c.titulo}
                         <Flecha direccion={direccion} />
                       </button>
+                    ) : c.ayuda ? (
+                      <span className="decoration-dotted underline-offset-4 hover:underline">
+                        {c.titulo}
+                      </span>
                     ) : (
                       c.titulo
                     )}
@@ -249,7 +282,8 @@ export function Tabla<T>({
           <tbody>
             {ordenadas.map((fila, i) => {
               const esActiva = activa?.(fila) ?? false;
-              const hayActiva = activa != null && ordenadas.some((x) => activa(x));
+              const hayActiva =
+                activa != null && ordenadas.some((x) => activa(x));
               return (
                 <tr
                   key={clave(fila, i)}
@@ -267,7 +301,9 @@ export function Tabla<T>({
                       // un número. Sin partir, la tabla se ensancha y scrollea,
                       // que es el comportamiento correcto.
                       className={`py-1.5 pr-3 ${
-                        c.numerica ? "text-right whitespace-nowrap tabular-nums" : ""
+                        c.numerica
+                          ? "text-right whitespace-nowrap tabular-nums"
+                          : ""
                       }`}
                     >
                       {c.celda(fila)}
@@ -292,7 +328,9 @@ export function Tabla<T>({
                   <td
                     key={c.titulo}
                     className={`text-ink py-2 pr-3 font-medium ${
-                      c.numerica ? "text-right whitespace-nowrap tabular-nums" : ""
+                      c.numerica
+                        ? "text-right whitespace-nowrap tabular-nums"
+                        : ""
                     }`}
                   >
                     {c.total ??

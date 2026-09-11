@@ -74,6 +74,67 @@ export const COBERTURA_MAXIMA_COMPRA_DIAS = 90;
 export const COBERTURA_SIN_INFLAR_DIAS = 120;
 
 /**
+ * EL FRENO DE LOS ARTÍCULOS QUE NO RINDEN.
+ *
+ * Por debajo de esta rentabilidad, una oferta grande NO es motivo para comprar
+ * más: es más plata quieta en un artículo que ya no la devuelve.
+ *
+ * 15 % no es un número redondo elegido a ojo. La rentabilidad a 3 meses de los
+ * 3.297 SKU con venta tiene mediana 20,9 % y primer cuartil 15,3 %: el corte
+ * cae, con una precisión que no busqué, en el cuartil de abajo. Son 799
+ * artículos, de los cuales 130 pierden plata.
+ */
+export const RENTABILIDAD_COMPRA_DISCRETA = 15;
+
+/**
+ * Cuánto mejor que su propia historia tiene que estar la oferta para que un
+ * artículo de baja rentabilidad SÍ se pueda comprar de más.
+ *
+ * ES LA EXCEPCIÓN, Y HACE FALTA, porque si no la regla de arriba dejaría afuera
+ * el único caso que sí vale la pena: margen flojo pero un descuento que antes no
+ * teníamos.
+ *
+ * Se mide contra la MEDIANA de los últimos meses y no contra la diferencia en
+ * puntos, y los datos dicen por qué. Los cuatro Almond Breeze tienen sell in del
+ * 50 % con mediana 42,5 %: son 7,5 puntos de ventaja sobre una oferta que el
+ * proveedor viene dando SIEMPRE, y el artículo igual pierde plata (-28 %, -9,6 %).
+ * El Scotch-Brite tiene 40 % con mediana 0: ese descuento no existía.
+ *
+ * En puntos los dos casos se parecen. Contra la mediana no: 50 sobre 42,5 no
+ * llega al doble, 40 sobre 0 sí. Mediana 0 quiere decir "nunca hubo oferta", así
+ * que cualquier descuento de hoy es nuevo.
+ */
+export const VECES_SOBRE_LA_MEDIANA_PARA_INFLAR = 2;
+
+/**
+ * PARA CUÁNTOS DÍAS SE ESTÁ COMPRANDO.
+ *
+ * `COBERTURA_OBJETIVO_DIAS` (30) es el objetivo permanente del negocio y sigue
+ * siendo el valor por defecto. Esto es otra cosa: la decisión de ESTA orden.
+ * No es lo mismo la reposición de todas las semanas que la compra de una
+ * oferta que no vuelve hasta marzo, y hasta ahora las dos daban el mismo
+ * número.
+ *
+ * EL TOPE ES 120 Y NO ES REDONDO: es `COBERTURA_SIN_INFLAR_DIAS`, el borde a
+ * partir del cual el propio cálculo considera que un artículo YA SOBRA. Pedir
+ * más días que eso sería comprar para quedar, por definición, excedido.
+ */
+export const COBERTURAS_COMPRA = [30, 60, 90] as const;
+export const COBERTURA_COMPRA_MAXIMA = COBERTURA_SIN_INFLAR_DIAS;
+
+/**
+ * Los días pedidos, o el objetivo de siempre si el número no sirve.
+ *
+ * Se recorta y no se rechaza: viene de una URL, y una orden de compra no es el
+ * lugar para que un parámetro raro tire la pantalla. Entero, porque medio día
+ * de cobertura no significa nada.
+ */
+export function coberturaValida(dias: number | null | undefined): number {
+  if (dias == null || !Number.isFinite(dias)) return COBERTURA_OBJETIVO_DIAS;
+  return Math.min(Math.max(Math.round(dias), 1), COBERTURA_COMPRA_MAXIMA);
+}
+
+/**
  * Las dos formas de comprar, con los tres nombres que tiene cada una.
  *
  * SON TRES Y NO UNO, y no es redundancia: cada camino habla distinto.
@@ -171,7 +232,10 @@ export type RenglonOrden = {
  * verdad.
  */
 export function factorNeto(descuento1: number, descuento2: number): number {
-  return (1 - descuentoValido(descuento1) / 100) * (1 - descuentoValido(descuento2) / 100);
+  return (
+    (1 - descuentoValido(descuento1) / 100) *
+    (1 - descuentoValido(descuento2) / 100)
+  );
 }
 
 /**
@@ -381,7 +445,11 @@ export const RAZON_SOCIAL_POR_GRUPO: Record<string, string> = {
 };
 
 export function razonSocial(grupo: string | null | undefined): string {
-  if (!grupo) return RAZON_SOCIAL_POR_GRUPO[GRUPO_PROVEEDOR_POR_DEFECTO] ?? GRUPO_PROVEEDOR_POR_DEFECTO;
+  if (!grupo)
+    return (
+      RAZON_SOCIAL_POR_GRUPO[GRUPO_PROVEEDOR_POR_DEFECTO] ??
+      GRUPO_PROVEEDOR_POR_DEFECTO
+    );
   return RAZON_SOCIAL_POR_GRUPO[grupo] ?? grupo;
 }
 
@@ -481,7 +549,20 @@ export function excelParaProveedor(
     // LA FILA DE CIERRE NO SUMA "Cantidad", y no es un olvido: sumar bultos con
     // unidades da un número que no significa nada. Las unidades físicas —que sí
     // se pueden sumar— están arriba, en la carátula.
-    total: ["TOTAL", null, null, null, null, null, null, null, null, null, null, total],
+    total: [
+      "TOTAL",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      total,
+    ],
   };
 }
 
@@ -527,7 +608,17 @@ export function nombreArchivo(proveedor: string, extension: string): string {
  * cuenta vive en este archivo. Si mañana cambia el factor, las dos cosas se
  * tocan juntas.
  */
-export function porQueSugerido(f: FilaCompra): string[] {
+export function porQueSugerido(
+  f: FilaCompra,
+  /**
+   * Los días de cobertura con los que se calculó ESTA fila. Es obligatorio a
+   * propósito: con un valor por defecto, el día que alguien llame a esta
+   * función sin pasarlo el tooltip diría "30 días" sobre un sugerido calculado
+   * para 90, y un número que se explica con la cuenta equivocada es peor que
+   * uno sin explicar.
+   */
+  coberturaDias: number,
+): string[] {
   if (f.cobertura == null) {
     return [
       "Sin ventas en la ventana: no hay ritmo con el que calcular nada.",
@@ -538,7 +629,7 @@ export function porQueSugerido(f: FilaCompra): string[] {
   const l: string[] = [
     `Se vende ${f.ritmoDiario.toFixed(2)} u. por día y hay ${Math.round(f.total)} u.`,
     `Alcanza para ${Math.round(f.cobertura)} días.`,
-    `Para cubrir ${COBERTURA_OBJETIVO_DIAS} días de objetivo + ${PLAZO_REPOSICION_DIAS}` +
+    `Para cubrir ${coberturaDias} días de compra + ${PLAZO_REPOSICION_DIAS}` +
       ` de reposición faltan ${Math.ceil(f.sugeridoBase)} u.`,
   ];
 
@@ -559,6 +650,26 @@ export function porQueSugerido(f: FilaCompra): string[] {
       "",
       "Sin sell in del proveedor con qué comparar: se sugiere lo que hace falta" +
         " y nada más.",
+    );
+  } else if (
+    f.factorOferta <= 1 &&
+    (f.rentabilidad ?? 0) < RENTABILIDAD_COMPRA_DISCRETA / 100 &&
+    vigente > mediana
+  ) {
+    // EL CASO NUEVO, Y EL QUE MÁS FALTA HACE EXPLICAR. Sin esto el tooltip
+    // diría "el descuento no supera al habitual" sobre un artículo que sí lo
+    // supera -- y quien lo lea va a pensar que el número está mal.
+    l.push(
+      "",
+      `El descuento de este mes es ${vigente.toFixed(1)} % contra ${mediana.toFixed(1)} %` +
+        ` habitual, pero el artículo rinde ${((f.rentabilidad ?? 0) * 100).toFixed(1)} %,` +
+        ` por debajo del ${RENTABILIDAD_COMPRA_DISCRETA} %.`,
+      "COMPRA DISCRETA: sólo lo necesario. Comprar de más un artículo que no" +
+        " rinde es plata quieta, por buena que esté la oferta.",
+      `Se adelantaría compra si el descuento fuera al menos` +
+        ` ${VECES_SOBRE_LA_MEDIANA_PARA_INFLAR} veces el habitual` +
+        ` (${(mediana * VECES_SOBRE_LA_MEDIANA_PARA_INFLAR).toFixed(1)} %),` +
+        " o sea uno que antes no teníamos.",
     );
   } else if (f.factorOferta <= 1) {
     l.push(

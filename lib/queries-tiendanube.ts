@@ -14,6 +14,7 @@ import type {
   PuntoDiaTiendaNube,
   RankingTiendaNube,
 } from "@/lib/types";
+import { descuentosAgrupados, joinCostos } from "@/lib/sql-descuentos";
 
 /**
  * Consultas de "Venta minorista — Tienda Nube".
@@ -243,7 +244,8 @@ const COLUMNAS_ARTICULO = `sku,
             coalesce(sum(${VENTA_SIVA}), 0)   as venta_siva,
             coalesce(sum(${COSTO}), 0)        as costo,
             coalesce(sum(${ENVIO}), 0)        as envio,
-            coalesce(sum(${RENTABILIDAD}), 0) as rentabilidad`;
+            coalesce(sum(${RENTABILIDAD}), 0) as rentabilidad,
+            ${descuentosAgrupados("fv")}`;
 
 function aArticulo(r: Record<string, string>): ArticuloTiendaNube {
   const ventaCiva = num(r.venta_civa);
@@ -260,6 +262,10 @@ function aArticulo(r: Record<string, string>): ArticuloTiendaNube {
     envio: num(r.envio),
     rentabilidad,
     margenPct: pct(rentabilidad, ventaCiva),
+    // `null` y no 0: "sin dato" y "sin descuento" se leen distinto en una
+    // columna de porcentajes.
+    ofertaProveedorPct: r.ofertaProveedorPct == null ? null : num(r.ofertaProveedorPct),
+    ofertaPropiaPct: r.ofertaPropiaPct == null ? null : num(r.ofertaPropiaPct),
   };
 }
 
@@ -272,7 +278,8 @@ async function getTopRentabilidad(f: FiltrosTiendaNube): Promise<ArticuloTiendaN
   const w = whereBase(f);
   const filas = await query<Record<string, string>>(
     `select ${COLUMNAS_ARTICULO}
-     from gold.fact_ventas
+     from gold.fact_ventas fv
+     ${joinCostos("fv")}
      where ${w.sql}
      group by sku
      order by rentabilidad desc
@@ -286,7 +293,8 @@ async function getArticulos(f: FiltrosTiendaNube): Promise<ArticuloTiendaNube[]>
   const w = whereBase(f);
   const filas = await query<Record<string, string>>(
     `select ${COLUMNAS_ARTICULO}
-     from gold.fact_ventas
+     from gold.fact_ventas fv
+     ${joinCostos("fv")}
      where ${w.sql}
      group by sku
      order by venta_civa desc

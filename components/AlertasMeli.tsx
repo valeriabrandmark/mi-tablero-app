@@ -88,6 +88,8 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
   return [
     {
       titulo: "Alerta",
+      ayuda:
+        "Qué tan bajo está el margen de esa venta. El umbral lo fija lib/meli.ts.",
       celda: (f) => <Etiqueta nivel={f.nivel} />,
       orden: (f) => f.nivel,
     },
@@ -98,6 +100,8 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "N° Orden",
+      ayuda:
+        "Número de orden de Mercado Libre. Se puede copiar y pegar en el buscador de ML.",
       celda: (f) => (
         <span className="flex items-center gap-1.5 whitespace-nowrap">
           <span className="font-mono text-[11px]">{f.nroOrden ?? "—"}</span>
@@ -126,12 +130,16 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
       // Columna propia y no solo la marquita: sin esto no habría forma de juntar
       // todas las parciales, que es justo lo que uno quiere al revisarlas.
       titulo: "Tipo",
+      ayuda:
+        "Si la orden tuvo una devolución PARCIAL. En ese caso la venta figura por el importe completo --la API de ML no informa lo devuelto--, así que su rentabilidad está algo sobreestimada.",
       celda: (f) => (f.parcial ? "Parcial" : "Venta"),
       orden: (f) => (f.parcial ? 0 : 1),
     },
     { titulo: "SKU", celda: (f) => f.sku ?? "—", orden: (f) => f.sku },
     {
       titulo: "Descripción",
+      ayuda:
+        "El título de la publicación en Mercado Libre, que no siempre coincide con la descripción del artículo en Sigma.",
       celda: (f) => (
         <span className="block max-w-[116px] sm:max-w-[260px] truncate">
           {f.producto ?? "—"}
@@ -141,6 +149,7 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "Proveedor",
+      ayuda: "El proveedor del artículo según el maestro de Sigma.",
       celda: (f) => (
         <span className="block max-w-[96px] sm:max-w-[180px] truncate">
           {f.proveedor ?? "—"}
@@ -151,19 +160,55 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     {
       titulo: "Marca",
       celda: (f) => (
-        <span className="block max-w-[96px] sm:max-w-[130px] truncate">{f.marca ?? "—"}</span>
+        <span className="block max-w-[96px] sm:max-w-[130px] truncate">
+          {f.marca ?? "—"}
+        </span>
       ),
       orden: (f) => f.marca,
     },
     {
       titulo: "Cant.",
+      ayuda: "Unidades de esa línea de venta.",
       celda: (f) => fmtNumero(f.cantidad),
       numerica: true,
       orden: (f) => f.cantidad,
       total: fmtNumero(sumar(filas, (f) => f.cantidad)),
     },
     {
+      titulo: "Oferta prov. %",
+      ayuda:
+        "Lo que el proveedor nos descontó a nosotros el mes de esa venta (columna J del Excel de costos). Es del COSTO, no de la venta.",
+      celda: (f) =>
+        f.ofertaProveedorPct == null ? "—" : fmtPct(f.ofertaProveedorPct / 100),
+      numerica: true,
+      orden: (f) => f.ofertaProveedorPct,
+      total: fmtPct(
+        promedioPonderado(
+          filas.filter((f) => f.ofertaProveedorPct != null),
+          (f) => ((f.ofertaProveedorPct ?? 0) / 100) * f.cantidad,
+          (f) => f.cantidad,
+        ),
+      ),
+    },
+    {
+      titulo: "Oferta propia %",
+      ayuda:
+        "Lo que ponemos nosotros encima del descuento del proveedor (columna K del Excel de costos).",
+      celda: (f) =>
+        f.ofertaPropiaPct == null ? "—" : fmtPct(f.ofertaPropiaPct / 100),
+      numerica: true,
+      orden: (f) => f.ofertaPropiaPct,
+      total: fmtPct(
+        promedioPonderado(
+          filas.filter((f) => f.ofertaPropiaPct != null),
+          (f) => ((f.ofertaPropiaPct ?? 0) / 100) * f.cantidad,
+          (f) => f.cantidad,
+        ),
+      ),
+    },
+    {
       titulo: "Venta c/IVA",
+      ayuda: "Lo que pagó el comprador, IVA incluido.",
       celda: (f) => fmtMoneda(f.ventaCiva),
       numerica: true,
       orden: (f) => f.ventaCiva,
@@ -171,6 +216,7 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "Venta s/IVA",
+      ayuda: "La misma venta, quitado el IVA.",
       celda: (f) => fmtMoneda(f.ventaSiva),
       numerica: true,
       orden: (f) => f.ventaSiva,
@@ -178,12 +224,15 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "Costo unit. s/IVA",
+      ayuda:
+        "Costo de UNA unidad, sin IVA, del Excel de costos del mes de la venta.",
       celda: (f) => fmtMoneda(f.costoUnitario),
       numerica: true,
       orden: (f) => f.costoUnitario,
     },
     {
       titulo: "Costo total s/IVA",
+      ayuda: "El costo unitario por la cantidad.",
       celda: (f) => fmtMoneda(f.costo),
       numerica: true,
       orden: (f) => f.costo,
@@ -191,6 +240,7 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "Comisión",
+      ayuda: "Lo que se queda Mercado Libre por la venta.",
       celda: (f) => fmtMoneda(f.comision),
       numerica: true,
       orden: (f) => f.comision,
@@ -198,6 +248,7 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "Envío",
+      ayuda: "Costo del envío que absorbemos nosotros.",
       celda: (f) => fmtMoneda(f.envio),
       numerica: true,
       orden: (f) => f.envio,
@@ -205,6 +256,8 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "Rent. bruta",
+      ayuda:
+        "Venta menos costo, comisión y envío. Todavía sin los tres impuestos.",
       celda: (f) => <Importe valor={f.rentabilidad} />,
       numerica: true,
       orden: (f) => f.rentabilidad,
@@ -212,6 +265,7 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "Margen bruto c/IVA",
+      ayuda: "La rentabilidad bruta sobre la venta con IVA.",
       celda: (f) => (
         <span
           style={(f.margenPct ?? 0) < 0 ? { color: TEMA.negativo } : undefined}
@@ -231,6 +285,8 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "IIBB",
+      ayuda:
+        "Ingresos brutos, calculado sobre la venta sin IVA con la alícuota de lib/meli.ts.",
       celda: (f) => fmtMoneda(f.iibb),
       numerica: true,
       orden: (f) => f.iibb,
@@ -238,6 +294,7 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "Imp. cheque",
+      ayuda: "Impuesto al cheque, sobre la venta sin IVA.",
       celda: (f) => fmtMoneda(f.cheque),
       numerica: true,
       orden: (f) => f.cheque,
@@ -245,6 +302,7 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "Imp. municipal",
+      ayuda: "Tasa municipal, sobre la venta sin IVA.",
       celda: (f) => fmtMoneda(f.municipal),
       numerica: true,
       orden: (f) => f.municipal,
@@ -252,6 +310,8 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "Rent. neta",
+      ayuda:
+        "La rentabilidad bruta menos los tres impuestos. Es el número que decide si la venta dejó plata.",
       celda: (f) => <Importe valor={f.rentabilidadNeta} />,
       numerica: true,
       orden: (f) => f.rentabilidadNeta,
@@ -259,6 +319,8 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "Margen neto c/IVA",
+      ayuda:
+        "La rentabilidad neta sobre la venta con IVA. Es lo que ordena la tabla.",
       celda: (f) => (
         <span
           style={
@@ -280,6 +342,8 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
     },
     {
       titulo: "Acción",
+      ayuda:
+        "Qué conviene hacer con ese artículo según el margen. Es una sugerencia del cálculo, no una regla.",
       celda: (f) => <span className="whitespace-nowrap">{f.accion}</span>,
       orden: (f) => f.accion,
     },

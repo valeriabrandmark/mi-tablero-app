@@ -291,6 +291,33 @@ export type FiltrosObjetivos = {
    * eso el avance sigue midiéndose contra la meta entera y la pantalla lo dice.
    */
   cliente?: string[];
+  /**
+   * Texto libre. Va contra el nombre del cliente Y el número de comprobante a
+   * la vez, porque quien busca tiene uno de los dos a mano y no quiere elegir
+   * contra cuál compara. Recorta las VENTAS, igual que `cliente`.
+   */
+  buscar?: string;
+};
+
+/**
+ * Un comprobante impago cuyo vencimiento ya pasó.
+ *
+ * Sale de `bronze.cuentas_corrientes_aging`, que es UNA FOTO al momento de la
+ * carga y no un acumulado del mes: por eso esta tabla no se mueve con el
+ * selector de mes, igual que la tarjeta de vencido de arriba.
+ */
+export type ComprobanteVencido = {
+  comprobante: string | null;
+  /** Del comprobante, no del vencimiento. */
+  fecha: string | null;
+  vencimiento: string | null;
+  cliente: string | null;
+  empresa: string | null;
+  /** Lo que decía el comprobante. */
+  total: number;
+  /** Lo que queda debiendo: el total menos lo que se haya pagado a cuenta. */
+  adeuda: number;
+  diasVencido: number;
 };
 
 /** Totales de una métrica. Nunca se mezclan dos métricas en un mismo total. */
@@ -320,6 +347,11 @@ export type FilaObjetivo = {
   vendido: number;
   avancePct: number | null;
   faltan: number;
+  /**
+   * Los SKU que componen el grupo, ya unidos con " + ". Null en los grupos que
+   * no se miden por SKU (los de empresa), donde el nombre ya lo dice todo.
+   */
+  skus: string | null;
 };
 
 /** Un comprobante del vendedor dentro del recorte elegido. */
@@ -357,6 +389,8 @@ export type DashboardObjetivos = {
   resumen: ResumenMetrica[];
   /** Null si el vendedor todavía no tiene código de SIGMA. */
   vencido: VencidoVendedor | null;
+  /** Los comprobantes que están detrás de ese número, uno por uno. */
+  comprobantesVencidos: ComprobanteVencido[];
   porGrupo: FilaObjetivo[];
   serieFacturacion: PuntoFacturacion[];
   comprobantes: FilaComprobanteObjetivo[];
@@ -500,6 +534,20 @@ export type ArticuloMeli = {
   proveedor: string | null;
   marca: string | null;
   unidades: number;
+  /**
+   * Los tres descuentos, iguales que en Ventas Mayoristas. Ver
+   * `lib/sql-descuentos.ts`: se parecen y son cosas distintas.
+   *
+   *   ofertaProveedorPct  lo que EL PROVEEDOR nos descontó (columna J del Excel)
+   *   ofertaPropiaPct     lo que ponemos NOSOTROS encima (columna K)
+   *
+   * NO está el descuento AL CLIENTE que sí tiene Mayorista: ese sale de la
+   * factura de Sigma y las ventas de ML y TN no lo traen. Ver sql-descuentos.
+   *
+   * `null` es "sin dato", que no es lo mismo que 0.
+   */
+  ofertaProveedorPct: number | null;
+  ofertaPropiaPct: number | null;
   ventaCiva: number;
   ventaSiva: number;
   costo: number;
@@ -609,6 +657,20 @@ export type FilaAlertaMeli = {
   proveedor: string | null;
   marca: string | null;
   cantidad: number;
+  /**
+   * Los tres descuentos, iguales que en Ventas Mayoristas. Ver
+   * `lib/sql-descuentos.ts`: se parecen y son cosas distintas.
+   *
+   *   ofertaProveedorPct  lo que EL PROVEEDOR nos descontó (columna J del Excel)
+   *   ofertaPropiaPct     lo que ponemos NOSOTROS encima (columna K)
+   *
+   * NO está el descuento AL CLIENTE que sí tiene Mayorista: ese sale de la
+   * factura de Sigma y las ventas de ML y TN no lo traen. Ver sql-descuentos.
+   *
+   * `null` es "sin dato", que no es lo mismo que 0.
+   */
+  ofertaProveedorPct: number | null;
+  ofertaPropiaPct: number | null;
   ventaCiva: number;
   ventaSiva: number;
   costoUnitario: number | null;
@@ -727,6 +789,20 @@ export type ArticuloTiendaNube = {
   proveedor: string | null;
   marca: string | null;
   unidades: number;
+  /**
+   * Los tres descuentos, iguales que en Ventas Mayoristas. Ver
+   * `lib/sql-descuentos.ts`: se parecen y son cosas distintas.
+   *
+   *   ofertaProveedorPct  lo que EL PROVEEDOR nos descontó (columna J del Excel)
+   *   ofertaPropiaPct     lo que ponemos NOSOTROS encima (columna K)
+   *
+   * NO está el descuento AL CLIENTE que sí tiene Mayorista: ese sale de la
+   * factura de Sigma y las ventas de ML y TN no lo traen. Ver sql-descuentos.
+   *
+   * `null` es "sin dato", que no es lo mismo que 0.
+   */
+  ofertaProveedorPct: number | null;
+  ofertaPropiaPct: number | null;
   ventaCiva: number;
   ventaSiva: number;
   costo: number;
@@ -880,6 +956,8 @@ export type FiltrosStockFull = {
   proveedor?: string[];
   marca?: string[];
   sku?: string[];
+  /** Filtro cruzado: sale de hacer click en una barra del gráfico de tramos. */
+  tramo?: string;
   /** "Sin vender hace más de N días". El que nunca vendió entra siempre. */
   minDias?: number;
 };
@@ -888,14 +966,44 @@ export type KpisStockFull = {
   skus: number;
   /** Unidades que Mercado Libre puede vender. */
   disponible: number;
-  /** En el depósito pero NO vendibles: dañadas, en revisión, reservadas. */
+  /**
+   * En el depósito pero NO vendibles: dañadas, en revisión, reservadas.
+   *
+   * CUENTA TAMBIÉN LOS ARTÍCULOS QUE ESTÁN ENTEROS ASÍ, que es lo que la hacía
+   * mentir: el resto de la pantalla mira sólo stock vendible, y con ese corte
+   * un artículo con cero disponibles y tres trabadas no existía. Eran 87 de
+   * 120 unidades, el 72 %.
+   */
   noDisponible: number;
   valorizacion: number;
+  /**
+   * Lo mismo que `valorizacion` pero A COSTO NETO: el teórico con la oferta del
+   * proveedor ya descontada.
+   *
+   * Son dos preguntas distintas y por eso están las dos. A precio de venta dice
+   * cuánto se dejaría de facturar; a costo, cuánta plata NUESTRA está parada
+   * ahí. Para decidir si conviene retirar mercadería de Full manda la segunda.
+   */
+  valorizacionCosto: number;
+  /** Lo trabado, valorizado a costo. */
+  valorizacionCostoNoDisponible: number;
   /** SKUs sin vender hace más de `UMBRAL_PARADO` días, o que nunca vendieron. */
   skusParados: number;
   valorizacionParada: number;
   /** Unidades vendidas en los últimos 30 días, para saber si el stock rota. */
   uds30: number;
+};
+
+/** Un artículo con unidades que Mercado Libre no puede vender. */
+export type FilaNoDisponible = {
+  sku: string | null;
+  producto: string | null;
+  proveedor: string | null;
+  marca: string | null;
+  noDisponible: number;
+  /** Las que SÍ se pueden vender. En 0 está el peor caso: nada vendible. */
+  disponible: number;
+  valorizacionCosto: number;
 };
 
 export type TramoStockFull = {
@@ -926,6 +1034,8 @@ export type DashboardStockFull = {
   umbrales: Record<number, number>;
   tramos: TramoStockFull[];
   filas: FilaStockFull[];
+  /** Los artículos detrás de la tarjeta de "No disponible". */
+  noDisponible: FilaNoDisponible[];
   recortada: boolean;
   /**
    * Desde cuándo hay foto diaria del stock, o null si todavía no hay ninguna.
@@ -1216,6 +1326,12 @@ export type DashboardStock = {
 
 export type FiltrosAntiguedad = {
   proveedor?: string[];
+  /**
+   * Empresa del grupo a la que pertenece el proveedor ("NOA COMERCIAL" o
+   * "QUO MKT"). Sale de `bronze.proveedores_grupo`, igual que en Stock y en
+   * Compras.
+   */
+  grupo?: string[];
   marca?: string[];
   sku?: string[];
   /** Deja los artículos con alguna unidad en ese tramo de antigüedad en Full. */
@@ -1289,8 +1405,16 @@ export type KpisAntiguedad = {
   skusParciales: number;
 };
 
-export type TramoAntiguedad = { tramo: string; unidades: number; valor: number };
-export type TramoVencimiento = { tramo: string; unidades: number; valor: number };
+export type TramoAntiguedad = {
+  tramo: string;
+  unidades: number;
+  valor: number;
+};
+export type TramoVencimiento = {
+  tramo: string;
+  unidades: number;
+  valor: number;
+};
 
 export type DashboardAntiguedad = {
   kpis: KpisAntiguedad;
@@ -1333,10 +1457,24 @@ export type FiltrosCompras = {
   grupo?: string[];
   /** Sobre cuántos días se mide el ritmo de venta. Ver lib/stock.ts. */
   ventana?: number;
+  /**
+   * Para cuántos días de venta se quiere comprar en ESTA orden.
+   *
+   * No confundir con `ventana`, que se le parece y es lo contrario:
+   * `ventana` mira para atrás (sobre cuántos días se midió lo que se vende),
+   * `cobertura` mira para adelante (cuántos días se quiere tener cubiertos).
+   */
+  cobertura?: number;
   /** Mes comercial del que sale la oferta del proveedor (`YYYY-MM`). */
   mes?: string;
   /** `true` para ver también los artículos que el cálculo no pidió comprar. */
   todos?: boolean;
+  /**
+   * `true` deja sólo los artículos con oferta del proveedor vigente en el mes
+   * elegido. Es para armar la orden de una campaña de ofertas sin tener que
+   * mirar el resto del catálogo.
+   */
+  soloOferta?: boolean;
   buscar?: string;
 };
 
@@ -1433,6 +1571,11 @@ export type FilaCompra = {
    * `proveedorComproMesPasado`, que sale de la cabecera y no del detalle.
    */
   compradoMesPasado: boolean;
+  /**
+   * Cuántas UNIDADES de este SKU se compraron el mes pasado. 0 cuando no hay
+   * renglón, que --por lo de arriba-- no quiere decir que no se haya comprado.
+   */
+  unidadesMesPasado: number;
   /** Si hubo alguna compra a ese proveedor el mes pasado, por cabecera. */
   proveedorComproMesPasado: boolean;
   /**
@@ -1453,6 +1596,15 @@ export type DashboardCompras = {
   filas: FilaCompra[];
   recortada: boolean;
   ventana: number;
+  /**
+   * Los días de cobertura con los que se calculó el sugerido.
+   *
+   * LO DEVUELVE EL SERVIDOR aunque la pantalla ya los eligió, por el mismo
+   * motivo que `ventana` y `mesPasado`: mientras una consulta viaja, el filtro
+   * local ya cambió, y explicar un número con un parámetro que no es el que se
+   * usó es peor que no explicarlo.
+   */
+  cobertura: number;
   /** El mes calendario pasado (`YYYY-MM`), que es de donde salen las columnas
    * de rentabilidad y de compra del mes pasado. Lo calcula el servidor para que
    * la pantalla no lo vuelva a deducir y los dos puedan discrepar un día 1. */
@@ -1552,4 +1704,100 @@ export type DashboardTrazabilidad = {
   desde: string | null;
   hasta: string | null;
   diasDeFoto: number;
+};
+
+/* -------------------------------------------------------------------------
+   Precios TN — Comparador (Operaciones)
+
+   Lo que produce el proyecto `precios` y este tablero sólo muestra. Los montos
+   vienen como `float8` desde Postgres porque son para mostrar; las cuentas que
+   importan --piso de margen, precio propuesto-- ya se hicieron allá con
+   Decimal, y acá no se recalcula ninguna.
+   ------------------------------------------------------------------------- */
+
+/** Un competidor concreto, con su precio y el link para ir a verlo. */
+export type CompetidorPrecioTn = {
+  fuente: string;
+  precio: number;
+  dia: string;
+  disponible: boolean;
+  url: string | null;
+};
+
+export type FilaPrecioTn = {
+  id: number;
+  sku: string;
+  descripcion: string;
+  marca: string | null;
+  proveedor: string | null;
+  accion: "mantener" | "subir" | "bajar" | "omitir";
+  estado: "pendiente" | "aprobada" | "rechazada" | "aplicada" | "vencida";
+  precioActual: number | null;
+  precioPropuesto: number | null;
+  piso: number | null;
+  mejorCompetencia: number | null;
+  /** Fracción: 0,22 = estamos 22 % arriba del más barato del mercado. */
+  difMercado: number | null;
+  grupo: string;
+  motivos: string[];
+  competidores: CompetidorPrecioTn[];
+  stock: number | null;
+  costo: number | null;
+};
+
+export type ResumenPreciosTn = {
+  corridaId: number | null;
+  /** Cuándo corrió el motor que produjo estas propuestas. */
+  corridaFecha: string | null;
+  /**
+   * Cuándo se miró a la competencia por última vez, que NO es lo mismo.
+   *
+   * El motor puede correr hoy sobre observaciones de hace tres días: para él
+   * son datos vigentes según la política, y no tiene forma de avisar. Quien
+   * aprueba necesita este otro número, porque es el que dice si la pantalla
+   * está hablando del mercado de hoy o del de la semana pasada.
+   */
+  comparadoEn: string | null;
+  grupos: Record<string, number>;
+  pendientes: number;
+  decididas: number;
+  /** Aprobadas y todavía sin escribir en la tienda, de todas las corridas. */
+  aprobadasSinAplicar: number;
+};
+
+/** Los filtros de la pantalla. `null` = sin filtrar por eso. */
+export type FiltrosPreciosTn = {
+  grupo: string | null;
+  proveedor: string | null;
+  marca: string | null;
+  busqueda: string | null;
+};
+
+/** Los valores que existen hoy para llenar los desplegables. */
+export type CatalogosPreciosTn = {
+  proveedores: string[];
+  marcas: string[];
+};
+
+/**
+ * Un precio efectivamente escrito en Tienda Nube.
+ *
+ * Sale de `precios.cambio`, que es append-only por trigger: un registro de
+ * auditoría que se puede editar no es un registro de auditoría. `precioAnterior`
+ * es lo que permite volver atrás sin depender de que Tienda Nube recuerde nada.
+ */
+export type CambioPrecioTn = {
+  id: number;
+  sku: string;
+  descripcion: string;
+  marca: string | null;
+  precioAnterior: number;
+  precioNuevo: number;
+  /** Fracción: 0,12 = el precio subió 12 %. */
+  variacion: number | null;
+  aplicadoEn: string;
+  autorizadoPor: string | null;
+  /** La ficha en NUESTRA tienda, para ir a verlo. */
+  url: string | null;
+  yaSeDeshizo: boolean;
 };
