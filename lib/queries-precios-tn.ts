@@ -1,5 +1,9 @@
 import { query, queryOne } from "@/lib/db";
-import { DIFERENCIA_MINIMA_VISIBLE, type ClaveAlerta } from "@/lib/precios-tn";
+import {
+  DIFERENCIA_MINIMA_VISIBLE,
+  GRUPO_INFORMATIVO,
+  type ClaveAlerta,
+} from "@/lib/precios-tn";
 import type {
   CambioPrecioTn,
   CatalogosPreciosTn,
@@ -43,6 +47,19 @@ const CLASIFICACION = `
       then 'no_competible'
     when p.precio_actual < p.piso
       then 'bajo_piso'
+    -- EN PRECIO VA ANTES QUE CAROS Y BARATOS, y el orden es la regla.
+    --
+    -- Estar 1 % arriba del mercado es estar en precio, no estar caro. Si esta
+    -- rama fuera después, todo caería en "caros" o "baratos" según el signo de
+    -- una diferencia que no significa nada, y las dos tarjetas dirían miles.
+    --
+    -- Va DESPUÉS de las dos de piso a propósito: vender por debajo del costo
+    -- sigue siendo grave aunque estemos clavados con el mercado. Ahí el
+    -- problema no es el precio de ellos, es el nuestro.
+    when p.referencia_competencia is not null
+         and abs(p.precio_actual - p.referencia_competencia) / p.referencia_competencia
+             < ${DIFERENCIA_MINIMA_VISIBLE}
+      then 'en_precio'
     when p.referencia_competencia is not null and p.precio_actual > p.referencia_competencia
       then 'caros'
     when p.referencia_competencia is not null and p.precio_actual < p.referencia_competencia
@@ -269,15 +286,25 @@ function condicionesDeFiltro(
 
 /** El `where` común a la lista y a la aprobación en bloque. */
 function cuerpoDeConsulta(filtros: FiltrosPreciosTn, params: unknown[]): string {
+  // LO QUE ESTÁ EN PRECIO NO ES COLA DE TRABAJO, PERO TAMPOCO ES INVISIBLE.
+  //
+  // Antes se excluía con un `where` y no aparecía en ningún lado: ni en la
+  // lista ni en el resumen. Eso es correcto para una cola —trescientos
+  // productos con 1 % de diferencia hacen abandonar la pantalla— y es un
+  // agujero para saber cómo está el negocio.
+  //
+  // Ahora se cuenta siempre y se lista sólo cuando se lo pide haciendo clic en
+  // su tarjeta. `$2` no se usa más acá: el umbral vive en la clasificación, en
+  // un solo lugar, así que la lista y la tarjeta no pueden decir cosas
+  // distintas sobre qué está en precio.
+  const soloInformativo = filtros.grupo === GRUPO_INFORMATIVO;
   return `
        from precios.propuesta p
        left join bronze.sigma_articulos a on a.id = p.sku
        ${FOTO_PROPIA}
       where p.corrida_id = $1
         and ${CLASIFICACION} is not null
-        -- Lo que está a menos del umbral no es cola de trabajo, es ruido.
-        and (p.referencia_competencia is null
-             or abs(p.precio_actual - p.referencia_competencia) / p.referencia_competencia >= $2)
+        and (${CLASIFICACION} <> '${GRUPO_INFORMATIVO}' or ${soloInformativo})
         ${condicionesDeFiltro(filtros, params)}`;
 }
 
@@ -297,7 +324,7 @@ export async function getFilasPreciosTn(
   const corrida = await queryOne<{ id: number }>(ULTIMA_CORRIDA, []);
   if (!corrida) return [];
 
-  const params: unknown[] = [corrida.id, DIFERENCIA_MINIMA_VISIBLE];
+  const params: unknown[] = [corrida.id];
   const cuerpo = cuerpoDeConsulta(filtros, params);
   params.push(limite);
   const limiteParam = params.length;
@@ -368,7 +395,7 @@ export async function getCatalogosPreciosTn(): Promise<CatalogosPreciosTn> {
     marca: null,
     busqueda: null,
   };
-  const params: unknown[] = [corrida.id, DIFERENCIA_MINIMA_VISIBLE];
+  const params: unknown[] = [corrida.id];
   const cuerpo = cuerpoDeConsulta(sinFiltros, params);
 
   const filas = await query<{ proveedor: string | null; marca: string | null }>(
@@ -400,13 +427,46 @@ export async function decidirPropuesta(
   id: number,
   decision: "aprobada" | "rechazada",
   quien: string,
+  precioManual?: number | null,
 ): Promise<boolean> {
+  if (decision === "rechazada" || precioManual == null) {
+    const filas = await query<{ id: number }>(
+      `update precios.propuesta
+          set estado = $2, decidida_por = $3, decidida_en = now()
+        where id = $1 and estado = 'pendiente'
+        returning id`,
+      [id, decision, quien],
+    );
+    return filas.length > 0;
+  }
+
   const filas = await query<{ id: number }>(
     `update precios.propuesta
-        set estado = $2, decidida_por = $3, decidida_en = now()
-      where id = $1 and estado = 'pendiente'
+        set estado = 'aprobada',
+            decidida_por = $3,
+            decidida_en = now(),
+            precio_propuesto = $2::numeric,
+            motivos = motivos || to_jsonb(
+              'precio escrito a mano por ' || $3::text ||
+              ': el motor proponia ' || coalesce(precio_propuesto::text, 'nada')
+            )
+      where id = $1
+        and estado = 'pendiente'
+        -- EL PISO NO SE PUEDE PERFORAR NI A MANO, Y SE VERIFICA ACA.
+        --
+        -- Es la unica regla dura del sistema: no vender por debajo del costo
+        -- con IVA, pasarela e impuestos y el margen minimo. Un campo de texto
+        -- libre en una pantalla es exactamente por donde se saltea una regla
+        -- asi, y confiar en que el navegador valide no sirve: el navegador es
+        -- de quien escribe.
+        --
+        -- Si la condicion no se cumple no se actualiza ninguna fila y la ruta
+        -- contesta que no se pudo, que es lo mismo que pasa si otra persona ya
+        -- la decidio. El comando de aplicar vuelve a mirar el piso contra el
+        -- costo de HOY antes de escribir, asi que son dos puertas y no una.
+        and ($2::numeric >= piso or piso is null)
       returning id`,
-    [id, decision, quien],
+    [id, precioManual, quien],
   );
   return filas.length > 0;
 }
@@ -440,7 +500,7 @@ export async function aprobarFiltradas(
   const corrida = await queryOne<{ id: number }>(ULTIMA_CORRIDA, []);
   if (!corrida) return 0;
 
-  const params: unknown[] = [corrida.id, DIFERENCIA_MINIMA_VISIBLE];
+  const params: unknown[] = [corrida.id];
   const cuerpo = cuerpoDeConsulta(filtros, params);
   params.push(quien);
   const quienParam = params.length;
@@ -454,6 +514,15 @@ export async function aprobarFiltradas(
                 and p.estado = 'pendiente'
                 and p.precio_propuesto is not null
                 and ${CLASIFICACION} <> 'no_competible'
+                -- Lo que está en precio no se aprueba en bloque aunque se lo
+                -- esté mirando: son de accion "mantener", escribirlos pondría
+                -- el mismo número que ya está y el comando de aplicar los
+                -- vetaría uno por uno. Un botón que dice "23 autorizadas" y
+                -- después no escribe ninguna enseña a desconfiar del contador.
+                --
+                -- (Sin backticks: esto viaja dentro de un template literal de
+                -- JS y uno solo lo corta a la mitad. Ya pasó en este archivo.)
+                and ${CLASIFICACION} <> '${GRUPO_INFORMATIVO}'
             )
         and destino.estado = 'pendiente'
       returning destino.id`,
@@ -476,7 +545,7 @@ export async function contarAprobables(filtros: FiltrosPreciosTn): Promise<{
   const corrida = await queryOne<{ id: number }>(ULTIMA_CORRIDA, []);
   if (!corrida) return { total: 0, bajan: 0, suben: 0 };
 
-  const params: unknown[] = [corrida.id, DIFERENCIA_MINIMA_VISIBLE];
+  const params: unknown[] = [corrida.id];
   const cuerpo = cuerpoDeConsulta(filtros, params);
 
   const fila = await queryOne<{ total: number; bajan: number; suben: number }>(
@@ -486,7 +555,8 @@ export async function contarAprobables(filtros: FiltrosPreciosTn): Promise<{
        ${cuerpo}
         and p.estado = 'pendiente'
         and p.precio_propuesto is not null
-        and ${CLASIFICACION} <> 'no_competible'`,
+        and ${CLASIFICACION} <> 'no_competible'
+        and ${CLASIFICACION} <> '${GRUPO_INFORMATIVO}'`,
     params,
   );
   return fila ?? { total: 0, bajan: 0, suben: 0 };

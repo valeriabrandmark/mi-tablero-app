@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fmtFechaCorta, fmtMoneda, fmtPct } from "@/lib/format";
+import { imprimirPdf, libroDePrecios } from "@/lib/exportar-precios-tn";
+import { aXlsx } from "@/lib/xlsx";
 import { Tabla, type Columna } from "@/components/Tabla";
 import { ALERTAS, nombreFuente, type ClaveAlerta } from "@/lib/precios-tn";
 import type {
@@ -31,7 +33,37 @@ const TONOS: Record<string, string> = {
   critico: "border-negativo/40 bg-negativo/10 text-negativo",
   aviso: "border-c3/40 bg-c3/15 text-c3",
   neutro: "border-line bg-panel-2 text-muted",
+  // "En precio" no es un aviso: es lo que está bien. Va en verde y al final,
+  // para que se lea como el saldo y no como un problema más de la fila.
+  ok: "border-c1/40 bg-c1/10 text-c1",
 };
+
+/** Descarga un contenido como archivo. Texto o bytes: al Blob le da igual. */
+function bajarArchivo(contenido: BlobPart, nombre: string, tipo: string) {
+  const url = URL.createObjectURL(new Blob([contenido], { type: tipo }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * El filtro en palabras, para la carátula del archivo.
+ *
+ * Sin esto, dos Excel bajados con filtros distintos se ven idénticos por fuera
+ * y no hay forma de saber cuál es cuál una semana después.
+ */
+function descripcionDelFiltro(f: FiltrosPreciosTn): string {
+  const partes: string[] = [];
+  if (f.grupo) partes.push(ALERTAS.find((a) => a.clave === f.grupo)?.titulo ?? f.grupo);
+  if (f.marca) partes.push(`marca ${f.marca}`);
+  if (f.proveedor) partes.push(`proveedor ${f.proveedor}`);
+  if (f.busqueda) partes.push(`búsqueda "${f.busqueda}"`);
+  return partes.join(" · ");
+}
 
 const SIN_FILTRO: FiltrosPreciosTn = {
   grupo: null,
@@ -73,34 +105,127 @@ function Diferencia({ valor }: { valor: number | null }) {
 }
 
 /**
- * El margen de hoy y el del precio propuesto, uno sobre el otro.
+ * Un margen, como porcentaje de la venta sin IVA.
  *
- * LOS DOS JUNTOS, porque lo que hay que ver de un vistazo no es "cuánto gano"
- * sino "cuánto estoy resignando por competir", y eso es la resta. El de arriba
- * es el de hoy; el de abajo, el que quedaría.
+ * LO CALCULA EL MOTOR Y NO ESTA PANTALLA. La cuenta —sacar el IVA, restar la
+ * pasarela y los impuestos— vive en `dominio/margen.py` y es la misma con la que
+ * se despeja el piso. Recalcularla acá sería una segunda implementación de la
+ * misma fórmula, y el día que una cambie la pantalla mostraría un margen que el
+ * motor no usó para decidir nada.
  *
- * El color del propuesto no es decorativo: por debajo del margen mínimo de la
- * política (15 %) el precio perfora el piso, y eso tiene que saltar a la vista
- * aunque el motor ya lo haya limitado — porque cuando el motor dice "sigue
- * debajo del piso" es justamente el caso que hay que mirar de cerca.
+ * `resalta` pinta en rojo lo que queda debajo del 15 % mínimo. Va sólo en el
+ * propuesto: el margen de hoy es un hecho, el propuesto es lo que está por
+ * decidirse, y es ahí donde "quedás debajo del piso" tiene que saltar a la vista.
+ *
+ * `null` en las propuestas anteriores a la corrida que empezó a guardarlos. Se
+ * muestra "—" y se llena solo en la próxima comparación.
  */
-function Margenes({ fila }: { fila: FilaPrecioTn }) {
-  const { margenActual: hoy, margenPropuesto: propuesto } = fila;
-  if (hoy === null && propuesto === null) {
+/**
+ * El precio propuesto, con la opción de escribir otro.
+ *
+ * POR QUÉ SE PUEDE ESCRIBIR A MANO. El motor sabe el costo, el piso y lo que
+ * publican tres competidores. No sabe que ese proveedor sube la semana que
+ * viene, que quedan dos unidades de una caja rota, ni que ese artículo es el
+ * gancho de una promo. Sin esta casilla, el único camino para esos casos es
+ * abrir Tienda Nube y tocarlo por afuera — y un precio cambiado por afuera no
+ * queda registrado en ningún lado, que es justo lo que este sistema vino a
+ * resolver.
+ *
+ * ESCRIBIR UN PRECIO NO SALTEA EL PISO. La validación de verdad está en el
+ * servidor, dentro del `update` (ver `decidirPropuesta`): el navegador es de
+ * quien escribe, así que acá abajo sólo se avisa antes de mandar. Si igual se
+ * manda, la base lo rechaza.
+ *
+ * QUEDA FIRMADO COMO LO QUE ES: el motivo que se guarda dice quién lo escribió
+ * y cuánto proponía el motor. Seis meses después, "por qué este quedó en
+ * $12.000" tiene respuesta.
+ */
+function PrecioPropuesto({
+  fila,
+  onAutorizar,
+}: {
+  fila: FilaPrecioTn;
+  onAutorizar: (id: number, decision: "aprobada", precio: number) => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [texto, setTexto] = useState("");
+
+  if (fila.precioPropuesto === null && !editando) {
     return <span className="text-muted">—</span>;
   }
-  const tono =
-    propuesto === null ? "text-muted" : propuesto < 0.15 ? "text-negativo" : "text-c1";
+
+  if (fila.estado !== "pendiente") {
+    return <span>{fila.precioPropuesto ? fmtMoneda(fila.precioPropuesto) : "—"}</span>;
+  }
+
+  if (!editando) {
+    return (
+      <button
+        onClick={() => {
+          setTexto(fila.precioPropuesto ? String(fila.precioPropuesto.toFixed(2)) : "");
+          setEditando(true);
+        }}
+        className="hover:text-c1 hover:underline"
+        title="Click para escribir otro precio a mano"
+      >
+        {fila.precioPropuesto ? fmtMoneda(fila.precioPropuesto) : "escribir…"}
+      </button>
+    );
+  }
+
+  const valor = Number(texto.replace(",", "."));
+  const valido = Number.isFinite(valor) && valor > 0;
+  const bajoPiso = valido && fila.piso !== null && valor < fila.piso;
+
   return (
-    <div className="leading-tight">
-      <span className="text-muted block text-[11px]">
-        {hoy !== null ? fmtPct(hoy) : "—"}
-      </span>
-      <span className={`block font-medium ${tono}`}>
-        {propuesto !== null ? fmtPct(propuesto) : "—"}
-      </span>
+    <div className="flex flex-col items-end gap-1">
+      <input
+        autoFocus
+        value={texto}
+        onChange={(e) => setTexto(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setEditando(false);
+          if (e.key === "Enter" && valido && !bajoPiso) {
+            onAutorizar(fila.id, "aprobada", valor);
+            setEditando(false);
+          }
+        }}
+        inputMode="decimal"
+        className={`border-line bg-panel-2 w-24 rounded border px-1.5 py-0.5 text-right text-xs ${
+          bajoPiso ? "border-negativo text-negativo" : ""
+        }`}
+      />
+      {bajoPiso && (
+        <span className="text-negativo text-[10px]">
+          debajo del piso ({fmtMoneda(fila.piso)})
+        </span>
+      )}
+      <div className="flex gap-1">
+        <button
+          disabled={!valido || bajoPiso}
+          onClick={() => {
+            onAutorizar(fila.id, "aprobada", valor);
+            setEditando(false);
+          }}
+          className="border-c1/40 bg-c1/10 text-c1 rounded border px-1.5 py-0.5 text-[10px] disabled:opacity-40"
+        >
+          Autorizar
+        </button>
+        <button
+          onClick={() => setEditando(false)}
+          className="border-line text-muted rounded border px-1.5 py-0.5 text-[10px]"
+        >
+          Cancelar
+        </button>
+      </div>
     </div>
   );
+}
+
+function Margen({ valor, resalta = false }: { valor: number | null; resalta?: boolean }) {
+  if (valor === null) return <span className="text-muted">—</span>;
+  const tono = !resalta ? "text-ink" : valor < 0.15 ? "text-negativo" : "text-c1";
+  return <span className={`font-medium ${tono}`}>{fmtPct(valor)}</span>;
 }
 
 /**
@@ -263,8 +388,7 @@ function columnas(
         "es hacia abajo, y es el piso. Cuando el movimiento pasa del 50 % el motor lo avisa en " +
         "los motivos, para que abras la ficha del competidor antes de autorizar. " +
         "Vacío = el motor no propone nada (sin stock, sin costo o sin competencia).",
-      celda: (f) =>
-        f.precioPropuesto ? fmtMoneda(f.precioPropuesto) : <span className="text-muted">—</span>,
+      celda: (f) => <PrecioPropuesto fila={f} onAutorizar={decidir} />,
       numerica: true,
       orden: (f) => f.precioPropuesto,
     },
@@ -284,16 +408,29 @@ function columnas(
       numerica: true,
       orden: (f) => f.costo,
     },
+    // DOS COLUMNAS Y NO UNA APILADA. Estaban los dos margenes en la misma celda,
+    // uno arriba del otro, y eso obliga a acordarse de cual es cual cada vez que
+    // se mira una fila. Separados, cada uno tiene su titulo y se puede ordenar
+    // por el que interese: por el de hoy para ver que estamos resignando, por el
+    // propuesto para encontrar lo que quedaria mas flaco.
     {
-      titulo: "Margen",
+      titulo: "Margen actual",
       ayuda:
-        "Cuánto queda de cada venta después de sacar el IVA, el arancel de la pasarela más cara " +
-        "y el 7,4 % de IIBB, cheque y municipal — como porcentaje de la venta SIN IVA. " +
-        "Arriba el margen que deja el precio de HOY; abajo el que dejaría el PROPUESTO. " +
-        "Es la pregunta que falta para decidir: bajar a $19.107 no dice nada solo, " +
-        "bajar a $19.107 y quedar en 15 % en vez de 31 % sí. " +
-        "Lo calcula el motor con la misma cuenta que usa para el piso, no lo recalcula esta pantalla.",
-      celda: (f) => <Margenes fila={f} />,
+        "Cuánto queda de cada venta al precio de HOY, después de sacar el IVA, el arancel de la " +
+        "pasarela más cara y el 7,4 % de IIBB, cheque y municipal — como porcentaje de la venta " +
+        "SIN IVA. Lo calcula el motor con la misma cuenta que usa para el piso; esta pantalla no " +
+        "lo recalcula.",
+      celda: (f) => <Margen valor={f.margenActual} />,
+      numerica: true,
+      orden: (f) => f.margenActual,
+    },
+    {
+      titulo: "Margen propuesto",
+      ayuda:
+        "El margen que dejaría el precio propuesto. Es la pregunta que falta para decidir: " +
+        "bajar a $19.107 no dice nada solo; bajar a $19.107 y quedar en 15 % en vez de 31 % sí. " +
+        "En rojo cuando queda por debajo del 15 % mínimo.",
+      celda: (f) => <Margen valor={f.margenPropuesto} resalta />,
       numerica: true,
       orden: (f) => f.margenPropuesto,
     },
@@ -550,6 +687,7 @@ export default function DashboardPreciosTn() {
   const [corrida, setCorrida] = useState<EstadoCorrida | null>(null);
   const [escritura, setEscritura] = useState<EstadoCorrida | null>(null);
   const [confirmandoEscritura, setConfirmandoEscritura] = useState(false);
+  const [bajando, setBajando] = useState<"xlsx" | "pdf" | null>(null);
   const [recarga, setRecarga] = useState(0);
   // Dos vistas: la cola de lo que falta decidir, y el registro de lo que ya se
   // escribió. Separadas porque se usan en momentos distintos: una es trabajo
@@ -706,12 +844,58 @@ export default function DashboardPreciosTn() {
     [filtros],
   );
 
-  async function decidir(id: number, decision: "aprobada" | "rechazada") {
+  /**
+   * Bajar lo que está filtrado, en Excel o en PDF.
+   *
+   * SE VUELVE A PEDIR AL SERVIDOR en vez de usar `filas`, que es lo que ya está
+   * en memoria. La pantalla muestra 200 como máximo, y un archivo que dice
+   * "800 artículos" con 200 adentro es peor que no tener el botón: se reenvía
+   * por mail y en ningún lado dice que le falta el 75 %.
+   */
+  async function descargar(formato: "xlsx" | "pdf") {
+    setBajando(formato);
+    setAviso(null);
+    try {
+      const qs = new URLSearchParams({ ...aParams(filtros), todo: "1" }).toString();
+      const r = await fetch(`/api/precios-tn?${qs}`, { cache: "no-store" });
+      if (!r.ok) throw new Error("No se pudieron traer los datos para el archivo");
+      const datos = await r.json();
+      const todas: FilaPrecioTn[] = datos.filas ?? [];
+      if (!todas.length) {
+        setAviso("No hay filas para bajar con este filtro.");
+        return;
+      }
+
+      const comparadoEn = datos.resumen?.comparadoEn ?? null;
+      const descripcion = descripcionDelFiltro(filtros);
+      const sello = new Date().toISOString().slice(0, 10);
+
+      if (formato === "pdf") {
+        imprimirPdf(todas, comparadoEn, descripcion);
+      } else {
+        bajarArchivo(
+          aXlsx(libroDePrecios(todas, comparadoEn, descripcion)),
+          `precios-tn-${sello}.xlsx`,
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        );
+      }
+    } catch (e) {
+      setAviso(e instanceof Error ? e.message : "No se pudo armar el archivo");
+    } finally {
+      setBajando(null);
+    }
+  }
+
+  async function decidir(
+    id: number,
+    decision: "aprobada" | "rechazada",
+    precio?: number | null,
+  ) {
     setAviso(null);
     const r = await fetch("/api/precios-tn/decidir", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id, decision }),
+      body: JSON.stringify({ id, decision, precio: precio ?? null }),
     });
     if (!r.ok) {
       // El 409 es el caso de dos personas decidiendo lo mismo a la vez. Se
@@ -720,7 +904,13 @@ export default function DashboardPreciosTn() {
       recargar();
       return;
     }
-    setFilas((previas) => previas.map((f) => (f.id === id ? { ...f, estado: decision } : f)));
+    setFilas((previas) =>
+      previas.map((f) =>
+        f.id === id
+          ? { ...f, estado: decision, precioPropuesto: precio ?? f.precioPropuesto }
+          : f,
+      ),
+    );
     setAprobables((a) => ({ ...a, total: Math.max(0, a.total - 1) }));
 
     // EL CONTADOR DE ARRIBA TAMBIÉN, y no es cosmético: es el que habilita el
@@ -1103,6 +1293,25 @@ export default function DashboardPreciosTn() {
         )}
 
         <div className="ml-auto flex items-center gap-2">
+          {/* BAJAR LO FILTRADO. Los dos botones piden la lista COMPLETA al
+              servidor, no las 200 que muestra la pantalla: ver `descargar`. */}
+          <button
+            onClick={() => descargar("xlsx")}
+            disabled={bajando !== null}
+            className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1.5 text-xs disabled:opacity-50"
+            title="Baja en Excel todo lo que cumple el filtro actual, no sólo lo que se ve"
+          >
+            {bajando === "xlsx" ? "Armando…" : "↓ Excel"}
+          </button>
+          <button
+            onClick={() => descargar("pdf")}
+            disabled={bajando !== null}
+            className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1.5 text-xs disabled:opacity-50"
+            title="Abre la vista de impresión: elegí «Guardar como PDF» en el diálogo"
+          >
+            {bajando === "pdf" ? "Armando…" : "↓ PDF"}
+          </button>
+
           {/* TILDAR TODO LO VISIBLE. Vive acá y no en el encabezado de la tabla
               porque `Tabla` declara `titulo: string` y lo usa como key y como
               identidad del orden; cambiar ese tipo tocaría todos los tableros

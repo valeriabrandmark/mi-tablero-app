@@ -69,19 +69,49 @@ export const ALERTAS = [
       "venden, o les falta el código de barras a ellos o a nosotros.",
     tono: "neutro",
   },
+  {
+    // LO QUE ESTÁ BIEN TAMBIÉN ES INFORMACIÓN, y faltaba.
+    //
+    // La pantalla mostraba cinco tarjetas y las cinco eran problemas. Los
+    // productos en precio —la mayoría— no aparecían en ningún lado: estaban
+    // filtrados como ruido, y "ruido" es la palabra correcta para una cola de
+    // trabajo pero no para saber cómo está el negocio. Sin este número, la
+    // pantalla contesta "qué está mal" pero no "cuánto está bien", y son dos
+    // preguntas distintas.
+    clave: "en_precio",
+    titulo: "En precio",
+    detalle:
+      "Estamos a menos del 2 % del más barato del mercado. No hay nada que " +
+      "hacer con estos: se listan para poder verlos, no para decidirlos.",
+    tono: "ok",
+  },
 ] as const;
 
 export type ClaveAlerta = (typeof ALERTAS)[number]["clave"];
 
 /**
- * Debajo de esta diferencia no se muestra nada.
+ * Debajo de esta diferencia un producto está EN PRECIO.
  *
  * Con la política actual el motor ya no propone cambios menores al 2 %, pero el
  * umbral se repite acá porque la pantalla también lista cosas que el motor
  * MANTUVO, y una lista de trescientos productos con 1 % de diferencia no es
  * una cola de trabajo: es ruido que hace abandonar la pantalla.
+ *
+ * ESO SIGUE SIENDO CIERTO PARA LA COLA, Y NO PARA EL RESUMEN. Antes estos
+ * productos no existían en ningún lado de la pantalla; ahora cuentan en su
+ * propia tarjeta y se pueden ver haciendo clic. Lo que no hacen es mezclarse
+ * con lo que hay que decidir, que es de lo que había que protegerse.
  */
 export const DIFERENCIA_MINIMA_VISIBLE = 0.02;
+
+/**
+ * El grupo que NO es cola de trabajo.
+ *
+ * Se nombra una sola vez para que la consulta y la pantalla no puedan opinar
+ * distinto sobre cuál es: el día que se agregue otro grupo informativo, se
+ * agrega acá y las dos se enteran.
+ */
+export const GRUPO_INFORMATIVO: ClaveAlerta = "en_precio";
 
 /** Cómo se llama cada fuente en pantalla. El código es feo; el nombre no. */
 export const NOMBRE_FUENTE: Record<string, string> = {
