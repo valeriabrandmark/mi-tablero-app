@@ -50,7 +50,14 @@ const WORKFLOWS = {
     archivo: "aplicar.yml",
     // `confirmar: true` es lo que pone PRECIOS_APLICAR=si en el workflow. Sin
     // esto el job corre el simulacro y no escribe nada — que es su default.
-    inputs: { confirmar: true, limite: "50" } as Record<string, unknown>,
+    //
+    // `tarea` VA EXPLÍCITA aunque el workflow tenga ese mismo valor por
+    // omisión. Ese workflow ahora hace dos cosas —aplicar propuestas y corregir
+    // precios tachados— y depender del default significa que el día que alguien
+    // cambie cuál es, este botón empieza a hacer otra cosa sin que este archivo
+    // se entere. Un mapa cerrado que deja un campo librado al default no es
+    // cerrado.
+    inputs: { tarea: "aplicar", confirmar: true, limite: "50" } as Record<string, unknown>,
   },
 } as const;
 
