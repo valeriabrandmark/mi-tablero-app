@@ -118,6 +118,47 @@ const COMPETIDORES = `
   ), '[]'::jsonb)
 `;
 
+/**
+ * El link a NUESTRA ficha, para poder mirar el producto antes de autorizarlo.
+ *
+ * Quien aprueba una propuesta está mirando un renglón: un SKU, una descripción
+ * de Sigma y dos números. Lo que NO ve es el producto — la foto, la variante,
+ * cómo está escrito el título en la tienda, si la promo que tenemos puesta tiene
+ * sentido con el precio nuevo. Es el mismo argumento por el que se guarda la URL
+ * del competidor: una propuesta que no se puede verificar se aprueba a ciegas o
+ * no se aprueba nunca. Si vale para la tienda de otro, vale para la nuestra.
+ *
+ * DOS FUENTES, Y LA DE ADELANTE ES LA FRESCA. `precios.precio_propio.url` la
+ * copia el pipeline de `canonical_url` en cada corrida de `propios`, o sea antes
+ * de cada comparación. `bronze.tn_productos` es una copia vieja —el error que
+ * originó medio proyecto— pero la dirección de un producto no cambia cuando
+ * cambia su precio, así que sirve de respaldo, igual que para las URLs de la
+ * competencia.
+ *
+ * Hace falta que sean las dos: de los 834 artículos de la cola de hoy, bronze
+ * tiene URL para 790. Los 44 que faltan son productos que se cargaron después de
+ * la última sincronización de esa tabla, y son justamente los que uno más quiere
+ * abrir antes de tocarles el precio.
+ */
+const URL_PROPIA = `coalesce(pp.url, t.canonical_url)`;
+
+/**
+ * Nuestra última foto de precios, para colgarle la URL y el producto_id.
+ *
+ * `distinct on (sku)` con el día más nuevo: la tabla guarda una fila por
+ * variante y por día, y acá alcanza con la última de cada SKU.
+ */
+const FOTO_PROPIA = `
+  left join lateral (
+    select pr.url, pr.producto_id
+      from precios.precio_propio pr
+     where pr.sku = p.sku
+     order by pr.dia desc, pr.id desc
+     limit 1
+  ) pp on true
+  left join bronze.tn_productos t on t.id = pp.producto_id
+`;
+
 /** Cuántos hay en cada grupo, para las tarjetas de arriba. */
 export async function getResumenPreciosTn(): Promise<ResumenPreciosTn> {
   const vacio: ResumenPreciosTn = {
@@ -231,6 +272,7 @@ function cuerpoDeConsulta(filtros: FiltrosPreciosTn, params: unknown[]): string 
   return `
        from precios.propuesta p
        left join bronze.sigma_articulos a on a.id = p.sku
+       ${FOTO_PROPIA}
       where p.corrida_id = $1
         and ${CLASIFICACION} is not null
         -- Lo que está a menos del umbral no es cola de trabajo, es ruido.
@@ -297,7 +339,8 @@ export async function getFilasPreciosTn(
             -- a guardarlo. La pantalla muestra "—" y se llena solo en la
             -- próxima comparación.
             (p.entradas->>'margen_actual')::float8          as "margenActual",
-            (p.entradas->>'margen_propuesto')::float8       as "margenPropuesto"
+            (p.entradas->>'margen_propuesto')::float8       as "margenPropuesto",
+            ${URL_PROPIA}                                  as url
        ${cuerpo}
       order by
         -- Los pendientes primero: lo ya decidido no vuelve a la cola.
