@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fmtMoneda, fmtPct } from "@/lib/format";
+import { fmtFechaCorta, fmtMoneda, fmtPct } from "@/lib/format";
 import { Tabla, type Columna } from "@/components/Tabla";
 import { ALERTAS, nombreFuente, type ClaveAlerta } from "@/lib/precios-tn";
 import type {
@@ -103,6 +103,19 @@ function Margenes({ fila }: { fila: FilaPrecioTn }) {
   );
 }
 
+/**
+ * Los competidores de la fila, UNO POR TIENDA.
+ *
+ * Se veían "precios repetidos de la competencia" y no lo eran: la ventana de
+ * comparación dura varios días, así que el mismo competidor aparecía una vez
+ * por captura. Tres chips de Farmaonline no son tres competidores — son uno
+ * que cambió de precio — y leerlos como tres es creer que hay más mercado del
+ * que hay.
+ *
+ * El colapso a la más nueva lo hace el SQL, con el mismo desempate que el
+ * motor. Acá se agrega LA FECHA, que antes no se mostraba y es justamente lo
+ * que hacía que dos precios distintos del mismo negocio parecieran un error.
+ */
 function Competidores({ lista }: { lista: FilaPrecioTn["competidores"] }) {
   if (!lista?.length) return <span className="text-muted text-xs">sin datos</span>;
 
@@ -117,24 +130,36 @@ function Competidores({ lista }: { lista: FilaPrecioTn["competidores"] }) {
           <>
             <span className="opacity-70">{nombreFuente(c.fuente)}</span>{" "}
             <span className="font-mono">{fmtMoneda(c.precio)}</span>
+            <span className="text-muted ml-1 text-[10px]">{fmtFechaCorta(c.dia)}</span>
+            {c.anteriores > 0 && (
+              <span className="text-muted ml-0.5 text-[10px]">+{c.anteriores}</span>
+            )}
             {!c.disponible && <span className="text-muted ml-1 text-[10px]">(sin stock)</span>}
           </>
         );
+        const historial =
+          c.anteriores > 0
+            ? ` — tiene ${c.anteriores} captura(s) anterior(es) en la ventana; se usa la del ${fmtFechaCorta(c.dia)}`
+            : "";
         const clases =
           "border-line bg-panel-2 rounded-full border px-2 py-0.5 text-[11px] whitespace-nowrap";
         return c.url ? (
           <a
-            key={`${c.fuente}-${c.precio}`}
+            key={c.fuente}
             href={c.url}
             target="_blank"
             rel="noopener noreferrer"
             className={`${clases} hover:border-c1/50 hover:text-c1`}
-            title={`Abrir la ficha en ${nombreFuente(c.fuente)} para verificar el precio`}
+            title={`Abrir la ficha en ${nombreFuente(c.fuente)} para verificar el precio${historial}`}
           >
             {contenido} ↗
           </a>
         ) : (
-          <span key={`${c.fuente}-${c.precio}`} className={clases} title="Sin link guardado">
+          <span
+            key={c.fuente}
+            className={clases}
+            title={`Sin link guardado${historial}`}
+          >
             {contenido}
           </span>
         );

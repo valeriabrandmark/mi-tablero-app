@@ -1719,9 +1719,16 @@ export type DashboardTrazabilidad = {
 export type CompetidorPrecioTn = {
   fuente: string;
   precio: number;
+  /** El día en que se capturó ESTE precio, no el día de la corrida. */
   dia: string;
   disponible: boolean;
   url: string | null;
+  /**
+   * Cuántas capturas anteriores de este mismo competidor quedaron dentro de la
+   * ventana y no se usan. Es el "+2" del chip: sirve para ver que el precio se
+   * movió sin repetir el competidor tres veces en la fila.
+   */
+  anteriores: number;
 };
 
 export type FilaPrecioTn = {

@@ -69,24 +69,52 @@ const CLASIFICACION = `
  * El EAN se normaliza igual que en el proyecto `precios`: espacios afuera y
  * relleno de ceros a la izquierda hasta 13. Un código que allá no pasó el
  * dígito verificador simplemente no encuentra observación, que es lo correcto.
+ *
+ * UNA FILA POR COMPETIDOR, LA MÁS NUEVA. `entradas.observaciones` guarda TODAS
+ * las de la ventana, y la ventana son varios días: Farmaonline capturado el 11
+ * y el 14 son dos entradas del mismo competidor. En pantalla eso se leía como
+ * precios repetidos —fue el reporte que abrió este arreglo— y no lo eran: era
+ * el mismo negocio en días distintos.
+ *
+ * El desempate es EL MISMO QUE EL DEL MOTOR (día más nuevo; con empate de día,
+ * la más barata). Tiene que serlo: si la pantalla colapsara distinto, mostraría
+ * como referencia un precio que no es el que produjo la propuesta, que es
+ * exactamente la confusión que esta pantalla existe para evitar.
+ *
+ * Lo anterior no se tira, se cuenta: `anteriores` alimenta el "+N" del chip,
+ * para poder ver que ese competidor venía de otro precio sin que la fila se
+ * llene de globitos.
  */
 const COMPETIDORES = `
   coalesce((
-    select jsonb_agg(
-             e || jsonb_build_object(
-               'precio', (e->>'precio')::numeric,
-               'url', coalesce(e->>'url', u.url))
-             order by (e->>'precio')::numeric)
-      from jsonb_array_elements(p.entradas->'observaciones') e
-      left join lateral (
-        select o.url
-          from precios.observacion o
-         where o.fuente = e->>'fuente'
-           and o.ean = lpad(replace(trim(coalesce(a."eanUnidad", '')), ' ', ''), 13, '0')
-           and o.url is not null
-         order by o.dia desc
-         limit 1
-      ) u on true
+    select jsonb_agg(to_jsonb(c) order by c.precio)
+      from (
+        select distinct on (o.fuente)
+               o.fuente,
+               o.precio,
+               o.dia,
+               o.disponible,
+               coalesce(o.url, u.url)                    as url,
+               count(*) over (partition by o.fuente) - 1 as anteriores
+          from (
+            select e->>'fuente'                as fuente,
+                   (e->>'precio')::numeric     as precio,
+                   e->>'dia'                   as dia,
+                   (e->>'disponible')::boolean as disponible,
+                   e->>'url'                   as url
+              from jsonb_array_elements(p.entradas->'observaciones') e
+          ) o
+          left join lateral (
+            select ob.url
+              from precios.observacion ob
+             where ob.fuente = o.fuente
+               and ob.ean = lpad(replace(trim(coalesce(a."eanUnidad", '')), ' ', ''), 13, '0')
+               and ob.url is not null
+             order by ob.dia desc
+             limit 1
+          ) u on true
+         order by o.fuente, o.dia desc, o.precio
+      ) c
   ), '[]'::jsonb)
 `;
 
