@@ -74,15 +74,43 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Pedido inválido" }, { status: 400 });
   }
 
-  const cambio = await decidirPropuesta(id, decision, quien);
+  // UN PRECIO ESCRITO A MANO, cuando quien aprueba sabe algo que el motor no.
+  //
+  // Se valida acá antes de llegar al SQL para poder decir POR QUÉ está mal; el
+  // piso, en cambio, se verifica dentro del `update` — ver el comentario largo
+  // ahí. Un campo de texto libre en una pantalla es por donde se saltea una
+  // regla, y el navegador es de quien escribe.
+  let precioManual: number | null = null;
+  if (cuerpo?.precio !== undefined && cuerpo?.precio !== null && cuerpo?.precio !== "") {
+    precioManual = Number(cuerpo.precio);
+    if (!Number.isFinite(precioManual) || precioManual <= 0) {
+      return NextResponse.json(
+        { error: "El precio escrito a mano tiene que ser un número mayor que cero." },
+        { status: 400 },
+      );
+    }
+    if (decision !== "aprobada") {
+      return NextResponse.json(
+        { error: "Un precio a mano sólo tiene sentido al autorizar." },
+        { status: 400 },
+      );
+    }
+  }
+
+  const cambio = await decidirPropuesta(id, decision, quien, precioManual);
   if (!cambio) {
-    // La propuesta ya no estaba pendiente. No es un error del servidor: alguien
-    // la decidió antes, y la pantalla tiene que decirlo en vez de fingir que
-    // funcionó.
+    // No se actualizó ninguna fila, y puede ser por dos motivos distintos: que
+    // otra persona la haya decidido antes, o que el precio a mano perfore el
+    // piso. Se dicen los dos en vez de elegir uno: quien lo lee sabe cuál es.
     return NextResponse.json(
-      { error: "Esa propuesta ya fue decidida por otra persona." },
+      {
+        error: precioManual
+          ? "No se autorizó: o esa propuesta ya fue decidida, o el precio que escribiste " +
+            "queda por debajo del piso de margen."
+          : "Esa propuesta ya fue decidida por otra persona.",
+      },
       { status: 409 },
     );
   }
-  return NextResponse.json({ ok: true, id, decision, quien });
+  return NextResponse.json({ ok: true, id, decision, quien, precioManual });
 }

@@ -29,9 +29,25 @@ export async function GET(request: NextRequest) {
 
   const filtros = leerFiltros(request.nextUrl.searchParams);
 
+  /**
+   * `?todo=1` trae la lista COMPLETA, sin el corte de 200.
+   *
+   * Es lo que piden los botones de Excel y PDF. La pantalla se limita a 200
+   * porque nadie mira más que eso de corrido, pero un archivo que dice "Precios
+   * TN (200 artículos)" cuando el filtro tiene 800 es peor que no tener el
+   * botón: se reenvía por mail, se toman decisiones sobre él, y en ningún lado
+   * dice que le falta el 75 %.
+   *
+   * El tope de 5.000 no es por la base --la corrida entera son 3.788 filas--
+   * sino por el navegador: armar el PDF de más que eso lo deja colgado, y un
+   * número redondo por encima del catálogo completo es un freno que hoy no
+   * toca nada y mañana evita una pantalla congelada.
+   */
+  const todo = request.nextUrl.searchParams.get("todo") === "1";
+
   const [resumen, filas, catalogos, aprobables] = await Promise.all([
     getResumenPreciosTn(),
-    getFilasPreciosTn(filtros),
+    getFilasPreciosTn(filtros, todo ? 5000 : undefined),
     getCatalogosPreciosTn(),
     // Cuántas aprobaría el botón de bloque con ESTE filtro. Se calcula acá y no
     // contando las filas de la pantalla: la lista está limitada a 200 y el

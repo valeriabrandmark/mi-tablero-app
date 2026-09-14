@@ -400,13 +400,46 @@ export async function decidirPropuesta(
   id: number,
   decision: "aprobada" | "rechazada",
   quien: string,
+  precioManual?: number | null,
 ): Promise<boolean> {
+  if (decision === "rechazada" || precioManual == null) {
+    const filas = await query<{ id: number }>(
+      `update precios.propuesta
+          set estado = $2, decidida_por = $3, decidida_en = now()
+        where id = $1 and estado = 'pendiente'
+        returning id`,
+      [id, decision, quien],
+    );
+    return filas.length > 0;
+  }
+
   const filas = await query<{ id: number }>(
     `update precios.propuesta
-        set estado = $2, decidida_por = $3, decidida_en = now()
-      where id = $1 and estado = 'pendiente'
+        set estado = 'aprobada',
+            decidida_por = $3,
+            decidida_en = now(),
+            precio_propuesto = $2::numeric,
+            motivos = motivos || to_jsonb(
+              'precio escrito a mano por ' || $3::text ||
+              ': el motor proponia ' || coalesce(precio_propuesto::text, 'nada')
+            )
+      where id = $1
+        and estado = 'pendiente'
+        -- EL PISO NO SE PUEDE PERFORAR NI A MANO, Y SE VERIFICA ACA.
+        --
+        -- Es la unica regla dura del sistema: no vender por debajo del costo
+        -- con IVA, pasarela e impuestos y el margen minimo. Un campo de texto
+        -- libre en una pantalla es exactamente por donde se saltea una regla
+        -- asi, y confiar en que el navegador valide no sirve: el navegador es
+        -- de quien escribe.
+        --
+        -- Si la condicion no se cumple no se actualiza ninguna fila y la ruta
+        -- contesta que no se pudo, que es lo mismo que pasa si otra persona ya
+        -- la decidio. El comando de aplicar vuelve a mirar el piso contra el
+        -- costo de HOY antes de escribir, asi que son dos puertas y no una.
+        and ($2::numeric >= piso or piso is null)
       returning id`,
-    [id, decision, quien],
+    [id, precioManual, quien],
   );
   return filas.length > 0;
 }
