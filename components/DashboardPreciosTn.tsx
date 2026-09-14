@@ -150,10 +150,7 @@ function PrecioPropuesto({
   const [editando, setEditando] = useState(false);
   const [texto, setTexto] = useState("");
 
-  if (fila.precioPropuesto === null && !editando) {
-    return <span className="text-muted">—</span>;
-  }
-
+  // Ya decidida: es un numero, no una decision pendiente. Sin lapiz.
   if (fila.estado !== "pendiente") {
     return <span>{fila.precioPropuesto ? fmtMoneda(fila.precioPropuesto) : "—"}</span>;
   }
@@ -165,10 +162,22 @@ function PrecioPropuesto({
           setTexto(fila.precioPropuesto ? String(fila.precioPropuesto.toFixed(2)) : "");
           setEditando(true);
         }}
-        className="hover:text-c1 hover:underline"
-        title="Click para escribir otro precio a mano"
+        className="group hover:text-c1 inline-flex items-center gap-1.5"
+        title={
+          fila.precioPropuesto
+            ? "Click para escribir otro precio a mano"
+            : "El motor no propone nada acá. Click para escribir un precio vos."
+        }
       >
-        {fila.precioPropuesto ? fmtMoneda(fila.precioPropuesto) : "escribir…"}
+        {/* EL SUBRAYADO PUNTEADO Y EL LAPIZ ESTAN SIEMPRE, y esa es la
+            correccion. Antes esto era un <button> sin estilo: se renderizaba
+            IDENTICO al texto que habia antes --mismo color, sin borde-- y lo
+            unico que lo delataba era un subrayado al pasar el mouse. Una
+            funcion que solo existe para quien ya sabe que existe no existe. */}
+        <span className="decoration-muted/50 underline decoration-dotted underline-offset-4">
+          {fila.precioPropuesto ? fmtMoneda(fila.precioPropuesto) : "—"}
+        </span>
+        <span className="text-muted/70 group-hover:text-c1 text-[11px] leading-none">✎</span>
       </button>
     );
   }
@@ -381,13 +390,16 @@ function columnas(
       orden: (f) => f.precioActual,
     },
     {
-      titulo: "Propuesto",
+      titulo: "Propuesto ✎",
       ayuda:
         "A dónde llevaría el precio el motor: iguala al competidor más barato, y si eso " +
         "quedaba por debajo del piso, lo sube al piso. NO HAY TOPE DE SUBA — el único límite " +
         "es hacia abajo, y es el piso. Cuando el movimiento pasa del 50 % el motor lo avisa en " +
         "los motivos, para que abras la ficha del competidor antes de autorizar. " +
-        "Vacío = el motor no propone nada (sin stock, sin costo o sin competencia).",
+        "«—» = el motor no propone nada (sin stock, sin costo o sin competencia). " +
+        "SE PUEDE ESCRIBIR OTRO PRECIO: click en el número (o en el «—») y autorizás ese en " +
+        "vez del propuesto. Queda firmado con tu mail y con lo que proponía el motor, y no " +
+        "puede perforar el piso.",
       celda: (f) => <PrecioPropuesto fila={f} onAutorizar={decidir} />,
       numerica: true,
       orden: (f) => f.precioPropuesto,
