@@ -1763,6 +1763,13 @@ export type FilaPrecioTn = {
    */
   margenActual: number | null;
   margenPropuesto: number | null;
+  /**
+   * La ficha del producto en NUESTRA tienda, para poder mirarlo antes de
+   * autorizar el precio. `null` cuando no se conoce la dirección: se muestra el
+   * nombre sin link, nunca uno armado a mano — en Tienda Nube el handle sale
+   * del título del producto y no del id, así que componerlo sería inventarlo.
+   */
+  url: string | null;
 };
 
 export type ResumenPreciosTn = {

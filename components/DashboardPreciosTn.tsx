@@ -206,13 +206,29 @@ function columnas(
     {
       titulo: "Producto",
       ayuda:
-        "Descripción, SKU, marca y proveedor según Sigma, más las unidades disponibles en Digip. " +
-        "Debajo van los motivos que escribió el motor: por qué llegó a ese precio y qué lo limitó.",
+        "El nombre abre la ficha en NUESTRA tienda: la foto, la variante y la promo que tenga " +
+        "puesta, que es lo que no se ve en el renglón. Debajo, SKU, marca y proveedor según " +
+        "Sigma, las unidades en Digip, y los motivos que escribió el motor.",
       celda: (f) => (
         <div>
-          <span className="block max-w-[260px] truncate font-medium" title={f.descripcion}>
-            {f.descripcion}
-          </span>
+          {/* EL NOMBRE ES EL LINK, y no un ícono al costado: lo que uno quiere
+              abrir es el producto, y el producto ES el nombre. Sin `url` queda
+              texto plano — nunca un link inventado, que es peor que ninguno. */}
+          {f.url ? (
+            <a
+              href={f.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-c1 block max-w-[260px] truncate font-medium"
+              title={`${f.descripcion} — abrir la ficha en unibrandco.com.ar`}
+            >
+              {f.descripcion} ↗
+            </a>
+          ) : (
+            <span className="block max-w-[260px] truncate font-medium" title={f.descripcion}>
+              {f.descripcion}
+            </span>
+          )}
           <span className="text-muted font-mono text-[10px]">
             {f.sku}
             {f.marca ? ` · ${f.marca}` : ""}
@@ -456,7 +472,65 @@ type EstadoCorrida = {
   disponible?: boolean;
   estado: "en_cola" | "corriendo" | "termino" | "fallo" | "sin_datos";
   log?: string | null;
+  arrancada?: string | null;
+  /** Pasos terminados sobre pasos totales del job, y qué está haciendo ahora. */
+  paso?: number;
+  pasos?: number;
+  haciendo?: string | null;
 };
+
+/**
+ * La barra de avance de una corrida.
+ *
+ * NO ES UN CRONÓMETRO DISFRAZADO. La tentación era llenarla contra una duración
+ * estimada, y no sirve: las corridas tardan entre 6 y 18 minutos según cuántas
+ * fuentes haya y cuánto tarden en contestar. Una barra que llega al 100 % y se
+ * queda ahí es peor que ninguna, porque enseña a no creerle.
+ *
+ * Así que avanza por PASOS REALES del job y dice en qué anda. Cuando dice
+ * "bajando precios de la competencia" es porque lo está haciendo.
+ *
+ * LA FRANJA QUE SE MUEVE ES LO QUE FALTA, y tiene una razón: el paso de bajar
+ * competencia dura más que los otros tres juntos. Sin ella, la barra se queda
+ * quieta diez minutos y parece colgada. La franja no promete avance —no crece—,
+ * dice "sigo trabajando", que es lo único cierto que se puede decir ahí.
+ */
+function Avance({ estado }: { estado: EstadoCorrida }) {
+  const total = estado.pasos ?? 0;
+  const hechos = estado.paso ?? 0;
+  const enCola = estado.estado === "en_cola";
+  // Sin pasos todavía —recién encolada— la barra no miente con un número: se
+  // muestra vacía y moviéndose.
+  const proporcion = total > 0 ? hechos / total : 0;
+
+  return (
+    <div className="w-56">
+      <div className="text-muted mb-1 flex items-baseline justify-between text-[11px]">
+        <span className="text-ink">
+          {enCola
+            ? "En cola en GitHub…"
+            : (estado.haciendo ?? "Arrancando…")}
+        </span>
+        {total > 0 && (
+          <span className="tabular-nums">
+            {hechos}/{total}
+          </span>
+        )}
+      </div>
+      <div className="bg-panel-2 border-line h-1.5 overflow-hidden rounded-full border">
+        <div
+          className="bg-c1/70 relative h-full rounded-full transition-[width] duration-700 ease-out"
+          style={{ width: `${Math.max(proporcion * 100, 4)}%` }}
+        >
+          <span className="absolute inset-0 animate-pulse rounded-full bg-white/25" />
+        </div>
+      </div>
+      {estado.arrancada && (
+        <p className="text-muted mt-1 text-[10px]">Arrancó {haceCuanto(estado.arrancada)}</p>
+      )}
+    </div>
+  );
+}
 
 const CLASE_SELECT =
   "border-line bg-panel-2 text-ink rounded-lg border px-2.5 py-1.5 text-xs focus:border-c1/50 focus:outline-none";
@@ -531,8 +605,12 @@ export default function DashboardPreciosTn() {
   }, [filtros, recarga]);
 
   // El estado de los DOS workflows. Se consulta al entrar y, MIENTRAS ALGUNO
-  // ESTÁ CORRIENDO, cada 15 segundos: una bajada tarda unos 6 minutos y un
-  // botón que no cuenta nada durante 6 minutos se clickea de nuevo.
+  // ESTÁ CORRIENDO, cada 15 segundos.
+  //
+  // POR QUÉ SE MIRA SEGUIDO. Una bajada tarda entre 6 y 18 minutos según
+  // cuántas fuentes haya y cuánto tarden en contestar, y un botón que no cuenta
+  // nada durante ese rato se clickea de nuevo. Cada consulta trae también el
+  // paso en que va, que es lo que llena la barra.
   useEffect(() => {
     let vigente = true;
     const mirar = async () => {
@@ -746,7 +824,7 @@ export default function DashboardPreciosTn() {
       setAviso(
         datos?.yaCorria
           ? "Ya había una comparación en curso: no se encoló otra."
-          : "Comparación arrancada. Tarda unos 6 minutos; la pantalla se actualiza sola.",
+          : "Comparación arrancada. La barra dice en qué anda; la pantalla se actualiza sola.",
       );
       return;
     }
@@ -793,7 +871,13 @@ export default function DashboardPreciosTn() {
           )}
         </div>
 
-        <div className="flex flex-col items-end gap-1">
+        <div className="flex flex-col items-end gap-1.5">
+          {/* LA BARRA VA ARRIBA DE LOS BOTONES Y SÓLO MIENTRAS CORRE. Ocupar
+              lugar fijo para algo que se usa diez minutos cada dos días sería
+              regalar media pantalla —el mismo error de las tarjetas de alerta—;
+              y meterla dentro del botón la dejaría del ancho del texto. */}
+          {corriendo && corrida && <Avance estado={corrida} />}
+          {escribiendo && escritura && <Avance estado={escritura} />}
           <div className="flex gap-2">
             <button
               onClick={() => correrAhora("comparar")}

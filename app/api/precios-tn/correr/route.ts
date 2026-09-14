@@ -67,7 +67,72 @@ type CorridaGitHub = {
   estado: "en_cola" | "corriendo" | "termino" | "fallo" | "sin_datos";
   arrancada: string | null;
   log: string | null;
+  /** Avance real: pasos terminados sobre pasos totales del job. */
+  paso: number;
+  pasos: number;
+  /** Qué está haciendo ahora, en castellano de la pantalla. */
+  haciendo: string | null;
 };
+
+/**
+ * El avance sale de los PASOS DEL JOB, no de un cronómetro.
+ *
+ * La tentación era una barra que avanza sola contra una duración estimada. No
+ * sirve por dos motivos y los dos se vieron acá: las corridas tardan entre 6 y
+ * 18 minutos según cuántas fuentes haya y cuánto tarden en contestar, así que
+ * la estimación estaría mal casi siempre; y una barra que llega al 100 % y se
+ * queda ahí es peor que ninguna barra, porque enseña a no creerle.
+ *
+ * GitHub ya cuenta los pasos y dice cuál está corriendo. Eso es avance de
+ * verdad: cuando dice "bajando precios de la competencia" es porque lo está
+ * haciendo. Que un paso dure más que otro se ve raro en una barra, pero es
+ * cierto, y preferimos una barra honesta que se demora a una que miente.
+ *
+ * Los pasos de andamiaje --checkout, instalar Python-- no se cuentan: son
+ * segundos y ensucian la proporción. Se cuentan los del trabajo real.
+ */
+const ANDAMIAJE = /^(set up job|complete job|post |run actions\/|instalar dependencias)/i;
+
+/** El nombre del paso como lo va a leer una persona, no como lo escribió el YAML. */
+function enCastellano(nombre: string): string {
+  const limpio = nombre.trim();
+  const mapa: Record<string, string> = {
+    "Diagnostico del catalogo": "Revisando el catálogo",
+    "Leer nuestros precios de Tienda Nube": "Leyendo nuestros precios",
+    "Bajar precios de la competencia": "Bajando precios de la competencia",
+    "Proponer precios": "Calculando las propuestas",
+    Simulacro: "Simulacro (no escribe nada)",
+    Aplicar: "Escribiendo en Tienda Nube",
+  };
+  return mapa[limpio] ?? limpio;
+}
+
+/** Los pasos del job, para poder decir en qué anda. */
+async function avanceDe(
+  token: string,
+  runId: number,
+): Promise<Pick<CorridaGitHub, "paso" | "pasos" | "haciendo">> {
+  const vacio = { paso: 0, pasos: 0, haciendo: null };
+  const r = await fetch(`https://api.github.com/repos/${REPO}/actions/runs/${runId}/jobs`, {
+    headers: cabeceras(token),
+    cache: "no-store",
+  });
+  if (!r.ok) return vacio;
+
+  const job = (await r.json())?.jobs?.[0];
+  const pasos: { name: string; status: string; conclusion: string | null }[] = (
+    job?.steps ?? []
+  ).filter((p: { name: string }) => !ANDAMIAJE.test(p.name ?? ""));
+  if (!pasos.length) return vacio;
+
+  const terminados = pasos.filter((p) => p.status === "completed").length;
+  const enCurso = pasos.find((p) => p.status === "in_progress");
+  return {
+    paso: terminados,
+    pasos: pasos.length,
+    haciendo: enCurso ? enCastellano(enCurso.name) : null,
+  };
+}
 
 function cabeceras(token: string) {
   return {
@@ -79,14 +144,23 @@ function cabeceras(token: string) {
 
 /** Cómo salió (o cómo va) la última corrida de ese workflow. */
 async function ultimaCorrida(token: string, llave: Llave): Promise<CorridaGitHub> {
+  const sinDatos: CorridaGitHub = {
+    estado: "sin_datos",
+    arrancada: null,
+    log: null,
+    paso: 0,
+    pasos: 0,
+    haciendo: null,
+  };
+
   const r = await fetch(`${apiDe(llave)}/runs?per_page=1`, {
     headers: cabeceras(token),
     cache: "no-store",
   });
-  if (!r.ok) return { estado: "sin_datos", arrancada: null, log: null };
+  if (!r.ok) return sinDatos;
 
   const run = (await r.json())?.workflow_runs?.[0];
-  if (!run) return { estado: "sin_datos", arrancada: null, log: null };
+  if (!run) return sinDatos;
 
   // `status` es queued | in_progress | completed; cuando está completo lo que
   // importa es `conclusion`. Se traducen acá para que la pantalla no tenga que
@@ -100,10 +174,16 @@ async function ultimaCorrida(token: string, llave: Llave): Promise<CorridaGitHub
           ? "termino"
           : "fallo";
 
+  // Los pasos sólo se piden MIENTRAS CORRE: es una consulta más a la API de
+  // GitHub, y de una corrida terminada no dicen nada que la pantalla use.
+  const avance =
+    estado === "corriendo" ? await avanceDe(token, run.id) : { paso: 0, pasos: 0, haciendo: null };
+
   return {
     estado,
     arrancada: run.run_started_at ?? run.created_at ?? null,
     log: run.html_url ?? null,
+    ...avance,
   };
 }
 
@@ -183,5 +263,13 @@ export async function POST(request: NextRequest) {
   // El dispatch contesta 204 sin cuerpo y la corrida tarda unos segundos en
   // aparecer en la API. No se consulta el estado acá: daría "sin_datos" y la
   // pantalla mostraría que no pasó nada justo después de que sí pasó.
-  return NextResponse.json({ ok: true, yaCorria: false, que: llave, estado: "en_cola" });
+  return NextResponse.json({
+    ok: true,
+    yaCorria: false,
+    que: llave,
+    estado: "en_cola",
+    paso: 0,
+    pasos: 0,
+    haciendo: null,
+  });
 }
