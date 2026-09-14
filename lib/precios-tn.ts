@@ -113,6 +113,22 @@ export const DIFERENCIA_MINIMA_VISIBLE = 0.02;
  */
 export const GRUPO_INFORMATIVO: ClaveAlerta = "en_precio";
 
+/**
+ * Cuántos precios escribe COMO MÁXIMO cada corrida de escritura.
+ *
+ * POR QUÉ HAY UN TOPE. Escribir un precio es lo único irreversible de todo
+ * esto: un precio publicado ya lo vio un cliente. Si una corrida sale con un
+ * dato roto —un costo mal cargado, una fuente que devolvió precios de otro
+ * producto— 50 productos mal es un problema de una tarde y 3.788 es un problema
+ * de una semana. El tope es el freno de mano.
+ *
+ * SE DECLARA ACÁ Y NO SÓLO EN LA RUTA porque la pantalla lo necesita para no
+ * mentir: con 200 autorizadas, un botón que dice "Escribir (200)" promete algo
+ * que no va a pasar. Los dos leen de esta constante, así que no pueden decir
+ * números distintos.
+ */
+export const TANDA_ESCRITURA = 50;
+
 /** Cómo se llama cada fuente en pantalla. El código es feo; el nombre no. */
 export const NOMBRE_FUENTE: Record<string, string> = {
   farmaonline: "Farmaonline",

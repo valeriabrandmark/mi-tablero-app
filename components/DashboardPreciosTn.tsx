@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fmtFechaCorta, fmtMoneda, fmtPct } from "@/lib/format";
 import { imprimirPdf, libroDePrecios } from "@/lib/exportar-precios-tn";
 import { aXlsx } from "@/lib/xlsx";
 import { Tabla, type Columna } from "@/components/Tabla";
-import { ALERTAS, nombreFuente, type ClaveAlerta } from "@/lib/precios-tn";
+import { ALERTAS, nombreFuente, TANDA_ESCRITURA, type ClaveAlerta } from "@/lib/precios-tn";
 import type {
   CambioPrecioTn,
   CatalogosPreciosTn,
@@ -771,6 +771,7 @@ export default function DashboardPreciosTn() {
     };
   }, [corrida?.estado, escritura?.estado, recarga]);
 
+
   // El historial se trae siempre, no sólo al abrir la solapa: el contador del
   // título tiene que ser cierto desde el primer render, y son pocas filas.
   useEffect(() => {
@@ -790,6 +791,41 @@ export default function DashboardPreciosTn() {
     setCargando(true);
     setRecarga((n) => n + 1);
   }, []);
+
+  /**
+   * CUANDO LA ESCRITURA TERMINA, DECIR QUÉ PASÓ.
+   *
+   * Con 200 autorizadas se escriben 50 y quedan 150. Eso está bien —el tope es
+   * el freno ante una corrida con datos rotos— pero la pantalla no lo decía:
+   * el botón se apagaba, la barra desaparecía, y quedaban 150 esperando sin
+   * ninguna explicación. La conclusión razonable era que algo había fallado.
+   *
+   * Se mira la TRANSICIÓN, no el estado: "terminó" es cierto todo el tiempo
+   * hasta la próxima corrida, y avisar en cada render sería un cartel pegado.
+   */
+  const estadoEscrituraPrevio = useRef<string | null>(null);
+  useEffect(() => {
+    const antes = estadoEscrituraPrevio.current;
+    const ahora = escritura?.estado ?? null;
+    estadoEscrituraPrevio.current = ahora;
+
+    if ((antes !== "corriendo" && antes !== "en_cola") || ahora !== "termino") return;
+
+    // Los números de después de escribir: se vuelven a traer porque los que
+    // hay en pantalla son de antes de la corrida.
+    void (async () => {
+      const r = await fetch("/api/precios-tn", { cache: "no-store" }).catch(() => null);
+      const quedan = r?.ok ? ((await r.json())?.resumen?.aprobadasSinAplicar ?? 0) : 0;
+      setAviso(
+        quedan > 0
+          ? `Escritura terminada. Quedan ${quedan} autorizadas esperando: el tope es de ` +
+              `${TANDA_ESCRITURA} por corrida. Apretá «Escribir» otra vez para la próxima tanda.`
+          : "Escritura terminada. No queda nada autorizado sin escribir; " +
+              "lo que se escribió está en «Cambios aplicados».",
+      );
+      recargar();
+    })();
+  }, [escritura?.estado, recargar]);
 
   const cambiarFiltro = useCallback((cambio: Partial<FiltrosPreciosTn>) => {
     setCargando(true);
@@ -1109,9 +1145,15 @@ export default function DashboardPreciosTn() {
                     : "Escribe en Tienda Nube las propuestas que autorizaste"
               }
             >
+              {/* EL BOTON DICE LO QUE VA A HACER, NO LO QUE HAY ESPERANDO.
+                  Con 200 autorizadas decia "Escribir (200)" y escribia 50: una
+                  promesa que no se cumple, y sin nada que avisara despues por
+                  que quedaban 150. */}
               {escribiendo
                 ? "Escribiendo…"
-                : `Escribir en Tienda Nube (${esperandoEscritura})`}
+                : esperandoEscritura > TANDA_ESCRITURA
+                  ? `Escribir ${TANDA_ESCRITURA} de ${esperandoEscritura}`
+                  : `Escribir en Tienda Nube (${esperandoEscritura})`}
             </button>
           </div>
 
@@ -1162,12 +1204,20 @@ export default function DashboardPreciosTn() {
               del piso de hoy tampoco se escribe.
             </li>
             <li>
-              · Donde haya <b>oferta vigente, la oferta sigue</b>: se mueve el precio regular
-              por debajo para que el descuento que muestra la tienda no cambie.
+              · Donde haya <b>oferta vigente, el precio tachado no se toca</b> y se ajusta la
+              oferta. El porcentaje pasa a decir el descuento real. Si el precio nuevo alcanza
+              al de lista, se saca la oferta y queda un precio solo.
             </li>
             <li>
-              · Se escriben <b>50 como máximo</b> por corrida. Si autorizaste más, el resto
-              queda para la siguiente.
+              · Se escriben <b>{TANDA_ESCRITURA} como máximo</b> por corrida.
+              {esperandoEscritura > TANDA_ESCRITURA && (
+                <>
+                  {" "}
+                  Como autorizaste {esperandoEscritura}, van a quedar{" "}
+                  <b>{esperandoEscritura - TANDA_ESCRITURA} para la próxima tanda</b>: siguen
+                  autorizadas y el botón queda listo para volver a apretarlo.
+                </>
+              )}
             </li>
             <li>· Esto sí cambia lo que ve un cliente. Tarda menos de un minuto.</li>
           </ul>
