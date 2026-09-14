@@ -33,6 +33,9 @@ const TONOS: Record<string, string> = {
   critico: "border-negativo/40 bg-negativo/10 text-negativo",
   aviso: "border-c3/40 bg-c3/15 text-c3",
   neutro: "border-line bg-panel-2 text-muted",
+  // "En precio" no es un aviso: es lo que está bien. Va en verde y al final,
+  // para que se lea como el saldo y no como un problema más de la fila.
+  ok: "border-c1/40 bg-c1/10 text-c1",
 };
 
 /** Descarga un contenido como archivo. Texto o bytes: al Blob le da igual. */
