@@ -556,3 +556,33 @@ export async function deshacerCambio(
   );
   return propuesta?.id ?? null;
 }
+
+/**
+ * Autorizar una selección concreta, por id.
+ *
+ * ACÁ SÍ VIAJAN LOS IDs, y no es una contradicción con `aprobarFiltradas`.
+ * Son dos gestos distintos: "todo lo de esta marca" es una descripción que el
+ * servidor tiene que resolver contra la base de ahora, porque entre que se
+ * dibujó la pantalla y se apretó el botón pueden haber entrado filas nuevas.
+ * "Estas seis que tildé" es una lista, y resolverla de nuevo contra un filtro
+ * aprobaría cosas que la persona nunca miró.
+ *
+ * El `estado = 'pendiente'` del where sigue siendo la red: si otra persona
+ * decidió alguna en el medio, esa no se toca y el total que vuelve es menor que
+ * lo pedido — que es justo lo que la pantalla tiene que poder decir.
+ */
+export async function aprobarPorIds(ids: number[], quien: string): Promise<number> {
+  const limpios = [...new Set(ids)].filter((n) => Number.isInteger(n) && n > 0);
+  if (!limpios.length) return 0;
+
+  const filas = await query<{ id: number }>(
+    `update precios.propuesta
+        set estado = 'aprobada', decidida_por = $2, decidida_en = now()
+      where id = any($1::bigint[])
+        and estado = 'pendiente'
+        and precio_propuesto is not null
+      returning id`,
+    [limpios, quien],
+  );
+  return filas.length;
+}

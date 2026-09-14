@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { enConstruccion, permisoDelUsuario, puedeVer, puedeVerBorradores } from "@/lib/permisos";
-import { aprobarFiltradas, decidirPropuesta } from "@/lib/queries-precios-tn";
+import { aprobarFiltradas, aprobarPorIds, decidirPropuesta } from "@/lib/queries-precios-tn";
 import { leerFiltros } from "@/lib/precios-tn";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
@@ -44,6 +44,22 @@ export async function POST(request: NextRequest) {
   }
 
   const cuerpo = await request.json().catch(() => null);
+
+  // UNA SELECCIÓN CONCRETA: los ids que la persona tildó.
+  //
+  // Acá sí viajan ids y no un filtro, y no es una contradicción con el bloque
+  // de abajo: son dos gestos distintos. "Todo lo de esta marca" es una
+  // descripción que el servidor resuelve contra la base de ahora; "estas seis
+  // que tildé" es una lista, y volver a resolverla contra un filtro aprobaría
+  // cosas que nadie miró.
+  if (Array.isArray(cuerpo?.ids)) {
+    const ids = cuerpo.ids.map(Number).filter(Number.isInteger);
+    if (!ids.length) {
+      return NextResponse.json({ error: "No hay nada seleccionado" }, { status: 400 });
+    }
+    const total = await aprobarPorIds(ids, quien);
+    return NextResponse.json({ ok: true, aprobadas: total, pedidas: ids.length, quien });
+  }
 
   if (cuerpo?.todas === true) {
     const filtros = leerFiltros(new URLSearchParams(cuerpo?.filtros ?? {}));

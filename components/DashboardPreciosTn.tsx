@@ -153,8 +153,31 @@ function Competidores({ lista }: { lista: FilaPrecioTn["competidores"] }) {
  */
 function columnas(
   decidir: (id: number, decision: "aprobada" | "rechazada") => void,
+  seleccion: Set<number>,
+  alternar: (id: number) => void,
 ): Columna<FilaPrecioTn>[] {
   return [
+    {
+      // EL TITULO ES UN STRING Y NO UNA CASILLA, aunque una casilla de "tildar
+      // todo" en el encabezado seria lo natural: `Tabla` declara `titulo:
+      // string` y lo usa como key de React y como identidad del orden. Cambiar
+      // ese tipo tocaria todos los tableros que comparten el componente por una
+      // comodidad de esta pantalla. El "tildar todo" vive en la barra de
+      // acciones, que ademas es donde esta el boton que lo usa.
+      titulo: "✓",
+      ayuda:
+        "Tildá varias y autorizalas juntas con el botón de arriba. Sólo tienen casilla las " +
+        "que están pendientes y tienen precio propuesto: el resto no hay nada que autorizar.",
+      celda: (f) =>
+        f.estado === "pendiente" && f.precioPropuesto !== null ? (
+          <input
+            type="checkbox"
+            checked={seleccion.has(f.id)}
+            onChange={() => alternar(f.id)}
+            className="accent-c1 h-3.5 w-3.5 cursor-pointer"
+          />
+        ) : null,
+    },
     {
       titulo: "Producto",
       ayuda:
@@ -433,6 +456,9 @@ export default function DashboardPreciosTn() {
   // escribió. Separadas porque se usan en momentos distintos: una es trabajo
   // pendiente y la otra es control de lo hecho.
   const [vista, setVista] = useState<"cola" | "cambios">("cola");
+  // Lo que la persona tildó a mano. Se guarda por id y no por índice: la lista
+  // se reordena al cambiar de filtro, y un índice apuntaría a otra fila.
+  const [seleccion, setSeleccion] = useState<Set<number>>(new Set());
   const [cambios, setCambios] = useState<CambioPrecioTn[]>([]);
 
   // Medio segundo de quietud antes de consultar. Es el mínimo que se siente
@@ -527,15 +553,50 @@ export default function DashboardPreciosTn() {
   const cambiarFiltro = useCallback((cambio: Partial<FiltrosPreciosTn>) => {
     setCargando(true);
     setConfirmando(false);
+    // LA SELECCION SE VACIA AL CAMBIAR DE FILTRO. Si sobreviviera, el botón
+    // diría "autorizar 6" mientras en pantalla no hay ninguna tildada, y esas
+    // 6 serían de una lista que la persona ya no está viendo.
+    setSeleccion(new Set());
     setFiltros((f) => ({ ...f, ...cambio }));
   }, []);
 
   const limpiar = useCallback(() => {
     setCargando(true);
     setConfirmando(false);
+    setSeleccion(new Set());
     setTexto("");
     setFiltros(SIN_FILTRO);
   }, []);
+
+  /**
+   * Las que se pueden tildar de lo que hay en pantalla.
+   *
+   * Es el universo del "tildar todo": lo VISIBLE con el filtro actual, no las
+   * 845 de la cola. Tildar a ciegas cosas que no se ven es justo lo que el
+   * botón de bloque ya hace --y ése al menos dice que lo hace-- así que acá
+   * conviene lo contrario: lo que se tilda es lo que se está mirando.
+   */
+  const seleccionables = useMemo(
+    () => filas.filter((f) => f.estado === "pendiente" && f.precioPropuesto !== null),
+    [filas],
+  );
+
+  const alternar = useCallback((id: number) => {
+    setSeleccion((previa) => {
+      const proxima = new Set(previa);
+      if (proxima.has(id)) proxima.delete(id);
+      else proxima.add(id);
+      return proxima;
+    });
+  }, []);
+
+  const alternarTodas = useCallback(() => {
+    setSeleccion((previa) =>
+      previa.size >= seleccionables.length
+        ? new Set()
+        : new Set(seleccionables.map((f) => f.id)),
+    );
+  }, [seleccionables]);
 
   const hayFiltro = useMemo(
     () => Boolean(filtros.grupo || filtros.proveedor || filtros.marca || filtros.busqueda),
@@ -571,6 +632,31 @@ export default function DashboardPreciosTn() {
     } else {
       setResumen((r) => (r ? { ...r, pendientes: Math.max(0, r.pendientes - 1) } : r));
     }
+  }
+
+  async function autorizarSeleccionadas() {
+    setAviso(null);
+    const ids = [...seleccion];
+    const r = await fetch("/api/precios-tn/decidir", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    if (!r.ok) {
+      setAviso((await r.json().catch(() => null))?.error ?? "No se pudo autorizar");
+      return;
+    }
+    const { aprobadas, pedidas } = await r.json();
+    // SI ALGUNA NO ENTRO, SE DICE. Otra persona pudo decidirla en el medio, y
+    // "6 autorizadas" cuando entraron 4 es el tipo de mentira que despues
+    // aparece como dos precios que nadie entiende.
+    setAviso(
+      aprobadas === pedidas
+        ? `${aprobadas} propuestas autorizadas.`
+        : `${aprobadas} de ${pedidas} autorizadas. El resto ya lo había decidido otra persona.`,
+    );
+    setSeleccion(new Set());
+    recargar();
   }
 
   async function autorizarTodo() {
@@ -830,9 +916,16 @@ export default function DashboardPreciosTn() {
 
       {vista === "cola" && (
         <>
-      {/* Las alertas. No son tramos de un mismo eje: son situaciones que se
-          resuelven de formas distintas, por eso van separadas y en este orden. */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {/* LAS ALERTAS, COMO CHIPS Y NO COMO TARJETAS.
+          Eran cinco cuadros de tres líneas cada uno y empujaban la tabla media
+          pantalla hacia abajo: para ver la primera propuesta había que hacer
+          scroll, en una pantalla cuyo trabajo es revisar propuestas. El texto
+          largo no se perdió — pasó al tooltip, que es donde se lee cuando hace
+          falta y no cada vez que se abre la página.
+
+          Siguen sin ser tramos de un mismo eje: son situaciones que se
+          resuelven de formas distintas, por eso conservan su color y su orden. */}
+      <div className="flex flex-wrap items-center gap-2">
         {alertas.map((a) => {
           const total = resumen?.grupos?.[a.clave] ?? 0;
           const activo = filtros.grupo === a.clave;
@@ -840,16 +933,21 @@ export default function DashboardPreciosTn() {
             <button
               key={a.clave}
               onClick={() => cambiarFiltro({ grupo: activo ? null : (a.clave as ClaveAlerta) })}
-              className={`rounded-xl border p-3 text-left transition ${TONOS[a.tono]} ${
-                activo ? "ring-c1/60 ring-2" : "hover:opacity-80"
-              }`}
+              title={a.detalle}
+              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition ${
+                TONOS[a.tono]
+              } ${activo ? "ring-c1/60 ring-2" : "hover:opacity-80"}`}
             >
-              <p className="text-2xl font-semibold">{total}</p>
-              <p className="text-sm font-medium">{a.titulo}</p>
-              <p className="mt-1 text-[11px] leading-snug opacity-75">{a.detalle}</p>
+              <span className="font-semibold">{total}</span>
+              <span>{a.titulo}</span>
             </button>
           );
         })}
+        {filtros.grupo && (
+          <span className="text-muted text-[11px]">
+            {ALERTAS.find((a) => a.clave === filtros.grupo)?.detalle}
+          </span>
+        )}
       </div>
 
       {/* Los filtros. Se resuelven en el servidor sobre las 845 filas, no sobre
@@ -895,7 +993,36 @@ export default function DashboardPreciosTn() {
           </button>
         )}
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {/* TILDAR TODO LO VISIBLE. Vive acá y no en el encabezado de la tabla
+              porque `Tabla` declara `titulo: string` y lo usa como key y como
+              identidad del orden; cambiar ese tipo tocaría todos los tableros
+              que comparten el componente por una comodidad de esta pantalla. */}
+          {seleccionables.length > 0 && (
+            <button
+              onClick={alternarTodas}
+              className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1.5 text-xs"
+            >
+              {seleccion.size >= seleccionables.length
+                ? "Destildar todo"
+                : `Tildar ${seleccionables.length}`}
+            </button>
+          )}
+
+          {/* LO TILDADO A MANO tiene su propio botón y su propio camino: manda
+              la lista de ids, no el filtro. "Estas seis que miré" es una lista;
+              resolverla de nuevo contra un filtro aprobaría cosas que nadie
+              vio. Sin confirmación, a propósito: tildar seis casillas ya es la
+              confirmación, y una ventana más entrena a apretar Aceptar. */}
+          {seleccion.size > 0 && (
+            <button
+              onClick={autorizarSeleccionadas}
+              className="border-c1/40 bg-c1/15 text-c1 hover:bg-c1/25 rounded-lg border px-3 py-1.5 text-xs font-medium"
+            >
+              Autorizar {seleccion.size} seleccionada{seleccion.size === 1 ? "" : "s"}
+            </button>
+          )}
+
           {/* AUTORIZAR TODO LO FILTRADO, nunca "todo" a secas.
               Un botón que aprueba las 845 convierte una decisión en un reflejo:
               el día que una corrida salga rara --un costo mal cargado, una
@@ -948,7 +1075,7 @@ export default function DashboardPreciosTn() {
       ) : (
         <Tabla
           filas={filas}
-          columnas={columnas(decidir)}
+          columnas={columnas(decidir, seleccion, alternar)}
           clave={(f) => String(f.id)}
           vacio={hayFiltro ? "Nada coincide con el filtro." : "No hay propuestas para revisar."}
         />
