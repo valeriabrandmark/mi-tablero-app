@@ -1742,7 +1742,20 @@ export type FilaPrecioTn = {
   motivos: string[];
   competidores: CompetidorPrecioTn[];
   stock: number | null;
+  /** Costo NETO (sin IVA), con el descuento del proveedor ya aplicado. */
   costo: number | null;
+  /**
+   * Margen de contribución como fracción de la venta SIN IVA, al precio de hoy
+   * y al propuesto. 0,15 = 15 %.
+   *
+   * Los calcula el motor y los guarda en la propuesta: la cuenta vive en
+   * `dominio/margen.py` y es la misma con la que se despeja el piso. Si el
+   * tablero la recalculara, el día que una cambie mostraría un margen que el
+   * motor no usó para decidir. `null` en las propuestas anteriores a la corrida
+   * que empezó a guardarlos.
+   */
+  margenActual: number | null;
+  margenPropuesto: number | null;
 };
 
 export type ResumenPreciosTn = {

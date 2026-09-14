@@ -72,6 +72,37 @@ function Diferencia({ valor }: { valor: number | null }) {
   );
 }
 
+/**
+ * El margen de hoy y el del precio propuesto, uno sobre el otro.
+ *
+ * LOS DOS JUNTOS, porque lo que hay que ver de un vistazo no es "cuánto gano"
+ * sino "cuánto estoy resignando por competir", y eso es la resta. El de arriba
+ * es el de hoy; el de abajo, el que quedaría.
+ *
+ * El color del propuesto no es decorativo: por debajo del margen mínimo de la
+ * política (15 %) el precio perfora el piso, y eso tiene que saltar a la vista
+ * aunque el motor ya lo haya limitado — porque cuando el motor dice "sigue
+ * debajo del piso" es justamente el caso que hay que mirar de cerca.
+ */
+function Margenes({ fila }: { fila: FilaPrecioTn }) {
+  const { margenActual: hoy, margenPropuesto: propuesto } = fila;
+  if (hoy === null && propuesto === null) {
+    return <span className="text-muted">—</span>;
+  }
+  const tono =
+    propuesto === null ? "text-muted" : propuesto < 0.15 ? "text-negativo" : "text-c1";
+  return (
+    <div className="leading-tight">
+      <span className="text-muted block text-[11px]">
+        {hoy !== null ? fmtPct(hoy) : "—"}
+      </span>
+      <span className={`block font-medium ${tono}`}>
+        {propuesto !== null ? fmtPct(propuesto) : "—"}
+      </span>
+    </div>
+  );
+}
+
 function Competidores({ lista }: { lista: FilaPrecioTn["competidores"] }) {
   if (!lista?.length) return <span className="text-muted text-xs">sin datos</span>;
 
@@ -172,6 +203,35 @@ function columnas(
         f.precioPropuesto ? fmtMoneda(f.precioPropuesto) : <span className="text-muted">—</span>,
       numerica: true,
       orden: (f) => f.precioPropuesto,
+    },
+    {
+      titulo: "Costo",
+      ayuda:
+        "El costo NETO del artículo: sin IVA y con el descuento del proveedor ya aplicado. " +
+        "Sale de la misma lista con la que el tablero calcula la rentabilidad de Mercado Libre " +
+        "y la distribuidora, así que los tres márgenes hablan del mismo número. " +
+        "Cuando un mes tiene varias listas se usa la que rige hoy.",
+      celda: (f) =>
+        f.costo !== null ? (
+          <span className="text-muted">{fmtMoneda(f.costo)}</span>
+        ) : (
+          <span className="text-muted">—</span>
+        ),
+      numerica: true,
+      orden: (f) => f.costo,
+    },
+    {
+      titulo: "Margen",
+      ayuda:
+        "Cuánto queda de cada venta después de sacar el IVA, el arancel de la pasarela más cara " +
+        "y el 7,4 % de IIBB, cheque y municipal — como porcentaje de la venta SIN IVA. " +
+        "Arriba el margen que deja el precio de HOY; abajo el que dejaría el PROPUESTO. " +
+        "Es la pregunta que falta para decidir: bajar a $19.107 no dice nada solo, " +
+        "bajar a $19.107 y quedar en 15 % en vez de 31 % sí. " +
+        "Lo calcula el motor con la misma cuenta que usa para el piso, no lo recalcula esta pantalla.",
+      celda: (f) => <Margenes fila={f} />,
+      numerica: true,
+      orden: (f) => f.margenPropuesto,
     },
     {
       titulo: "Piso",

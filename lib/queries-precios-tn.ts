@@ -254,7 +254,22 @@ export async function getFilasPreciosTn(
             -- que poder abrir la ficha del otro y mirarla con sus propios ojos.
             ${COMPETIDORES}                                as competidores,
             (p.entradas->>'stock')::float8                 as stock,
-            (p.entradas->>'costo')::float8                 as costo
+            (p.entradas->>'costo')::float8                 as costo,
+            -- EL MARGEN SALE CALCULADO DEL MOTOR, no se recalcula acá.
+            -- La cuenta (sacar el IVA, restar pasarela e impuestos) vive en
+            -- dominio/margen.py y es la misma con la que se despeja el piso.
+            -- Recalcularla en este SQL sería una segunda implementación, y el
+            -- día que una cambie la pantalla mostraría un margen que el motor
+            -- no usó para decidir nada.
+            --
+            -- (Sin backticks a propósito: esto viaja dentro de un template
+            -- literal de JS y un backtick acá lo corta a la mitad.)
+            --
+            -- Viene NULL en las propuestas anteriores a la corrida que empezó
+            -- a guardarlo. La pantalla muestra "—" y se llena solo en la
+            -- próxima comparación.
+            (p.entradas->>'margen_actual')::float8          as "margenActual",
+            (p.entradas->>'margen_propuesto')::float8       as "margenPropuesto"
        ${cuerpo}
       order by
         -- Los pendientes primero: lo ya decidido no vuelve a la cola.
