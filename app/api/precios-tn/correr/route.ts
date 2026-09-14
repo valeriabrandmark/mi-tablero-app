@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { enConstruccion, permisoDelUsuario, puedeVer, puedeVerBorradores } from "@/lib/permisos";
+import { TANDA_ESCRITURA } from "@/lib/precios-tn";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
 
@@ -57,7 +58,14 @@ const WORKFLOWS = {
     // cambie cuál es, este botón empieza a hacer otra cosa sin que este archivo
     // se entere. Un mapa cerrado que deja un campo librado al default no es
     // cerrado.
-    inputs: { tarea: "aplicar", confirmar: true, limite: "50" } as Record<string, unknown>,
+    inputs: {
+      tarea: "aplicar",
+      confirmar: true,
+      // El mismo número que muestra la pantalla. Ver `TANDA_ESCRITURA`: si
+      // fueran dos constantes, el botón prometería una cantidad y el workflow
+      // escribiría otra.
+      limite: String(TANDA_ESCRITURA),
+    } as Record<string, unknown>,
   },
 } as const;
 
