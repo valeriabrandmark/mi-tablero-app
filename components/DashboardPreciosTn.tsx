@@ -498,6 +498,19 @@ export default function DashboardPreciosTn() {
     }
     setFilas((previas) => previas.map((f) => (f.id === id ? { ...f, estado: decision } : f)));
     setAprobables((a) => ({ ...a, total: Math.max(0, a.total - 1) }));
+
+    // EL CONTADOR DE ARRIBA TAMBIÉN, y no es cosmético: es el que habilita el
+    // botón de escribir. Sin esto, autorizar dejaba el botón deshabilitado
+    // hasta que alguien recargara la página — y como no había ninguna señal de
+    // que hiciera falta recargar, la conclusión razonable era que el botón no
+    // existía. Pasó exactamente eso.
+    if (decision === "aprobada") {
+      setResumen((r) =>
+        r ? { ...r, aprobadasSinAplicar: r.aprobadasSinAplicar + 1, pendientes: Math.max(0, r.pendientes - 1) } : r,
+      );
+    } else {
+      setResumen((r) => (r ? { ...r, pendientes: Math.max(0, r.pendientes - 1) } : r));
+    }
   }
 
   async function autorizarTodo() {
@@ -626,24 +639,35 @@ export default function DashboardPreciosTn() {
 
             {/* ESCRIBIR NO CORRE SOLO NUNCA. `aplicar.yml` no tiene cron y no
                 va a tenerlo: la comparación es automática, la publicación de un
-                precio se pide. Este botón sólo aparece cuando hay algo
-                autorizado esperando, porque si no, no hay nada que pedir. */}
-            {esperandoEscritura > 0 && (
-              <button
-                onClick={() => setConfirmandoEscritura(true)}
-                disabled={escribiendo || escritura?.disponible === false || confirmandoEscritura}
-                className="border-c1/40 bg-c1/10 text-c1 hover:bg-c1/20 rounded-lg border px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
-                title={
-                  escritura?.disponible === false
-                    ? "Falta configurar GITHUB_TOKEN_PRECIOS en el entorno"
+                precio se pide.
+
+                EL BOTÓN SE MUESTRA SIEMPRE, aunque no haya nada que escribir.
+                Antes se escondía con cero autorizadas —"si no hay nada que
+                pedir, no hay botón"— y eso convirtió una pantalla vacía en un
+                misterio: sin el botón a la vista no hay forma de distinguir
+                "no hay nada autorizado" de "esto no se desplegó". Deshabilitado
+                y diciendo por qué contesta las dos preguntas de una. */}
+            <button
+              onClick={() => setConfirmandoEscritura(true)}
+              disabled={
+                esperandoEscritura === 0 ||
+                escribiendo ||
+                escritura?.disponible === false ||
+                confirmandoEscritura
+              }
+              className="border-c1/40 bg-c1/10 text-c1 hover:bg-c1/20 rounded-lg border px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40"
+              title={
+                escritura?.disponible === false
+                  ? "Falta configurar GITHUB_TOKEN_PRECIOS en el entorno"
+                  : esperandoEscritura === 0
+                    ? "No hay nada autorizado esperando. Autorizá propuestas de la lista y el botón se habilita."
                     : "Escribe en Tienda Nube las propuestas que autorizaste"
-                }
-              >
-                {escribiendo
-                  ? "Escribiendo…"
-                  : `Escribir en Tienda Nube (${esperandoEscritura})`}
-              </button>
-            )}
+              }
+            >
+              {escribiendo
+                ? "Escribiendo…"
+                : `Escribir en Tienda Nube (${esperandoEscritura})`}
+            </button>
           </div>
 
           {corrida?.log && (
