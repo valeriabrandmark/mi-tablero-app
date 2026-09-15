@@ -316,6 +316,18 @@ function condicionesDeFiltro(
     params.push(filtros.marca);
     partes.push(`and coalesce(a.marca, a."attributes.marca") = $${params.length}`);
   }
+  if (filtros.competidor) {
+    // SE MIRA `entradas`, QUE ES LA FOTO CON LA QUE EL MOTOR DECIDIÓ, y no
+    // `precios.observacion` en vivo. Filtrar por "lo que se comparó contra
+    // Juleriaque" tiene que devolver las filas cuya propuesta REALMENTE miró a
+    // Juleriaque; una observación que llegó después no participó de esa
+    // decisión y no tiene por qué aparecer acá.
+    params.push(filtros.competidor);
+    partes.push(
+      `and exists (select 1 from jsonb_array_elements(p.entradas->'observaciones') e
+                    where e->>'fuente' = $${params.length})`,
+    );
+  }
   if (filtros.busqueda) {
     // Un solo parámetro para las dos columnas: quien escribe "CH07038" busca un
     // SKU y quien escribe "chupete" busca una descripción, y no tiene por qué
@@ -333,26 +345,31 @@ function condicionesDeFiltro(
 function cuerpoDeConsulta(filtros: FiltrosPreciosTn, params: unknown[]): string {
   // LO QUE ESTÁ EN PRECIO NO ES COLA DE TRABAJO, PERO TAMPOCO ES INVISIBLE.
   //
-  // Antes se excluía con un `where` y no aparecía en ningún lado: ni en la
-  // lista ni en el resumen. Eso es correcto para una cola —trescientos
-  // productos con 1 % de diferencia hacen abandonar la pantalla— y es un
-  // agujero para saber cómo está el negocio.
+  // ESTA CONSULTA YA NO ESCONDE NADA, y pasó por tres etapas.
   //
-  // Ahora se cuenta siempre y se lista sólo cuando se lo pide haciendo clic en
-  // su tarjeta. `$2` no se usa más acá: el umbral vive en la clasificación, en
-  // un solo lugar, así que la lista y la tarjeta no pueden decir cosas
-  // distintas sobre qué está en precio.
+  // Primero los productos en precio se excluían con un `where` y no aparecían
+  // en ningún lado: ni en la lista ni en el resumen. Después empezaron a
+  // contarse en su tarjeta pero seguían fuera de la lista, salvo que se
+  // hiciera clic.
+  //
+  // Ahora la pantalla abre con TODO a la vista y las tarjetas filtran al
+  // tocarlas. El motivo de esconderlos era que una cola con trescientas filas
+  // de 1 % de diferencia es ruido; el motivo de mostrarlos es que la pantalla
+  // también se usa para mirar el catálogo, y ahí "¿dónde está este producto?"
+  // no puede contestarse con "en ningún lado". Con las tarjetas a un clic, lo
+  // segundo no cuesta lo primero.
+  //
+  // Lo que SÍ sigue excluyendo los grupos informativos es la aprobación en
+  // bloque, más abajo: ahí no hay nada que aprobar y contarlos mentiría.
   // `some` y no `includes`: el filtro llega como `string | null` --lo valida
   // `leerFiltros` contra ALERTAS, pero el tipo no lo refleja-- y comparar es lo
   // que no obliga a un cast que taparía un valor inválido.
-  const soloInformativo = GRUPOS_INFORMATIVOS.some((g) => g === filtros.grupo);
   return `
        from precios.propuesta p
        left join bronze.sigma_articulos a on a.id = p.sku
        ${FOTO_PROPIA}
       where p.corrida_id = $1
         and ${CLASIFICACION} is not null
-        and (${CLASIFICACION} not in (${GRUPOS_INFORMATIVOS_SQL}) or ${soloInformativo})
         ${condicionesDeFiltro(filtros, params)}`;
 }
 
@@ -440,12 +457,13 @@ export async function getFilasPreciosTn(
  */
 export async function getCatalogosPreciosTn(): Promise<CatalogosPreciosTn> {
   const corrida = await queryOne<{ id: number }>(ULTIMA_CORRIDA, []);
-  if (!corrida) return { proveedores: [], marcas: [] };
+  if (!corrida) return { proveedores: [], marcas: [], competidores: [] };
 
   const sinFiltros: FiltrosPreciosTn = {
     grupo: null,
     proveedor: null,
     marca: null,
+    competidor: null,
     busqueda: null,
   };
   const params: unknown[] = [corrida.id];
@@ -463,9 +481,27 @@ export async function getCatalogosPreciosTn(): Promise<CatalogosPreciosTn> {
       a.localeCompare(b, "es"),
     );
 
+  // LOS COMPETIDORES QUE CONTESTARON EN ESTA CORRIDA, no los configurados.
+  //
+  // Va en su propia consulta porque sale de desarmar un array de JSON y
+  // mezclarlo con el `distinct` de arriba multiplicaría las filas por la
+  // cantidad de observaciones de cada producto.
+  //
+  // Que una fuente activa NO aparezca en esta lista es información: quiere
+  // decir que esta corrida no le sacó un solo precio.
+  const fuentes = await query<{ fuente: string }>(
+    `select distinct e->>'fuente' as fuente
+       from precios.propuesta p,
+            lateral jsonb_array_elements(p.entradas->'observaciones') e
+      where p.corrida_id = $1
+        and e->>'fuente' is not null`,
+    [corrida.id],
+  );
+
   return {
     proveedores: unicos(filas.map((f) => f.proveedor)),
     marcas: unicos(filas.map((f) => f.marca)),
+    competidores: unicos(fuentes.map((f) => f.fuente)),
   };
 }
 
@@ -651,6 +687,19 @@ export async function getCambiosPreciosTn(limite = 200): Promise<CambioPrecioTn[
             c.aplicado_en                           as "aplicadoEn",
             p.decidida_por                          as "autorizadoPor",
             t.canonical_url                         as url,
+            -- CON QUÉ RENTABILIDAD QUEDÓ. Sale del margen que calculó el
+            -- MOTOR, no de una cuenta hecha en este SQL: sacar el IVA, restar
+            -- pasarela e impuestos vive en dominio/margen.py y es la misma
+            -- cuenta con la que se despeja el piso. Reimplementarla acá sería
+            -- una segunda versión, y el día que una cambie el historial
+            -- mostraría un margen que nadie usó para decidir.
+            --
+            -- SÓLO SI EL PRECIO ESCRITO ES EL QUE EL MOTOR PROPUSO. Con un
+            -- precio puesto a mano --o un deshacer-- ese margen se calculó
+            -- para otro número, y mostrarlo sería peor que no mostrar nada.
+            case when p.precio_propuesto = c.precio_nuevo
+                 then (p.entradas->>'margen_propuesto')::float8
+            end                                     as margen,
             -- Si ya se deshizo, no se puede deshacer de nuevo. Se mira si
             -- existe una propuesta que revierta ESTE cambio y que siga viva
             -- (aprobada = en cola, aplicada = ya revertido).

@@ -185,6 +185,12 @@ export const NOMBRE_FUENTE: Record<string, string> = {
   philips: "Philips",
   chicco: "Chicco",
   fiorani: "Fiorani",
+  pigmento: "Perfumerías Pigmento",
+  farmacity: "Farmacity",
+  suavinex: "Suavinex",
+  thermos_ar: "Thermos Argentina",
+  naldo: "Naldo",
+  portal_express: "Portal Express",
 };
 
 export function nombreFuente(codigo: string): string {
@@ -218,6 +224,10 @@ export function leerFiltros(params: URLSearchParams): FiltrosPreciosTn {
     // sino contra una query string absurda de 8 kB que no puede coincidir con
     // ningún proveedor real.
     proveedor: texto("proveedor", 120),
+    // El código de fuente, no su nombre en pantalla: los códigos son cortos y
+    // estables, los nombres se editan. 40 alcanza para el más largo de hoy
+    // ("farmacias_del_pueblo", 20) con el doble de margen.
+    competidor: texto("competidor", 40),
     marca: texto("marca", 120),
     busqueda: texto("q", 60),
   };

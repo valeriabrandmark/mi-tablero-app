@@ -61,6 +61,7 @@ function descripcionDelFiltro(f: FiltrosPreciosTn): string {
   if (f.grupo) partes.push(ALERTAS.find((a) => a.clave === f.grupo)?.titulo ?? f.grupo);
   if (f.marca) partes.push(`marca ${f.marca}`);
   if (f.proveedor) partes.push(`proveedor ${f.proveedor}`);
+  if (f.competidor) partes.push(`comparados con ${nombreFuente(f.competidor)}`);
   if (f.busqueda) partes.push(`búsqueda "${f.busqueda}"`);
   return partes.join(" · ");
 }
@@ -69,6 +70,7 @@ const SIN_FILTRO: FiltrosPreciosTn = {
   grupo: null,
   proveedor: null,
   marca: null,
+  competidor: null,
   busqueda: null,
 };
 
@@ -628,6 +630,21 @@ function columnasCambios(
       orden: (c) => c.variacion,
     },
     {
+      titulo: "Rentabilidad",
+      ayuda:
+        "Con qué margen quedó el artículo a ese precio, después de sacar el IVA y restar " +
+        "pasarela e impuestos. Es la misma cuenta con la que el motor despeja el piso, no una " +
+        "hecha en la pantalla. Aparece “—” cuando el precio escrito no es el que el motor " +
+        "propuso —un precio puesto a mano, o un deshacer—: ahí ese margen se calculó para otro " +
+        "número y mostrarlo sería engañoso.",
+      // `resalta` para que un margen por debajo del mínimo se vea rojo. En el
+      // historial importa más que en la cola: acá el precio YA está puesto, así
+      // que un margen flaco no es una propuesta a rechazar, es plata corriendo.
+      celda: (c) => <Margen valor={c.margen} resalta />,
+      numerica: true,
+      orden: (c) => c.margen,
+    },
+    {
       titulo: "Autorizó",
       ayuda: "Quién aprobó la propuesta que produjo este cambio.",
       celda: (c) => (
@@ -730,7 +747,11 @@ const CLASE_SELECT =
 export default function DashboardPreciosTn() {
   const [resumen, setResumen] = useState<ResumenPreciosTn | null>(null);
   const [filas, setFilas] = useState<FilaPrecioTn[]>([]);
-  const [catalogos, setCatalogos] = useState<CatalogosPreciosTn>({ proveedores: [], marcas: [] });
+  const [catalogos, setCatalogos] = useState<CatalogosPreciosTn>({
+    proveedores: [],
+    marcas: [],
+    competidores: [],
+  });
   const [aprobables, setAprobables] = useState<Aprobables>({ total: 0, bajan: 0, suben: 0 });
   const [filtros, setFiltros] = useState<FiltrosPreciosTn>(SIN_FILTRO);
   // El texto del buscador va aparte del filtro: se escribe letra por letra y
@@ -931,7 +952,14 @@ export default function DashboardPreciosTn() {
   }, [seleccionables]);
 
   const hayFiltro = useMemo(
-    () => Boolean(filtros.grupo || filtros.proveedor || filtros.marca || filtros.busqueda),
+    () =>
+      Boolean(
+        filtros.grupo ||
+          filtros.proveedor ||
+          filtros.marca ||
+          filtros.competidor ||
+          filtros.busqueda,
+      ),
     [filtros],
   );
 
@@ -1385,6 +1413,23 @@ export default function DashboardPreciosTn() {
           {catalogos.marcas.map((m) => (
             <option key={m} value={m}>
               {m}
+            </option>
+          ))}
+        </select>
+        {/* LA LISTA SON LOS QUE CONTESTARON EN ESTA CORRIDA, no los que están
+            configurados. Que una fuente activa falte de este desplegable es el
+            dato: significa que esta corrida no le sacó un solo precio, y es la
+            única parte de la pantalla donde eso se ve. */}
+        <select
+          value={filtros.competidor ?? ""}
+          onChange={(e) => cambiarFiltro({ competidor: e.target.value || null })}
+          className={CLASE_SELECT}
+          title="Mostrar sólo los artículos que se compararon contra este competidor"
+        >
+          <option value="">Todos los competidores</option>
+          {catalogos.competidores.map((c) => (
+            <option key={c} value={c}>
+              {nombreFuente(c)}
             </option>
           ))}
         </select>
