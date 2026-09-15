@@ -1786,7 +1786,17 @@ export type ResumenPreciosTn = {
    */
   comparadoEn: string | null;
   grupos: Record<string, number>;
+  /** Propuestas de la corrida que todavía nadie decidió, de cualquier tipo. */
   pendientes: number;
+  /**
+   * Las que de verdad esperan una decisión: pendientes CON un cambio propuesto.
+   *
+   * No es lo mismo que `pendientes` y la diferencia es enorme — 510 contra
+   * 3.735 en la corrida donde se detectó. Lo que sobra son artículos sin stock,
+   * sin competencia, o que el motor decidió mantener: están pendientes porque
+   * nadie los tocó, pero no hay nada que apretar.
+   */
+  porDecidir: number;
   decididas: number;
   /** Aprobadas y todavía sin escribir en la tienda, de todas las corridas. */
   aprobadasSinAplicar: number;
