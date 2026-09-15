@@ -168,20 +168,50 @@ function Diferencia({ valor }: { valor: number | null }) {
  * y cuánto proponía el motor. Seis meses después, "por qué este quedó en
  * $12.000" tiene respuesta.
  */
+/**
+ * El precio propuesto, editable a mano.
+ *
+ * ---------------------------------------------------------------------------
+ * ESCRIBIR EL PRECIO Y AUTORIZAR SON DOS GESTOS, Y ANTES ERAN UNO SOLO.
+ *
+ * El numero tecleado vivia unicamente en el estado de este componente: llegaba
+ * a la base solo si se apretaba "Autorizar" ACA ADENTRO. Escribirlo y despues
+ * autorizar por cualquier otro camino --el boton de la fila, la casilla y
+ * "Autorizar seleccionadas", "Autorizar todo"-- mandaba el pedido sin precio,
+ * y en la tienda terminaba el que habia propuesto el motor.
+ *
+ * No fallaba nada y no avisaba: el numero desaparecia. En la base no quedo un
+ * solo caso con el motivo "escrito a mano".
+ *
+ * Ahora "Guardar" guarda y la propuesta sigue pendiente. A partir de ahi
+ * cualquier camino de aprobacion escribe ese precio, porque todos leen de la
+ * misma columna. "Guardar y autorizar" sigue existiendo para el caso de una
+ * sola fila, que es comodo y era lo unico que habia.
+ * ---------------------------------------------------------------------------
+ */
 function PrecioPropuesto({
   fila,
   onAutorizar,
+  onGuardar,
 }: {
   fila: FilaPrecioTn;
   onAutorizar: (id: number, decision: "aprobada", precio: number) => void;
+  onGuardar: (id: number, precio: number) => void;
 }) {
   const [editando, setEditando] = useState(false);
   const [texto, setTexto] = useState("");
 
   // Ya decidida: es un numero, no una decision pendiente. Sin lapiz.
   if (fila.estado !== "pendiente") {
-    return <span>{fila.precioPropuesto ? fmtMoneda(fila.precioPropuesto) : "—"}</span>;
+    return (
+      <span className={esAMano(fila) ? "text-c1 font-medium" : undefined}>
+        {fila.precioPropuesto ? fmtMoneda(fila.precioPropuesto) : "—"}
+        {esAMano(fila) && <span className="ml-1 text-[11px]" title="Escrito a mano">✎</span>}
+      </span>
+    );
   }
+
+  const aMano = esAMano(fila);
 
   if (!editando) {
     return (
@@ -202,10 +232,23 @@ function PrecioPropuesto({
             IDENTICO al texto que habia antes --mismo color, sin borde-- y lo
             unico que lo delataba era un subrayado al pasar el mouse. Una
             funcion que solo existe para quien ya sabe que existe no existe. */}
-        <span className="decoration-muted/50 underline decoration-dotted underline-offset-4">
+        <span
+          className={`underline decoration-dotted underline-offset-4 ${
+            aMano ? "decoration-c1 text-c1 font-medium" : "decoration-muted/50"
+          }`}
+        >
           {fila.precioPropuesto ? fmtMoneda(fila.precioPropuesto) : "—"}
         </span>
-        <span className="text-muted/70 group-hover:text-c1 text-[11px] leading-none">✎</span>
+        {/* LA MARCA DE "A MANO" ES VISIBLE SIN ABRIR NADA. Un precio guardado
+            que se ve igual que el que propuso el motor no se distingue de uno
+            que no se guardó, que es justo la duda que hay que sacar de encima
+            después de haberlo escrito. */}
+        <span
+          className={`text-[11px] leading-none ${aMano ? "text-c1" : "text-muted/70 group-hover:text-c1"}`}
+          title={aMano ? "Precio escrito a mano: es el que se va a escribir" : undefined}
+        >
+          ✎
+        </span>
       </button>
     );
   }
@@ -222,8 +265,11 @@ function PrecioPropuesto({
         onChange={(e) => setTexto(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Escape") setEditando(false);
+          // Enter GUARDA y no autoriza. Es la tecla del apuro, y autorizar es
+          // lo irreversible de los dos: el precio guardado se puede volver a
+          // editar mientras siga pendiente.
           if (e.key === "Enter" && valido && !bajoPiso) {
-            onAutorizar(fila.id, "aprobada", valor);
+            onGuardar(fila.id, valor);
             setEditando(false);
           }
         }}
@@ -241,12 +287,24 @@ function PrecioPropuesto({
         <button
           disabled={!valido || bajoPiso}
           onClick={() => {
-            onAutorizar(fila.id, "aprobada", valor);
+            onGuardar(fila.id, valor);
             setEditando(false);
           }}
           className="border-c1/40 bg-c1/10 text-c1 rounded border px-1.5 py-0.5 text-[10px] disabled:opacity-40"
+          title="Guarda el precio y deja la propuesta pendiente. Después la autorizás como cualquier otra."
         >
-          Autorizar
+          Guardar
+        </button>
+        <button
+          disabled={!valido || bajoPiso}
+          onClick={() => {
+            onAutorizar(fila.id, "aprobada", valor);
+            setEditando(false);
+          }}
+          className="border-line hover:bg-panel-2 text-muted rounded border px-1.5 py-0.5 text-[10px] disabled:opacity-40"
+          title="Guarda el precio y autoriza esta fila de una vez"
+        >
+          y autorizar
         </button>
         <button
           onClick={() => setEditando(false)}
@@ -374,7 +432,13 @@ function MarcaDeEstado({ estado }: { estado: string }) {
  * casi nunca, porque cada numero sale de una cuenta que nadie puede adivinar.
  */
 function columnas(
-  decidir: (id: number, decision: "aprobada" | "rechazada") => void,
+  // LA FIRMA COMPLETA, CON EL PRECIO. Antes decia `(id, decision) => void` a
+  // secas: TypeScript deja pasar una funcion de menos parametros donde se
+  // espera una de mas, asi que el desajuste con `PrecioPropuesto` --que llama
+  // con tres-- no daba error en ningun lado. Declarada entera, cualquier
+  // camino que se olvide del precio se ve al compilar.
+  decidir: (id: number, decision: "aprobada" | "rechazada", precio?: number | null) => void,
+  guardarPrecio: (id: number, precio: number) => void,
   seleccion: Set<number>,
   alternar: (id: number) => void,
 ): Columna<FilaPrecioTn>[] {
@@ -471,7 +535,9 @@ function columnas(
         "SE PUEDE ESCRIBIR OTRO PRECIO: click en el número (o en el «—») y autorizás ese en " +
         "vez del propuesto. Queda firmado con tu mail y con lo que proponía el motor, y no " +
         "puede perforar el piso.",
-      celda: (f) => <PrecioPropuesto fila={f} onAutorizar={decidir} />,
+      celda: (f) => (
+        <PrecioPropuesto fila={f} onAutorizar={decidir} onGuardar={guardarPrecio} />
+      ),
       numerica: true,
       orden: (f) => f.precioPropuesto,
     },
@@ -766,6 +832,19 @@ function Avance({ estado }: { estado: EstadoCorrida }) {
     </div>
   );
 }
+
+/**
+ * Como se reconoce un precio puesto a mano.
+ *
+ * El servidor escribe el motivo completo --con quien y cuanto proponia el
+ * motor-- en `motivos`. La pantalla solo necesita saber SI lo hay, y se fija
+ * por este prefijo. Se declara una vez para que el texto del servidor y el que
+ * busca la pantalla no puedan separarse en silencio.
+ */
+const MOTIVO_A_MANO = "precio escrito a mano por";
+
+const esAMano = (f: FilaPrecioTn) =>
+  (f.motivos ?? []).some((m) => m.startsWith(MOTIVO_A_MANO));
 
 const CLASE_SELECT =
   "border-line bg-panel-2 text-ink rounded-lg border px-2.5 py-1.5 text-xs focus:border-c1/50 focus:outline-none";
@@ -1066,6 +1145,40 @@ export default function DashboardPreciosTn() {
     } else {
       setResumen((r) => (r ? { ...r, pendientes: Math.max(0, r.pendientes - 1) } : r));
     }
+  }
+
+  /**
+   * Guardar un precio a mano, sin decidir nada.
+   *
+   * La fila queda pendiente con el numero nuevo, y cualquier camino de
+   * aprobacion posterior escribe ESE precio. Es la mitad que faltaba: antes el
+   * numero solo llegaba a la base si se autorizaba desde el mismo editor.
+   */
+  async function guardarPrecio(id: number, precio: number) {
+    setAviso(null);
+    const r = await fetch("/api/precios-tn/decidir", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, precio }),
+    });
+    if (!r.ok) {
+      setAviso((await r.json().catch(() => null))?.error ?? "No se pudo guardar el precio");
+      recargar();
+      return;
+    }
+    setFilas((previas) =>
+      previas.map((f) =>
+        f.id === id
+          ? {
+              ...f,
+              precioPropuesto: precio,
+              // El motivo lo escribe el servidor; se agrega tambien acá para
+              // que la marca de "a mano" aparezca sin recargar la pantalla.
+              motivos: [...(f.motivos ?? []), MOTIVO_A_MANO],
+            }
+          : f,
+      ),
+    );
   }
 
   async function autorizarSeleccionadas() {
@@ -1565,7 +1678,7 @@ export default function DashboardPreciosTn() {
       ) : (
         <Tabla
           filas={filas}
-          columnas={columnas(decidir, seleccion, alternar)}
+          columnas={columnas(decidir, guardarPrecio, seleccion, alternar)}
           clave={(f) => String(f.id)}
           vacio={hayFiltro ? "Nada coincide con el filtro." : "No hay propuestas para revisar."}
         />

@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { enConstruccion, permisoDelUsuario, puedeVer, puedeVerBorradores } from "@/lib/permisos";
-import { aprobarFiltradas, aprobarPorIds, decidirPropuesta } from "@/lib/queries-precios-tn";
+import {
+  aprobarFiltradas,
+  aprobarPorIds,
+  decidirPropuesta,
+  guardarPrecioManual,
+} from "@/lib/queries-precios-tn";
 import { leerFiltros } from "@/lib/precios-tn";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
@@ -69,6 +74,35 @@ export async function POST(request: NextRequest) {
 
   const id = Number(cuerpo?.id);
   const decision = cuerpo?.decision;
+
+  // GUARDAR EL PRECIO A MANO SIN DECIDIR: `{ id, precio }` sin `decision`.
+  //
+  // Es lo que arregla el precio a mano que se perdia. Escribir el numero y
+  // autorizar son dos gestos, y antes el numero solo llegaba a la base si se
+  // hacian juntos desde el editor. Separandolos, cualquier camino de
+  // aprobacion posterior escribe el precio correcto, porque todos leen de
+  // `precio_propuesto`.
+  if (Number.isInteger(id) && decision === undefined) {
+    const precio = Number(cuerpo?.precio);
+    if (!Number.isFinite(precio) || precio <= 0) {
+      return NextResponse.json(
+        { error: "El precio escrito a mano tiene que ser un número mayor que cero." },
+        { status: 400 },
+      );
+    }
+    const guardado = await guardarPrecioManual(id, precio, quien);
+    if (!guardado) {
+      return NextResponse.json(
+        {
+          error:
+            "No se guardó: o esa propuesta ya fue decidida, o el precio que escribiste " +
+            "queda por debajo del piso de margen.",
+        },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json({ ok: true, id, precio, quien });
+  }
 
   if (!Number.isInteger(id) || (decision !== "aprobada" && decision !== "rechazada")) {
     return NextResponse.json({ error: "Pedido inválido" }, { status: 400 });

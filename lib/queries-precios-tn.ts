@@ -512,6 +512,59 @@ export async function getCatalogosPreciosTn(): Promise<CatalogosPreciosTn> {
  * personas abren la pantalla a la vez, la segunda no pisa la decisión de la
  * primera sin enterarse -- devuelve 0 filas y la pantalla lo dice.
  */
+/**
+ * Guardar un precio a mano SIN decidir nada todavia.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE EXISTE, Y QUE ERROR ARREGLA.
+ *
+ * Antes el precio a mano no se guardaba en ningun lado: vivia en el estado del
+ * componente y sólo llegaba a la base si se apretaba el botón "Autorizar" del
+ * propio editor. Escribir el número y después autorizar por cualquier otro
+ * camino —el botón de la fila, la casilla y "Autorizar seleccionadas", o
+ * "Autorizar todo"— mandaba el pedido SIN precio, y se escribía en la tienda
+ * el que había propuesto el motor.
+ *
+ * No fallaba nada y no había aviso: el número tecleado simplemente desaparecía.
+ * En la base no quedó un solo caso con el motivo "escrito a mano", que es como
+ * se comprobó.
+ *
+ * Ahora escribir el precio es un acto propio: queda en `precio_propuesto` con
+ * la propuesta todavía pendiente, y a partir de ahí CUALQUIER camino de
+ * aprobación escribe ese número, porque todos leen de la misma columna.
+ * ---------------------------------------------------------------------------
+ */
+export async function guardarPrecioManual(
+  id: number,
+  precio: number,
+  quien: string,
+): Promise<boolean> {
+  const filas = await query<{ id: number }>(
+    `update precios.propuesta
+        set precio_propuesto = $2::numeric,
+            -- El coalesce no es de adorno: en jsonb, null || algo da null.
+            -- Sin el, una propuesta sin motivos perderia el rastro de que
+            -- alguien le puso el precio a mano, que es justo lo que hay que
+            -- poder contestar despues.
+            --
+            -- (Sin backticks: esto viaja dentro de un template literal de JS
+            -- y uno solo lo corta a la mitad. Ya paso tres veces en este
+            -- archivo, incluida la vez que escribi este comentario.)
+            motivos = coalesce(motivos, '[]'::jsonb) || to_jsonb(
+              'precio escrito a mano por ' || $3::text ||
+              ': el motor proponia ' || coalesce(precio_propuesto::text, 'nada')
+            )
+      where id = $1
+        and estado = 'pendiente'
+        -- EL PISO NO SE PUEDE PERFORAR NI A MANO. Ver el comentario largo en
+        -- decidirPropuesta, mas abajo: mismo control, misma razon.
+        and ($2::numeric >= piso or piso is null)
+      returning id`,
+    [id, precio, quien],
+  );
+  return filas.length > 0;
+}
+
 export async function decidirPropuesta(
   id: number,
   decision: "aprobada" | "rechazada",
@@ -535,7 +588,7 @@ export async function decidirPropuesta(
             decidida_por = $3,
             decidida_en = now(),
             precio_propuesto = $2::numeric,
-            motivos = motivos || to_jsonb(
+            motivos = coalesce(motivos, '[]'::jsonb) || to_jsonb(
               'precio escrito a mano por ' || $3::text ||
               ': el motor proponia ' || coalesce(precio_propuesto::text, 'nada')
             )
@@ -686,7 +739,19 @@ export async function getCambiosPreciosTn(limite = 200): Promise<CambioPrecioTn[
             end                                     as variacion,
             c.aplicado_en                           as "aplicadoEn",
             p.decidida_por                          as "autorizadoPor",
-            t.canonical_url                         as url,
+            -- LA MISMA FUENTE QUE LA COLA, Y POR EL MISMO MOTIVO.
+            --
+            -- bronze.tn_productos esta desactualizada y no cubre todo: 19 de
+            -- los 308 cambios no tienen fila ahi, y esos aparecian como texto
+            -- plano mientras el resto era link. precios.precio_propio guarda
+            -- la url de la ficha en cada lectura de la tienda y los cubre a
+            -- todos.
+            --
+            -- Se deja tn_productos como respaldo: no cuesta nada y cubre el
+            -- caso de una variante que todavia no paso por una lectura.
+            --
+            -- (Sin backticks acá: template literal de JS.)
+            coalesce(pp.url, t.canonical_url)       as url,
             -- CON QUÉ RENTABILIDAD QUEDÓ. Sale del margen que calculó el
             -- MOTOR, no de una cuenta hecha en este SQL: sacar el IVA, restar
             -- pasarela e impuestos vive en dominio/margen.py y es la misma
@@ -712,6 +777,11 @@ export async function getCambiosPreciosTn(limite = 200): Promise<CambioPrecioTn[
        left join precios.propuesta p       on p.id = c.propuesta_id
        left join bronze.sigma_articulos a  on a.id = c.sku
        left join bronze.tn_productos t     on t.id = c.producto_id
+       left join lateral (
+           select url from precios.precio_propio
+            where variante_id = c.variante_id and url is not null
+            order by capturado_en desc limit 1
+       ) pp on true
       order by c.aplicado_en desc
       limit $1`,
     [limite],
