@@ -74,13 +74,39 @@ const SIN_FILTRO: FiltrosPreciosTn = {
   busqueda: null,
 };
 
+/**
+ * Cómo se llama cada filtro en la query string.
+ *
+ * ---------------------------------------------------------------------------
+ * EL TIPO ES `Record<keyof FiltrosPreciosTn, string>` A PROPÓSITO, y es lo que
+ * convierte un bug silencioso en un error de compilación.
+ *
+ * Antes esto era una lista de `if` escritos a mano, y el filtro por competidor
+ * se agregó al tipo, al lector de la query string, al SQL y al desplegable —y
+ * no acá—. Resultado: elegir "Juleriaque" no mandaba nada al servidor, la
+ * pantalla contestaba con la lista entera y el filtro parecía roto porque lo
+ * estaba. No fallaba nada: simplemente el filtro no viajaba.
+ *
+ * Con este tipo, agregar un campo a `FiltrosPreciosTn` sin darle nombre acá no
+ * compila. El error aparece en el build y no en la pantalla de quien lo usa.
+ * ---------------------------------------------------------------------------
+ */
+const CLAVE_EN_URL: Record<keyof FiltrosPreciosTn, string> = {
+  grupo: "grupo",
+  proveedor: "proveedor",
+  marca: "marca",
+  competidor: "competidor",
+  // El buscador viaja como `q`, que es lo que ya leía `leerFiltros`.
+  busqueda: "q",
+};
+
 /** Los filtros como query string, en el único lugar donde se traducen. */
 function aParams(f: FiltrosPreciosTn): Record<string, string> {
   const p: Record<string, string> = {};
-  if (f.grupo) p.grupo = f.grupo;
-  if (f.proveedor) p.proveedor = f.proveedor;
-  if (f.marca) p.marca = f.marca;
-  if (f.busqueda) p.q = f.busqueda;
+  for (const campo of Object.keys(CLAVE_EN_URL) as (keyof FiltrosPreciosTn)[]) {
+    const valor = f[campo];
+    if (valor) p[CLAVE_EN_URL[campo]] = valor;
+  }
   return p;
 }
 
@@ -952,14 +978,10 @@ export default function DashboardPreciosTn() {
   }, [seleccionables]);
 
   const hayFiltro = useMemo(
-    () =>
-      Boolean(
-        filtros.grupo ||
-          filtros.proveedor ||
-          filtros.marca ||
-          filtros.competidor ||
-          filtros.busqueda,
-      ),
+    // Sobre el objeto entero y no campo por campo, por lo mismo que
+    // `CLAVE_EN_URL`: una lista escrita a mano se olvida del campo nuevo, y acá
+    // eso dejaría escondido el botón de "Limpiar filtros" con un filtro puesto.
+    () => Object.values(filtros).some(Boolean),
     [filtros],
   );
 
