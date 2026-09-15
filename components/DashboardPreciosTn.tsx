@@ -412,6 +412,77 @@ const MARCAS_DE_ESTADO: Record<string, { simbolo: string; texto: string; clase: 
   },
 };
 
+/**
+ * El costo, y de dónde sale.
+ *
+ * ---------------------------------------------------------------------------
+ * BAJAR UN PRECIO CONTRA UNA OFERTA NO ES LO MISMO QUE BAJARLO CONTRA EL COSTO
+ * DE SIEMPRE.
+ *
+ * La lista del proveedor trae dos números: el precio de lista y el descuento
+ * que hizo sobre él. El motor sólo usa el resultado, y estaba bien que así
+ * fuera — pero quien aprueba una baja de precio necesita saber si ese costo
+ * bajo se termina el mes que viene. Si la oferta se corta y el precio quedó
+ * puesto, el margen se lo come el costo nuevo sin que nadie se entere hasta la
+ * comparación siguiente.
+ *
+ *     costo = de lista × (1 − oferta %)
+ *
+ * El ⌁ aparece SÓLO cuando hay oferta: un ícono en todas las filas deja de
+ * señalar algo y pasa a ser decoración.
+ * ---------------------------------------------------------------------------
+ */
+function CostoConOferta({ fila }: { fila: FilaPrecioTn }) {
+  const hayOferta = fila.ofertaPct !== null && fila.ofertaPct > 0;
+
+  const vigencia = fila.costoDesde
+    ? `Lista ${fila.costoMes ?? ""} vigente desde ${new Date(
+        `${fila.costoDesde}T00:00:00`,
+      ).toLocaleDateString("es-AR")}`
+    : fila.costoMes
+      ? `Lista ${fila.costoMes}`
+      : "";
+
+  // TRES ESTADOS Y NO DOS. "No hay oferta" y "no sabemos si hay oferta" son
+  // cosas distintas, y decir la primera cuando corresponde la segunda es
+  // afirmar algo que no se midió. Las propuestas anteriores a que el motor
+  // empezara a guardar el desglose caen en el tercer caso, y se resuelven
+  // solas en la comparación siguiente.
+  const sinDato = fila.ofertaPct === null;
+
+  const detalle = sinDato
+    ? [
+        "Esta propuesta es anterior a que el motor guardara el desglose del",
+        "costo, así que no se sabe si hay oferta del proveedor.",
+        "Se completa en la próxima comparación.",
+        vigencia,
+      ]
+    : hayOferta
+      ? [
+          `De lista: ${fmtMoneda(fila.costoTeorico)}`,
+          `Oferta del proveedor: ${fila.ofertaPct} %`,
+          `Costo neto: ${fmtMoneda(fila.costo)}`,
+          "",
+          "Ojo al bajar el precio: si la oferta se termina, el costo vuelve al de",
+          "lista y este margen desaparece.",
+          vigencia,
+        ]
+      : [
+          "Sin oferta del proveedor: este es el precio de lista.",
+          vigencia,
+        ];
+
+  return (
+    <span
+      className={hayOferta ? "text-c1 cursor-help" : "text-muted"}
+      title={detalle.filter(Boolean).join("\n")}
+    >
+      {fmtMoneda(fila.costo)}
+      {hayOferta && <span className="ml-1 text-[10px]">⌁</span>}
+    </span>
+  );
+}
+
 function MarcaDeEstado({ estado }: { estado: string }) {
   const marca = MARCAS_DE_ESTADO[estado];
   // Pendiente sin precio propuesto cae acá y no tiene marca: no se decidió
@@ -546,13 +617,14 @@ function columnas(
     {
       titulo: "Costo",
       ayuda:
-        "El costo NETO del artículo: sin IVA y con el descuento del proveedor ya aplicado. " +
+        "El costo NETO del artículo: sin IVA y con la oferta del proveedor ya aplicada. " +
         "Sale de la misma lista con la que el tablero calcula la rentabilidad de Mercado Libre " +
         "y la distribuidora, así que los tres márgenes hablan del mismo número. " +
-        "Cuando un mes tiene varias listas se usa la que rige hoy.",
+        "Cuando un mes tiene varias listas se usa la que rige hoy. " +
+        "Pasá el mouse por un costo con ⌁ para ver de dónde sale.",
       celda: (f) =>
         f.costo !== null ? (
-          <span className="text-muted">{fmtMoneda(f.costo)}</span>
+          <CostoConOferta fila={f} />
         ) : (
           <span className="text-muted">—</span>
         ),

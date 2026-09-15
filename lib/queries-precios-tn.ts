@@ -492,6 +492,15 @@ export async function getFilasPreciosTn(
             ${COMPETIDORES}                                as competidores,
             (p.entradas->>'stock')::float8                 as stock,
             (p.entradas->>'costo')::float8                 as costo,
+            -- EL DESGLOSE DEL COSTO, para el tooltip. Sale de entradas y no
+            -- de bronze.costos_historicos en vivo, por lo mismo que los
+            -- margenes: si llega una lista nueva, la pantalla tiene que seguir
+            -- explicando el costo con el que el motor decidio, no con otro.
+            -- (Sin backticks: template literal de JS.)
+            (p.entradas->>'costo_teorico')::float8          as "costoTeorico",
+            (p.entradas->>'costo_oferta_pct')::float8       as "ofertaPct",
+            p.entradas->>'costo_mes'                        as "costoMes",
+            p.entradas->>'costo_desde'                      as "costoDesde",
             -- EL MARGEN SALE CALCULADO DEL MOTOR, no se recalcula acá.
             -- La cuenta (sacar el IVA, restar pasarela e impuestos) vive en
             -- dominio/margen.py y es la misma con la que se despeja el piso.
