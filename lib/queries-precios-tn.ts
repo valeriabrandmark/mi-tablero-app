@@ -103,6 +103,11 @@ const CLASIFICACION = `
   case
     when p.accion = 'omitir' and p.motivos::text like '%competencia insuficiente%'
       then 'sin_competencia'
+    -- SIN STOCK VA ANTES QUE TODO LO QUE MIRA PRECIOS, porque el motor los
+    -- descarta antes de mirar a la competencia: estas filas no tienen
+    -- referencia, ni piso, ni nada contra que compararse.
+    when p.accion = 'omitir' and p.motivos::text like '%sin stock vendible%'
+      then 'sin_stock'
     when ${PRECIO_VIGENTE} < p.piso and p.referencia_competencia < p.piso
       then 'no_competible'
     when ${PRECIO_VIGENTE} < p.piso
@@ -147,6 +152,15 @@ const CLASIFICACION = `
       then 'caros'
     when p.referencia_competencia is not null and ${PRECIO_VIGENTE} < ${OBJETIVO}
       then 'baratos'
+    -- LA RED, Y ES LO QUE HACE QUE LAS TARJETAS SUMEN EL TOTAL.
+    --
+    -- Antes este case podia dar NULL, y las filas que caian ahi no aparecian en
+    -- ninguna tarjeta ni en ningun lado: 2.387 de 3.788 articulos invisibles,
+    -- y los numeros de la pantalla que no cerraban sin forma de averiguar por
+    -- que. Con este else la clasificacion es total y eso no puede volver a
+    -- pasar: un motivo de omision nuevo aparece en su tarjeta en vez de
+    -- desaparecer.
+    else 'no_evaluable'
   end
 `;
 
@@ -267,6 +281,7 @@ export async function getResumenPreciosTn(): Promise<ResumenPreciosTn> {
     comparadoEn: null,
     grupos: {},
     pendientes: 0,
+    porDecidir: 0,
     decididas: 0,
     aprobadasSinAplicar: 0,
   };
@@ -309,6 +324,23 @@ export async function getResumenPreciosTn(): Promise<ResumenPreciosTn> {
     [corrida.id],
   );
 
+  // LO QUE DE VERDAD ESPERA UNA DECISION.
+  //
+  // La solapa decia "Para revisar 3.735" y las seis tarjetas sumaban 1.401. El
+  // contador estaba contando TODAS las pendientes -- incluidos 2.387 articulos
+  // sin stock que el motor ni compara-- asi que prometia trabajo que no
+  // existia. Lo que espera una decision es lo que tiene un cambio propuesto:
+  // 510 en esa misma corrida.
+  const porDecidir = await queryOne<{ total: number }>(
+    `select count(*)::int as total
+       from precios.propuesta
+      where corrida_id = $1
+        and estado = 'pendiente'
+        and accion in ('subir', 'bajar')
+        and precio_propuesto is not null`,
+    [corrida.id],
+  );
+
   // Lo aprobado y todavía sin escribir, de TODAS las corridas y no sólo de la
   // última: es la cola real que tiene esperando el comando `aplicar`, y si una
   // aprobación de ayer quedó sin aplicar, esconderla no la hace desaparecer.
@@ -324,6 +356,7 @@ export async function getResumenPreciosTn(): Promise<ResumenPreciosTn> {
     comparadoEn: comparado?.terminada_en ?? null,
     grupos: Object.fromEntries(grupos.map((g) => [g.grupo, g.total])),
     pendientes: porEstado.pendiente ?? 0,
+    porDecidir: porDecidir?.total ?? 0,
     decididas: (porEstado.aprobada ?? 0) + (porEstado.rechazada ?? 0) + (porEstado.aplicada ?? 0),
     aprobadasSinAplicar: esperando?.total ?? 0,
   };

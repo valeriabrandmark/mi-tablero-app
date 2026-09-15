@@ -1470,8 +1470,13 @@ export default function DashboardPreciosTn() {
           </p>
           {resumen && (
             <p className="text-muted mt-0.5 text-[11px]">
-              {resumen.pendientes} pendientes · {resumen.decididas} decididas ·{" "}
-              {resumen.aprobadasSinAplicar} autorizadas esperando escritura
+              {/* LOS DOS NUMEROS, porque son dos cosas. `porDecidir` es la
+                  cola de trabajo; `pendientes` incluye todo lo que nadie toco
+                  y no necesita que nadie lo toque. Mostrar solo el segundo era
+                  lo que hacia que la solapa prometiera 3.735 tareas. */}
+              {resumen.porDecidir} esperan decisión · {resumen.pendientes} sin tocar ·{" "}
+              {resumen.decididas} decididas · {resumen.aprobadasSinAplicar} autorizadas
+              esperando escritura
             </p>
           )}
         </div>
@@ -1623,7 +1628,13 @@ export default function DashboardPreciosTn() {
       <div className="border-line flex gap-1 border-b">
         {(
           [
-            ["cola", "Para revisar", resumen?.pendientes ?? null],
+            // EL NUMERO ES `porDecidir` Y NO `pendientes`, y la diferencia
+            // no es un detalle: decia 3.735 cuando lo que esperaba una
+            // decision eran 510. Lo que sobraba eran articulos sin stock, sin
+            // competencia o que el motor decidio mantener -- pendientes
+            // porque nadie los toco, pero sin nada que apretar. Una solapa que
+            // promete 3.735 tareas y tiene 510 ensena a no creerle al numero.
+            ["cola", "Para revisar", resumen?.porDecidir ?? null],
             ["cambios", "Cambios aplicados", cambios.length],
           ] as const
         ).map(([clave, titulo, total]) => (

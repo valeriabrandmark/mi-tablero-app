@@ -36,6 +36,8 @@ const NOMBRE_GRUPO: Record<string, string> = {
   caros: "Por encima de nuestro objetivo",
   baratos: "Por debajo de nuestro objetivo",
   sin_competencia: "Sin competencia detectada",
+  sin_stock: "Sin stock",
+  no_evaluable: "No se pueden evaluar",
   corregidos_sin_competir: "Corregidos pero sin competir",
   en_precio: "En precio",
 };

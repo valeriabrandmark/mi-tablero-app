@@ -74,6 +74,44 @@ export const ALERTAS = [
     tono: "neutro",
   },
   {
+    // LOS QUE FALTABAN, Y NO ESTABAN EN NINGUNA TARJETA.
+    //
+    // Eran 2.387 de 3.788 —casi dos tercios del catálogo— y no aparecían en
+    // ningún lado: la solapa los contaba en "Para revisar" y las seis tarjetas
+    // no los sumaban, así que los números no cerraban y no había forma de
+    // averiguar por qué. La pregunta llegó exactamente así: "el resto, ¿en qué
+    // categoría queda?".
+    //
+    // El motor los descarta ANTES de mirar a la competencia: sin unidades para
+    // vender, repreciar no cambia nada. Es la misma regla que evita proponer
+    // cambios sobre lo que no se puede despachar. Que la decisión sea correcta
+    // no quita que tenga que verse.
+    clave: "sin_stock",
+    titulo: "Sin stock",
+    detalle:
+      "No hay unidades para vender, así que el motor ni siquiera los compara: cambiarles el " +
+      "precio no cambia nada hasta que entre mercadería. Se listan para poder verlos —sirve " +
+      "para saber qué parte del catálogo está dormida— pero no hay nada que decidir acá.",
+    tono: "neutro",
+  },
+  {
+    // LA RED QUE IMPIDE QUE EL AGUJERO VUELVA.
+    //
+    // Con esta tarjeta la clasificación es TOTAL: cada propuesta cae en alguna,
+    // y la suma de las tarjetas es el total de la corrida. Si mañana el motor
+    // aprende a omitir por un motivo nuevo, ese artículo aparece acá en vez de
+    // desaparecer de la pantalla — que es exactamente lo que había pasado.
+    //
+    // Hoy da cero, y está bien que dé cero: es una alarma, no una lista.
+    clave: "no_evaluable",
+    titulo: "No se pueden evaluar",
+    detalle:
+      "El motor no pudo decidir sobre estos y el motivo no es ninguno de los anteriores: sin " +
+      "precio publicado en la tienda, sin costo cargado, o sin ningún precio que respete el " +
+      "margen mínimo. El motivo puntual está escrito debajo de cada artículo.",
+    tono: "neutro",
+  },
+  {
     // CORREGIDO Y AUN ASÍ ARRIBA DEL MERCADO. No es una cola de trabajo: es
     // una lista para mirar.
     //
@@ -149,6 +187,8 @@ export const DIFERENCIA_MINIMA_VISIBLE = 0.02;
 export const GRUPOS_INFORMATIVOS: readonly ClaveAlerta[] = [
   "en_precio",
   "corregidos_sin_competir",
+  "sin_stock",
+  "no_evaluable",
 ];
 
 /**
