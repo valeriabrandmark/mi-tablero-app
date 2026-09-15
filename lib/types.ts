@@ -1747,6 +1747,22 @@ export type FilaPrecioTn = {
   difMercado: number | null;
   grupo: string;
   motivos: string[];
+  /**
+   * De dónde sale el costo: el de lista y la oferta del proveedor sobre él.
+   *
+   *     costo = costoTeorico × (1 − ofertaPct/100)
+   *
+   * No entra en ninguna cuenta. Está para poder ver si un costo bajo es una
+   * oferta puntual que se termina, o el precio de siempre — que no es lo mismo
+   * a la hora de bajar un precio de venta.
+   */
+  costoTeorico: number | null;
+  /** Porcentaje, no fracción: 25 es 25 %. Así viene de la lista del proveedor. */
+  ofertaPct: number | null;
+  /** Mes comercial de la lista, "2026-09". */
+  costoMes: string | null;
+  /** Desde cuándo rige esa lista. Un mes puede tener varias. */
+  costoDesde: string | null;
   competidores: CompetidorPrecioTn[];
   stock: number | null;
   /** Costo NETO (sin IVA), con el descuento del proveedor ya aplicado. */

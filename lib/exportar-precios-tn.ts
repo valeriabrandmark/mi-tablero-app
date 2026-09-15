@@ -132,6 +132,37 @@ export const COLUMNAS_EXPORT: ColumnaExport[] = [
     texto: (f) => fmtPesos(f.costo),
     derecha: true,
   },
+  // DE DÓNDE SALE ESE COSTO. Van las dos y no una sola: con el de lista al
+  // lado, quien recibe el archivo puede ver cuánto del margen depende de una
+  // oferta que se puede terminar. Con la oferta sola habría que ir a buscar
+  // contra qué se aplicó.
+  {
+    titulo: "Costo de lista",
+    formato: "moneda",
+    ancho: 13,
+    valor: (f) => f.costoTeorico,
+    texto: (f) => fmtPesos(f.costoTeorico),
+    derecha: true,
+  },
+  {
+    // EL PORCENTAJE COMO NÚMERO Y NO COMO FRACCIÓN, al revés que los márgenes.
+    // Así viene de la lista del proveedor —25 es 25 %— y convertirlo sólo para
+    // que el Excel lo muestre igual que los otros porcentajes haría que el
+    // archivo dijera un número distinto del que figura en la lista original.
+    titulo: "Oferta proveedor %",
+    formato: "entero",
+    ancho: 12,
+    valor: (f) => f.ofertaPct,
+    texto: (f) => (f.ofertaPct === null ? "" : `${f.ofertaPct} %`),
+    derecha: true,
+  },
+  {
+    titulo: "Lista de costos",
+    formato: "texto",
+    ancho: 14,
+    valor: (f) => f.costoMes,
+    texto: (f) => f.costoMes ?? "",
+  },
   {
     titulo: "Piso",
     formato: "moneda",
@@ -254,8 +285,10 @@ const escapar = (t: string) =>
  * impresión, donde "Guardar como PDF" es la opción por defecto en Chrome, Edge
  * y Safari. Sale un PDF de verdad, con el texto seleccionable.
  *
- * APAISADO Y CHICO A PROPÓSITO: son diecisiete columnas. En vertical no entran
- * y el navegador las parte en dos hojas que no se pueden leer juntas.
+ * APAISADO Y CHICO A PROPÓSITO: son más de veinte columnas. En vertical no
+ * entran y el navegador las parte en dos hojas que no se pueden leer juntas.
+ * (No se pone el número exacto: la lista crece y un comentario con una cuenta
+ * adentro queda viejo sin que nadie lo note.)
  */
 export function imprimirPdf(
   filas: FilaPrecioTn[],
