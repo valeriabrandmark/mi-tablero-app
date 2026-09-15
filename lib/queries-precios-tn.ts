@@ -7,7 +7,9 @@ import {
 } from "@/lib/precios-tn";
 import type {
   CambioPrecioTn,
+  CatalogosCambiosTn,
   CatalogosPreciosTn,
+  FiltrosCambiosTn,
   FilaPrecioTn,
   FiltrosPreciosTn,
   ResumenPreciosTn,
@@ -726,12 +728,111 @@ export async function contarAprobables(filtros: FiltrosPreciosTn): Promise<{
  * precio, que es la misma razón por la que se puede completar desde ahí la URL
  * de un competidor.
  */
-export async function getCambiosPreciosTn(limite = 200): Promise<CambioPrecioTn[]> {
+/**
+ * El cuerpo del historial: de donde salen las filas y que filtro se aplica.
+ *
+ * Se arma una sola vez porque lo usan cuatro consultas --la lista, el conteo,
+ * los desplegables y el deshacer en bloque-- y tienen que coincidir. Si el
+ * bloque de "deshacer todo lo filtrado" resolviera un conjunto distinto del que
+ * la pantalla muestra, desharia cambios que nadie vio.
+ */
+function cuerpoDeCambios(filtros: FiltrosCambiosTn, params: unknown[]): string {
+  const partes: string[] = [];
+
+  if (filtros.proveedor) {
+    params.push(filtros.proveedor);
+    partes.push(`and a."proveedorNombre" = $${params.length}`);
+  }
+  if (filtros.marca) {
+    params.push(filtros.marca);
+    partes.push(`and coalesce(a.marca, a."attributes.marca") = $${params.length}`);
+  }
+  if (filtros.busqueda) {
+    params.push(`%${filtros.busqueda}%`);
+    partes.push(`and (c.sku ilike $${params.length} or a.descripcion ilike $${params.length})`);
+  }
+  // LAS FECHAS SE COMPARAN EN LA ZONA DE ARGENTINA, no en UTC. Un cambio
+  // escrito a las 22:30 de Buenos Aires es del dia siguiente en UTC, y filtrar
+  // "hoy" lo dejaria afuera -- justo el mas reciente, que es el que se busca.
+  if (filtros.desde) {
+    params.push(filtros.desde);
+    partes.push(
+      `and (c.aplicado_en at time zone 'America/Argentina/Buenos_Aires')::date >= $${params.length}::date`,
+    );
+  }
+  if (filtros.hasta) {
+    params.push(filtros.hasta);
+    partes.push(
+      `and (c.aplicado_en at time zone 'America/Argentina/Buenos_Aires')::date <= $${params.length}::date`,
+    );
+  }
+
+  return `
+       from precios.cambio c
+       left join precios.propuesta p       on p.id = c.propuesta_id
+       left join bronze.sigma_articulos a  on a.id = c.sku
+       left join bronze.tn_productos t     on t.id = c.producto_id
+       left join lateral (
+           select url from precios.precio_propio
+            where variante_id = c.variante_id and url is not null
+            order by capturado_en desc limit 1
+       ) pp on true
+      where true
+        ${partes.join("\n        ")}`;
+}
+
+/** Cuantos cambios hay en total con este filtro, para poder decirlo. */
+export async function contarCambiosPreciosTn(filtros: FiltrosCambiosTn): Promise<number> {
+  const params: unknown[] = [];
+  const cuerpo = cuerpoDeCambios(filtros, params);
+  const fila = await queryOne<{ total: number }>(
+    `select count(*)::int as total ${cuerpo}`,
+    params,
+  );
+  return fila?.total ?? 0;
+}
+
+/** Proveedores y marcas que existen EN EL HISTORIAL, no en el catalogo entero. */
+export async function getCatalogosCambiosTn(): Promise<CatalogosCambiosTn> {
+  const sinFiltros: FiltrosCambiosTn = {
+    proveedor: null,
+    marca: null,
+    busqueda: null,
+    desde: null,
+    hasta: null,
+  };
+  const params: unknown[] = [];
+  const cuerpo = cuerpoDeCambios(sinFiltros, params);
+  const filas = await query<{ proveedor: string | null; marca: string | null }>(
+    `select distinct a."proveedorNombre" as proveedor,
+            coalesce(a.marca, a."attributes.marca") as marca
+       ${cuerpo}`,
+    params,
+  );
+  const unicos = (valores: (string | null)[]) =>
+    [...new Set(valores.filter((v): v is string => !!v))].sort((a, b) => a.localeCompare(b, "es"));
+
+  return {
+    proveedores: unicos(filas.map((f) => f.proveedor)),
+    marcas: unicos(filas.map((f) => f.marca)),
+  };
+}
+
+export async function getCambiosPreciosTn(
+  filtros: FiltrosCambiosTn,
+  limite = 100,
+): Promise<CambioPrecioTn[]> {
+  const params: unknown[] = [];
+  const cuerpo = cuerpoDeCambios(filtros, params);
+  params.push(limite);
+  const limiteParam = params.length;
+
   return query<CambioPrecioTn>(
     `select c.id,
             c.sku,
             coalesce(a.descripcion, c.sku)          as descripcion,
             coalesce(a.marca, a."attributes.marca") as marca,
+            a."proveedorNombre"                     as proveedor,
             c.precio_anterior::float8               as "precioAnterior",
             c.precio_nuevo::float8                  as "precioNuevo",
             case when c.precio_anterior > 0
@@ -773,18 +874,10 @@ export async function getCambiosPreciosTn(limite = 200): Promise<CambioPrecioTn[
                where r.revierte_cambio_id = c.id
                  and r.estado in ('aprobada', 'aplicada')
             )                                       as "yaSeDeshizo"
-       from precios.cambio c
-       left join precios.propuesta p       on p.id = c.propuesta_id
-       left join bronze.sigma_articulos a  on a.id = c.sku
-       left join bronze.tn_productos t     on t.id = c.producto_id
-       left join lateral (
-           select url from precios.precio_propio
-            where variante_id = c.variante_id and url is not null
-            order by capturado_en desc limit 1
-       ) pp on true
+       ${cuerpo}
       order by c.aplicado_en desc
-      limit $1`,
-    [limite],
+      limit $${limiteParam}`,
+    params,
   );
 }
 
@@ -870,6 +963,105 @@ export async function deshacerCambio(
     ],
   );
   return propuesta?.id ?? null;
+}
+
+/**
+ * Deshacer VARIOS cambios de una vez.
+ *
+ * ---------------------------------------------------------------------------
+ * UNA SOLA CORRIDA PARA TODO EL LOTE, y no una por cambio.
+ *
+ * `deshacerCambio` abre una corrida propia cada vez, que está bien para un
+ * botón: deja registrado quién pidió esa vuelta y cuándo. Repetirlo doscientas
+ * veces llenaría `precios.corrida` de filas de una propuesta cada una, y el
+ * historial de corridas dejaría de servir para ver qué pasó.
+ *
+ * Acá el lote ES el gesto: una persona miró una lista y dijo "estos". Una
+ * corrida con los ids adentro cuenta eso mejor que doscientas sueltas.
+ *
+ * NO ESCRIBE EN TIENDA NUBE, igual que el de a uno: deja propuestas aprobadas
+ * en sentido contrario, que `precios aplicar` escribe después pasando por los
+ * mismos controles — incluido el que impide pisar una corrección hecha a mano.
+ * Por eso "deshacer 200" no es una operación peligrosa: es 200 pedidos que se
+ * van a verificar uno por uno antes de tocar nada.
+ * ---------------------------------------------------------------------------
+ */
+export async function deshacerCambios(
+  ids: number[],
+  quien: string,
+): Promise<number> {
+  if (!ids.length) return 0;
+
+  const corrida = await queryOne<{ id: number }>(
+    `insert into precios.corrida (tipo, estado, terminada_en, detalle)
+     values ('deshacer', 'ok', now(),
+             jsonb_build_object('quien', $1::text, 'cambios', $2::bigint[]))
+     returning id`,
+    [quien, ids],
+  );
+  if (!corrida) return 0;
+
+  // UN SOLO INSERT CON UN SELECT ADENTRO, y no un bucle de inserts.
+  //
+  // El filtro de "ya tiene vuelta pedida" y la inserción tienen que mirar el
+  // mismo estado: entre un select y un insert separados, dos personas pidiendo
+  // la misma vuelta a la vez meterían dos propuestas para el mismo cambio.
+  const filas = await query<{ id: number }>(
+    `insert into precios.propuesta
+         (corrida_id, sku, accion, precio_actual, precio_propuesto,
+          motivos, entradas, estado, decidida_por, decidida_en, revierte_cambio_id)
+     select $1,
+            c.sku,
+            case when c.precio_anterior < c.precio_nuevo then 'bajar' else 'subir' end,
+            c.precio_nuevo,
+            c.precio_anterior,
+            jsonb_build_array(
+              format('deshacer el cambio #%s: volver de %s a %s',
+                     c.id::text, c.precio_nuevo::text, c.precio_anterior::text),
+              'pedido a mano desde el tablero, en bloque; no lo propuso el motor'),
+            jsonb_build_object('producto_id', c.producto_id, 'variante_id', c.variante_id),
+            'aprobada',
+            $2::text,
+            now(),
+            c.id
+       from precios.cambio c
+      where c.id = any($3::bigint[])
+        and c.producto_id is not null
+        and c.variante_id is not null
+        and not exists (
+          select 1 from precios.propuesta r
+           where r.revierte_cambio_id = c.id
+             and r.estado in ('aprobada', 'aplicada')
+        )
+     returning id`,
+    [corrida.id, quien, ids],
+  );
+  return filas.length;
+}
+
+/**
+ * Los ids de cambio que cumplen un filtro y todavía se pueden deshacer.
+ *
+ * SE RESUELVE EN EL SERVIDOR, igual que "autorizar todo lo filtrado". Si el
+ * navegador mandara los ids que tiene en pantalla, estaría deshaciendo lo que
+ * su lista recordaba — que puede ser de antes del último cambio.
+ */
+export async function idsDeCambiosFiltrados(filtros: FiltrosCambiosTn): Promise<number[]> {
+  const params: unknown[] = [];
+  const cuerpo = cuerpoDeCambios(filtros, params);
+  const filas = await query<{ id: number }>(
+    `select c.id ${cuerpo}
+        and c.producto_id is not null
+        and c.variante_id is not null
+        and not exists (
+          select 1 from precios.propuesta r
+           where r.revierte_cambio_id = c.id
+             and r.estado in ('aprobada', 'aplicada')
+        )
+      order by c.aplicado_en desc`,
+    params,
+  );
+  return filas.map((f) => f.id);
 }
 
 /**

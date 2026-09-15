@@ -1823,11 +1823,35 @@ export type CatalogosPreciosTn = {
  * auditoría que se puede editar no es un registro de auditoría. `precioAnterior`
  * es lo que permite volver atrás sin depender de que Tienda Nube recuerde nada.
  */
+/**
+ * Filtros del historial de cambios.
+ *
+ * SON OTROS QUE LOS DE LA COLA, aunque se parezcan. La cola filtra una corrida
+ * --grupo de alerta, competidor--; el historial filtra el tiempo, que es lo
+ * que la cola no tiene. Compartir un tipo obligaria a que cada pantalla
+ * ignorara en silencio la mitad de los campos.
+ */
+export type FiltrosCambiosTn = {
+  proveedor: string | null;
+  marca: string | null;
+  busqueda: string | null;
+  /** YYYY-MM-DD, inclusive los dos. */
+  desde: string | null;
+  hasta: string | null;
+};
+
+/** Los valores que existen hoy en el historial, para llenar los desplegables. */
+export type CatalogosCambiosTn = {
+  proveedores: string[];
+  marcas: string[];
+};
+
 export type CambioPrecioTn = {
   id: number;
   sku: string;
   descripcion: string;
   marca: string | null;
+  proveedor: string | null;
   precioAnterior: number;
   precioNuevo: number;
   /** Fracción: 0,12 = el precio subió 12 %. */

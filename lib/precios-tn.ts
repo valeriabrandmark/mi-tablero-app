@@ -13,7 +13,7 @@
  * ---------------------------------------------------------------------------
  */
 
-import type { FiltrosPreciosTn } from "@/lib/types";
+import type { FiltrosCambiosTn, FiltrosPreciosTn } from "@/lib/types";
 
 /** Vive en `precios`, no acá. Se repite el nombre para poder tipar. */
 export const ESTADOS = ["pendiente", "aprobada", "rechazada", "aplicada", "vencida"] as const;
@@ -170,6 +170,53 @@ export const GRUPOS_INFORMATIVOS_SQL = GRUPOS_INFORMATIVOS.map((g) => `'${g}'`).
  * números distintos.
  */
 export const TANDA_ESCRITURA = 50;
+
+/**
+ * Cuántos cambios como máximo trae el historial cuando se pide "ver todo".
+ *
+ * NO ES "TODO" DE VERDAD, Y ESTÁ BIEN QUE NO LO SEA. El historial crece para
+ * siempre: con dos corridas por semana escribiendo hasta 50 precios cada una
+ * son ~5.000 por año, y dentro de tres años una pantalla sin tope tardaría lo
+ * mismo que tarda el navegador en renderizar 15.000 filas — que es mucho.
+ *
+ * 5.000 cubre de sobra los dos meses que hacen falta mirar de corrido, y lo que
+ * quede afuera se alcanza filtrando por fecha, que es justamente para lo que
+ * está el filtro.
+ */
+export const TOPE_HISTORIAL = 5000;
+
+/**
+ * Lee los filtros del historial de una query string.
+ *
+ * Vive al lado de `leerFiltros` y por la misma razón: la ruta que LISTA y la
+ * que DESHACE EN BLOQUE tienen que entender exactamente los mismos parámetros.
+ * Si cada una los leyera a su manera, el día que difieran el botón de "deshacer
+ * todo lo filtrado" desharía un conjunto distinto del que está en pantalla — y
+ * eso no daría ningún error, sólo precios revertidos que nadie eligió.
+ */
+export function leerFiltrosDeCambios(params: URLSearchParams): FiltrosCambiosTn {
+  const texto = (nombre: string, largoMaximo: number) => {
+    const v = params.get(nombre)?.trim() ?? "";
+    return v ? v.slice(0, largoMaximo) : null;
+  };
+
+  // La fecha se valida contra la forma AAAA-MM-DD antes de llegar al SQL. Va
+  // parametrizada igual, así que esto no es contra inyección: es para que un
+  // valor absurdo caiga en "sin filtro" en vez de hacer fallar la consulta con
+  // un error de casteo que en pantalla se lee como "el historial no anda".
+  const fecha = (nombre: string) => {
+    const v = params.get(nombre)?.trim() ?? "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+  };
+
+  return {
+    proveedor: texto("proveedor", 120),
+    marca: texto("marca", 120),
+    busqueda: texto("q", 60),
+    desde: fecha("desde"),
+    hasta: fecha("hasta"),
+  };
+}
 
 /** Cómo se llama cada fuente en pantalla. El código es feo; el nombre no. */
 export const NOMBRE_FUENTE: Record<string, string> = {
