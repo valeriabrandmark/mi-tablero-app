@@ -33,8 +33,8 @@ const fmtPorciento = (n: number | null): string =>
 const NOMBRE_GRUPO: Record<string, string> = {
   no_competible: "No se puede competir sin perder",
   bajo_piso: "Vendiendo por debajo del piso",
-  caros: "Más caros que la competencia",
-  baratos: "Más baratos de lo necesario",
+  caros: "Por encima de nuestro objetivo",
+  baratos: "Por debajo de nuestro objetivo",
   sin_competencia: "Sin competencia detectada",
   corregidos_sin_competir: "Corregidos pero sin competir",
   en_precio: "En precio",
