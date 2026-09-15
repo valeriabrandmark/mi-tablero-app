@@ -49,16 +49,20 @@ export const ALERTAS = [
   },
   {
     clave: "caros",
-    titulo: "Más caros que la competencia",
-    detalle: "Se puede bajar sin perforar el piso de margen.",
+    titulo: "Por encima de nuestro objetivo",
+    detalle:
+      "El objetivo es el precio del competidor más barato menos la agresividad que fija la " +
+      "política. Con agresividad en 0 esto es literalmente “más caros que la competencia”; " +
+      "con 2 % son también los que están clavados en el precio del mercado, que es justo de " +
+      "donde queremos despegarnos. Se puede bajar sin perforar el piso.",
     tono: "aviso",
   },
   {
     clave: "baratos",
-    titulo: "Más baratos de lo necesario",
+    titulo: "Por debajo de nuestro objetivo",
     detalle:
-      "Estamos por debajo del más barato del mercado sin necesidad. Subir hacia " +
-      "el pelotón no cuesta ventas y recupera margen.",
+      "Estamos más abajo de lo que hace falta para diferenciarnos. Subir hasta el objetivo " +
+      "no cuesta ventas y recupera margen.",
     tono: "aviso",
   },
   {
@@ -103,8 +107,9 @@ export const ALERTAS = [
     clave: "en_precio",
     titulo: "En precio",
     detalle:
-      "Estamos a menos del 2 % del más barato del mercado. No hay nada que " +
-      "hacer con estos: se listan para poder verlos, no para decidirlos.",
+      "Estamos a menos del 2 % del objetivo — el precio del competidor más barato, menos la " +
+      "agresividad que fija la política. No hay nada que hacer con estos: se listan para " +
+      "poder verlos, no para decidirlos.",
     tono: "ok",
   },
 ] as const;

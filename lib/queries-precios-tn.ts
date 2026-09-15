@@ -66,6 +66,33 @@ const PRECIO_VIGENTE = `
 `;
 
 /**
+ * El precio al que QUERÍAMOS llegar, que no siempre es el de la competencia.
+ *
+ * ---------------------------------------------------------------------------
+ * "EN PRECIO" SE MIDE CONTRA EL OBJETIVO, NO CONTRA EL MERCADO PELADO.
+ *
+ * Mientras la agresividad fue 0 daban lo mismo: el objetivo ERA el precio del
+ * competidor más barato. En cuanto se decide apuntar un poco por debajo para
+ * diferenciarse, dejan de coincidir — y medir contra el mercado marcaría "más
+ * barato de lo necesario" a todos los artículos que están EXACTAMENTE donde se
+ * los puso a propósito.
+ *
+ * Sale de `entradas.objetivo`, que el motor guarda por propuesta: la
+ * referencia menos la agresividad, ANTES de que lo recorten el piso, el
+ * redondeo y el umbral. Guardado y no recalculado acá, porque la agresividad
+ * puede cambiar mañana y una corrida vieja tiene que seguir explicándose con
+ * la política que la produjo.
+ *
+ * El `coalesce` cubre las propuestas anteriores a que el motor empezara a
+ * guardarlo: ahí el objetivo era la referencia, así que la cuenta sigue dando
+ * lo mismo que antes.
+ * ---------------------------------------------------------------------------
+ */
+const OBJETIVO = `
+  coalesce((p.entradas->>'objetivo')::numeric, p.referencia_competencia)
+`;
+
+/**
  * En qué grupo de alerta cae cada propuesta.
  *
  * El orden de los `when` ES la prioridad: una propuesta que está bajo el piso
@@ -90,7 +117,8 @@ const CLASIFICACION = `
     -- sigue siendo grave aunque estemos clavados con el mercado. Ahí el
     -- problema no es el precio de ellos, es el nuestro.
     when p.referencia_competencia is not null
-         and abs(${PRECIO_VIGENTE} - p.referencia_competencia) / p.referencia_competencia
+         and ${OBJETIVO} > 0
+         and abs(${PRECIO_VIGENTE} - ${OBJETIVO}) / ${OBJETIVO}
              < ${DIFERENCIA_MINIMA_VISIBLE}
       then 'en_precio'
     -- YA SE CORRIGIÓ Y AUN ASÍ NO ALCANZA, porque el piso no deja bajar más.
@@ -107,9 +135,17 @@ const CLASIFICACION = `
          and ${PRECIO_VIGENTE} > p.referencia_competencia
          and p.referencia_competencia < p.piso
       then 'corregidos_sin_competir'
-    when p.referencia_competencia is not null and ${PRECIO_VIGENTE} > p.referencia_competencia
+    -- CAROS Y BARATOS TAMBIEN CONTRA EL OBJETIVO, y no es opcional: si "en
+    -- precio" midiera contra el objetivo y estas dos contra el mercado, un
+    -- articulo clavado en el precio del competidor no caeria en NINGUNA de las
+    -- tres --no esta en precio, no esta arriba del mercado, no esta abajo-- y
+    -- desapareceria de la pantalla sin que nadie lo note.
+    --
+    -- Con agresividad en 0 dan exactamente lo mismo que antes, porque ahi el
+    -- objetivo ES la referencia.
+    when p.referencia_competencia is not null and ${PRECIO_VIGENTE} > ${OBJETIVO}
       then 'caros'
-    when p.referencia_competencia is not null and ${PRECIO_VIGENTE} < p.referencia_competencia
+    when p.referencia_competencia is not null and ${PRECIO_VIGENTE} < ${OBJETIVO}
       then 'baratos'
   end
 `;
