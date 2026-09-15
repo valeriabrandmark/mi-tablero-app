@@ -36,6 +36,7 @@ const NOMBRE_GRUPO: Record<string, string> = {
   caros: "Más caros que la competencia",
   baratos: "Más baratos de lo necesario",
   sin_competencia: "Sin competencia detectada",
+  corregidos_sin_competir: "Corregidos pero sin competir",
   en_precio: "En precio",
 };
 

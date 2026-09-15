@@ -70,6 +70,28 @@ export const ALERTAS = [
     tono: "neutro",
   },
   {
+    // CORREGIDO Y AUN ASÍ ARRIBA DEL MERCADO. No es una cola de trabajo: es
+    // una lista para mirar.
+    //
+    // Estos productos ya se escribieron, y aun así quedaron por encima del
+    // más barato del mercado, porque el piso no deja bajar más. No hay nada
+    // que autorizar —el precio ya está puesto— pero tampoco están "en precio",
+    // y meterlos en "más caros que la competencia" diría que se puede bajar,
+    // que es justo lo que no se puede.
+    //
+    // Es el mismo diagnóstico que "no se puede competir sin perder", visto
+    // después de haber actuado: allá el precio todavía estaba mal, acá ya se
+    // corrigió y lo que queda es una decisión de si este canal sirve para
+    // estos productos.
+    clave: "corregidos_sin_competir",
+    titulo: "Corregidos pero sin competir",
+    detalle:
+      "Ya se les escribió el precio nuevo y quedaron igual por encima del " +
+      "mercado: la competencia vende por debajo de nuestro piso. No hay nada " +
+      "que autorizar acá; hay que decidir si conviene seguir vendiéndolos.",
+    tono: "aviso",
+  },
+  {
     // LO QUE ESTÁ BIEN TAMBIÉN ES INFORMACIÓN, y faltaba.
     //
     // La pantalla mostraba cinco tarjetas y las cinco eran problemas. Los
@@ -105,13 +127,33 @@ export type ClaveAlerta = (typeof ALERTAS)[number]["clave"];
 export const DIFERENCIA_MINIMA_VISIBLE = 0.02;
 
 /**
- * El grupo que NO es cola de trabajo.
+ * Los grupos que NO son cola de trabajo.
  *
- * Se nombra una sola vez para que la consulta y la pantalla no puedan opinar
- * distinto sobre cuál es: el día que se agregue otro grupo informativo, se
- * agrega acá y las dos se enteran.
+ * Se nombran una sola vez para que la consulta y la pantalla no puedan opinar
+ * distinto sobre cuáles son: el día que se agregue otro, se agrega acá y las
+ * dos se enteran.
+ *
+ * QUÉ TIENEN EN COMÚN Y POR QUÉ NO SE LISTAN POR DEFECTO: en ninguno hay algo
+ * que autorizar. "En precio" no necesita cambio y "corregidos pero sin
+ * competir" ya lo tuvo. Mezclarlos con lo pendiente es lo que hacía que la
+ * cola mostrara cientos de renglones sin casilla —ni acción posible— y que
+ * encontrar los que sí esperan una decisión fuera un trabajo.
+ *
+ * Se cuentan siempre en su tarjeta y se listan al hacerle clic.
  */
-export const GRUPO_INFORMATIVO: ClaveAlerta = "en_precio";
+export const GRUPOS_INFORMATIVOS: readonly ClaveAlerta[] = [
+  "en_precio",
+  "corregidos_sin_competir",
+];
+
+/**
+ * Los mismos, listos para un `not in (...)` de SQL.
+ *
+ * Se interpolan sin parametrizar y está bien: son claves nuestras, declaradas
+ * arriba en este archivo, no texto que venga de una query string. Lo que sí se
+ * parametriza siempre es lo que escribe quien usa la pantalla.
+ */
+export const GRUPOS_INFORMATIVOS_SQL = GRUPOS_INFORMATIVOS.map((g) => `'${g}'`).join(", ");
 
 /**
  * Cuántos precios escribe COMO MÁXIMO cada corrida de escritura.

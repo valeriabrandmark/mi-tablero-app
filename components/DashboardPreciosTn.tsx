@@ -303,6 +303,41 @@ function Competidores({ lista }: { lista: FilaPrecioTn["competidores"] }) {
 }
 
 /**
+ * En qué quedó una propuesta que ya no se puede tildar.
+ *
+ * Ocupa el lugar de la casilla, así la columna nunca queda hueca: con el
+ * renglón a la vista se lee de un vistazo si el precio ya está en la tienda,
+ * si todavía espera su turno de escritura, o si se descartó.
+ *
+ * "vencida" es la que más necesita explicarse: no la rechazó nadie, la vetó el
+ * comando de escritura porque el precio de la tienda cambió entre que se
+ * aprobó y le tocó escribirse. Escribirla habría pisado esa corrección.
+ */
+const MARCAS_DE_ESTADO: Record<string, { simbolo: string; texto: string; clase: string }> = {
+  aplicada: { simbolo: "✓", texto: "Escrita en la tienda", clase: "text-emerald-600" },
+  aprobada: { simbolo: "⏳", texto: "Autorizada, esperando escritura", clase: "text-amber-600" },
+  rechazada: { simbolo: "✕", texto: "Rechazada", clase: "text-neutral-400" },
+  vencida: {
+    simbolo: "⌛",
+    texto: "Vencida: el precio de la tienda cambió antes de escribirla",
+    clase: "text-neutral-400",
+  },
+};
+
+function MarcaDeEstado({ estado }: { estado: string }) {
+  const marca = MARCAS_DE_ESTADO[estado];
+  // Pendiente sin precio propuesto cae acá y no tiene marca: no se decidió
+  // nada, simplemente no hay número que autorizar. Inventarle un símbolo sería
+  // afirmar algo que no pasó.
+  if (!marca) return null;
+  return (
+    <span className={`text-xs ${marca.clase}`} title={marca.texto} aria-label={marca.texto}>
+      {marca.simbolo}
+    </span>
+  );
+}
+
+/**
  * Las columnas, con su ayuda.
  *
  * LOS TOOLTIPS NO ESTAN EN TODAS, y ese es el criterio que ya trae `Tabla`: si
@@ -326,7 +361,9 @@ function columnas(
       titulo: "✓",
       ayuda:
         "Tildá varias y autorizalas juntas con el botón de arriba. Sólo tienen casilla las " +
-        "que están pendientes y tienen precio propuesto: el resto no hay nada que autorizar.",
+        "que están pendientes y tienen precio propuesto. Las ya decididas muestran en qué " +
+        "estado quedaron: ✓ escrita en la tienda, ⏳ autorizada esperando su turno, ✕ " +
+        "rechazada, y ⌛ vencida porque el precio cambió antes de escribirla.",
       celda: (f) =>
         f.estado === "pendiente" && f.precioPropuesto !== null ? (
           <input
@@ -335,7 +372,13 @@ function columnas(
             onChange={() => alternar(f.id)}
             className="accent-c1 h-3.5 w-3.5 cursor-pointer"
           />
-        ) : null,
+        ) : (
+          // UNA CELDA VACÍA NO DICE "YA ESTÁ", DICE "FALTA ALGO". Era la
+          // pregunta que llegaba: "los de esta tarjeta no tienen casilla para
+          // seleccionar". No estaba rota — no había nada que autorizar, porque
+          // la propuesta ya se había decidido— pero el hueco no lo contaba.
+          <MarcaDeEstado estado={f.estado} />
+        ),
     },
     {
       titulo: "Producto",

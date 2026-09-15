@@ -1,7 +1,8 @@
 import { query, queryOne } from "@/lib/db";
 import {
   DIFERENCIA_MINIMA_VISIBLE,
-  GRUPO_INFORMATIVO,
+  GRUPOS_INFORMATIVOS,
+  GRUPOS_INFORMATIVOS_SQL,
   type ClaveAlerta,
 } from "@/lib/precios-tn";
 import type {
@@ -33,6 +34,36 @@ const ULTIMA_CORRIDA = `
 `;
 
 /**
+ * El precio que la tienda tiene HOY, que no siempre es `precio_actual`.
+ *
+ * ---------------------------------------------------------------------------
+ * `precio_actual` ES UNA FOTO DEL MOMENTO DE LA CORRIDA, y deja de ser cierta
+ * en cuanto se escribe el precio.
+ *
+ * Se vio con doscientos precios cambiados de una vez: al día siguiente los
+ * artículos seguían contados en "más baratos de lo necesario", porque la
+ * clasificación comparaba contra el mercado el precio que tenían ANTES de que
+ * se los corrigiera. La tarjeta decía que faltaba hacer algo que ya se había
+ * hecho, y como la fila ya no estaba pendiente tampoco tenía casilla: quedaba
+ * un renglón que se quejaba y no se dejaba resolver.
+ *
+ * Aplicada la propuesta, lo que la tienda tiene es `precio_propuesto` —el
+ * comando de escritura lo verifica contra la tienda de verdad antes de cada
+ * PUT y lo registra en `precios.cambio`, así que no es una suposición.
+ *
+ * SÓLO 'aplicada', y no 'aprobada'. Una aprobada todavía no se escribió: la
+ * tienda sigue teniendo el precio viejo y clasificarla por el nuevo sería
+ * mentir en la otra dirección.
+ * ---------------------------------------------------------------------------
+ */
+const PRECIO_VIGENTE = `
+  case when p.estado = 'aplicada' and p.precio_propuesto is not null
+       then p.precio_propuesto
+       else p.precio_actual
+  end
+`;
+
+/**
  * En qué grupo de alerta cae cada propuesta.
  *
  * El orden de los `when` ES la prioridad: una propuesta que está bajo el piso
@@ -43,9 +74,9 @@ const CLASIFICACION = `
   case
     when p.accion = 'omitir' and p.motivos::text like '%competencia insuficiente%'
       then 'sin_competencia'
-    when p.precio_actual < p.piso and p.referencia_competencia < p.piso
+    when ${PRECIO_VIGENTE} < p.piso and p.referencia_competencia < p.piso
       then 'no_competible'
-    when p.precio_actual < p.piso
+    when ${PRECIO_VIGENTE} < p.piso
       then 'bajo_piso'
     -- EN PRECIO VA ANTES QUE CAROS Y BARATOS, y el orden es la regla.
     --
@@ -57,12 +88,26 @@ const CLASIFICACION = `
     -- sigue siendo grave aunque estemos clavados con el mercado. Ahí el
     -- problema no es el precio de ellos, es el nuestro.
     when p.referencia_competencia is not null
-         and abs(p.precio_actual - p.referencia_competencia) / p.referencia_competencia
+         and abs(${PRECIO_VIGENTE} - p.referencia_competencia) / p.referencia_competencia
              < ${DIFERENCIA_MINIMA_VISIBLE}
       then 'en_precio'
-    when p.referencia_competencia is not null and p.precio_actual > p.referencia_competencia
+    -- YA SE CORRIGIÓ Y AUN ASÍ NO ALCANZA, porque el piso no deja bajar más.
+    --
+    -- Va después de "en precio" a propósito: un artículo corregido que quedó
+    -- pegado al mercado está en precio y punto, que es lo que se buscaba. Acá
+    -- caen sólo los que siguen arriba con el piso ya tocando la competencia.
+    --
+    -- Y va antes de "caros" porque decir "más caros que la competencia"
+    -- promete que se puede bajar. No se puede: bajar más es vender a pérdida.
+    when p.estado = 'aplicada'
+         and p.referencia_competencia is not null
+         and p.piso is not null
+         and ${PRECIO_VIGENTE} > p.referencia_competencia
+         and p.referencia_competencia < p.piso
+      then 'corregidos_sin_competir'
+    when p.referencia_competencia is not null and ${PRECIO_VIGENTE} > p.referencia_competencia
       then 'caros'
-    when p.referencia_competencia is not null and p.precio_actual < p.referencia_competencia
+    when p.referencia_competencia is not null and ${PRECIO_VIGENTE} < p.referencia_competencia
       then 'baratos'
   end
 `;
@@ -297,14 +342,17 @@ function cuerpoDeConsulta(filtros: FiltrosPreciosTn, params: unknown[]): string 
   // su tarjeta. `$2` no se usa más acá: el umbral vive en la clasificación, en
   // un solo lugar, así que la lista y la tarjeta no pueden decir cosas
   // distintas sobre qué está en precio.
-  const soloInformativo = filtros.grupo === GRUPO_INFORMATIVO;
+  // `some` y no `includes`: el filtro llega como `string | null` --lo valida
+  // `leerFiltros` contra ALERTAS, pero el tipo no lo refleja-- y comparar es lo
+  // que no obliga a un cast que taparía un valor inválido.
+  const soloInformativo = GRUPOS_INFORMATIVOS.some((g) => g === filtros.grupo);
   return `
        from precios.propuesta p
        left join bronze.sigma_articulos a on a.id = p.sku
        ${FOTO_PROPIA}
       where p.corrida_id = $1
         and ${CLASIFICACION} is not null
-        and (${CLASIFICACION} <> '${GRUPO_INFORMATIVO}' or ${soloInformativo})
+        and (${CLASIFICACION} not in (${GRUPOS_INFORMATIVOS_SQL}) or ${soloInformativo})
         ${condicionesDeFiltro(filtros, params)}`;
 }
 
@@ -337,13 +385,17 @@ export async function getFilasPreciosTn(
             a."proveedorNombre"                            as proveedor,
             p.accion,
             p.estado,
-            p.precio_actual::float8                        as "precioActual",
+            -- EL PRECIO QUE LA TIENDA TIENE HOY, no el de la foto. Si la fila
+            -- se clasifica por uno y muestra otro, el renglón se contradice
+            -- solo: diría "en precio" al lado de un número que no lo está.
+            ${PRECIO_VIGENTE}::float8                      as "precioActual",
             p.precio_propuesto::float8                     as "precioPropuesto",
             p.piso::float8                                 as piso,
             p.referencia_competencia::float8               as "mejorCompetencia",
             -- La diferencia contra el mercado, que es lo que ordena la cola.
             case when p.referencia_competencia > 0
-                 then ((p.precio_actual - p.referencia_competencia) / p.referencia_competencia)::float8
+                 then ((${PRECIO_VIGENTE} - p.referencia_competencia)
+                       / p.referencia_competencia)::float8
             end                                            as "difMercado",
             ${CLASIFICACION}                               as grupo,
             p.motivos                                      as motivos,
@@ -372,7 +424,8 @@ export async function getFilasPreciosTn(
       order by
         -- Los pendientes primero: lo ya decidido no vuelve a la cola.
         (p.estado = 'pendiente') desc,
-        abs(coalesce(p.precio_actual - p.referencia_competencia, 0)) / nullif(p.referencia_competencia, 0) desc nulls last
+        abs(coalesce(${PRECIO_VIGENTE} - p.referencia_competencia, 0))
+          / nullif(p.referencia_competencia, 0) desc nulls last
       limit $${limiteParam}`,
     params,
   );
@@ -514,15 +567,17 @@ export async function aprobarFiltradas(
                 and p.estado = 'pendiente'
                 and p.precio_propuesto is not null
                 and ${CLASIFICACION} <> 'no_competible'
-                -- Lo que está en precio no se aprueba en bloque aunque se lo
-                -- esté mirando: son de accion "mantener", escribirlos pondría
-                -- el mismo número que ya está y el comando de aplicar los
-                -- vetaría uno por uno. Un botón que dice "23 autorizadas" y
+                -- Los grupos informativos no se aprueban en bloque aunque se
+                -- los esté mirando. Los que están en precio son de accion
+                -- "mantener": escribirlos pondría el mismo número que ya está
+                -- y el comando de aplicar los vetaría uno por uno. Los
+                -- corregidos sin competir ya se escribieron, así que no hay
+                -- nada que aprobar. Un botón que dice "23 autorizadas" y
                 -- después no escribe ninguna enseña a desconfiar del contador.
                 --
                 -- (Sin backticks: esto viaja dentro de un template literal de
                 -- JS y uno solo lo corta a la mitad. Ya pasó en este archivo.)
-                and ${CLASIFICACION} <> '${GRUPO_INFORMATIVO}'
+                and ${CLASIFICACION} not in (${GRUPOS_INFORMATIVOS_SQL})
             )
         and destino.estado = 'pendiente'
       returning destino.id`,
@@ -556,7 +611,7 @@ export async function contarAprobables(filtros: FiltrosPreciosTn): Promise<{
         and p.estado = 'pendiente'
         and p.precio_propuesto is not null
         and ${CLASIFICACION} <> 'no_competible'
-        and ${CLASIFICACION} <> '${GRUPO_INFORMATIVO}'`,
+        and ${CLASIFICACION} not in (${GRUPOS_INFORMATIVOS_SQL})`,
     params,
   );
   return fila ?? { total: 0, bajan: 0, suben: 0 };
