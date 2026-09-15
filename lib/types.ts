@@ -1797,6 +1797,8 @@ export type FiltrosPreciosTn = {
   grupo: string | null;
   proveedor: string | null;
   marca: string | null;
+  /** Código de fuente: muestra sólo lo que se comparó contra ese competidor. */
+  competidor: string | null;
   busqueda: string | null;
 };
 
@@ -1804,6 +1806,14 @@ export type FiltrosPreciosTn = {
 export type CatalogosPreciosTn = {
   proveedores: string[];
   marcas: string[];
+  /**
+   * Los códigos de fuente que REALMENTE aparecen en esta corrida.
+   *
+   * No la lista de competidores configurados: la de los que contestaron. La
+   * diferencia es el dato -- una fuente activa que no aparece acá es una
+   * fuente que no está trayendo nada, y eso no se ve en ningún otro lado.
+   */
+  competidores: string[];
 };
 
 /**
@@ -1826,5 +1836,15 @@ export type CambioPrecioTn = {
   autorizadoPor: string | null;
   /** La ficha en NUESTRA tienda, para ir a verlo. */
   url: string | null;
+  /**
+   * Con qué rentabilidad quedó el artículo a ese precio. Fracción: 0,32 = 32 %.
+   *
+   * Sale del margen que calculó el MOTOR para el precio propuesto, no de una
+   * cuenta hecha acá: sacar el IVA, restar pasarela e impuestos vive en
+   * `dominio/margen.py` y es la misma cuenta con la que se despeja el piso.
+   * Viene null cuando el precio escrito no es el que el motor propuso --un
+   * precio a mano, un deshacer-- porque entonces ese margen no le corresponde.
+   */
+  margen: number | null;
   yaSeDeshizo: boolean;
 };
