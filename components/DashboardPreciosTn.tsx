@@ -8,8 +8,10 @@ import { Tabla, type Columna } from "@/components/Tabla";
 import { ALERTAS, nombreFuente, TANDA_ESCRITURA, type ClaveAlerta } from "@/lib/precios-tn";
 import type {
   CambioPrecioTn,
+  CatalogosCambiosTn,
   CatalogosPreciosTn,
   FilaPrecioTn,
+  FiltrosCambiosTn,
   FiltrosPreciosTn,
   ResumenPreciosTn,
 } from "@/lib/types";
@@ -168,20 +170,50 @@ function Diferencia({ valor }: { valor: number | null }) {
  * y cuánto proponía el motor. Seis meses después, "por qué este quedó en
  * $12.000" tiene respuesta.
  */
+/**
+ * El precio propuesto, editable a mano.
+ *
+ * ---------------------------------------------------------------------------
+ * ESCRIBIR EL PRECIO Y AUTORIZAR SON DOS GESTOS, Y ANTES ERAN UNO SOLO.
+ *
+ * El numero tecleado vivia unicamente en el estado de este componente: llegaba
+ * a la base solo si se apretaba "Autorizar" ACA ADENTRO. Escribirlo y despues
+ * autorizar por cualquier otro camino --el boton de la fila, la casilla y
+ * "Autorizar seleccionadas", "Autorizar todo"-- mandaba el pedido sin precio,
+ * y en la tienda terminaba el que habia propuesto el motor.
+ *
+ * No fallaba nada y no avisaba: el numero desaparecia. En la base no quedo un
+ * solo caso con el motivo "escrito a mano".
+ *
+ * Ahora "Guardar" guarda y la propuesta sigue pendiente. A partir de ahi
+ * cualquier camino de aprobacion escribe ese precio, porque todos leen de la
+ * misma columna. "Guardar y autorizar" sigue existiendo para el caso de una
+ * sola fila, que es comodo y era lo unico que habia.
+ * ---------------------------------------------------------------------------
+ */
 function PrecioPropuesto({
   fila,
   onAutorizar,
+  onGuardar,
 }: {
   fila: FilaPrecioTn;
   onAutorizar: (id: number, decision: "aprobada", precio: number) => void;
+  onGuardar: (id: number, precio: number) => void;
 }) {
   const [editando, setEditando] = useState(false);
   const [texto, setTexto] = useState("");
 
   // Ya decidida: es un numero, no una decision pendiente. Sin lapiz.
   if (fila.estado !== "pendiente") {
-    return <span>{fila.precioPropuesto ? fmtMoneda(fila.precioPropuesto) : "—"}</span>;
+    return (
+      <span className={esAMano(fila) ? "text-c1 font-medium" : undefined}>
+        {fila.precioPropuesto ? fmtMoneda(fila.precioPropuesto) : "—"}
+        {esAMano(fila) && <span className="ml-1 text-[11px]" title="Escrito a mano">✎</span>}
+      </span>
+    );
   }
+
+  const aMano = esAMano(fila);
 
   if (!editando) {
     return (
@@ -202,10 +234,23 @@ function PrecioPropuesto({
             IDENTICO al texto que habia antes --mismo color, sin borde-- y lo
             unico que lo delataba era un subrayado al pasar el mouse. Una
             funcion que solo existe para quien ya sabe que existe no existe. */}
-        <span className="decoration-muted/50 underline decoration-dotted underline-offset-4">
+        <span
+          className={`underline decoration-dotted underline-offset-4 ${
+            aMano ? "decoration-c1 text-c1 font-medium" : "decoration-muted/50"
+          }`}
+        >
           {fila.precioPropuesto ? fmtMoneda(fila.precioPropuesto) : "—"}
         </span>
-        <span className="text-muted/70 group-hover:text-c1 text-[11px] leading-none">✎</span>
+        {/* LA MARCA DE "A MANO" ES VISIBLE SIN ABRIR NADA. Un precio guardado
+            que se ve igual que el que propuso el motor no se distingue de uno
+            que no se guardó, que es justo la duda que hay que sacar de encima
+            después de haberlo escrito. */}
+        <span
+          className={`text-[11px] leading-none ${aMano ? "text-c1" : "text-muted/70 group-hover:text-c1"}`}
+          title={aMano ? "Precio escrito a mano: es el que se va a escribir" : undefined}
+        >
+          ✎
+        </span>
       </button>
     );
   }
@@ -222,8 +267,11 @@ function PrecioPropuesto({
         onChange={(e) => setTexto(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Escape") setEditando(false);
+          // Enter GUARDA y no autoriza. Es la tecla del apuro, y autorizar es
+          // lo irreversible de los dos: el precio guardado se puede volver a
+          // editar mientras siga pendiente.
           if (e.key === "Enter" && valido && !bajoPiso) {
-            onAutorizar(fila.id, "aprobada", valor);
+            onGuardar(fila.id, valor);
             setEditando(false);
           }
         }}
@@ -241,12 +289,24 @@ function PrecioPropuesto({
         <button
           disabled={!valido || bajoPiso}
           onClick={() => {
-            onAutorizar(fila.id, "aprobada", valor);
+            onGuardar(fila.id, valor);
             setEditando(false);
           }}
           className="border-c1/40 bg-c1/10 text-c1 rounded border px-1.5 py-0.5 text-[10px] disabled:opacity-40"
+          title="Guarda el precio y deja la propuesta pendiente. Después la autorizás como cualquier otra."
         >
-          Autorizar
+          Guardar
+        </button>
+        <button
+          disabled={!valido || bajoPiso}
+          onClick={() => {
+            onAutorizar(fila.id, "aprobada", valor);
+            setEditando(false);
+          }}
+          className="border-line hover:bg-panel-2 text-muted rounded border px-1.5 py-0.5 text-[10px] disabled:opacity-40"
+          title="Guarda el precio y autoriza esta fila de una vez"
+        >
+          y autorizar
         </button>
         <button
           onClick={() => setEditando(false)}
@@ -374,7 +434,13 @@ function MarcaDeEstado({ estado }: { estado: string }) {
  * casi nunca, porque cada numero sale de una cuenta que nadie puede adivinar.
  */
 function columnas(
-  decidir: (id: number, decision: "aprobada" | "rechazada") => void,
+  // LA FIRMA COMPLETA, CON EL PRECIO. Antes decia `(id, decision) => void` a
+  // secas: TypeScript deja pasar una funcion de menos parametros donde se
+  // espera una de mas, asi que el desajuste con `PrecioPropuesto` --que llama
+  // con tres-- no daba error en ningun lado. Declarada entera, cualquier
+  // camino que se olvide del precio se ve al compilar.
+  decidir: (id: number, decision: "aprobada" | "rechazada", precio?: number | null) => void,
+  guardarPrecio: (id: number, precio: number) => void,
   seleccion: Set<number>,
   alternar: (id: number) => void,
 ): Columna<FilaPrecioTn>[] {
@@ -471,7 +537,9 @@ function columnas(
         "SE PUEDE ESCRIBIR OTRO PRECIO: click en el número (o en el «—») y autorizás ese en " +
         "vez del propuesto. Queda firmado con tu mail y con lo que proponía el motor, y no " +
         "puede perforar el piso.",
-      celda: (f) => <PrecioPropuesto fila={f} onAutorizar={decidir} />,
+      celda: (f) => (
+        <PrecioPropuesto fila={f} onAutorizar={decidir} onGuardar={guardarPrecio} />
+      ),
       numerica: true,
       orden: (f) => f.precioPropuesto,
     },
@@ -589,8 +657,29 @@ function columnas(
  */
 function columnasCambios(
   deshacer: (id: number) => void,
+  seleccion: Set<number>,
+  alternar: (id: number) => void,
 ): Columna<CambioPrecioTn>[] {
   return [
+    {
+      titulo: "✓",
+      ayuda:
+        "Tildá varios y deshacelos juntos con el botón de arriba. Los que ya tienen una vuelta " +
+        "pedida no se pueden volver a tildar: la vuelta ya está en cola.",
+      celda: (c) =>
+        c.yaSeDeshizo ? (
+          <span className="text-muted/60 text-xs" title="Ya tiene una vuelta pedida">
+            ↩
+          </span>
+        ) : (
+          <input
+            type="checkbox"
+            checked={seleccion.has(c.id)}
+            onChange={() => alternar(c.id)}
+            className="accent-c1 h-3.5 w-3.5 cursor-pointer"
+          />
+        ),
+    },
     {
       titulo: "Cuándo",
       ayuda:
@@ -628,6 +717,7 @@ function columnasCambios(
           <span className="text-muted font-mono text-[10px]">
             {c.sku}
             {c.marca ? ` · ${c.marca}` : ""}
+            {c.proveedor ? ` · ${c.proveedor}` : ""}
           </span>
         </div>
       ),
@@ -767,6 +857,51 @@ function Avance({ estado }: { estado: EstadoCorrida }) {
   );
 }
 
+/**
+ * Como se reconoce un precio puesto a mano.
+ *
+ * El servidor escribe el motivo completo --con quien y cuanto proponia el
+ * motor-- en `motivos`. La pantalla solo necesita saber SI lo hay, y se fija
+ * por este prefijo. Se declara una vez para que el texto del servidor y el que
+ * busca la pantalla no puedan separarse en silencio.
+ */
+const SIN_FILTRO_CAMBIOS: FiltrosCambiosTn = {
+  proveedor: null,
+  marca: null,
+  busqueda: null,
+  desde: null,
+  hasta: null,
+};
+
+/**
+ * Los filtros del historial como query string.
+ *
+ * Mismo tipo total que `CLAVE_EN_URL` de la cola, y por el mismo motivo: un
+ * campo nuevo sin nombre acá no compila. Ese fue exactamente el error del
+ * filtro por competidor, que viajaba a ningún lado sin avisar.
+ */
+const CLAVE_CAMBIOS_EN_URL: Record<keyof FiltrosCambiosTn, string> = {
+  proveedor: "proveedor",
+  marca: "marca",
+  busqueda: "q",
+  desde: "desde",
+  hasta: "hasta",
+};
+
+function aParamsCambios(f: FiltrosCambiosTn): Record<string, string> {
+  const p: Record<string, string> = {};
+  for (const campo of Object.keys(CLAVE_CAMBIOS_EN_URL) as (keyof FiltrosCambiosTn)[]) {
+    const valor = f[campo];
+    if (valor) p[CLAVE_CAMBIOS_EN_URL[campo]] = valor;
+  }
+  return p;
+}
+
+const MOTIVO_A_MANO = "precio escrito a mano por";
+
+const esAMano = (f: FilaPrecioTn) =>
+  (f.motivos ?? []).some((m) => m.startsWith(MOTIVO_A_MANO));
+
 const CLASE_SELECT =
   "border-line bg-panel-2 text-ink rounded-lg border px-2.5 py-1.5 text-xs focus:border-c1/50 focus:outline-none";
 
@@ -799,6 +934,18 @@ export default function DashboardPreciosTn() {
   // se reordena al cambiar de filtro, y un índice apuntaría a otra fila.
   const [seleccion, setSeleccion] = useState<Set<number>>(new Set());
   const [cambios, setCambios] = useState<CambioPrecioTn[]>([]);
+  const [totalCambios, setTotalCambios] = useState(0);
+  const [catalogosCambios, setCatalogosCambios] = useState<CatalogosCambiosTn>({
+    proveedores: [],
+    marcas: [],
+  });
+  const [filtrosCambios, setFiltrosCambios] = useState<FiltrosCambiosTn>(SIN_FILTRO_CAMBIOS);
+  const [textoCambios, setTextoCambios] = useState("");
+  // "Ver todo" no es un filtro: es hasta donde bajar. Se separa para que
+  // cambiar un filtro no lo apague ni lo encienda solo.
+  const [todoElHistorial, setTodoElHistorial] = useState(false);
+  const [seleccionCambios, setSeleccionCambios] = useState<Set<number>>(new Set());
+  const [deshaciendo, setDeshaciendo] = useState(false);
 
   // Medio segundo de quietud antes de consultar. Es el mínimo que se siente
   // instantáneo y el máximo que evita una consulta por letra.
@@ -874,20 +1021,44 @@ export default function DashboardPreciosTn() {
   }, [corrida?.estado, escritura?.estado, recarga]);
 
 
+  // Medio segundo de quietud antes de consultar, igual que el buscador de la
+  // cola: una consulta por tecla contra un historial de miles de filas es cara
+  // y no se nota mejor.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setFiltrosCambios((f) =>
+        f.busqueda === (textoCambios.trim() || null)
+          ? f
+          : { ...f, busqueda: textoCambios.trim() || null },
+      );
+    }, 500);
+    return () => clearTimeout(t);
+  }, [textoCambios]);
+
   // El historial se trae siempre, no sólo al abrir la solapa: el contador del
-  // título tiene que ser cierto desde el primer render, y son pocas filas.
+  // título tiene que ser cierto desde el primer render.
   useEffect(() => {
     let vigente = true;
     (async () => {
-      const r = await fetch("/api/precios-tn/cambios", { cache: "no-store" }).catch(() => null);
+      const qs = new URLSearchParams(aParamsCambios(filtrosCambios));
+      if (todoElHistorial) qs.set("todo", "1");
+      const r = await fetch(`/api/precios-tn/cambios?${qs}`, { cache: "no-store" }).catch(
+        () => null,
+      );
       if (!r?.ok || !vigente) return;
       const datos = await r.json();
-      if (vigente) setCambios(datos.cambios ?? []);
+      if (!vigente) return;
+      setCambios(datos.cambios ?? []);
+      setTotalCambios(datos.total ?? 0);
+      if (datos.catalogos) setCatalogosCambios(datos.catalogos);
+      // La selección se limpia al cambiar lo que se ve: mantener tildado algo
+      // que ya no está en pantalla es deshacer a ciegas.
+      setSeleccionCambios(new Set());
     })();
     return () => {
       vigente = false;
     };
-  }, [recarga]);
+  }, [recarga, filtrosCambios, todoElHistorial]);
 
   const recargar = useCallback(() => {
     setCargando(true);
@@ -1068,6 +1239,40 @@ export default function DashboardPreciosTn() {
     }
   }
 
+  /**
+   * Guardar un precio a mano, sin decidir nada.
+   *
+   * La fila queda pendiente con el numero nuevo, y cualquier camino de
+   * aprobacion posterior escribe ESE precio. Es la mitad que faltaba: antes el
+   * numero solo llegaba a la base si se autorizaba desde el mismo editor.
+   */
+  async function guardarPrecio(id: number, precio: number) {
+    setAviso(null);
+    const r = await fetch("/api/precios-tn/decidir", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, precio }),
+    });
+    if (!r.ok) {
+      setAviso((await r.json().catch(() => null))?.error ?? "No se pudo guardar el precio");
+      recargar();
+      return;
+    }
+    setFilas((previas) =>
+      previas.map((f) =>
+        f.id === id
+          ? {
+              ...f,
+              precioPropuesto: precio,
+              // El motivo lo escribe el servidor; se agrega tambien acá para
+              // que la marca de "a mano" aparezca sin recargar la pantalla.
+              motivos: [...(f.motivos ?? []), MOTIVO_A_MANO],
+            }
+          : f,
+      ),
+    );
+  }
+
   async function autorizarSeleccionadas() {
     setAviso(null);
     const ids = [...seleccion];
@@ -1127,6 +1332,75 @@ export default function DashboardPreciosTn() {
       "Vuelta atrás pedida. El precio anterior se escribe en la próxima corrida de " +
         "`aplicar`, después de verificar que nadie lo haya tocado en el medio.",
     );
+  }
+
+  const alternarCambio = useCallback((id: number) => {
+    setSeleccionCambios((previa) => {
+      const proxima = new Set(previa);
+      if (proxima.has(id)) proxima.delete(id);
+      else proxima.add(id);
+      return proxima;
+    });
+  }, []);
+
+  /** Los que se pueden tildar: los que todavía no tienen vuelta pedida. */
+  const cambiosSeleccionables = useMemo(
+    () => cambios.filter((c) => !c.yaSeDeshizo),
+    [cambios],
+  );
+
+  const alternarTodosLosCambios = useCallback(() => {
+    setSeleccionCambios((previa) =>
+      previa.size >= cambiosSeleccionables.length
+        ? new Set()
+        : new Set(cambiosSeleccionables.map((c) => c.id)),
+    );
+  }, [cambiosSeleccionables]);
+
+  const hayFiltroCambios = useMemo(
+    () => Object.values(filtrosCambios).some(Boolean),
+    [filtrosCambios],
+  );
+
+  /**
+   * Deshacer varios de una vez.
+   *
+   * `todas` manda el FILTRO y no los ids, igual que "autorizar todo lo
+   * filtrado": el servidor resuelve el conjunto contra la base de ahora. Si
+   * viajaran los ids de la pantalla, se desharía lo que el navegador recordaba
+   * —que puede incluir cosas que ya volvieron atrás por otro lado—.
+   */
+  async function deshacerVarios(todas: boolean) {
+    setAviso(null);
+    setDeshaciendo(true);
+    try {
+      const r = await fetch("/api/precios-tn/cambios", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(
+          todas
+            ? { todas: true, filtros: aParamsCambios(filtrosCambios) }
+            : { ids: [...seleccionCambios] },
+        ),
+      });
+      if (!r.ok) {
+        setAviso((await r.json().catch(() => null))?.error ?? "No se pudieron pedir las vueltas");
+        return;
+      }
+      const { pedidas, seleccionados } = await r.json();
+      // SI ALGUNA NO ENTRO, SE DICE. Un cambio puede haber quedado sin
+      // producto_id, o alguien pudo pedir su vuelta en el medio.
+      setAviso(
+        pedidas === seleccionados
+          ? `${pedidas} vueltas atrás pedidas. Se escriben en la próxima corrida de aplicar, ` +
+              "después de verificar una por una que nadie haya tocado ese precio."
+          : `${pedidas} de ${seleccionados} vueltas pedidas. El resto ya tenía una en cola.`,
+      );
+      setSeleccionCambios(new Set());
+      recargar();
+    } finally {
+      setDeshaciendo(false);
+    }
   }
 
   /**
@@ -1565,7 +1839,7 @@ export default function DashboardPreciosTn() {
       ) : (
         <Tabla
           filas={filas}
-          columnas={columnas(decidir, seleccion, alternar)}
+          columnas={columnas(decidir, guardarPrecio, seleccion, alternar)}
           clave={(f) => String(f.id)}
           vacio={hayFiltro ? "Nada coincide con el filtro." : "No hay propuestas para revisar."}
         />
@@ -1575,11 +1849,144 @@ export default function DashboardPreciosTn() {
 
       {vista === "cambios" && (
         <>
+          {/* LOS FILTROS DEL HISTORIAL. Se resuelven en el servidor sobre TODO
+              lo escrito, no sobre las 100 que bajaron: filtrar en el navegador
+              mostraria "las de Chicco que habia entre las ultimas 100", que es
+              justo lo contrario de buscar en el historial. */}
+          <div className="border-line bg-panel-2/40 flex flex-wrap items-center gap-2 rounded-xl border p-3">
+            <input
+              value={textoCambios}
+              onChange={(e) => setTextoCambios(e.target.value)}
+              placeholder="Buscar por SKU o descripción…"
+              className={`${CLASE_SELECT} min-w-[200px] flex-1`}
+            />
+            <select
+              value={filtrosCambios.proveedor ?? ""}
+              onChange={(e) =>
+                setFiltrosCambios((f) => ({ ...f, proveedor: e.target.value || null }))
+              }
+              className={CLASE_SELECT}
+            >
+              <option value="">Todos los proveedores</option>
+              {catalogosCambios.proveedores.map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
+            </select>
+            <select
+              value={filtrosCambios.marca ?? ""}
+              onChange={(e) => setFiltrosCambios((f) => ({ ...f, marca: e.target.value || null }))}
+              className={CLASE_SELECT}
+            >
+              <option value="">Todas las marcas</option>
+              {catalogosCambios.marcas.map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
+            </select>
+            <label className="text-muted flex items-center gap-1.5 text-xs">
+              Desde
+              <input
+                type="date"
+                value={filtrosCambios.desde ?? ""}
+                onChange={(e) =>
+                  setFiltrosCambios((f) => ({ ...f, desde: e.target.value || null }))
+                }
+                className={CLASE_SELECT}
+              />
+            </label>
+            <label className="text-muted flex items-center gap-1.5 text-xs">
+              Hasta
+              <input
+                type="date"
+                value={filtrosCambios.hasta ?? ""}
+                onChange={(e) =>
+                  setFiltrosCambios((f) => ({ ...f, hasta: e.target.value || null }))
+                }
+                className={CLASE_SELECT}
+              />
+            </label>
+            {hayFiltroCambios && (
+              <button
+                onClick={() => {
+                  setFiltrosCambios(SIN_FILTRO_CAMBIOS);
+                  setTextoCambios("");
+                }}
+                className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1.5 text-xs"
+              >
+                Limpiar filtros
+              </button>
+            )}
+          </div>
+
+          {/* CUANTAS SE VEN DE CUANTAS HAY. Una lista cortada que no dice que
+              esta cortada se lee como "esto es todo lo que hay", y sobre eso se
+              toman decisiones. */}
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="text-muted">
+              {cambios.length === totalCambios
+                ? `${totalCambios.toLocaleString("es-AR")} cambios`
+                : `Mostrando ${cambios.length.toLocaleString("es-AR")} de ${totalCambios.toLocaleString("es-AR")}`}
+              {hayFiltroCambios && " con el filtro puesto"}
+            </span>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {cambios.length < totalCambios && (
+                <button
+                  onClick={() => setTodoElHistorial(true)}
+                  className="border-line hover:bg-panel-2 rounded-lg border px-2.5 py-1.5 text-xs"
+                >
+                  Ver todo el historial
+                </button>
+              )}
+              {cambiosSeleccionables.length > 0 && (
+                <button
+                  onClick={alternarTodosLosCambios}
+                  className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1.5 text-xs"
+                >
+                  {seleccionCambios.size >= cambiosSeleccionables.length
+                    ? "Destildar todo"
+                    : `Tildar ${cambiosSeleccionables.length}`}
+                </button>
+              )}
+              {seleccionCambios.size > 0 && (
+                <button
+                  onClick={() => deshacerVarios(false)}
+                  disabled={deshaciendo}
+                  className="border-line hover:bg-panel-2 text-ink rounded-lg border px-2.5 py-1.5 text-xs disabled:opacity-50"
+                >
+                  ↩ Deshacer {seleccionCambios.size} seleccionado
+                  {seleccionCambios.size === 1 ? "" : "s"}
+                </button>
+              )}
+              {hayFiltroCambios && (
+                <button
+                  onClick={() => deshacerVarios(true)}
+                  disabled={deshaciendo}
+                  className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1.5 text-xs disabled:opacity-50"
+                  title="Pide la vuelta atrás de TODO lo que cumple el filtro, no sólo lo que se ve en pantalla"
+                >
+                  ↩ Deshacer todo lo filtrado
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* EL REGISTRO DE LO QUE SE ESCRIBIO DE VERDAD.
               No sale de las propuestas aprobadas --que son intenciones-- sino
               de precios.cambio, que escribe `aplicar` en la misma transaccion
               en la que cierra la propuesta. Si algo figura aca, se escribio. */}
-          {cambios.length === 0 ? (
+          {cambios.length === 0 && hayFiltroCambios ? (
+            <div className="border-line bg-panel-2/40 rounded-xl border p-6 text-center">
+              <p className="text-sm font-medium">Nada coincide con el filtro.</p>
+              <p className="text-muted mx-auto mt-2 max-w-lg text-xs leading-relaxed">
+                Hay {totalCambios === 0 ? "cambios" : `${totalCambios.toLocaleString("es-AR")} cambios`}{" "}
+                escritos en total. Probá sacando alguna condición.
+              </p>
+            </div>
+          ) : cambios.length === 0 ? (
             <div className="border-line bg-panel-2/40 rounded-xl border p-6 text-center">
               <p className="text-sm font-medium">Todavía no se escribió ningún precio.</p>
               <p className="text-muted mx-auto mt-2 max-w-lg text-xs leading-relaxed">
@@ -1592,7 +1999,7 @@ export default function DashboardPreciosTn() {
           ) : (
             <Tabla
               filas={cambios}
-              columnas={columnasCambios(deshacer)}
+              columnas={columnasCambios(deshacer, seleccionCambios, alternarCambio)}
               clave={(c) => String(c.id)}
               vacio="Todavía no se escribió ningún precio."
             />
