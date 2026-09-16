@@ -364,6 +364,19 @@ Cada usuario de Supabase Auth lleva su rol en `app_metadata`:
 { "rol": "vendedor", "vendedor": "SILVIO" }
 ```
 
+> Las pruebas de quién ve qué se corren sin base ni navegador:
+>
+> ```bash
+> node --experimental-strip-types --import ./pruebas/registrar.mjs pruebas/permisos.mts
+> ```
+>
+> Existen por un error real: un permiso a medida con Precios TN tildado no veía
+> el módulo, porque la excepción de Precios TN se evaluaba **antes** que el
+> bloque de permisos a medida y contestaba por él. Había pruebas del catálogo de
+> módulos y pasaban todas — pero ninguna llamaba a `puedeVer`, que es la función
+> que usan las tres barreras. Un permiso que falla no se ve como un error: se ve
+> como un menú al que le falta una entrada.
+
 | Rol | Qué ve |
 |---|---|
 | `superadmin` | Todo |
@@ -396,8 +409,18 @@ Dos advertencias que importan:
 ### Lo normal: el panel de Usuarios
 
 **Mi cuenta → Usuarios**, y lo ve únicamente el `superadmin`. Desde ahí se crea
-una persona con su mail y se le marcan casillas: qué módulos ve, y en los dos
-que se puede, si además edita.
+una persona con su **nombre** y su mail, y se le marcan casillas: qué módulos ve,
+y en los dos que se puede, si además edita.
+
+El nombre es con lo que el tablero la saluda al entrar («Hola, Ana», arriba de
+todo en la barra lateral). Vive en `user_metadata` y **no** en `app_metadata`, y
+la diferencia importa: los permisos van en `app_metadata` justamente porque el
+usuario no la puede tocar. Un nombre para saludar no es un permiso — que alguien
+se cambie el suyo no le da acceso a nada — así que va del lado que le pertenece.
+
+Sobre uno mismo se puede cambiar el nombre pero **no los permisos**: sacarse el
+propio rol es la única forma de quedarse afuera para siempre, porque no queda
+nadie que pueda devolverlo desde la pantalla.
 
 | Módulo | Qué significa "puede editar" |
 |---|---|

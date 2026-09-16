@@ -27,6 +27,7 @@ import { MODULOS, nombreModulo, type ClaveModulo } from "@/lib/modulos";
 type Usuario = {
   id: string;
   email: string;
+  nombre: string | null;
   rol: string | null;
   vendedor: string | null;
   modulos: ClaveModulo[];
@@ -106,8 +107,11 @@ export default function PanelUsuarios() {
             usuario={u}
             abierto={editando === u.id}
             onAbrir={() => setEditando(editando === u.id ? null : u.id)}
-            onGuardado={() => {
-              setEditando(null);
+            onGuardado={(cerrar) => {
+              // Se cierra sólo si no hay nada que leer. Cuando el servidor
+              // devuelve un aviso --el caso de editarse a uno mismo-- cerrar la
+              // fila se lo llevaría puesto antes de que nadie lo vea.
+              if (cerrar) setEditando(null);
               cargar();
             }}
           />
@@ -162,7 +166,7 @@ function FilaUsuario({
   usuario: Usuario;
   abierto: boolean;
   onAbrir: () => void;
-  onGuardado: () => void;
+  onGuardado: (cerrar: boolean) => void;
 }) {
   const aMedida = usuario.rol === "personalizado";
   const sinAcceso = aMedida && usuario.modulos.length === 0;
@@ -193,7 +197,12 @@ function FilaUsuario({
     <div className="border-line rounded-lg border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium">{usuario.email}</p>
+          <p className="truncate text-sm font-medium">
+            {usuario.nombre ?? usuario.email}
+          </p>
+          {usuario.nombre && (
+            <p className="text-muted truncate text-xs">{usuario.email}</p>
+          )}
           <p className="text-muted mt-0.5 text-xs">
             {aMedida
               ? sinAcceso
@@ -256,8 +265,8 @@ function FilaUsuario({
               const cuerpo = await res.json().catch(() => null);
               if (!res.ok)
                 throw new Error(cuerpo?.error ?? `Error ${res.status}`);
-              onGuardado();
-              return null;
+              onGuardado(!cuerpo?.aviso);
+              return cuerpo?.aviso ?? null;
             }}
           />
         </div>
@@ -289,7 +298,7 @@ function FormularioAlta({ onCreado }: { onCreado: () => void }) {
 
       <div className="mt-3">
         <FormularioPermisos
-          inicial={{ modulos: [], editar: [], sigma: null }}
+          inicial={{ nombre: "", modulos: [], editar: [], sigma: null }}
           textoBoton="Crear usuario"
           onEnviar={async (datos) => {
             const res = await fetch("/api/usuarios", {
@@ -330,6 +339,7 @@ function FormularioAlta({ onCreado }: { onCreado: () => void }) {
 }
 
 type Datos = {
+  nombre: string;
   modulos: ClaveModulo[];
   editar: ClaveModulo[];
   sigma: number | null;
@@ -343,6 +353,7 @@ function FormularioPermisos({
   onEnviar,
 }: {
   inicial: {
+    nombre?: string | null;
     modulos: ClaveModulo[];
     editar: ClaveModulo[];
     sigma: number | null;
@@ -350,6 +361,7 @@ function FormularioPermisos({
   textoBoton: string;
   onEnviar: (datos: Datos) => Promise<string | null>;
 }) {
+  const [nombre, setNombre] = useState(inicial.nombre ?? "");
   const [ve, setVe] = useState<ClaveModulo[]>(inicial.modulos);
   const [edita, setEdita] = useState<ClaveModulo[]>(inicial.editar);
   const [sigma, setSigma] = useState(
@@ -378,6 +390,7 @@ function FormularioPermisos({
     setEnviando(true);
     try {
       const aviso = await onEnviar({
+        nombre: nombre.trim(),
         modulos: ve,
         editar: edita,
         sigma: sigma.trim() === "" ? null : Number(sigma),
@@ -392,6 +405,21 @@ function FormularioPermisos({
 
   return (
     <form onSubmit={onSubmit} className="space-y-3">
+      <label className="block text-xs">
+        Nombre
+        <input
+          type="text"
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value)}
+          placeholder="Ana"
+          className={CLASE_INPUT}
+        />
+        {/* Es con lo que lo saluda el tablero al entrar, nada más. */}
+        <span className="text-muted mt-1 block">
+          Con esto lo saluda el tablero al entrar.
+        </span>
+      </label>
+
       <div className="grid gap-1.5 sm:grid-cols-2">
         {MODULOS.map((m) => {
           const visible = ve.includes(m.clave);

@@ -76,6 +76,12 @@ const NAV: ItemNav[] = [
   },
 ];
 
+/** El nombre con el que se saluda, o `null` si nadie se lo cargó. */
+function nombreDelUsuario(usuario: { user_metadata?: Record<string, unknown> } | null) {
+  const valor = usuario?.user_metadata?.nombre;
+  return typeof valor === "string" && valor.trim() !== "" ? valor.trim() : null;
+}
+
 /** Cómo se muestra cada rol abajo del email. */
 const NOMBRE_ROL: Record<Rol, string> = {
   superadmin: "Superadministrador",
@@ -126,6 +132,10 @@ export default async function TableroLayout({ children }: LayoutProps<"/">) {
       <BarraLateral
         nav={nav}
         email={usuario?.email ?? null}
+        // El nombre vive en `user_metadata` y no en `app_metadata`: es para
+        // saludar, no un permiso. Que la persona se lo pueda cambiar no le abre
+        // ninguna puerta (ver la nota en /api/usuarios).
+        nombre={nombreDelUsuario(usuario)}
         rol={permiso ? NOMBRE_ROL[permiso.rol] : null}
         authConfigurada={authConfigurada}
       />
