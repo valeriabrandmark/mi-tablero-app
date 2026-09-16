@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { esModulo, type ClaveModulo } from "@/lib/modulos";
-import { permisoDelUsuario } from "@/lib/permisos";
-import { adminConfigurado, createAdminClient } from "@/lib/supabase/admin";
-import { authConfigurada } from "@/lib/supabase/env";
-import { getUsuario } from "@/lib/supabase/server";
+import {
+  exigirSuperadmin,
+  rutaParaPonerContrasena,
+} from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,38 +34,6 @@ type Cuerpo = {
   sigma?: unknown;
   nombreSigma?: unknown;
 };
-
-/** Devuelve el cliente admin, o la respuesta de error si no corresponde. */
-async function admin() {
-  if (!authConfigurada) {
-    return {
-      error: NextResponse.json(
-        { error: "Login no configurado" },
-        { status: 503 },
-      ),
-    };
-  }
-  const usuario = await getUsuario();
-  const permiso = permisoDelUsuario(usuario);
-  if (permiso?.rol !== "superadmin") {
-    return {
-      error: NextResponse.json({ error: "Sin permiso" }, { status: 403 }),
-    };
-  }
-  if (!adminConfigurado) {
-    return {
-      error: NextResponse.json(
-        {
-          error:
-            "Falta la llave de servicio de Supabase. Cargá SUPABASE_SERVICE_ROLE_KEY " +
-            "en Vercel → Settings → Environment Variables y volvé a desplegar.",
-        },
-        { status: 503 },
-      ),
-    };
-  }
-  return { cliente: createAdminClient(), yo: usuario?.id ?? null };
-}
 
 /** Las claves de módulo válidas de lo que haya mandado el navegador. */
 function modulos(valor: unknown): ClaveModulo[] {
@@ -101,7 +69,7 @@ function claim(cuerpo: Cuerpo) {
 
 /** La lista, con lo justo para la pantalla: nunca nada de la sesión. */
 export async function GET() {
-  const { error, cliente } = await admin();
+  const { error, cliente } = await exigirSuperadmin();
   if (error) return error;
 
   const { data, error: fallo } = await cliente.auth.admin.listUsers({
@@ -136,9 +104,31 @@ export async function GET() {
  * el otro viaja por WhatsApp y queda escrita en el teléfono de los dos. El
  * enlace vence solo y sirve una vez: es lo mismo que hace el "¿Olvidaste tu
  * contraseña?" que ya existe, pero sin depender de que el mail llegue.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUÉ NO SE USA EL `action_link` QUE DEVUELVE SUPABASE
+ *
+ * Porque no funciona, y falla de la peor manera: parece que anda.
+ *
+ * Ese enlace apunta a `/auth/v1/verify` de Supabase, que CONSUME EL TOKEN al
+ * abrirlo y después redirige a la "Site URL" del proyecto. Si esa Site URL
+ * quedó en `http://localhost:3000` --como estaba-- la persona aterriza en una
+ * dirección que no existe, y al reintentar el token ya está gastado:
+ *
+ *     localhost:3000/#error=access_denied&error_code=otp_expired
+ *
+ * Así que se arma el enlace contra ESTE tablero, apuntando a `/auth/confirmar`,
+ * que es la misma ruta que usa "¿Olvidaste tu contraseña?" desde siempre: canjea
+ * el `token_hash` con `verifyOtp` y manda a poner la contraseña. No depende de
+ * la Site URL, ni de la lista de redirecciones permitidas, ni de que alguien
+ * haya configurado bien el proyecto.
+ *
+ * El `origin` lo pone el navegador (ver PanelUsuarios) y no el servidor: acá
+ * habría que adivinarlo entre proxys y encabezados reenviados, y el navegador
+ * sabe con certeza desde qué dirección se está usando el tablero.
  */
 export async function POST(request: NextRequest) {
-  const { error, cliente } = await admin();
+  const { error, cliente } = await exigirSuperadmin();
   if (error) return error;
 
   const cuerpo = ((await request.json().catch(() => null)) ?? {}) as Cuerpo;
@@ -181,21 +171,14 @@ export async function POST(request: NextRequest) {
 
   // El enlace es lo único que puede fallar sin arruinar el alta: si no sale, el
   // usuario ya existe y puede entrar por "¿Olvidaste tu contraseña?".
-  const { data: enlace } = await cliente.auth.admin.generateLink({
-    type: "recovery",
-    email,
-  });
+  const ruta = await rutaParaPonerContrasena(cliente, email);
 
-  return NextResponse.json({
-    id: data.user?.id ?? null,
-    email,
-    enlace: enlace?.properties?.action_link ?? null,
-  });
+  return NextResponse.json({ id: data.user?.id ?? null, email, ruta });
 }
 
 /** Cambio de permisos de alguien que ya existe. */
 export async function PATCH(request: NextRequest) {
-  const { error, cliente, yo } = await admin();
+  const { error, cliente, yo } = await exigirSuperadmin();
   if (error) return error;
 
   const cuerpo = ((await request.json().catch(() => null)) ?? {}) as Cuerpo;
