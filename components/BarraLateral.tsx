@@ -298,11 +298,13 @@ function Contenido({
   nav,
   email,
   rol,
+  nombre,
   authConfigurada,
   alNavegar,
 }: {
   nav: ItemNav[];
   email: string | null;
+  nombre: string | null;
   rol: string | null;
   authConfigurada: boolean;
   alNavegar?: () => void;
@@ -316,6 +318,14 @@ function Contenido({
           Brandmark
         </span>
         <span className="text-muted ml-1.5 text-base">negocio</span>
+        {/* SÓLO EL PRIMER NOMBRE: "Hola, Ana Maldonado" suena a carta del banco.
+            Y si nadie le cargó el nombre no se saluda a medias -- abajo sigue
+            estando el mail, que es lo que identifica la sesión. */}
+        {nombre && (
+          <p className="text-muted mt-2 truncate text-sm">
+            Hola, <span className="text-ink">{nombre.split(" ")[0]}</span>
+          </p>
+        )}
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 pb-4">
@@ -405,6 +415,7 @@ function Contenido({
 export default function BarraLateral(props: {
   nav: ItemNav[];
   email: string | null;
+  nombre: string | null;
   rol: string | null;
   authConfigurada: boolean;
 }) {

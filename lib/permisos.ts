@@ -262,19 +262,26 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   if (!permiso) return false;
   if (PAGINAS_DE_CUENTA.includes(pathname)) return true;
 
+  // EL PERSONALIZADO SE RESUELVE ENTERO ACÁ, Y VA PRIMERO. Lo suyo es la lista
+  // de módulos y nada más: no comparte ninguna regla con los roles viejos, ni
+  // con la excepción de Precios TN de acá abajo.
+  //
+  // ESTUVO ABAJO DEL BLOQUE DE PRECIOS TN Y ESE FUE EL ERROR. Con ese orden,
+  // pedir /precios-tn caía en la excepción --que contesta "superadmin o
+  // admin_tn"-- y devolvía false aunque la persona tuviera el módulo marcado:
+  // el 16/09/2026 a.rios tenía Precios TN tildado y el módulo no le aparecía en
+  // el menú. La excepción existe para dejar a `admin` afuera, y `admin` se
+  // resuelve más abajo: no tiene nada que decir sobre este permiso.
+  if (permiso.rol === "personalizado") {
+    return moduloPermiteRuta(permiso.modulos, pathname);
+  }
+
   // PRECIOS TN SE RESUELVE ANTES QUE EL PERMISO GENERAL DE LOS ADMINS, y ese
   // orden ES la regla: abajo hay un `admin -> true` que, si se evaluara
   // primero, le abriría el módulo a todos los administradores. Que este bloque
   // esté arriba no es estilo, es lo único que deja a `admin` afuera.
   if (esDePreciosTn(pathname) || esApiPreciosTn(pathname)) {
     return permiso.rol === "superadmin" || permiso.rol === "admin_tn";
-  }
-
-  // EL PERSONALIZADO SE RESUELVE ENTERO ACÁ: lo suyo es la lista de módulos y
-  // nada más. Va antes que los roles viejos porque no comparte ninguna de sus
-  // reglas, y deja el resto de la función como estaba.
-  if (permiso.rol === "personalizado") {
-    return moduloPermiteRuta(permiso.modulos, pathname);
   }
 
   if (permiso.rol === "superadmin" || permiso.rol === "admin") return true;

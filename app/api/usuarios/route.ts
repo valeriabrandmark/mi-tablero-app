@@ -29,6 +29,7 @@ export const dynamic = "force-dynamic";
 type Cuerpo = {
   email?: unknown;
   id?: unknown;
+  nombre?: unknown;
   modulos?: unknown;
   editar?: unknown;
   sigma?: unknown;
@@ -80,9 +81,11 @@ export async function GET() {
 
   const usuarios = data.users.map((u) => {
     const meta = (u.app_metadata ?? {}) as Record<string, unknown>;
+    const propia = (u.user_metadata ?? {}) as Record<string, unknown>;
     return {
       id: u.id,
       email: u.email ?? "",
+      nombre: texto(propia.nombre),
       rol: typeof meta.rol === "string" ? meta.rol : null,
       vendedor: typeof meta.vendedor === "string" ? meta.vendedor : null,
       modulos: modulos(meta.modulos),
@@ -160,6 +163,12 @@ export async function POST(request: NextRequest) {
 
   const { data, error: fallo } = await cliente.auth.admin.createUser({
     email,
+    // EL NOMBRE VA EN user_metadata Y NO EN app_metadata, y la diferencia
+    // importa: app_metadata es donde viven los permisos justamente porque el
+    // usuario no la puede tocar. Un nombre para saludar no es un permiso --que
+    // alguien se cambie el suyo no le da acceso a nada-- así que va del otro
+    // lado, que es el que le pertenece.
+    user_metadata: { nombre: texto(cuerpo.nombre) },
     // Al azar y larga: nadie la ve ni la necesita, el acceso se toma por el
     // enlace de abajo.
     password: crypto.randomUUID() + crypto.randomUUID(),
@@ -185,14 +194,26 @@ export async function PATCH(request: NextRequest) {
   const id = texto(cuerpo.id);
   if (!id)
     return NextResponse.json({ error: "Falta el usuario" }, { status: 400 });
+
+  const nombre = texto(cuerpo.nombre);
+
+  // SOBRE UNO MISMO SE CAMBIA EL NOMBRE, NO LOS PERMISOS.
+  //
+  // Sacarse el propio rol es la única forma de quedarse afuera para siempre: no
+  // queda nadie que pueda devolverlo desde la pantalla. El nombre no tiene ese
+  // problema y hace falta poder ponérselo, así que se guarda y se avisa que lo
+  // demás no se tocó — en vez de rechazar todo y dejar sin explicación por qué.
   if (id === yo) {
-    return NextResponse.json(
-      {
-        error:
-          "No podés cambiar tus propios permisos: sería la forma de quedarte afuera.",
-      },
-      { status: 400 },
-    );
+    const { error: fallo } = await cliente.auth.admin.updateUserById(id, {
+      user_metadata: { nombre },
+    });
+    if (fallo)
+      return NextResponse.json({ error: fallo.message }, { status: 400 });
+    return NextResponse.json({
+      ok: true,
+      aviso:
+        "Se guardó tu nombre. Tus propios permisos no se pueden cambiar desde acá.",
+    });
   }
 
   const permisos = claim(cuerpo);
@@ -208,6 +229,7 @@ export async function PATCH(request: NextRequest) {
 
   const { error: fallo } = await cliente.auth.admin.updateUserById(id, {
     app_metadata: permisos,
+    user_metadata: { nombre },
   });
   if (fallo)
     return NextResponse.json({ error: fallo.message }, { status: 400 });
