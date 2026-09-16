@@ -372,6 +372,7 @@ Cada usuario de Supabase Auth lleva su rol en `app_metadata`:
 | `vendedor` | Únicamente su propia página de objetivos |
 | `responsable_meli` | Únicamente la sección Venta minorista |
 | `admin_tn` | Únicamente Operaciones → Precios TN — Comparador |
+| `personalizado` | Los módulos que le marcaron en **Mi cuenta → Usuarios** |
 | *(sin claim)* | **Nada** |
 
 Dos advertencias que importan:
@@ -392,10 +393,44 @@ Dos advertencias que importan:
   ver la facturación de la empresa entera. Por eso hay que **cargar el claim
   antes de desplegar**, o el usuario que ya existía se queda sin acceso.
 
-### Cómo se asigna
+### Lo normal: el panel de Usuarios
 
-`app_metadata` **no se puede editar desde el dashboard de Supabase** (solo
-muestra el `user_metadata`). Se carga con un `update` en el SQL Editor:
+**Mi cuenta → Usuarios**, y lo ve únicamente el `superadmin`. Desde ahí se crea
+una persona con su mail y se le marcan casillas: qué módulos ve, y en los dos
+que se puede, si además edita.
+
+| Módulo | Qué significa "puede editar" |
+|---|---|
+| Compras | mandar órdenes de compra al ERP |
+| Precios TN | aprobar y rechazar cambios de precio, y correr la comparación |
+| los demás | nada: se ven o no se ven |
+
+Tres cosas que conviene saber antes de usarlo:
+
+- **Ver y editar dejaron de ser lo mismo.** Antes cada rol traía las dos juntas
+  —quien veía Precios TN podía aprobar— y no había forma de dar una sin la otra.
+  Ahora "Tienda Nube" puede ser mirar el tablero, o además aprobar precios.
+- **Editar Compras pide el número de usuario de Sigma.** No es burocracia: la
+  orden queda firmada con ese número y no se puede deducir de nada nuestro. Sin
+  él, el permiso no serviría para nada y es mejor que se note al cargarlo.
+- **Al crear, sale un enlace** para que la persona ponga su contraseña. Vence en
+  una hora, sirve una vez y hay que mandarlo por privado: quien lo tenga entra a
+  esa cuenta. No hace falta que funcione el mail.
+
+Para sacarle el acceso a alguien se le destildan todos los módulos. **No se
+borra el usuario**: si mañana vuelve, se le marcan las casillas otra vez.
+
+El panel necesita `SUPABASE_SERVICE_ROLE_KEY` cargada en Vercel → Settings →
+Environment Variables (sale de Supabase → Project Settings → API → `service_role`).
+Es la llave que se saltea todas las reglas de la base, así que **va sin el
+prefijo `NEXT_PUBLIC_`**: con ese prefijo Next la publica en el JavaScript de la
+página. Si falta, el panel lo dice en vez de fallar raro.
+
+### A mano, cuando hace falta
+
+Los seis roles viejos siguen existiendo y no se tocan desde el panel: se cargan
+con un `update` en el SQL Editor. `app_metadata` **no se puede editar desde el
+dashboard de Supabase** (solo muestra el `user_metadata`):
 
 ```sql
 update auth.users

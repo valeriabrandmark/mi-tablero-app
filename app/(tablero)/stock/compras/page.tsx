@@ -2,7 +2,7 @@ import DashboardCompras from "@/components/DashboardCompras";
 import {
   permisoDelUsuario,
   puedeEscribirEnElERP,
-  usuarioSigmaDe,
+  datosSigmaDe,
 } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
@@ -38,7 +38,7 @@ export default async function ComprasPage() {
       // Con qué usuario de Sigma va a quedar firmada. Se muestra en el panel
       // de confirmación: la orden lleva el nombre de quien la manda, y eso
       // tiene que verse ANTES de mandarla, no después en el ERP.
-      usuarioSigma={usuarioSigmaDe(usuario?.email)?.nombre ?? null}
+      usuarioSigma={datosSigmaDe(permiso, usuario?.email)?.nombre ?? null}
     />
   );
 }

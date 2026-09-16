@@ -84,6 +84,9 @@ const NOMBRE_ROL: Record<Rol, string> = {
   vendedor: "Vendedor",
   responsable_meli: "Responsable Mercado Libre",
   admin_tn: "Administrador Tienda Nube",
+  // No dice qué ve porque depende de las casillas de cada uno: eso se mira en
+  // el panel de Usuarios, que es donde se puede cambiar.
+  personalizado: "Permisos a medida",
 };
 
 /**

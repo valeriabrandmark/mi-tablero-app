@@ -1,5 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { enConstruccion, permisoDelUsuario, puedeVer, puedeVerBorradores } from "@/lib/permisos";
+import {
+  enConstruccion,
+  permisoDelUsuario,
+  puedeEditar,
+  puedeVer,
+  puedeVerBorradores,
+} from "@/lib/permisos";
 import { TANDA_ESCRITURA } from "@/lib/precios-tn";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
@@ -202,7 +208,12 @@ async function ultimaCorrida(token: string, llave: Llave): Promise<CorridaGitHub
   };
 }
 
-async function autorizar() {
+/**
+ * `conEdicion` distingue mirar de hacer. El GET pregunta cómo viene la corrida
+ * —eso lo puede ver cualquiera que tenga el módulo— y el POST la dispara, que
+ * es lanzar un workflow y generar propuestas nuevas: eso ya es editar.
+ */
+async function autorizar(conEdicion = false) {
   if (!authConfigurada) return null;
   const permiso = permisoDelUsuario(await getUsuario());
   if (!puedeVer(permiso, "/api/precios-tn")) {
@@ -210,6 +221,12 @@ async function autorizar() {
   }
   if (enConstruccion("/precios-tn") && !puedeVerBorradores(permiso)) {
     return NextResponse.json({ error: "En construcción" }, { status: 403 });
+  }
+  if (conEdicion && !puedeEditar(permiso, "precios_tn")) {
+    return NextResponse.json(
+      { error: "Tu usuario puede ver Precios TN, pero no correr la comparación" },
+      { status: 403 },
+    );
   }
   return null;
 }
@@ -233,7 +250,7 @@ export async function GET(request: NextRequest) {
 
 /** Dispara uno de los dos workflows. */
 export async function POST(request: NextRequest) {
-  const rechazo = await autorizar();
+  const rechazo = await autorizar(true);
   if (rechazo) return rechazo;
 
   const token = process.env.GITHUB_TOKEN_PRECIOS;
