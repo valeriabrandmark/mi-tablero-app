@@ -3,6 +3,12 @@ import {
   VENDEDORES_OBJETIVOS,
   type VendedorObjetivos,
 } from "@/lib/constantes";
+import {
+  esModulo,
+  MODULOS,
+  moduloPermiteRuta,
+  type ClaveModulo,
+} from "@/lib/modulos";
 
 /**
  * Permisos del tablero.
@@ -27,6 +33,7 @@ import {
  * | `vendedor`         | Únicamente su propia página de objetivos          |
  * | `responsable_meli` | Únicamente la sección Venta minorista             |
  * | `admin_tn`         | Únicamente Precios TN — Comparador                |
+ * | `personalizado`    | Los módulos que le marcaron en el panel de Usuarios |
  *
  * `admin` y `superadmin` ven las mismas páginas, pero YA NO ES LO MISMO: las
  * páginas en construcción las ve sólo el `superadmin` (ver `enConstruccion` y
@@ -53,6 +60,7 @@ export const ROLES = [
   "vendedor",
   "responsable_meli",
   "admin_tn",
+  "personalizado",
 ] as const;
 export type Rol = (typeof ROLES)[number];
 
@@ -78,7 +86,24 @@ export type Permiso =
   | { rol: "supervisor" }
   | { rol: "responsable_meli" }
   | { rol: "admin_tn" }
-  | { rol: "vendedor"; vendedor: VendedorObjetivos };
+  | { rol: "vendedor"; vendedor: VendedorObjetivos }
+  | {
+      /**
+       * El permiso que arma el panel de Usuarios: en vez de un rol con un
+       * significado fijo, la lista de módulos que marcaron para esa persona.
+       *
+       * `editar` es SIEMPRE un subconjunto de `modulos` — no se puede editar
+       * algo que no se ve — y eso lo garantiza `permisoDelUsuario` al leerlo,
+       * no el panel: el claim se puede escribir a mano desde Supabase.
+       */
+      rol: "personalizado";
+      modulos: ClaveModulo[];
+      editar: ClaveModulo[];
+      /** Número de usuario de Sigma, para firmar las órdenes de compra. */
+      sigma: number | null;
+      /** Nombre con el que Sigma lo muestra, sólo para la pantalla. */
+      nombreSigma: string | null;
+    };
 
 /** Forma mínima del usuario de Supabase que hace falta acá. */
 type UsuarioConClaim =
@@ -116,7 +141,36 @@ export function permisoDelUsuario(usuario: UsuarioConClaim): Permiso | null {
   if (rol === "vendedor") {
     return vendedor ? { rol, vendedor } : null;
   }
+
+  if (rol === "personalizado") {
+    const modulos = listaDeModulos(meta.modulos);
+    // SIN MÓDULOS NO HAY PERMISO, igual que un vendedor sin vendedor: si el
+    // claim quedó a medio escribir, que se quede afuera y llame.
+    if (modulos.length === 0) return null;
+
+    // `editar` se recorta contra `modulos` acá y no en el panel. El claim se
+    // puede escribir a mano desde Supabase, así que "editar algo que no ve" es
+    // un estado que hay que descartar en el lugar donde se lee, no donde se
+    // escribe.
+    const editar = listaDeModulos(meta.editar).filter((m) => modulos.includes(m));
+    const sigma = Number(meta.sigma);
+
+    return {
+      rol,
+      modulos,
+      editar,
+      sigma: Number.isInteger(sigma) && sigma > 0 ? sigma : null,
+      nombreSigma: texto(meta.nombre_sigma),
+    };
+  }
+
   return { rol }; // superadmin | admin | supervisor | responsable_meli | admin_tn
+}
+
+/** Las claves de módulo válidas de un valor cualquiera del claim. */
+function listaDeModulos(valor: unknown): ClaveModulo[] {
+  if (!Array.isArray(valor)) return [];
+  return valor.filter(esModulo);
 }
 
 const PAGINAS_OBJETIVOS = VENDEDORES_OBJETIVOS.map(
@@ -214,6 +268,13 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   // esté arriba no es estilo, es lo único que deja a `admin` afuera.
   if (esDePreciosTn(pathname) || esApiPreciosTn(pathname)) {
     return permiso.rol === "superadmin" || permiso.rol === "admin_tn";
+  }
+
+  // EL PERSONALIZADO SE RESUELVE ENTERO ACÁ: lo suyo es la lista de módulos y
+  // nada más. Va antes que los roles viejos porque no comparte ninguna de sus
+  // reglas, y deja el resto de la función como estaba.
+  if (permiso.rol === "personalizado") {
+    return moduloPermiteRuta(permiso.modulos, pathname);
   }
 
   if (permiso.rol === "superadmin" || permiso.rol === "admin") return true;
@@ -320,18 +381,73 @@ export function usuarioSigmaDe(email: string | null | undefined) {
 }
 
 /**
+ * Quién puede EDITAR en un módulo, además de verlo.
+ *
+ * Hay dos maneras de tener el permiso y conviven a propósito:
+ *
+ *   - por LISTA, como venía: `USUARIOS_ERP` para Compras, y el rol para Precios
+ *     TN, donde ver el módulo y poder aprobar eran la misma cosa;
+ *   - por CASILLA, si el permiso es `personalizado`: lo que marcaron en el
+ *     panel de Usuarios.
+ *
+ * Ver el módulo es condición previa y se chequea igual: sin `puedeVer` no hay
+ * nada que editar. Esta función contesta la segunda mitad.
+ */
+export function puedeEditar(
+  permiso: Permiso | null,
+  modulo: ClaveModulo,
+  email?: string | null,
+): boolean {
+  if (!permiso) return false;
+  if (permiso.rol === "personalizado") return permiso.editar.includes(modulo);
+  if (permiso.rol === "superadmin") return true;
+
+  // Los roles viejos, uno por uno y no por descarte: un rol nuevo no tiene por
+  // qué heredar permiso de escritura porque sí.
+  if (modulo === "precios_tn") return permiso.rol === "admin_tn";
+  if (modulo === "compras") {
+    return permiso.rol === "admin" && usuarioSigmaDe(email) != null;
+  }
+  return false;
+}
+
+/**
+ * El usuario de Sigma con el que se firma una orden, o `null`.
+ *
+ * Sale de dos lados, y el orden importa: primero el claim de la persona —que es
+ * lo que carga el panel de Usuarios— y si no está, la lista de acá arriba, que
+ * es como estaban cargados los dos primeros. Así conviven sin que haya que
+ * migrar a nadie.
+ */
+export function datosSigmaDe(
+  permiso: Permiso | null,
+  email: string | null | undefined,
+): { sigma: number; nombre: string } | null {
+  if (permiso?.rol === "personalizado" && permiso.sigma != null) {
+    return {
+      sigma: permiso.sigma,
+      nombre: permiso.nombreSigma ?? (email ?? "").split("@")[0].toUpperCase(),
+    };
+  }
+  return usuarioSigmaDe(email);
+}
+
+/**
  * Quién puede escribir en el ERP: mandar una orden de compra a Sigma.
  *
- * El rol sigue contando: la persona tiene que poder ver Compras. La lista dice
- * quién, además, puede apretar el botón.
+ * Tres condiciones, y hacen falta las tres: ver Compras, tener el permiso de
+ * editar, y tener número de Sigma. La última no es burocracia — sin ese número
+ * la orden no se puede firmar, así que un permiso sin número no sirve para
+ * nada y es mejor que se note acá que en el momento de mandar.
  */
 export function puedeEscribirEnElERP(
   permiso: Permiso | null,
   email: string | null | undefined,
 ): boolean {
   if (!permiso) return false;
-  if (permiso.rol !== "superadmin" && permiso.rol !== "admin") return false;
-  return usuarioSigmaDe(email) != null;
+  if (!puedeVer(permiso, "/stock/compras")) return false;
+  if (!puedeEditar(permiso, "compras", email)) return false;
+  return datosSigmaDe(permiso, email) != null;
 }
 
 /** Adónde mandar al usuario cuando entra, o cuando pide algo que no puede ver. */
@@ -344,6 +460,12 @@ export function paginaInicial(permiso: Permiso | null): string {
   // El `admin_tn` no tiene permiso sobre ninguna otra página: mandarlo al
   // tablero de mayoristas sería mandarlo a un 403 apenas entra.
   if (permiso.rol === "admin_tn") return RAIZ_PRECIOS_TN;
+  // El personalizado entra por la primera página de su primer módulo, en el
+  // orden del catálogo. Mandarlo a mayoristas sería mandarlo a un 403.
+  if (permiso.rol === "personalizado") {
+    const primero = MODULOS.find((m) => permiso.modulos.includes(m.clave));
+    return primero?.rutas[0] ?? "/cuenta";
+  }
   return "/ventas-mayoristas";
 }
 
@@ -354,6 +476,11 @@ export function puedeVerVendedor(
 ): boolean {
   if (!permiso) return false;
   if (permiso.rol === "vendedor") return permiso.vendedor === vendedor;
+  // El personalizado los ve si le marcaron Objetivos, y a los cuatro: la
+  // casilla es del módulo entero. Un permiso "sólo este vendedor" es lo que ya
+  // hace el rol `vendedor`, y mezclar los dos daría dos formas de decir lo
+  // mismo que pueden contradecirse.
+  if (permiso.rol === "personalizado") return permiso.modulos.includes("objetivos");
   // Se lista explícitamente en vez de `return true`: con el `true` de antes,
   // cada rol nuevo pasaba a ver los objetivos de los cuatro vendedores sin que
   // nadie lo decidiera — que es justo lo que NO tiene que ver el de Meli.

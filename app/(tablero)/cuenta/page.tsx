@@ -1,5 +1,7 @@
 import FormularioCambiarContrasena from "@/components/FormularioCambiarContrasena";
+import PanelUsuarios from "@/components/PanelUsuarios";
 import { Panel } from "@/components/ui";
+import { permisoDelUsuario } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
 
@@ -8,6 +10,12 @@ export const metadata = { title: "Mi cuenta — Tablero Brandmark" };
 
 export default async function CuentaPage() {
   const usuario = authConfigurada ? await getUsuario() : null;
+
+  // EL PANEL DE USUARIOS SE DECIDE EN EL SERVIDOR. Esconderlo desde el cliente
+  // sería sólo cosmética: el que importa es el chequeo de /api/usuarios, que
+  // vuelve a pedir superadmin. Pero no tiene sentido pintar una sección que a
+  // los demás les va a contestar 403.
+  const esSuperadmin = permisoDelUsuario(usuario)?.rol === "superadmin";
 
   return (
     <div className="max-w-2xl space-y-4">
@@ -25,6 +33,15 @@ export default async function CuentaPage() {
           </p>
         )}
       </Panel>
+
+      {esSuperadmin && (
+        <Panel
+          titulo="Usuarios"
+          nota="Quién entra al tablero, qué ve y qué puede editar"
+        >
+          <PanelUsuarios />
+        </Panel>
+      )}
     </div>
   );
 }

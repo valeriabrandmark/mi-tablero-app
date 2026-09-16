@@ -1,5 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { enConstruccion, permisoDelUsuario, puedeVer, puedeVerBorradores } from "@/lib/permisos";
+import {
+  enConstruccion,
+  permisoDelUsuario,
+  puedeEditar,
+  puedeVer,
+  puedeVerBorradores,
+} from "@/lib/permisos";
 import {
   aprobarFiltradas,
   aprobarPorIds,
@@ -44,6 +50,16 @@ export async function POST(request: NextRequest) {
     }
     if (enConstruccion("/precios-tn") && !puedeVerBorradores(permiso)) {
       return NextResponse.json({ error: "En construcción" }, { status: 403 });
+    }
+    // VER Y APROBAR DEJARON DE SER LO MISMO. Antes alcanzaba con tener el
+    // módulo, porque los dos únicos roles que lo tenían eran los que aprueban.
+    // Desde el panel de Usuarios se puede dar Precios TN en modo "sólo ver", y
+    // esta es la línea que hace que ese "sólo ver" signifique algo.
+    if (!puedeEditar(permiso, "precios_tn")) {
+      return NextResponse.json(
+        { error: "Tu usuario puede ver Precios TN, pero no aprobar cambios" },
+        { status: 403 },
+      );
     }
     quien = usuario?.email ?? "sin email";
   }

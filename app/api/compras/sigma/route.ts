@@ -7,7 +7,7 @@ import {
 import {
   permisoDelUsuario,
   puedeEscribirEnElERP,
-  usuarioSigmaDe,
+  datosSigmaDe,
 } from "@/lib/permisos";
 import { getArticulosParaOrden } from "@/lib/queries-compras";
 import { guardarOrdenEnviada } from "@/lib/queries-ordenes";
@@ -184,8 +184,8 @@ export async function POST(request: NextRequest) {
         { status: 403 },
       );
     }
-    // El `!` es seguro: `puedeEscribirEnElERP` ya comprobó que está en la lista.
-    usuarioSigma = usuarioSigmaDe(usuario)!.sigma;
+    // El `!` es seguro: `puedeEscribirEnElERP` ya comprobó que hay número.
+    usuarioSigma = datosSigmaDe(permiso, usuario)!.sigma;
   }
 
   // SIN SESIÓN NO SE MANDA, NI SIQUIERA EN LOCAL. La pantalla deja apretar el
