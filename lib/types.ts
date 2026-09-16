@@ -142,6 +142,17 @@ export type KpisLogistica = {
   rentabilidadAjustadaPct: number | null;
 };
 
+/**
+ * Un punto del historial mensual de cuentas corrientes, con el DÍA del que es
+ * la foto.
+ *
+ * La fecha no es decoración: cada barra es una foto de un día suelto —la más
+ * nueva de ese mes— y no el cierre del mes. El mes en curso se fotografía con
+ * lo que haya hasta hoy, así que sin la fecha a la vista una barra más baja se
+ * lee como "bajó la mora" cuando puede ser "todavía no terminó el mes".
+ */
+export type PuntoHistorial = PuntoEtiqueta & { fecha: string | null };
+
 export type PuntoEtiqueta = {
   label: string;
   valor: number;
@@ -228,7 +239,7 @@ export type DashboardCuentas = {
   deudaPorCategoria: PuntoEtiqueta[];
   clientesPorCategoria: PuntoEtiqueta[];
   aging: PuntoEtiqueta[];
-  historial: PuntoEtiqueta[];
+  historial: PuntoHistorial[];
   cancelacionesPorVendedor: PuntoEtiqueta[];
   generadoEn: string;
 };

@@ -23,9 +23,29 @@ import type {
   FilaCliente,
   FiltrosCuentas,
   OpcionesCuentas,
+  PuntoHistorial,
 } from "@/lib/types";
 
 type Respuesta = DashboardCuentas & { opciones: OpcionesCuentas | null };
+
+/**
+ * Qué dice el pie del gráfico de evolución.
+ *
+ * DICE LA FECHA DE LA ÚLTIMA FOTO, no sólo cuántos períodos hay. Cada barra es
+ * una foto de un día —la más nueva que se tomó ese mes— y no el cierre del mes:
+ * la del mes en curso sale con lo que haya hasta hoy. Sin la fecha a la vista,
+ * una barra más baja se lee como "bajó la mora" cuando puede ser "todavía no
+ * terminó el mes".
+ *
+ * Y si la última foto quedó vieja —nadie subió cuentas corrientes en semanas—
+ * la fecha es la única señal de que el gráfico no se está moviendo.
+ */
+function notaHistorial(historial: PuntoHistorial[]): string {
+  if (historial.length === 0) return "Sin historial cargado";
+  const ultima = historial[historial.length - 1].fecha;
+  const periodos = `${historial.length} ${historial.length === 1 ? "período" : "períodos"}`;
+  return ultima ? `${periodos} · última foto ${ultima}` : periodos;
+}
 
 /** Colores fijos por categoría: el semáforo tiene que leerse igual siempre. */
 const COLOR_CATEGORIA: Record<string, string> = {
@@ -477,7 +497,7 @@ export default function DashboardCuentasPage() {
 
           <Panel
             titulo="Evolución del saldo vencido"
-            nota={`${data.historial.length} períodos cargados`}
+            nota={notaHistorial(data.historial)}
           >
             <BarrasCategoria
               datos={data.historial.map((d) => ({

@@ -5,6 +5,7 @@ import type {
   FiltrosCuentas,
   OpcionesCuentas,
   PuntoEtiqueta,
+  PuntoHistorial,
 } from "@/lib/types";
 import { agregarFiltro, vacio } from "@/lib/filtros";
 
@@ -226,10 +227,27 @@ async function getAging(f: FiltrosCuentas): Promise<PuntoEtiqueta[]> {
   );
 }
 
-async function getHistorial(f: FiltrosCuentas): Promise<PuntoEtiqueta[]> {
+/**
+ * La evolución del saldo vencido, un punto por mes.
+ *
+ * DE DÓNDE SALE. `_historial_scoring` es una FOTO: una fila por cliente y por
+ * mes, con el día en que se sacó. La saca `foto_cuentas.py` desde
+ * `_scoring` —que dice cómo está cada cliente hoy y se pisa entera en cada
+ * carga— así que lo que no se fotografió antes de que la pisaran no existe.
+ *
+ * Por eso viaja `fecha`: la barra del mes en curso es la foto de un día suelto,
+ * no el cierre del mes, y la pantalla lo dice para que una barra más baja no se
+ * lea como "bajó la mora" cuando es "todavía no terminó el mes".
+ *
+ * `fecha` es texto DD/MM/YYYY, así que el máximo se toma sobre la fecha de
+ * verdad: en texto, 09/09 sería mayor que 16/09.
+ */
+async function getHistorial(f: FiltrosCuentas): Promise<PuntoHistorial[]> {
   const w = whereCuentas(f, "h");
-  return query<PuntoEtiqueta>(
-    `select h.periodo as label, coalesce(sum(h.saldo_vencido), 0)::float8 as valor
+  return query<PuntoHistorial>(
+    `select h.periodo as label,
+            coalesce(sum(h.saldo_vencido), 0)::float8 as valor,
+            to_char(max(to_date(h.fecha, 'DD/MM/YYYY')), 'DD/MM/YYYY') as fecha
      from bronze.cuentas_corrientes_historial_scoring h
      where ${w.sql}
      group by h.periodo order by h.periodo`,
