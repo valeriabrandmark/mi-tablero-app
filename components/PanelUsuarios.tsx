@@ -119,6 +119,39 @@ export default function PanelUsuarios() {
   );
 }
 
+/**
+ * El enlace para poner la contraseña, con su advertencia.
+ *
+ * Se muestra igual al crear a alguien y al pedirle uno nuevo: es la misma cosa
+ * y tiene los mismos cuidados, así que se escribe una sola vez.
+ */
+function EnlaceAcceso({ enlace }: { enlace: string }) {
+  return (
+    <div className="border-line mt-3 rounded-lg border p-3">
+      {/* EL ENLACE ES UNA LLAVE: quien lo tenga entra a esa cuenta. Por eso se
+          manda por privado y no se deja anotado — vence y se usa una sola vez. */}
+      <p className="text-muted text-xs">
+        Sirve una sola vez y vence —por defecto, en una hora—. Mandáselo por
+        privado: quien lo tenga entra a esa cuenta.
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <input
+          readOnly
+          value={enlace}
+          className={`${CLASE_INPUT} font-mono text-xs`}
+        />
+        <button
+          type="button"
+          onClick={() => void navigator.clipboard?.writeText(enlace)}
+          className="border-line shrink-0 rounded-lg border px-3 py-2 text-xs"
+        >
+          Copiar
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Una persona: qué ve, qué edita, y el formulario para cambiarlo. */
 function FilaUsuario({
   usuario,
@@ -133,6 +166,28 @@ function FilaUsuario({
 }) {
   const aMedida = usuario.rol === "personalizado";
   const sinAcceso = aMedida && usuario.modulos.length === 0;
+  const [enlace, setEnlace] = useState<string | null>(null);
+  const [pidiendo, setPidiendo] = useState(false);
+  const [fallo, setFallo] = useState<string | null>(null);
+
+  async function pedirEnlace() {
+    setPidiendo(true);
+    setFallo(null);
+    try {
+      const res = await fetch("/api/usuarios/enlace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: usuario.email }),
+      });
+      const cuerpo = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(cuerpo?.error ?? `Error ${res.status}`);
+      setEnlace(`${window.location.origin}${cuerpo.ruta}`);
+    } catch (e) {
+      setFallo(e instanceof Error ? e.message : "No se pudo generar el enlace");
+    } finally {
+      setPidiendo(false);
+    }
+  }
 
   return (
     <div className="border-line rounded-lg border p-3">
@@ -156,14 +211,30 @@ function FilaUsuario({
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={onAbrir}
-          className="border-line rounded-lg border px-3 py-1.5 text-xs"
-        >
-          {abierto ? "Cerrar" : "Permisos"}
-        </button>
+        <div className="flex shrink-0 gap-2">
+          {/* El enlace de acceso sirve para las dos cosas que pasan de verdad:
+              la persona que no llegó a usar el primero, y la que se olvidó la
+              contraseña cuando el mail del proyecto no está configurado. */}
+          <button
+            type="button"
+            onClick={() => void pedirEnlace()}
+            disabled={pidiendo}
+            className="border-line rounded-lg border px-3 py-1.5 text-xs disabled:opacity-60"
+          >
+            {pidiendo ? "Generando…" : "Enlace de acceso"}
+          </button>
+          <button
+            type="button"
+            onClick={onAbrir}
+            className="border-line rounded-lg border px-3 py-1.5 text-xs"
+          >
+            {abierto ? "Cerrar" : "Permisos"}
+          </button>
+        </div>
       </div>
+
+      {fallo && <p className="mt-2 text-xs text-rose-400">{fallo}</p>}
+      {enlace && <EnlaceAcceso enlace={enlace} />}
 
       {abierto && (
         <div className="border-line mt-3 border-t pt-3">
@@ -230,10 +301,15 @@ function FormularioAlta({ onCreado }: { onCreado: () => void }) {
             if (!res.ok)
               throw new Error(cuerpo?.error ?? `Error ${res.status}`);
             setCreado(email);
-            setEnlace(cuerpo.enlace ?? null);
+            // El origen lo pone el navegador: es el único que sabe con certeza
+            // desde qué dirección se está usando el tablero. El servidor
+            // tendría que adivinarlo entre proxys y encabezados reenviados.
+            setEnlace(
+              cuerpo.ruta ? `${window.location.origin}${cuerpo.ruta}` : null,
+            );
             setEmail("");
             onCreado();
-            return cuerpo.enlace
+            return cuerpo.ruta
               ? null
               : "Usuario creado. No se pudo generar el enlace: decile que entre con «¿Olvidaste tu contraseña?».";
           }}
@@ -241,31 +317,12 @@ function FormularioAlta({ onCreado }: { onCreado: () => void }) {
       </div>
 
       {creado && enlace && (
-        <div className="border-line mt-3 rounded-lg border p-3">
+        <div className="mt-3">
           <p className="text-sm">
             <span className="font-medium">{creado}</span> ya puede entrar.
             Mandale este enlace para que ponga su contraseña:
           </p>
-          {/* EL ENLACE ES UNA LLAVE: quien lo tenga entra a esa cuenta. Por eso
-              se manda por privado y no se deja anotado — vence en una hora y se
-              usa una sola vez. */}
-          <p className="text-muted mt-1 text-xs">
-            Vence en una hora y sirve una sola vez. Mandáselo por privado.
-          </p>
-          <div className="mt-2 flex items-center gap-2">
-            <input
-              readOnly
-              value={enlace}
-              className={`${CLASE_INPUT} font-mono text-xs`}
-            />
-            <button
-              type="button"
-              onClick={() => void navigator.clipboard?.writeText(enlace)}
-              className="border-line shrink-0 rounded-lg border px-3 py-2 text-xs"
-            >
-              Copiar
-            </button>
-          </div>
+          <EnlaceAcceso enlace={enlace} />
         </div>
       )}
     </div>

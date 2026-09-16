@@ -413,9 +413,20 @@ Tres cosas que conviene saber antes de usarlo:
 - **Editar Compras pide el número de usuario de Sigma.** No es burocracia: la
   orden queda firmada con ese número y no se puede deducir de nada nuestro. Sin
   él, el permiso no serviría para nada y es mejor que se note al cargarlo.
-- **Al crear, sale un enlace** para que la persona ponga su contraseña. Vence en
-  una hora, sirve una vez y hay que mandarlo por privado: quien lo tenga entra a
-  esa cuenta. No hace falta que funcione el mail.
+- **Al crear, sale un enlace** para que la persona ponga su contraseña. Sirve
+  una vez, vence, y hay que mandarlo por privado: quien lo tenga entra a esa
+  cuenta. No hace falta que funcione el mail. Si no llegó a usarlo, el botón
+  **Enlace de acceso** de su fila genera uno nuevo —y ese mismo botón es el
+  rescate cuando alguien se olvida la contraseña y el correo del proyecto no
+  está configurado—.
+
+  El enlace apunta a `/auth/confirmar` de este tablero y **no** al `action_link`
+  que devuelve Supabase. Ese último consume el token al abrirlo y después
+  redirige a la *Site URL* del proyecto: mientras esa Site URL estuvo en
+  `http://localhost:3000`, el token se quemaba en el viaje y el segundo intento
+  decía `otp_expired`. Armándolo contra `/auth/confirmar` —la misma ruta que usa
+  «¿Olvidaste tu contraseña?»— no depende de la Site URL ni de la lista de
+  redirecciones permitidas.
 
 Para sacarle el acceso a alguien se le destildan todos los módulos. **No se
 borra el usuario**: si mañana vuelve, se le marcan las casillas otra vez.
