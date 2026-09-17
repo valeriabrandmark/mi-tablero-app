@@ -1,3 +1,4 @@
+import { cacheado } from "@/lib/cache";
 import { query } from "@/lib/db";
 import type {
   ComprobanteVencido,
@@ -405,7 +406,7 @@ async function getComprobantesVencidos(
 
 // --- Opciones de los selectores ----------------------------------------------
 
-export async function getOpcionesObjetivos(): Promise<OpcionesObjetivos> {
+async function getOpcionesObjetivosDirecto(): Promise<OpcionesObjetivos> {
   // Solo los meses. La lista de grupos se fue con el selector de Grupo: los
   // grupos se siguen filtrando haciendo click en su barra, que es donde se los
   // está mirando, así que la consulta no tenía a quién servir.
@@ -427,7 +428,7 @@ export async function getOpcionesObjetivos(): Promise<OpcionesObjetivos> {
  * Si la base no responde devuelve el mes vigente igual, así el error lo muestra
  * el dashboard con su propio cartel en vez de romper la página entera.
  */
-export async function getMesInicialObjetivos(
+async function getMesInicialObjetivosDirecto(
   vendedor: string,
 ): Promise<string> {
   const vigente = mesComercialActual();
@@ -449,7 +450,7 @@ export async function getMesInicialObjetivos(
 
 // --- Dashboard completo ------------------------------------------------------
 
-export async function getDashboardObjetivos(
+async function getDashboardObjetivosDirecto(
   f: FiltrosObjetivos,
 ): Promise<DashboardObjetivos> {
   const [
@@ -478,3 +479,26 @@ export async function getDashboardObjetivos(
     generadoEn: new Date().toISOString(),
   };
 }
+
+
+/* ---------------------------------------------------------------------------
+   LAS ENTRADAS QUE CONSUME LA RUTA, CACHEADAS.
+
+   Se envuelven acá al final y no en la ruta para que cualquier consumidor
+   futuro herede el caché sin acordarse de pedirlo. La version sin cachear
+   queda como `...Directo` por si alguna vez hace falta saltearlo.
+
+   Ver lib/cache.ts para por que esto es seguro (y cuando dejaria de serlo).
+   --------------------------------------------------------------------------- */
+export const getOpcionesObjetivos = cacheado(
+  "objetivos:opciones",
+  getOpcionesObjetivosDirecto,
+);
+export const getMesInicialObjetivos = cacheado(
+  "objetivos:mes-inicial",
+  getMesInicialObjetivosDirecto,
+);
+export const getDashboardObjetivos = cacheado(
+  "objetivos:dashboard",
+  getDashboardObjetivosDirecto,
+);

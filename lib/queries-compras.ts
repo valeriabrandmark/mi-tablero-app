@@ -1,3 +1,4 @@
+import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { COSTOS_VIGENTES_POR_MES, ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
@@ -510,7 +511,7 @@ async function getSellInCargado(mes: string): Promise<number> {
   return Number(fila?.v ?? 0);
 }
 
-export async function getOpcionesCompras() {
+async function getOpcionesComprasDirecto() {
   // Las opciones de los selectores no dependen de la cobertura elegida --son
   // la lista de proveedores, marcas y grupos que existen--, así que va el
   // objetivo de siempre.
@@ -556,7 +557,7 @@ async function getComprasHasta(): Promise<string | null> {
   return fila?.v ?? null;
 }
 
-export async function getDashboardCompras(
+async function getDashboardComprasDirecto(
   f: FiltrosCompras,
 ): Promise<DashboardCompras> {
   const meses = await getMeses();
@@ -645,3 +646,22 @@ export async function getArticulosParaOrden(
     costoLista: num(r.costo_lista),
   }));
 }
+
+
+/* ---------------------------------------------------------------------------
+   LAS ENTRADAS QUE CONSUME LA RUTA, CACHEADAS.
+
+   Se envuelven acá al final y no en la ruta para que cualquier consumidor
+   futuro herede el caché sin acordarse de pedirlo. La version sin cachear
+   queda como `...Directo` por si alguna vez hace falta saltearlo.
+
+   Ver lib/cache.ts para por que esto es seguro (y cuando dejaria de serlo).
+   --------------------------------------------------------------------------- */
+export const getOpcionesCompras = cacheado(
+  "compras:opciones",
+  getOpcionesComprasDirecto,
+);
+export const getDashboardCompras = cacheado(
+  "compras:dashboard",
+  getDashboardComprasDirecto,
+);

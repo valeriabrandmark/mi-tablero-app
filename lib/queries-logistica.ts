@@ -1,3 +1,4 @@
+import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import type {
   DashboardLogistica,
@@ -244,7 +245,7 @@ async function getComprobantes(
 
 // --- Opciones de los selectores ----------------------------------------------
 
-export async function getOpcionesLogistica(): Promise<OpcionesLogistica> {
+async function getOpcionesLogisticaDirecto(): Promise<OpcionesLogistica> {
   const w = whereBase({});
   const columna = (col: string, orden: string) =>
     query<{ valor: string }>(
@@ -288,7 +289,7 @@ export async function getOpcionesLogistica(): Promise<OpcionesLogistica> {
 
 // --- Dashboard completo ------------------------------------------------------
 
-export async function getDashboardLogistica(
+async function getDashboardLogisticaDirecto(
   f: FiltrosLogistica,
 ): Promise<DashboardLogistica> {
   const [totales, envios, graficos, comprobantes] = await Promise.all([
@@ -339,3 +340,22 @@ export async function getDashboardLogistica(
     generadoEn: new Date().toISOString(),
   };
 }
+
+
+/* ---------------------------------------------------------------------------
+   LAS ENTRADAS QUE CONSUME LA RUTA, CACHEADAS.
+
+   Se envuelven acá al final y no en la ruta para que cualquier consumidor
+   futuro herede el caché sin acordarse de pedirlo. La version sin cachear
+   queda como `...Directo` por si alguna vez hace falta saltearlo.
+
+   Ver lib/cache.ts para por que esto es seguro (y cuando dejaria de serlo).
+   --------------------------------------------------------------------------- */
+export const getOpcionesLogistica = cacheado(
+  "logistica:opciones",
+  getOpcionesLogisticaDirecto,
+);
+export const getDashboardLogistica = cacheado(
+  "logistica:dashboard",
+  getDashboardLogisticaDirecto,
+);

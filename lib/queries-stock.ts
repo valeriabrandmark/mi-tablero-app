@@ -1,3 +1,4 @@
+import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import {
@@ -366,7 +367,7 @@ async function getFilas(f: FiltrosStock): Promise<FilaStock[]> {
   }));
 }
 
-export async function getOpcionesStock() {
+async function getOpcionesStockDirecto() {
   const params = [VENTANA_POR_DEFECTO, PROVEEDORES_NO_MERCADERIA, DEPOSITO_POR_DEFECTO];
   // UNA sola consulta y no tres. `BASE` es cara --cruza ocho fuentes-- y antes
   // se la corría una vez por cada selector, encima de las cuatro que ya hace el
@@ -430,7 +431,7 @@ async function getAntiguedadAl(): Promise<string | null> {
   }
 }
 
-export async function getDashboardStock(f: FiltrosStock): Promise<DashboardStock> {
+async function getDashboardStockDirecto(f: FiltrosStock): Promise<DashboardStock> {
   const [kpis, tramos, proveedores, filas, comprasHasta, antiguedadAl] =
     await Promise.all([
       getKpis(f),
@@ -454,3 +455,22 @@ export async function getDashboardStock(f: FiltrosStock): Promise<DashboardStock
     generadoEn: new Date().toISOString(),
   };
 }
+
+
+/* ---------------------------------------------------------------------------
+   LAS ENTRADAS QUE CONSUME LA RUTA, CACHEADAS.
+
+   Se envuelven acá al final y no en la ruta para que cualquier consumidor
+   futuro herede el caché sin acordarse de pedirlo. La version sin cachear
+   queda como `...Directo` por si alguna vez hace falta saltearlo.
+
+   Ver lib/cache.ts para por que esto es seguro (y cuando dejaria de serlo).
+   --------------------------------------------------------------------------- */
+export const getOpcionesStock = cacheado(
+  "stock:opciones",
+  getOpcionesStockDirecto,
+);
+export const getDashboardStock = cacheado(
+  "stock:dashboard",
+  getDashboardStockDirecto,
+);

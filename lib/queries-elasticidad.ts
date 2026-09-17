@@ -1,3 +1,4 @@
+import { cacheado } from "@/lib/cache";
 import { query } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import {
@@ -359,7 +360,7 @@ async function getKpis(f: FiltrosElasticidad, bandas: ResumenBanda[]): Promise<K
   };
 }
 
-export async function getOpcionesElasticidad(f: FiltrosElasticidad) {
+async function getOpcionesElasticidadDirecto(f: FiltrosElasticidad) {
   // Sin los filtros de proveedor/marca puestos: si se filtrara por proveedor,
   // el desplegable de proveedores mostraría únicamente el ya elegido y no se
   // podría cambiar sin limpiar antes.
@@ -379,7 +380,7 @@ export async function getOpcionesElasticidad(f: FiltrosElasticidad) {
   return { proveedores: proveedores.map((r) => r.v), marcas: marcas.map((r) => r.v) };
 }
 
-export async function getDashboardElasticidad(
+async function getDashboardElasticidadDirecto(
   f: FiltrosElasticidad,
 ): Promise<DashboardElasticidad> {
   const bandas = await getBandas(f);
@@ -477,7 +478,7 @@ async function getVentasPorDia(f: FiltrosElasticidad) {
 
 const vacioSemana = () => ({ unidades: 0, margen: 0, facturacion: 0, diasSinStock: 0 });
 
-export async function getDashboardResultados(
+async function getDashboardResultadosDirecto(
   f: FiltrosElasticidad,
 ): Promise<DashboardResultados> {
   // Los días sin stock y los días mirados se piden por semana, con el rango de
@@ -565,3 +566,26 @@ export async function getDashboardResultados(
     generadoEn: new Date().toISOString(),
   };
 }
+
+
+/* ---------------------------------------------------------------------------
+   LAS ENTRADAS QUE CONSUME LA RUTA, CACHEADAS.
+
+   Se envuelven acá al final y no en la ruta para que cualquier consumidor
+   futuro herede el caché sin acordarse de pedirlo. La version sin cachear
+   queda como `...Directo` por si alguna vez hace falta saltearlo.
+
+   Ver lib/cache.ts para por que esto es seguro (y cuando dejaria de serlo).
+   --------------------------------------------------------------------------- */
+export const getOpcionesElasticidad = cacheado(
+  "elasticidad:opciones",
+  getOpcionesElasticidadDirecto,
+);
+export const getDashboardElasticidad = cacheado(
+  "elasticidad:dashboard",
+  getDashboardElasticidadDirecto,
+);
+export const getDashboardResultados = cacheado(
+  "elasticidad:resultados",
+  getDashboardResultadosDirecto,
+);

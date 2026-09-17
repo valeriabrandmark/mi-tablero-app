@@ -1,3 +1,4 @@
+import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
@@ -403,7 +404,7 @@ async function getFilas(f: FiltrosAntiguedad): Promise<FilaAntiguedad[]> {
   }));
 }
 
-export async function getOpcionesAntiguedad() {
+async function getOpcionesAntiguedadDirecto() {
   const params = [PROVEEDORES_NO_MERCADERIA];
   const [proveedores, marcas, grupos] = await Promise.all([
     query<{ v: string }>(
@@ -476,7 +477,7 @@ async function getFotoAntiguedad(): Promise<{
   }
 }
 
-export async function getDashboardAntiguedad(
+async function getDashboardAntiguedadDirecto(
   f: FiltrosAntiguedad,
 ): Promise<DashboardAntiguedad> {
   const [kpis, antiguedad, vencimiento, filas, foto] = await Promise.all([
@@ -501,3 +502,22 @@ export async function getDashboardAntiguedad(
     generadoEn: new Date().toISOString(),
   };
 }
+
+
+/* ---------------------------------------------------------------------------
+   LAS ENTRADAS QUE CONSUME LA RUTA, CACHEADAS.
+
+   Se envuelven acá al final y no en la ruta para que cualquier consumidor
+   futuro herede el caché sin acordarse de pedirlo. La version sin cachear
+   queda como `...Directo` por si alguna vez hace falta saltearlo.
+
+   Ver lib/cache.ts para por que esto es seguro (y cuando dejaria de serlo).
+   --------------------------------------------------------------------------- */
+export const getOpcionesAntiguedad = cacheado(
+  "antiguedad:opciones",
+  getOpcionesAntiguedadDirecto,
+);
+export const getDashboardAntiguedad = cacheado(
+  "antiguedad:dashboard",
+  getDashboardAntiguedadDirecto,
+);

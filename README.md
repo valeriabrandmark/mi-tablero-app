@@ -562,6 +562,62 @@ lado.
 
 ---
 
+## La caché de las consultas
+
+Las rutas de la API están en `force-dynamic` y el navegador pide con
+`cache: "no-store"`: sin nada en el medio, cada click en un filtro vuelve a
+ejecutar el juego completo de consultas. Medido sobre la base el 16/09/2026, las
+de Stock, Stock Full, Compras y Trazabilidad tardan **entre 2,7 y 3,0 segundos
+cada una**, y cada pantalla dispara varias en paralelo.
+
+Con una persona no se nota. Con cinco filtrando a la vez es cinco veces el mismo
+trabajo sobre el mismo CPU: las consultas se encolan y esos 3 segundos se
+vuelven diez. El 24/08 el tablero saturó el disco de Supabase con uso normal, y
+el orquestador estuvo doce corridas seguidas en rojo por eso.
+
+`lib/cache.ts` lo resuelve: todas las visitas con los mismos filtros comparten
+**una sola ejecución**.
+
+### La clave lleva la versión de los datos
+
+Y ahí está todo el diseño. La clave de cada entrada incluye **cuándo terminó el
+pipeline por última vez** (`ops.estado`, la misma fila que mira
+`ops.despertar_orquestador`).
+
+Eso resuelve dos problemas de un TTL a secas:
+
+- **Mientras el pipeline no corra, la entrada vale.** Los tableros leen tablas
+  que sólo cambian una vez por hora: entre corrida y corrida el resultado es
+  literalmente el mismo. Con el TTL de 60 segundos que había antes, una persona
+  navegando volvía a pagar los tres segundos **cada minuto** sin ninguna razón.
+- **Apenas corre, la clave cambia sola.** No hay invalidación que mantener ni
+  ventana en la que se puedan ver datos viejos — que es justo lo que haría
+  parecer roto un botón de "actualizar ahora".
+
+Cuesta una consulta de una fila (~1 ms) por pedido. Si esa consulta falla, la
+caché sigue funcionando con la clave `sin-version`: no tira la pantalla abajo
+por no poder leer un timestamp.
+
+### Qué queda afuera, a propósito
+
+| Fuera de la caché | Por qué |
+|---|---|
+| Precios TN | ahí escribe la aplicación: aprobar un precio tiene que verse en el momento, no cuando corra el pipeline |
+| Órdenes de compra enviadas | ídem: las escribe el tablero |
+| `getArticulosParaOrden` | es el precio que viaja al ERP. Se lee fresco siempre |
+
+### Y un límite que hay que tener presente
+
+La clave son **los argumentos de la función, no el usuario**. Hoy eso es
+correcto porque el permiso se chequea en la ruta **antes** de llamar a la
+consulta, y con los mismos filtros todos los que tienen permiso ven lo mismo.
+
+El día que una consulta devuelva datos distintos según quién mira, **no** se
+puede envolver sin meter el usuario en la clave. Si no, una persona ve los
+números de otra.
+
+---
+
 ## Filtros
 
 **Todos los filtros son de selección múltiple.** El valor de un filtro es una
