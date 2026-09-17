@@ -1,3 +1,4 @@
+import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import type {
   DashboardCuentas,
@@ -269,7 +270,7 @@ async function getCancelaciones(f: FiltrosCuentas): Promise<PuntoEtiqueta[]> {
 
 // --- Opciones ----------------------------------------------------------------
 
-export async function getOpcionesCuentas(): Promise<OpcionesCuentas> {
+async function getOpcionesCuentasDirecto(): Promise<OpcionesCuentas> {
   const columna = (col: string) =>
     query<{ valor: string }>(
       `select distinct s.${col} as valor from bronze.cuentas_corrientes_scoring s
@@ -291,7 +292,7 @@ export async function getOpcionesCuentas(): Promise<OpcionesCuentas> {
 
 // --- Dashboard completo ------------------------------------------------------
 
-export async function getDashboardCuentas(f: FiltrosCuentas): Promise<DashboardCuentas> {
+async function getDashboardCuentasDirecto(f: FiltrosCuentas): Promise<DashboardCuentas> {
   const [saldos, actividad, vencidosQueCompran, clientes, categorias, aging, historial, cancelaciones] =
     await Promise.all([
       getSaldos(f),
@@ -320,3 +321,22 @@ export async function getDashboardCuentas(f: FiltrosCuentas): Promise<DashboardC
     generadoEn: new Date().toISOString(),
   };
 }
+
+
+/* ---------------------------------------------------------------------------
+   LAS ENTRADAS QUE CONSUME LA RUTA, CACHEADAS.
+
+   Se envuelven acá al final y no en la ruta para que cualquier consumidor
+   futuro herede el caché sin acordarse de pedirlo. La version sin cachear
+   queda como `...Directo` por si alguna vez hace falta saltearlo.
+
+   Ver lib/cache.ts para por que esto es seguro (y cuando dejaria de serlo).
+   --------------------------------------------------------------------------- */
+export const getOpcionesCuentas = cacheado(
+  "cuentas:opciones",
+  getOpcionesCuentasDirecto,
+);
+export const getDashboardCuentas = cacheado(
+  "cuentas:dashboard",
+  getDashboardCuentasDirecto,
+);

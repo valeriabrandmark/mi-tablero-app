@@ -1,3 +1,4 @@
+import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import {
   CANAL_MAYORISTA,
@@ -554,7 +555,7 @@ async function getFletes(f: Filtros) {
 
 // --- Opciones de los selectores ----------------------------------------------
 
-export async function getOpcionesFiltro(): Promise<OpcionesFiltro> {
+async function getOpcionesFiltroDirecto(): Promise<OpcionesFiltro> {
   const provincias = await query<{ valor: string }>(
     `select distinct rl.provincia as valor from gold.reporte_logistica rl
      where rl.provincia is not null and rl.provincia <> '' order by valor`,
@@ -636,7 +637,7 @@ function mesDeComparacion(f: Filtros): { mes: string; hasta: string | null } | n
  *   proveedor. Sirve para separar "vendemos barato" de "el envío se come el
  *   margen", que son dos problemas con dos soluciones distintas.
  */
-export async function getDashboardVentasMayoristas(
+async function getDashboardVentasMayoristasDirecto(
   f: Filtros,
   conFlete = true,
 ): Promise<DashboardVentasMayoristas> {
@@ -708,3 +709,22 @@ export async function getDashboardVentasMayoristas(
     generadoEn: new Date().toISOString(),
   };
 }
+
+
+/* ---------------------------------------------------------------------------
+   LAS ENTRADAS QUE CONSUME LA RUTA, CACHEADAS.
+
+   Se envuelven acá al final y no en la ruta para que cualquier consumidor
+   futuro herede el caché sin acordarse de pedirlo. La version sin cachear
+   queda como `...Directo` por si alguna vez hace falta saltearlo.
+
+   Ver lib/cache.ts para por que esto es seguro (y cuando dejaria de serlo).
+   --------------------------------------------------------------------------- */
+export const getOpcionesFiltro = cacheado(
+  "filtros:opciones",
+  getOpcionesFiltroDirecto,
+);
+export const getDashboardVentasMayoristas = cacheado(
+  "mayoristas:dashboard",
+  getDashboardVentasMayoristasDirecto,
+);

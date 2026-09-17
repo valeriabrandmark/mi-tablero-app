@@ -1,3 +1,4 @@
+import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { CARGA_IMPOSITIVA } from "@/lib/impuestos";
@@ -587,7 +588,7 @@ async function getUltimaVenta(): Promise<string | null> {
 
 // --- Opciones de los filtros -------------------------------------------------
 
-export async function getOpcionesTiendaNube(): Promise<OpcionesTiendaNube> {
+async function getOpcionesTiendaNubeDirecto(): Promise<OpcionesTiendaNube> {
   const [proveedores, marcas, bordes] = await Promise.all([
     query<{ v: string }>(
       `select distinct proveedor as v from gold.fact_ventas
@@ -623,13 +624,13 @@ export async function getOpcionesTiendaNube(): Promise<OpcionesTiendaNube> {
  * el rango inicial es el mes comercial entero, así que con ocho pedidos por mes
  * casi siempre cae adentro. Retroceder movería el mes de lugar sin motivo.
  */
-export async function getDiaInicialTiendaNube(): Promise<string> {
+async function getDiaInicialTiendaNubeDirecto(): Promise<string> {
   return hoyArgentina();
 }
 
 // --- Dashboard ---------------------------------------------------------------
 
-export async function getDashboardTiendaNube(
+async function getDashboardTiendaNubeDirecto(
   f: FiltrosTiendaNube,
 ): Promise<DashboardTiendaNube> {
   // El rango siempre está resuelto para cuando llega acá (lo fija la ruta de
@@ -730,3 +731,26 @@ export async function getDashboardTiendaNube(
     generadoEn: new Date().toISOString(),
   };
 }
+
+
+/* ---------------------------------------------------------------------------
+   LAS ENTRADAS QUE CONSUME LA RUTA, CACHEADAS.
+
+   Se envuelven acá al final y no en la ruta para que cualquier consumidor
+   futuro herede el caché sin acordarse de pedirlo. La version sin cachear
+   queda como `...Directo` por si alguna vez hace falta saltearlo.
+
+   Ver lib/cache.ts para por que esto es seguro (y cuando dejaria de serlo).
+   --------------------------------------------------------------------------- */
+export const getOpcionesTiendaNube = cacheado(
+  "tn:opciones",
+  getOpcionesTiendaNubeDirecto,
+);
+export const getDiaInicialTiendaNube = cacheado(
+  "tn:dia-inicial",
+  getDiaInicialTiendaNubeDirecto,
+);
+export const getDashboardTiendaNube = cacheado(
+  "tn:dashboard",
+  getDashboardTiendaNubeDirecto,
+);

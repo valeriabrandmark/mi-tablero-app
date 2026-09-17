@@ -1,3 +1,4 @@
+import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
@@ -277,7 +278,7 @@ async function getFilas(f: FiltrosTrazabilidad, desde: string): Promise<FilaTraz
   }));
 }
 
-export async function getOpcionesTrazabilidad(desde: string) {
+async function getOpcionesTrazabilidadDirecto(desde: string) {
   const params = [desde, PROVEEDORES_NO_MERCADERIA];
   const [proveedores, grupos] = await Promise.all([
     query<{ v: string }>(
@@ -294,7 +295,7 @@ export async function getOpcionesTrazabilidad(desde: string) {
   return { proveedores: proveedores.map((r) => r.v), grupos: grupos.map((r) => r.v) };
 }
 
-export async function getDashboardTrazabilidad(
+async function getDashboardTrazabilidadDirecto(
   f: FiltrosTrazabilidad,
 ): Promise<DashboardTrazabilidad> {
   const rango = await getRango();
@@ -328,3 +329,22 @@ export async function getDashboardTrazabilidad(
     desde, hasta: rango.hasta, diasDeFoto: rango.dias,
   };
 }
+
+
+/* ---------------------------------------------------------------------------
+   LAS ENTRADAS QUE CONSUME LA RUTA, CACHEADAS.
+
+   Se envuelven acá al final y no en la ruta para que cualquier consumidor
+   futuro herede el caché sin acordarse de pedirlo. La version sin cachear
+   queda como `...Directo` por si alguna vez hace falta saltearlo.
+
+   Ver lib/cache.ts para por que esto es seguro (y cuando dejaria de serlo).
+   --------------------------------------------------------------------------- */
+export const getOpcionesTrazabilidad = cacheado(
+  "trazabilidad:opciones",
+  getOpcionesTrazabilidadDirecto,
+);
+export const getDashboardTrazabilidad = cacheado(
+  "trazabilidad:dashboard",
+  getDashboardTrazabilidadDirecto,
+);

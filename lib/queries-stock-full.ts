@@ -1,3 +1,4 @@
+import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
@@ -383,7 +384,7 @@ async function getDesdeCuandoHayHistoria(): Promise<string | null> {
   }
 }
 
-export async function getOpcionesStockFull() {
+async function getOpcionesStockFullDirecto() {
   const [proveedores, marcas] = await Promise.all([
     query<{ v: string }>(
       `${BASE} select distinct proveedor as v from base
@@ -402,7 +403,7 @@ export async function getOpcionesStockFull() {
   };
 }
 
-export async function getDashboardStockFull(
+async function getDashboardStockFullDirecto(
   f: FiltrosStockFull,
 ): Promise<DashboardStockFull> {
   const [kpis, umbrales, tramos, filas, noDisponible, historiaDesde] =
@@ -426,3 +427,22 @@ export async function getDashboardStockFull(
     generadoEn: new Date().toISOString(),
   };
 }
+
+
+/* ---------------------------------------------------------------------------
+   LAS ENTRADAS QUE CONSUME LA RUTA, CACHEADAS.
+
+   Se envuelven acá al final y no en la ruta para que cualquier consumidor
+   futuro herede el caché sin acordarse de pedirlo. La version sin cachear
+   queda como `...Directo` por si alguna vez hace falta saltearlo.
+
+   Ver lib/cache.ts para por que esto es seguro (y cuando dejaria de serlo).
+   --------------------------------------------------------------------------- */
+export const getOpcionesStockFull = cacheado(
+  "stock-full:opciones",
+  getOpcionesStockFullDirecto,
+);
+export const getDashboardStockFull = cacheado(
+  "stock-full:dashboard",
+  getDashboardStockFullDirecto,
+);
