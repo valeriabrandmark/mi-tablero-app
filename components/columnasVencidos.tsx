@@ -1,4 +1,4 @@
-import { nombreVendedor } from "@/lib/constantes";
+import { nombreEmpresa, nombreVendedor } from "@/lib/constantes";
 import { sumar, type Columna } from "@/components/Tabla";
 import { fmtFechaCortaConAnio, fmtMoneda, fmtNumero } from "@/lib/format";
 import { TEMA } from "@/lib/paleta";
@@ -27,6 +27,16 @@ import type { ComprobanteVencido } from "@/lib/types";
  * `conVendedor` agrega la columna del vendedor: en Cuentas Corrientes se ven
  * los de todos y hace falta distinguirlos; en la página de un vendedor sería
  * una columna con un solo valor repetido.
+ *
+ * ---------------------------------------------------------------------------
+ * OJO CON "EMPRESA"
+ *
+ * Acá los datos salen de `bronze.cuentas_corrientes_aging`, que guarda el
+ * CÓDIGO ('0001'), así que la columna pasa por `nombreEmpresa`. En la tabla de
+ * comprobantes de Objetivos la misma columna se muestra cruda porque viene de
+ * `gold.fact_ventas`, donde `modelo.py` ya dejó el nombre resuelto. Mismo
+ * título, dos orígenes: traducir el que ya está traducido devolvería el
+ * nombre igual, pero no traducir este dejaría cuatro números en pantalla.
  */
 export function columnasVencidos(
   filas: ComprobanteVencido[],
@@ -59,6 +69,13 @@ export function columnasVencidos(
         </span>
       ),
       orden: (f) => f.cliente,
+    },
+    {
+      titulo: "Empresa",
+      ayuda:
+        "Con qué empresa del grupo se facturó: Quo Marketing, Noa Comercial o sus presupuestos. Acá el aging lo guarda como código (0001, 0004…) y se traduce al nombre.",
+      celda: (f) => nombreEmpresa(f.empresa),
+      orden: (f) => nombreEmpresa(f.empresa),
     },
     {
       titulo: "Total del comprobante",
