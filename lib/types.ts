@@ -239,6 +239,8 @@ export type DashboardCuentas = {
   deudaPorCategoria: PuntoEtiqueta[];
   clientesPorCategoria: PuntoEtiqueta[];
   aging: PuntoEtiqueta[];
+  /** Los comprobantes vencidos, UNO POR UNO. Ver la nota en queries-cuentas.ts. */
+  comprobantesVencidos: ComprobanteVencido[];
   historial: PuntoHistorial[];
   cancelacionesPorVendedor: PuntoEtiqueta[];
   generadoEn: string;
@@ -324,6 +326,9 @@ export type ComprobanteVencido = {
   vencimiento: string | null;
   cliente: string | null;
   empresa: string | null;
+  /** Código de SIGMA (006, 007…). Lo muestra Cuentas Corrientes, que mezcla
+   *  vendedores; en la página de un vendedor sería una columna de un solo valor. */
+  vendedor: string | null;
   /** Lo que decía el comprobante. */
   total: number;
   /** Lo que queda debiendo: el total menos lo que se haya pagado a cuenta. */

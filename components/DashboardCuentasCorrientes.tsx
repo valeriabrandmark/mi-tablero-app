@@ -7,6 +7,7 @@ import TortaProveedores from "@/components/charts/TortaProveedores";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { nombreEmpresa, nombreVendedor } from "@/lib/constantes";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
+import { columnasVencidos } from "@/components/columnasVencidos";
 import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import {
@@ -108,7 +109,10 @@ function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
     {
       titulo: "Atraso máx.",
       ayuda:
-        "Días del comprobante impago más viejo. Es el peor caso, no el promedio.",
+        "Días del comprobante impago MÁS VIEJO de ese cliente, no de todo el " +
+        "saldo de al lado: lo normal es que el saldo esté repartido en varios " +
+        "comprobantes con antigüedades distintas. El detalle está en la tabla " +
+        "de Comprobantes vencidos, acá abajo.",
       celda: (f) => (f.atrasoMax == null ? "—" : `${fmtNumero(f.atrasoMax)} d`),
       numerica: true,
       orden: (f) => f.atrasoMax,
@@ -534,6 +538,29 @@ export default function DashboardCuentasPage() {
               }
             />
             <LeyendaEstados />
+          </Panel>
+
+          {/* UNA FILA POR COMPROBANTE, y ésa es toda la razón de que exista.
+              La tabla de arriba muestra una fila por cliente: la suma de lo
+              vencido con, al lado, el atraso del comprobante más viejo. Leídas
+              juntas dicen "debe todo esto desde hace tanto", que casi nunca es
+              cierto — el saldo suele estar repartido en comprobantes de
+              antigüedades muy distintas. Acá cada uno trae su plata y sus días. */}
+          <Panel
+            titulo="Comprobantes vencidos"
+            nota={
+              data.comprobantesVencidos.length === 0
+                ? "Sin comprobantes vencidos"
+                : `${fmtNumero(data.comprobantesVencidos.length)} comprobantes · uno por fila, con su propia antigüedad`
+            }
+          >
+            <Tabla
+              filas={data.comprobantesVencidos}
+              columnas={columnasVencidos(data.comprobantesVencidos, {
+                conVendedor: true,
+              })}
+              clave={(f, i) => `${f.comprobante ?? "s/n"}-${i}`}
+            />
           </Panel>
         </div>
       )}

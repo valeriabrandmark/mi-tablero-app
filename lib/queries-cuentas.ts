@@ -1,6 +1,7 @@
 import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import type {
+  ComprobanteVencido,
   DashboardCuentas,
   FilaCliente,
   FiltrosCuentas,
@@ -243,6 +244,62 @@ async function getAging(f: FiltrosCuentas): Promise<PuntoEtiqueta[]> {
  * `fecha` es texto DD/MM/YYYY, así que el máximo se toma sobre la fecha de
  * verdad: en texto, 09/09 sería mayor que 16/09.
  */
+/**
+ * Los comprobantes vencidos, UNO POR UNO.
+ *
+ * POR QUE EXISTE, que es la parte importante.
+ *
+ * La tabla "Clientes y Saldos" muestra una fila por cliente: la SUMA de lo
+ * vencido y, al lado, el atraso del comprobante MAS VIEJO. Leídas juntas, esas
+ * dos celdas dicen algo que no es cierto.
+ *
+ * El caso real, al 18/09/2026: JESUS GUILLERMO TORRES debe $ 751.451 repartidos
+ * en CUATRO comprobantes, con atrasos de 14, y hasta 246 días. La fila del
+ * cliente dice "$ 751.451 · 246 días", como si todo estuviera vencido hace ocho
+ * meses. Para decidir a quién llamar primero, eso es una lectura falsa.
+ *
+ * Acá cada comprobante trae SU plata y SUS días, sin sumar nada. La fila del
+ * cliente sigue estando --sirve para ver el total de la cuenta-- pero el
+ * detalle para ir a cobrar sale de esta tabla.
+ *
+ * SALE DE `aging` Y NO DE `scoring`, y por eso los dos totales pueden no dar
+ * igual: `scoring` guarda un saldo por CLIENTE ya consolidado y `aging` una
+ * fila por COMPROBANTE. Un pago a cuenta que todavía no se imputó baja el
+ * primero y no baja ninguna fila del segundo.
+ */
+async function getComprobantesVencidos(
+  f: FiltrosCuentas,
+): Promise<ComprobanteVencido[]> {
+  // `false`: aging no tiene columna categoría, se resuelve por cuit.
+  const w = whereCuentas(f, "a", false);
+  return query<ComprobanteVencido>(
+    `select a.comprobante,
+            -- Las fechas vienen como texto dd/mm/yyyy: se dan vuelta acá para
+            -- que la pantalla reciba el mismo formato que el resto del tablero
+            -- y para que ordenen por fecha y no alfabéticamente.
+            to_char(to_date(a.fecha, 'DD/MM/YYYY'), 'YYYY-MM-DD')       as fecha,
+            to_char(to_date(a.vencimiento, 'DD/MM/YYYY'), 'YYYY-MM-DD') as vencimiento,
+            a.razon_social                    as cliente,
+            a.empresa,
+            a.vendedor,
+            coalesce(a.total, 0)::float8      as total,
+            coalesce(a.pendiente, 0)::float8  as adeuda,
+            coalesce(a.atraso, 0)::float8     as "diasVencido"
+     from bronze.cuentas_corrientes_aging a
+     where ${w.sql}
+       and coalesce(a.atraso, 0) > 0
+       -- Un comprobante saldado no es una deuda vencida aunque su fecha haya
+       -- pasado. Sin esto la tabla listaría todo el histórico cobrado.
+       and coalesce(a.pendiente, 0) > 0
+       -- Sólo la última foto: la tabla guarda una por carga y sin esto cada
+       -- comprobante saldría repetido una vez por día cargado.
+       and a.fecha_carga = (select max(fecha_carga) from bronze.cuentas_corrientes_aging)
+     order by a.atraso desc nulls last, a.pendiente desc
+     limit 500`,
+    w.params,
+  );
+}
+
 async function getHistorial(f: FiltrosCuentas): Promise<PuntoHistorial[]> {
   const w = whereCuentas(f, "h");
   return query<PuntoHistorial>(
@@ -293,17 +350,27 @@ async function getOpcionesCuentasDirecto(): Promise<OpcionesCuentas> {
 // --- Dashboard completo ------------------------------------------------------
 
 async function getDashboardCuentasDirecto(f: FiltrosCuentas): Promise<DashboardCuentas> {
-  const [saldos, actividad, vencidosQueCompran, clientes, categorias, aging, historial, cancelaciones] =
-    await Promise.all([
-      getSaldos(f),
-      getActividad(f),
-      getVencidosQueCompran(f),
-      getClientes(f),
-      getPorCategoria(f),
-      getAging(f),
-      getHistorial(f),
-      getCancelaciones(f),
-    ]);
+  const [
+    saldos,
+    actividad,
+    vencidosQueCompran,
+    clientes,
+    categorias,
+    aging,
+    comprobantesVencidos,
+    historial,
+    cancelaciones,
+  ] = await Promise.all([
+    getSaldos(f),
+    getActividad(f),
+    getVencidosQueCompran(f),
+    getClientes(f),
+    getPorCategoria(f),
+    getAging(f),
+    getComprobantesVencidos(f),
+    getHistorial(f),
+    getCancelaciones(f),
+  ]);
 
   return {
     kpis: {
@@ -316,6 +383,7 @@ async function getDashboardCuentasDirecto(f: FiltrosCuentas): Promise<DashboardC
     deudaPorCategoria: categorias.deuda,
     clientesPorCategoria: categorias.clientes,
     aging,
+    comprobantesVencidos,
     historial,
     cancelacionesPorVendedor: cancelaciones,
     generadoEn: new Date().toISOString(),
