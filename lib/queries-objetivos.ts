@@ -393,6 +393,7 @@ async function getComprobantesVencidos(
             to_char(to_date(a.vencimiento, 'DD/MM/YYYY'), 'YYYY-MM-DD') as vencimiento,
             a.razon_social                    as cliente,
             a.empresa,
+            a.vendedor,
             coalesce(a.total, 0)::float8      as total,
             coalesce(a.pendiente, 0)::float8  as adeuda,
             coalesce(a.atraso, 0)::float8     as "diasVencido"

@@ -5,10 +5,10 @@ import { ListaAvance } from "@/components/BarraAvance";
 import LineaFacturacion from "@/components/charts/LineaFacturacion";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
+import { columnasVencidos } from "@/components/columnasVencidos";
 import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import {
-  fmtFechaCortaConAnio,
   fmtMes,
   fmtMetrica,
   fmtMoneda,
@@ -18,7 +18,6 @@ import {
 import { PALETA, TEMA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
-  ComprobanteVencido,
   DashboardObjetivos,
   FilaComprobanteObjetivo,
   FiltrosObjetivos,
@@ -80,77 +79,6 @@ function columnasComprobantes(
       numerica: true,
       orden: (f) => f.facturacion,
       total: fmtMoneda(sumar(filas, (f) => f.facturacion)),
-    },
-  ];
-}
-
-/**
- * Los comprobantes que están detrás de la tarjeta de deuda vencida.
- *
- * La tarjeta dice CUÁNTA plata está vencida; esto dice de quién y desde cuándo,
- * que es lo que hace falta para ir a cobrarla.
- */
-function columnasVencidos(
-  filas: ComprobanteVencido[],
-): Columna<ComprobanteVencido>[] {
-  return [
-    {
-      titulo: "Comprobante",
-      ayuda: "Número del comprobante impago, tal como está en Sigma.",
-      celda: (f) => <span className="font-mono">{f.comprobante ?? "—"}</span>,
-      orden: (f) => f.comprobante,
-    },
-    {
-      titulo: "Fecha",
-      ayuda: "Cuándo se emitió el comprobante, no cuándo venció.",
-      celda: (f) => (f.fecha ? fmtFechaCortaConAnio(f.fecha) : "—"),
-      orden: (f) => f.fecha,
-    },
-    {
-      titulo: "Venció el",
-      ayuda: "La fecha de vencimiento, que ya pasó.",
-      celda: (f) => (f.vencimiento ? fmtFechaCortaConAnio(f.vencimiento) : "—"),
-      orden: (f) => f.vencimiento,
-    },
-    {
-      titulo: "Cliente",
-      celda: (f) => (
-        <span className="block max-w-[180px] truncate sm:max-w-[280px]">
-          {f.cliente ?? "—"}
-        </span>
-      ),
-      orden: (f) => f.cliente,
-    },
-    {
-      titulo: "Total del comprobante",
-      ayuda: "Lo que decía el comprobante cuando se emitió.",
-      celda: (f) => fmtMoneda(f.total),
-      numerica: true,
-      orden: (f) => f.total,
-      total: fmtMoneda(sumar(filas, (f) => f.total)),
-    },
-    {
-      titulo: "Adeuda",
-      ayuda:
-        "Lo que queda debiendo hoy: el total menos lo que se haya pagado a cuenta. Es el número con el que se va a cobrar.",
-      celda: (f) => (
-        <strong style={{ color: TEMA.negativo }}>{fmtMoneda(f.adeuda)}</strong>
-      ),
-      numerica: true,
-      orden: (f) => f.adeuda,
-      total: fmtMoneda(sumar(filas, (f) => f.adeuda)),
-    },
-    {
-      titulo: "Días vencido",
-      ayuda:
-        "Días desde el vencimiento. Lo calcula el orquestador, así que cuenta igual que en Cuentas Corrientes.",
-      celda: (f) => (
-        <span style={{ color: f.diasVencido > 90 ? TEMA.negativo : undefined }}>
-          {fmtNumero(f.diasVencido)}
-        </span>
-      ),
-      numerica: true,
-      orden: (f) => f.diasVencido,
     },
   ];
 }
