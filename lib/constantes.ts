@@ -267,6 +267,7 @@ export function nombreVendedor(codigo: string | null | undefined): string {
 }
 
 /** `'0001'` -> `'Quo Marketing SRL'`. Devuelve el código si no está mapeado. */
-export function nombreEmpresa(codigo: string): string {
-  return EMPRESAS[codigo] ?? codigo;
+export function nombreEmpresa(codigo: string | null | undefined): string {
+  if (!codigo) return "—";
+  return EMPRESAS[codigo.trim()] ?? codigo;
 }
