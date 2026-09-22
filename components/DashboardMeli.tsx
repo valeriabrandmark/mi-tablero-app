@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import BotonActualizar from "@/components/BotonActualizar";
 import VentaRentabilidad from "@/components/charts/VentaRentabilidad";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
@@ -553,13 +554,22 @@ export default function DashboardMeliPage({
           dicen dónde estás. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <UltimaCarga carga={data?.ultimaCarga ?? null} cargando={!data} />
-        <button
-          onClick={recargar}
-          disabled={cargando}
-          className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40"
-        >
-          {cargando ? "Actualizando…" : "Actualizar"}
-        </button>
+        {/* DOS BOTONES Y NO UNO. "Recargar" vuelve a leer la base y es
+            instantáneo; "Actualizar ahora" le pide al pipeline que vaya a
+            buscar datos nuevos a las APIs y tarda un par de minutos. Antes el
+            primero se llamaba "Actualizar", que con la caché prometía de más:
+            releer no trae nada nuevo si el pipeline no corrió. */}
+        <div className="flex items-start gap-2">
+          <button
+            onClick={recargar}
+            disabled={cargando}
+            title="Vuelve a leer los datos que ya están en la base. Es instantáneo."
+            className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40"
+          >
+            {cargando ? "Recargando…" : "Recargar"}
+          </button>
+          <BotonActualizar onDatosNuevos={recargar} />
+        </div>
       </div>
 
       <BarraFiltrosMeli

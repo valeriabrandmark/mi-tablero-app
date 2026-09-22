@@ -1,3 +1,4 @@
+import { RUTA_ACTUALIZAR } from "@/lib/actualizar";
 import {
   slugVendedor,
   VENDEDORES_OBJETIVOS,
@@ -184,6 +185,7 @@ const PAGINAS_OBJETIVOS = VENDEDORES_OBJETIVOS.map(
  */
 const PAGINAS_DE_CUENTA = ["/cuenta", "/nueva-contrasena"];
 
+
 /** Raíz de la sección Venta minorista: la ven los admins y el responsable de Meli. */
 const RAIZ_MINORISTA = "/venta-minorista";
 
@@ -261,6 +263,23 @@ function esApiPreciosTn(pathname: string): boolean {
 export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   if (!permiso) return false;
   if (PAGINAS_DE_CUENTA.includes(pathname)) return true;
+
+  // "ACTUALIZAR AHORA" NO ES DE NINGUN MODULO: le sirve a todas las pantallas
+  // por igual, como `/api/filtros`. Va acá arriba y no en `RUTAS_COMUNES`
+  // porque esa lista sólo la mira el permiso personalizado, y esta ruta la
+  // necesitan también el responsable de Meli y los vendedores — que son
+  // justamente quienes miran los dos tableros donde está el botón.
+  //
+  // NO SE PIDE PERMISO DE EDICION, a propósito: no escribe nada ni cambia lo
+  // que nadie ve, pide que los números que ya se están mirando estén al día.
+  // Quien sólo mira tiene el mismo problema con un dato de hace tres horas que
+  // quien puede editar.
+  //
+  // Lo único que se exige es tener algo que mirar: un personalizado sin ningún
+  // módulo no ve ninguna pantalla, así que tampoco tiene qué actualizar.
+  if (pathname === RUTA_ACTUALIZAR) {
+    return permiso.rol !== "personalizado" || permiso.modulos.length > 0;
+  }
 
   // EL PERSONALIZADO SE RESUELVE ENTERO ACÁ, Y VA PRIMERO. Lo suyo es la lista
   // de módulos y nada más: no comparte ninguna regla con los roles viejos, ni

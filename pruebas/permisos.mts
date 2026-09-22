@@ -92,5 +92,41 @@ revisar("meli ve lo suyo",
 revisar("meli NO ve Precios TN", puedeVer({ rol: "responsable_meli" }, "/precios-tn"), false);
 revisar("sin permiso, nada", puedeVer(null, "/ventas-mayoristas"), false);
 
+// --- "Actualizar ahora" la aprieta cualquiera que tenga algo que mirar -------
+//
+// Es la ruta que le pide al pipeline que traiga datos frescos. No es de ningún
+// módulo y no escribe nada: quien sólo mira tiene el mismo problema con un dato
+// de hace tres horas que quien puede editar.
+//
+// Los casos que importan son los roles viejos ACOTADOS. El responsable de Meli
+// y los vendedores son justamente quienes miran los dos tableros donde está el
+// botón, y sus reglas se resuelven por listas cerradas de rutas: sin una regla
+// propia, el botón les contestaría 403 y el resto del tablero andaría igual --
+// o sea que el error se vería como un botón que no hace nada.
+
+const ACTUALIZAR = "/api/actualizar";
+const vendedorSilvio: Permiso = { rol: "vendedor", vendedor: "SILVIO" };
+
+revisar("el responsable de Meli puede actualizar",
+  puedeVer({ rol: "responsable_meli" }, ACTUALIZAR), true);
+revisar("un vendedor puede actualizar", puedeVer(vendedorSilvio, ACTUALIZAR), true);
+revisar("un supervisor puede actualizar", puedeVer({ rol: "supervisor" }, ACTUALIZAR), true);
+revisar("un admin puede actualizar", puedeVer({ rol: "admin" }, ACTUALIZAR), true);
+revisar("y el admin_tn también",
+  puedeVer({ rol: "admin_tn" }, ACTUALIZAR), true);
+revisar("un personalizado con módulos puede", puedeVer(soloMira, ACTUALIZAR), true);
+
+// Sin módulos no ve ninguna pantalla, así que no tiene qué actualizar: dejarlo
+// disparar corridas del pipeline sería darle lo único que puede hacer.
+const sinNada: Permiso = {
+  rol: "personalizado",
+  modulos: [],
+  editar: [],
+  sigma: null,
+  nombreSigma: null,
+};
+revisar("un personalizado SIN módulos no puede", puedeVer(sinNada, ACTUALIZAR), false);
+revisar("sin sesión tampoco", puedeVer(null, ACTUALIZAR), false);
+
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);
