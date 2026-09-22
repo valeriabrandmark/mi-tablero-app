@@ -618,6 +618,58 @@ números de otra.
 
 ---
 
+## "Recargar" y "Actualizar ahora"
+
+Los tableros de Mercado Libre y de Objetivos tienen **dos botones**, y hacen
+cosas distintas:
+
+| | Qué hace | Cuánto tarda |
+|---|---|---|
+| **Recargar** | Vuelve a leer lo que ya está en la base | instantáneo |
+| **Actualizar ahora** | Le pide al orquestador que vaya a buscar datos nuevos a Mercado Libre, SIGMA, Tienda Nube y Digip | un par de minutos |
+
+Antes había uno solo llamado "Actualizar", y con la caché prometía de más:
+releer no trae nada nuevo mientras el pipeline no haya corrido.
+
+**El disparo pasa por la base, no por la API de GitHub.** El botón llama a
+`ops.despertar_orquestador(15)` — la misma función que el cron de Supabase usa
+como red desde que el scheduler de GitHub dejó el tablero ocho horas sin
+actualizar el 27/08. Eso evita un segundo token de GitHub que cargar en Vercel y
+que rotar, y **no hay ninguna variable de entorno nueva**: la app ya se conecta
+con el rol `postgres`, que es el dueño de la función.
+
+**La espera de 15 minutos no cuenta botonazos, cuenta datos.** La función mide
+contra `ops.estado`, o sea contra cuándo se actualizaron los datos, así que
+también cuenta la corrida automática de la hora y la que pidió otra persona hace
+tres minutos. Apretar el botón con datos de hace dos minutos no tiene sentido
+aunque nadie haya apretado nada antes. Si no hace falta, el botón lo dice ("Ya
+estaban al día") y relee igual.
+
+**Cómo sabe que terminó:** no mira el workflow, mira **la versión de los datos**
+— la misma marca de tiempo con la que la caché arma su clave. Se la guarda al
+apretar y pregunta cada 10 segundos hasta que cambia. Eso es lo que hace que el
+botón no pueda mentir: cuando esa versión cambia, la caché ya quedó invalidada,
+así que el momento en que dice "listo" es exactamente el momento en que la
+pantalla puede leer datos nuevos.
+
+Lo aprieta **cualquiera que tenga algún módulo**, sin permiso de edición: no
+escribe nada, pide que los números que ya se están mirando estén al día. Quien
+sólo mira tiene el mismo problema con un dato de hace tres horas que quien puede
+editar.
+
+> Las pruebas del botón se corren sin base ni navegador:
+>
+> ```bash
+> node --experimental-strip-types --import ./pruebas/registrar.mjs pruebas/actualizar.mts
+> ```
+>
+> Lo que cubren es un contrato **entre dos repos**: el botón decide qué mostrar
+> según el texto que devuelve una función de Postgres que vive en `tablero_quo`.
+> El día que alguien reescriba ese mensaje, acá no falla nada —compila igual— y
+> el botón empieza a mentir en silencio.
+
+---
+
 ## Filtros
 
 **Todos los filtros son de selección múltiple.** El valor de un filtro es una

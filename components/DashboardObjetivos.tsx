@@ -5,6 +5,7 @@ import { ListaAvance } from "@/components/BarraAvance";
 import LineaFacturacion from "@/components/charts/LineaFacturacion";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
+import BotonActualizar from "@/components/BotonActualizar";
 import { columnasVencidos } from "@/components/columnasVencidos";
 import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
@@ -158,7 +159,7 @@ export default function DashboardObjetivosPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">
             Objetivos <span className="text-c1">{vendedor}</span>
@@ -169,13 +170,22 @@ export default function DashboardObjetivosPage({
               : "Cargando datos en vivo…"}
           </p>
         </div>
-        <button
-          onClick={recargar}
-          disabled={cargando}
-          className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40"
-        >
-          {cargando ? "Actualizando…" : "Actualizar"}
-        </button>
+        {/* DOS BOTONES Y NO UNO. "Recargar" vuelve a leer la base y es
+            instantáneo; "Actualizar ahora" le pide al pipeline que vaya a
+            buscar datos nuevos a las APIs y tarda un par de minutos. Antes el
+            primero se llamaba "Actualizar", que con la caché prometía de más:
+            releer no trae nada nuevo si el pipeline no corrió. */}
+        <div className="flex items-start gap-2">
+          <button
+            onClick={recargar}
+            disabled={cargando}
+            title="Vuelve a leer los datos que ya están en la base. Es instantáneo."
+            className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40"
+          >
+            {cargando ? "Recargando…" : "Recargar"}
+          </button>
+          <BotonActualizar onDatosNuevos={recargar} />
+        </div>
       </div>
 
       <div className="border-line bg-panel flex flex-wrap items-end gap-3 rounded-xl border p-3">
