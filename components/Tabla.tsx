@@ -143,7 +143,13 @@ export function Tabla<T>({
   filas: T[];
   columnas: Columna<T>[];
   clave: (fila: T, i: number) => string;
-  vacio?: string;
+  /**
+   * Qué mostrar cuando no hay filas. Es un `ReactNode` y no un texto porque a
+   * veces la salida de una tabla vacía es una ACCIÓN --"no hay nada que
+   * comprar, pero hay 23 artículos: vení a verlos"-- y un cartel que explica
+   * el problema sin dar la salida obliga a adivinar qué botón lo destraba.
+   */
+  vacio?: ReactNode;
   /** Si se pasa, las filas son clickeables y filtran el resto del tablero. */
   onClickFila?: (fila: T) => void;
   /** Devuelve true para la fila que está actuando como filtro. */
@@ -221,7 +227,7 @@ export function Tabla<T>({
   }, [filas, columnas]);
 
   if (filas.length === 0) {
-    return <p className="text-muted py-10 text-center text-sm">{vacio}</p>;
+    return <div className="text-muted py-10 text-center text-sm">{vacio}</div>;
   }
 
   const hayTotales = columnas.some((c) => c.total != null);

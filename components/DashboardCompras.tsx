@@ -1617,11 +1617,21 @@ export default function DashboardComprasPage({
               columnas={columnas}
               etiquetaTotal="Total de la orden"
               clave={(f) => f.sku}
-              vacio={
-                filtros.todos
-                  ? "Ningún artículo para el filtro elegido."
-                  : "Nada que comprar con este filtro: ningún artículo está por debajo de la cobertura objetivo."
-              }
+              /* LA TABLA VACÍA TIENE QUE DAR LA SALIDA, no sólo el
+                 diagnóstico.
+
+                 Filtrando por una marca que no se vende la pantalla quedaba
+                 en blanco. Y estaba bien que no sugiriera nada --no se vende,
+                 no hay qué reponer-- pero los artículos EXISTEN y se pueden
+                 pedir igual: es una marca nueva, una reposición puntual, algo
+                 que se acordó con el proveedor. Lo que faltaba era saberlo y
+                 poder llegar a ellos.
+
+                 Los dos botones son los dos motivos por los que la tabla
+                 puede estar vacía teniendo artículos detrás, cada uno con su
+                 número. Antes había que adivinar cuál de los dos destrabar
+                 --y con las dos reglas puestas, los dos. */
+              vacio={<VacioCompras data={data} filtros={filtros} cambiar={cambiar} />}
             />
           </Panel>
 
@@ -1885,6 +1895,100 @@ export default function DashboardComprasPage({
           </Aviso>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Qué decir cuando la tabla no tiene ninguna fila.
+ *
+ * ---------------------------------------------------------------------------
+ * UN CARTEL QUE NO DA LA SALIDA ES UN CARTEL QUE NO SIRVE
+ *
+ * Esta pantalla esconde filas por dos motivos distintos, y los dos se pueden
+ * dar juntos: la regla de "sólo los que hay que comprar" (que tapa lo que el
+ * cálculo no pidió) y el botón de "dejar sólo con oferta" (que tapa lo que no
+ * tiene sell in del mes). Con los dos puestos y un filtro por marca chica, el
+ * resultado era una pantalla en blanco que parecía decir "esa marca no
+ * existe", cuando lo que pasaba era que sus 23 artículos estaban detrás de dos
+ * botones.
+ *
+ * Que no haya sugerencia NO es lo mismo que que no haya nada que pedir: una
+ * marca nueva, un artículo que se repone puntualmente o algo que se acordó con
+ * el proveedor se cargan a mano, y para eso el artículo tiene que estar a la
+ * vista. Así que acá va el número de lo que hay detrás de cada regla y el
+ * botón que la destraba.
+ */
+function VacioCompras({
+  data,
+  filtros,
+  cambiar,
+}: {
+  data: DashboardCompras;
+  filtros: FiltrosCompras;
+  cambiar: (f: FiltrosCompras) => void;
+}) {
+  const sinSugerido = data.ocultosSinSugerido;
+  const sinOferta = data.ocultosSinOferta;
+
+  // Ninguna regla es la culpable: el filtro de verdad no encontró nada.
+  if (sinSugerido === 0 && sinOferta === 0) {
+    return <p>Ningún artículo para el filtro elegido.</p>;
+  }
+
+  const estilo =
+    "border-c1 bg-c1/15 text-c1 hover:bg-c1/25 rounded-lg border px-3 py-1.5 text-xs transition-colors";
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <p className="mx-auto max-w-lg">
+        El cálculo no pide reponer nada con este filtro
+        {sinSugerido === 1 ? (
+          <>
+            , pero <strong className="text-ink">hay 1 artículo</strong> al que
+            podés cargarle cantidades a mano.
+          </>
+        ) : sinSugerido > 1 ? (
+          <>
+            , pero{" "}
+            <strong className="text-ink">
+              hay {fmtNumero(sinSugerido)} artículos
+            </strong>{" "}
+            a los que podés cargarles cantidades a mano.
+          </>
+        ) : (
+          <>
+            , y los que tienen sell in de {fmtMes(data.mes)} quedaron todos
+            afuera.
+          </>
+        )}
+      </p>
+
+      <div className="flex flex-wrap justify-center gap-2">
+        {sinSugerido > 0 && (
+          <button
+            type="button"
+            onClick={() => cambiar({ ...filtros, todos: true })}
+            className={estilo}
+          >
+            {sinSugerido === 1
+              ? "Ver el artículo"
+              : `Ver los ${fmtNumero(sinSugerido)} artículos`}
+          </button>
+        )}
+        {sinOferta > 0 && (
+          <button
+            type="button"
+            onClick={() =>
+              cambiar({ ...filtros, todos: true, soloOferta: false })
+            }
+            className={estilo}
+          >
+            Ver los {fmtNumero(sinSugerido + sinOferta)}, con y sin sell in de{" "}
+            {fmtMes(data.mes)}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
