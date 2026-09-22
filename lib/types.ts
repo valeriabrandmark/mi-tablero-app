@@ -1634,6 +1634,12 @@ export type DashboardCompras = {
    * cero como si el proveedor no diera ninguno.
    */
   sellInCargado: number;
+  /**
+   * Cuándo llegó la última foto de la planilla de sell in, o `null` si no hay
+   * ninguna. Es de cuándo es el DESCUENTO que viaja a la orden de compra — no
+   * cuándo se generó esta pantalla.
+   */
+  sellInFoto: string | null;
   comprasHasta: string | null;
   generadoEn: string;
 };

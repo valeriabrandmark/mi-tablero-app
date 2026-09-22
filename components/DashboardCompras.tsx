@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import BotonActualizar from "@/components/BotonActualizar";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { contarSkus, sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
@@ -88,6 +89,40 @@ function bajar(contenido: BlobPart, nombre: string, tipo: string) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * "Descuentos del proveedor: planilla del 22/09 06:49".
+ *
+ * En ámbar si hace más de un día y medio, que es cuando conviene mirar el
+ * disparador del Apps Script: manda una foto por día, así que pasadas ~36 h sin
+ * novedades algo dejó de andar. No es rojo porque un fin de semana largo sin
+ * cambios es normal.
+ */
+function FotoSellIn({ iso }: { iso: string }) {
+  // La hora actual va en estado y no se lee en el render: además de ser lo que
+  // pide React, es lo que hace que el aviso aparezca solo si la pestaña queda
+  // abierta. Mismo patrón que `UltimaCarga` en el tablero de Meli.
+  const [ahora, setAhora] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setAhora(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const horas = (ahora - new Date(iso).getTime()) / 3_600_000;
+  const vieja = horas > 36;
+  const cuando = new Date(iso).toLocaleString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return (
+    <p className={`mt-0.5 text-[11px] ${vieja ? "text-negativo" : "text-muted"}`}>
+      Descuentos del proveedor: planilla del {cuando}
+      {vieja && " — hace más de un día, revisar el disparador de la planilla"}
+    </p>
+  );
 }
 
 export default function DashboardComprasPage({
@@ -912,7 +947,7 @@ export default function DashboardComprasPage({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">
             Compras{" "}
@@ -925,14 +960,31 @@ export default function DashboardComprasPage({
               ? `Actualizado ${new Date(data.generadoEn).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`
               : "Cargando datos en vivo…"}
           </p>
+          {/* DE CUANDO ES EL DESCUENTO, que es lo que viaja a la orden.
+              No sale del tablero: sale de un Google Sheet que un Apps Script
+              fotografía una vez por día. Sin esta fecha no hay forma de saber
+              si lo que se está mirando incluye el cambio de hace un rato — y
+              una orden de compra con el descuento viejo se manda igual. */}
+          {data?.sellInFoto && <FotoSellIn iso={data.sellInFoto} />}
         </div>
-        <button
-          onClick={recargar}
-          disabled={cargando}
-          className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40"
-        >
-          {cargando ? "Actualizando…" : "Actualizar"}
-        </button>
+        {/* DOS BOTONES Y NO UNO. "Recargar" vuelve a leer la base y es
+            instantáneo; "Actualizar ahora" le pide al pipeline que vaya a
+            buscar datos nuevos — y acá eso incluye **el descuento del sell in**,
+            que es lo que viaja a la orden de compra. Antes el paso del sell in
+            corría una vez por día a las 00:20 y la planilla manda su foto a las
+            06:00, así que un descuento editado el lunes entraba el miércoles.
+            Ahora corre en cada corrida, y este botón la fuerza. */}
+        <div className="flex items-start gap-2">
+          <button
+            onClick={recargar}
+            disabled={cargando}
+            title="Vuelve a leer los datos que ya están en la base. Es instantáneo."
+            className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:opacity-40"
+          >
+            {cargando ? "Recargando…" : "Recargar"}
+          </button>
+          <BotonActualizar onDatosNuevos={recargar} />
+        </div>
       </div>
 
       <div className="border-line bg-panel flex flex-col gap-3 rounded-xl border p-3">
