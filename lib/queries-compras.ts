@@ -511,6 +511,26 @@ async function getSellInCargado(mes: string): Promise<number> {
   return Number(fila?.v ?? 0);
 }
 
+/**
+ * Cuándo llegó la última foto de la planilla de sell in.
+ *
+ * POR QUE SE MUESTRA. El descuento del proveedor es lo que viaja a la orden de
+ * compra, y no sale del tablero: sale de un Google Sheet que un Apps Script
+ * fotografía y deja en `bronze.sell_in_crudo`. Entre editar la planilla y ver
+ * el número acá hay un camino con escalas, y sin esta fecha no hay forma de
+ * saber si lo que se está mirando incluye el cambio de hace un rato.
+ *
+ * SALE DE `sell_in_crudo` Y NO DE `sell_in.actualizado`, que es cuándo el
+ * pipeline la procesó. Lo que importa para decidir una compra no es cuándo se
+ * parseó sino DE CUÁNDO ES LA PLANILLA.
+ */
+async function getSellInFoto(): Promise<string | null> {
+  const fila = await queryOne<{ v: string | null }>(
+    `select max(recibido)::text as v from bronze.sell_in_crudo`,
+  );
+  return fila?.v ?? null;
+}
+
 async function getOpcionesComprasDirecto() {
   // Las opciones de los selectores no dependen de la cobertura elegida --son
   // la lista de proveedores, marcas y grupos que existen--, así que va el
@@ -565,10 +585,11 @@ async function getDashboardComprasDirecto(
   // descuentos en cero sin decir por qué.
   const mes = (f.mes && meses.includes(f.mes) ? f.mes : meses[0]) ?? "";
 
-  const [filas, comprasHasta, sellInCargado] = await Promise.all([
+  const [filas, comprasHasta, sellInCargado, sellInFoto] = await Promise.all([
     getFilas(f, mes),
     getComprasHasta(),
     getSellInCargado(mes),
+    getSellInFoto(),
   ]);
 
   // El mes pasado, calculado igual que en el SQL, para que la pantalla lo
@@ -590,6 +611,7 @@ async function getDashboardComprasDirecto(
     mes,
     meses,
     sellInCargado,
+    sellInFoto,
     comprasHasta,
     generadoEn: new Date().toISOString(),
   };
