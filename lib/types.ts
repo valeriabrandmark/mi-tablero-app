@@ -1640,6 +1640,20 @@ export type DashboardCompras = {
    * cuándo se generó esta pantalla.
    */
   sellInFoto: string | null;
+  /**
+   * POR QUÉ LA TABLA SALIÓ VACÍA, en números. Los dos vienen en 0 salvo que
+   * `filas` esté vacía: es ahí donde hacen falta, para que la pantalla pueda
+   * decir "no hay nada que reponer, pero hay 23 artículos acá" en vez de
+   * quedarse en blanco como si el filtro no hubiera encontrado nada.
+   *
+   * `ocultosSinSugerido` son los que el filtro SÍ encontró y el cálculo no
+   * pidió reponer --se les pueden cargar cantidades a mano igual--, y
+   * `ocultosSinOferta` cuántos más aparecerían apagando "dejar sólo con
+   * oferta". Van separados porque son dos botones distintos los que los
+   * destraban.
+   */
+  ocultosSinSugerido: number;
+  ocultosSinOferta: number;
   comprasHasta: string | null;
   generadoEn: string;
 };
