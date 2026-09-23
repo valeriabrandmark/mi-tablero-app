@@ -6,7 +6,10 @@ import {
   COBERTURA_MAXIMA_COMPRA_DIAS,
   COBERTURA_SIN_INFLAR_DIAS,
   RENTABILIDAD_COMPRA_DISCRETA,
-  VECES_SOBRE_LA_MEDIANA_PARA_INFLAR,
+  DIAS_ARTICULO_NUEVO,
+  MESES_SIN_SELL_IN_PARA_SUGERIR,
+  VECES_SOBRE_LO_HABITUAL_PARA_INFLAR,
+  recortesValidos,
   FACTOR_OFERTA_MAX,
   MESES_HISTORIA_SELL_IN,
   MESES_RENTABILIDAD,
@@ -15,6 +18,7 @@ import {
 } from "@/lib/compras";
 import {
   COBERTURA_OBJETIVO_DIAS,
+  DIAS_MINIMOS_DE_RITMO,
   GRUPO_PROVEEDOR_POR_DEFECTO,
   PLAZO_REPOSICION_DIAS,
   PROVEEDORES_NO_MERCADERIA,
@@ -22,7 +26,12 @@ import {
 } from "@/lib/stock";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import type { ArticuloParaOrden } from "@/lib/sigma-orden";
-import type { DashboardCompras, FilaCompra, FiltrosCompras } from "@/lib/types";
+import type {
+  DashboardCompras,
+  FilaCompra,
+  FiltrosCompras,
+  RecorteCompras,
+} from "@/lib/types";
 
 /**
  * Consultas del panel de Compras.
@@ -83,16 +92,36 @@ sell_in as (
   where mes_comercial = $3::text
     and evento = ''
 ),
--- El costo de lista y el sell in calculado del mes elegido. El calculado se
--- MUESTRA como referencia —es con lo que venimos costeando— pero no viaja al
--- archivo.
+-- El costo de lista del mes elegido: el número sobre el que se aplica el
+-- descuento para llegar a lo que se paga.
 oferta as (
   -- UNA fila por SKU: el tramo que rige hoy dentro de ese mes. Desde que un
   -- mes puede tener varios costos, traerlos todos duplicaría cada artículo de
   -- la tabla. Ver lib/sql-costos.ts.
-  select sku, oferta_pct, costo_teorico
+  --
+  -- QUEDA POR EL COSTO DE LISTA, que es sobre lo que se aplica el descuento.
+  -- El oferta_pct de este mismo CTE se usaba para la columna
+  -- "s/ n. compras %", que se sacó de la pantalla.
+  select sku, costo_teorico
   from (${COSTOS_VIGENTES_POR_MES}) cv
   where mes_comercial = $3::text
+),
+-- QUE PROVEEDORES YA MANDARON SU SELL IN DE ESTE MES.
+--
+-- Es el seguro de la regla de más abajo. Sin esto, el día 1 de cada mes
+-- --antes de que entre ninguna planilla-- TODOS los artículos con historia
+-- quedarían con sugerido 0, y el panel aparecería vacío justo cuando hay que
+-- armar la compra del mes. Con esto, "no dio oferta" sólo se puede afirmar de
+-- un proveedor que efectivamente mandó su lista: del que no mandó nada no
+-- sabemos, y no saber no es lo mismo que un no.
+proveedores_con_sell_in as (
+  select distinct a."proveedorNombre" as proveedor
+  from bronze.sell_in si
+  join bronze.sigma_articulos a on trim(a.id) = si.sku
+  where si.mes_comercial = $3::text
+    and si.evento = ''
+    and si.descuento_pct > 0
+    and a."proveedorNombre" is not null
 ),
 compras as (
   select it->>'articuloId' as sku,
@@ -146,7 +175,11 @@ proveedores_mes_pasado as (
 -- mes. La historia es contra qué se compara el vigente, no el vigente otra vez.
 meses_hist as (
   select to_char(to_date($3::text || '-01', 'YYYY-MM-DD') - (n || ' month')::interval,
-                 'YYYY-MM') as mes
+                 'YYYY-MM')          as mes,
+         -- "Reciente" son los meses anteriores que, junto con el elegido,
+         -- forman la ventana de ${MESES_SIN_SELL_IN_PARA_SUGERIR} meses de la
+         -- regla de abajo. Con la ventana en 3, son los dos anteriores.
+         n < ${MESES_SIN_SELL_IN_PARA_SUGERIR} as reciente
   from generate_series(1, ${MESES_HISTORIA_SELL_IN}) as n
 ),
 -- Van los dos: el sell in del proveedor y el calculado con nuestras compras. La
@@ -157,14 +190,33 @@ meses_hist as (
 -- además duplicaba filas --en 2026-07 hay 302 SKU con las dos-- y eso inflaba
 -- los totales de la tabla, no sólo esta columna.
 --
--- La MEDIANA sale de acá y no de un promedio: con seis valores donde varios son
--- 0, un solo mes de oferta grande corre el promedio y haría ver como "oferta
--- excepcional" algo que pasó el mes pasado. La mediana aguanta ese caso.
+-- EL "HABITUAL" ES EL PROMEDIO DE LOS MESES EN QUE HUBO OFERTA, y los meses en
+-- cero NO entran en esa cuenta. La diferencia decide compras:
+--
+--   historia 10 · 10 · 0 · 10 · 0 · 0
+--   con los ceros adentro (la mediana que había acá antes) da 5 %, y entonces
+--   un 10 % de este mes aparecía como "5 puntos de ventaja" y multiplicaba el
+--   sugerido por 1,17. Pero 10 % es exactamente lo que ese proveedor da CADA
+--   VEZ QUE DA ALGO: no hay ninguna ventaja que aprovechar.
+--
+-- Con el promedio de los meses con oferta da 10 %, la ventaja da 0 y el
+-- sugerido queda en lo que hace falta. Un mes sin oferta no es "una oferta del
+-- 0 %" que baje el promedio: es un mes en el que no hubo nada que comparar.
+--
+-- Queda NULL para los artículos que nunca tuvieron oferta en la ventana, y más
+-- abajo eso se lee como 0: ahí cualquier descuento de hoy es nuevo.
 hist_sell_in as (
   select s.sku,
          jsonb_agg(jsonb_build_object('mes', m.mes, 'pct', coalesce(si.descuento_pct, 0))
                    order by m.mes desc)                                        as historia,
-         percentile_cont(0.5) within group (order by coalesce(si.descuento_pct, 0)) as mediana
+         avg(si.descuento_pct) filter (where coalesce(si.descuento_pct, 0) > 0) as habitual,
+         -- En cuántos de los ${MESES_HISTORIA_SELL_IN} meses anteriores hubo
+         -- oferta. 0 es "este proveedor nunca le dio descuento a este
+         -- artículo", que es distinto de "se lo sacó".
+         count(*) filter (where coalesce(si.descuento_pct, 0) > 0)             as meses_con_oferta,
+         -- Si tuvo oferta en alguno de los meses recientes. Es lo que separa
+         -- "justo este mes no la dio" de "hace rato que no la da".
+         coalesce(bool_or(m.reciente and coalesce(si.descuento_pct, 0) > 0), false) as oferta_reciente
   from (select distinct sku from bronze.sell_in where evento = '') s
   cross join meses_hist m
   left join bronze.sell_in si
@@ -186,6 +238,9 @@ hist_calculado as (
 ventas as (
   select sku,
          max(fecha) as ultima_venta,
+         -- DESDE CUANDO ESTE ARTICULO PUDO VENDER. Es lo que convierte el
+         -- ritmo en un ritmo y no en un promedio diluido: ver dias_ritmo.
+         min(fecha) as primera_venta,
          coalesce(sum(cantidad) filter (where fecha >= current_date - $1::int), 0) as uds,
          -- La rentabilidad de los ÚLTIMOS 3 MESES va con su propia ventana y no
          -- con la del ritmo: son dos preguntas distintas. El ritmo dice cuánto
@@ -230,6 +285,9 @@ base as (
          -- cargue. (Sin backticks: esto vive adentro de un template literal.)
          coalesce(pg.grupo, '${GRUPO_PROVEEDOR_POR_DEFECTO}') as grupo,
          a."attributes.marca"                           as marca,
+         a."fechaAlta"::date                            as alta,
+         -- DADO DE ALTA HACE POCO. Ver DIAS_ARTICULO_NUEVO en lib/compras.ts.
+         (a."fechaAlta"::date >= current_date - ${DIAS_ARTICULO_NUEVO})  as es_nuevo,
          -- LOS DOS CÓDIGOS QUE NO SON NUESTROS. Van sólo al Excel que se le
          -- manda al proveedor, no al archivo de Sigma: el proveedor no conoce
          -- nuestro SKU, conoce el código con el que él lo vende y el EAN.
@@ -249,7 +307,6 @@ base as (
          -- El costo de lista del mes elegido, que es sobre el que se aplica el
          -- descuento. Si ese mes no está cargado, cae al último costo conocido.
          coalesce(o.costo_teorico, c.costo_teorico, c.costo_real, 0) as costo_lista,
-         o.oferta_pct                                   as oferta_calculada_pct,
          si.descuento_pct                               as sell_in_pct,
          coalesce(v.uds, 0)                             as uds,
          v.ultima_venta,
@@ -266,12 +323,33 @@ base as (
          coalesce(co.unidades_mes_pasado, 0)            as unidades_mes_pasado,
          (pmp.proveedor is not null)                    as proveedor_compro,
          hs.historia                                    as hist_sell_in,
-         hs.mediana                                     as mediana_sell_in,
+         hs.habitual                                    as habitual_sell_in,
+         coalesce(hs.meses_con_oferta, 0)               as meses_con_oferta,
+         coalesce(hs.oferta_reciente, false)            as oferta_reciente,
+         (pcsi.proveedor is not null)                   as proveedor_mando_sell_in,
          hc.historia                                    as hist_calculado,
-         coalesce(v.uds, 0)::numeric / $1::int          as ritmo_diario,
-         case when coalesce(v.uds, 0) = 0 then null
-              else s.total / (coalesce(v.uds, 0)::numeric / $1::int)
-         end                                            as cobertura
+         -- SOBRE CUANTOS DIAS SE MIDE EL RITMO.
+         --
+         -- Era siempre la ventana entera, y para un artículo nuevo eso es una
+         -- cuenta mal hecha: uno que se dio de alta hace 30 días y vendió 20
+         -- unidades no vende 20/120 = 0,17 por día, vende 0,67. Dividido por
+         -- 120 el ritmo queda por debajo de lo que hace falta para que el
+         -- sugerido dé algo, y el artículo que MAS necesita reposición --el
+         -- que recién arranca y se está vendiendo-- es justo el que no aparece.
+         --
+         -- Hoy son 1.718 artículos con primera venta dentro de la ventana; 75
+         -- de ellos no dan ningún sugerido por esto.
+         --
+         -- EL PISO DE ${DIAS_MINIMOS_DE_RITMO} DIAS NO ES DECORATIVO. Sin él,
+         -- un artículo que vendió 3 unidades ayer daría un ritmo de 3 por día
+         -- y pediría cientos: medido, el peor caso sin piso sugería 800
+         -- unidades, y con el piso queda en 58. Dos semanas es lo mínimo para
+         -- que un promedio diario signifique algo.
+         case when v.primera_venta is null then $1::int
+              else least($1::int,
+                         greatest(${DIAS_MINIMOS_DE_RITMO},
+                                  current_date - v.primera_venta::date))
+         end                                            as dias_ritmo
   from stock s
   left join bronze.sigma_articulos a on trim(a.id) = s.sku
   left join bronze.proveedores_grupo pg on pg.proveedor = a."proveedorNombre"
@@ -281,9 +359,31 @@ base as (
   left join ventas v on v.sku = s.sku
   left join compras co on co.sku = s.sku
   left join proveedores_mes_pasado pmp on pmp.proveedor = a."proveedorNombre"
+  left join proveedores_con_sell_in pcsi on pcsi.proveedor = a."proveedorNombre"
   left join hist_sell_in hs on hs.sku = s.sku
   left join hist_calculado hc on hc.sku = s.sku
   where coalesce(a."proveedorNombre", '') <> all($2::text[])
+),
+-- El ritmo y la cobertura salen aca y no de base porque los dos dependen de
+-- dias_ritmo, que se calcula ahi: en SQL una columna no se puede usar en la
+-- misma lista de select donde se define. (Sin backticks: template literal.)
+con_ritmo as (
+  select b.*,
+         b.uds::numeric / b.dias_ritmo                  as ritmo_diario,
+         case when b.uds = 0 then null
+              else b.total / (b.uds::numeric / b.dias_ritmo)
+         end                                            as cobertura,
+         -- Vendió por primera vez DENTRO de la ventana, o sea que el ritmo de
+         -- arriba se midió sobre menos días que los demás. La pantalla lo dice:
+         -- un ritmo medido sobre 30 días y uno medido sobre 120 no se leen
+         -- igual aunque el número sea el mismo.
+         --
+         -- NO ES LO MISMO QUE es_nuevo, que mira la fecha de alta: un
+         -- artículo puede ser viejo y haber empezado a venderse recién ahora
+         -- (ritmo recortado, alta vieja), o ser nuevo y no haber vendido nunca
+         -- (alta reciente, sin ritmo que recortar).
+         (b.dias_ritmo < $1::int)                       as ritmo_recortado
+  from base b
 ),
 con_base as (
   select b.*,
@@ -307,8 +407,25 @@ con_base as (
          -- Cuánto está EL DESCUENTO DE ESTE MES por encima de lo habitual, en
          -- puntos. Sin sell in vigente cargado no hay ventaja que medir: queda
          -- en 0 y el factor da 1, o sea el sugerido de siempre.
-         greatest(0, coalesce(b.sell_in_pct, 0) - coalesce(b.mediana_sell_in, 0))                   as ventaja_pp
-  from base b
+         greatest(0, coalesce(b.sell_in_pct, 0) - coalesce(b.habitual_sell_in, 0))                   as ventaja_pp,
+         -- SE LE SACO LA OFERTA ESTE MES, Y HASTA EL MES PASADO LA TENIA.
+         --
+         -- Comprar ahora es pagarlo a precio de lista algo que el proveedor
+         -- viene bonificando: lo que corresponde es esperar a que vuelva la
+         -- oferta, no adelantar la compra. Por eso NO se sugiere nada, ni el
+         -- mínimo.
+         (b.proveedor_mando_sell_in
+          and coalesce(b.sell_in_pct, 0) = 0
+          and b.oferta_reciente)                                                             as sin_oferta_por_ahora,
+         -- DEJO DE TENER OFERTA: ${MESES_SIN_SELL_IN_PARA_SUGERIR} meses
+         -- seguidos sin nada, incluido el elegido, pero antes sí tenía. Acá no
+         -- hay oferta que esperar --se terminó-- así que se sugiere lo que
+         -- haga falta y la pantalla lo avisa.
+         (b.proveedor_mando_sell_in
+          and coalesce(b.sell_in_pct, 0) = 0
+          and not b.oferta_reciente
+          and b.meses_con_oferta > 0)                                                        as dejo_de_tener_sell_in
+  from con_ritmo b
 ),
 con_factor as (
   select c.*,
@@ -338,8 +455,8 @@ con_factor as (
            -- descuento de hoy es nuevo y pasa.
            when coalesce(c.rentabilidad, 0) < ${RENTABILIDAD_COMPRA_DISCRETA} / 100.0
                 and not (coalesce(c.sell_in_pct, 0)
-                         >= greatest(coalesce(c.mediana_sell_in, 0), 0.0001)
-                            * ${VECES_SOBRE_LA_MEDIANA_PARA_INFLAR})
+                         >= greatest(coalesce(c.habitual_sell_in, 0), 0.0001)
+                            * ${VECES_SOBRE_LO_HABITUAL_PARA_INFLAR})
              then 1::numeric
            else least(
              ${FACTOR_OFERTA_MAX}::numeric,
@@ -353,7 +470,37 @@ calculada as (
          -- El sugerido final: la necesidad, movida por la oferta, contra el
          -- techo. El least va al final y no antes para que el tope sea siempre
          -- lo último que manda.
-         ceil(least(f.sugerido_base * f.factor_oferta, f.sugerido_tope)) as sugerido
+         --
+         -- ARRIBA DE TODO, EL FRENO: a un artículo al que este mes le sacaron
+         -- la oferta que venía teniendo no se le sugiere nada. La cuenta de al
+         -- lado se calcula igual --sugerido_base y factor_oferta siguen ahí--
+         -- para que el tooltip pueda decir cuánto habría dado y por qué no se
+         -- pide. (Sin backticks: template literal.)
+         --
+         -- Y DESPUES, EL MINIMO DE UN BULTO PARA LO QUE NO TIENE HISTORIAL.
+         -- Sin ventas en la ventana no hay ritmo, así que la cuenta da 0 y el
+         -- artículo desaparece de la tabla: pasa con el que recién se dio de
+         -- alta y con el que hace rato no se mueve, que son dos casos donde la
+         -- decisión es de una persona y no del cálculo. Un bulto es el piso de
+         -- cualquier compra --por debajo no se le pide a un proveedor-- así que
+         -- sirve de punto de partida para ajustar a mano.
+         --
+         -- SOLO SI NO HAY STOCK. Un artículo que no se vende Y que además ya
+         -- tiene mercadería en el depósito no necesita que le propongan
+         -- comprar más: es plata quieta pidiendo más plata quieta. Son 875 de
+         -- los 4.475 sin ventas, y sacarlos baja la propuesta de $ 318 a
+         -- $ 275 millones. Siguen estando en la tabla y se les puede cargar
+         -- una cantidad a mano; lo que no hay es una sugerencia.
+         --
+         -- NO ES UNA NECESIDAD MEDIDA y la pantalla lo dice: viaja
+         -- sugerido_minimo para que la celda y el tooltip no lo hagan pasar
+         -- por una cuenta.
+         case when f.sin_oferta_por_ahora then 0
+              when f.uds = 0 and f.total = 0 then f.u_bulto
+              when f.uds = 0 then 0
+              else ceil(least(f.sugerido_base * f.factor_oferta, f.sugerido_tope))
+         end as sugerido,
+         (not f.sin_oferta_por_ahora and f.uds = 0 and f.total = 0) as sugerido_minimo
   from con_factor f
 )`;
 
@@ -370,26 +517,24 @@ const REGLA_OFERTA = "coalesce(sell_in_pct, 0) > 0";
 /**
  * El `where` de la consulta, despiezado.
  *
- * LAS DOS REGLAS QUE ESCONDEN FILAS VAN APARTE de los filtros que eligió la
- * persona --"sólo los que hay que comprar" (`sugerido > 0`) y "dejar sólo con
- * oferta"-- porque cuando la tabla sale vacía hay que poder contestar CUÁL DE
- * LAS TRES COSAS la vació. Con un solo texto de `where` no se distinguen, y la
+ * LOS RECORTES VAN APARTE de los filtros que eligió la persona, porque cuando
+ * la tabla sale vacía hay que poder contestar cuál de las dos cosas la vació:
+ * si el filtro no encontró ningún artículo, o si los encontró y los recortes
+ * los dejaron afuera. Con un solo texto de `where` no se distinguen, y la
  * pantalla queda en blanco sin poder decir nada.
  *
- * El caso que lo motivó fue exactamente ese, con las dos reglas apiladas:
- * filtrando por la marca BUBBA quedaban 23 artículos, uno solo tenía sell in
- * de septiembre y a ese el cálculo no le pedía reponer nada. Cero filas, y la
- * marca entera escondida detrás de dos botones que había que adivinar.
+ * El caso que lo motivó: filtrando por la marca BUBBA quedaban 23 artículos,
+ * uno solo tenía sell in de septiembre y a ese el cálculo no le pedía reponer
+ * nada. Cero filas, y la marca entera escondida detrás de un botón que había
+ * que adivinar.
  */
 type Where = {
-  /** Lo que se consulta: los filtros de la persona más las reglas que estén puestas. */
+  /** Lo que se consulta: los filtros de la persona más lo que recorta la vista. */
   sql: string;
   /** Sólo los filtros de la persona: proveedor, grupo, marca, búsqueda. */
   sqlEstructural: string;
-  /** Si "dejar sólo con oferta" está puesto. */
-  filtraPorOferta: boolean;
-  /** Si "sólo los que hay que comprar" está puesto. */
-  aplicaLaRegla: boolean;
+  /** Los recortes que se pidieron, ya saneados. */
+  recortes: RecorteCompras[];
   params: unknown[];
 };
 
@@ -417,26 +562,23 @@ function where(f: FiltrosCompras, mes: string): Where {
     );
   }
 
-  // LAS REGLAS, que no eligen QUÉ artículos sino CUÁLES DE ESOS se muestran.
-  //
-  // Por defecto sólo lo que hay que comprar: son ~3.300 SKU con stock y la
-  // orden típica tiene decenas, así que arrancar con todo obligaría a buscar
-  // los que importan entre los que no. El switch de "ver todos" está en la
-  // pantalla para cuando se quiere agregar algo que el cálculo no pidió.
-  const aplicaLaRegla = !f.todos;
-  const filtraPorOferta = f.soloOferta === true;
+  // LOS RECORTES, que no eligen QUÉ artículos sino CUÁLES DE ESOS se muestran.
+  // SE SUMAN: cada uno que esté marcado agrega una condición, y sin ninguno
+  // están todos. El porqué está en `RecorteCompras` (lib/types.ts).
+  const recortes = recortesValidos(f.recortes);
 
-  const todas = [...estructurales];
-  if (filtraPorOferta) todas.push(REGLA_OFERTA);
-  if (aplicaLaRegla) todas.push("sugerido > 0");
+  const condicion: Record<RecorteCompras, string> = {
+    sugerido: "sugerido > 0",
+    oferta: REGLA_OFERTA,
+    sin_ventas: "uds = 0",
+  };
 
   const armar = (cs: string[]) => (cs.length ? `where ${cs.join(" and ")}` : "");
 
   return {
-    sql: armar(todas),
+    sql: armar([...estructurales, ...recortes.map((r) => condicion[r])]),
     sqlEstructural: armar(estructurales),
-    filtraPorOferta,
-    aplicaLaRegla,
+    recortes,
     params,
   };
 }
@@ -454,59 +596,31 @@ function historia(v: unknown): { mes: string; pct: number }[] {
     }));
 }
 
-/** Tope de filas. Una orden de compra de más de 500 renglones no existe. */
-const TOPE = 500;
-
-/** Lo que la pantalla muestra, y lo que le escondieron las reglas. */
+/** Lo que la pantalla muestra, y cuántos artículos hay detrás del filtro. */
 type Listado = {
   filas: FilaCompra[];
-  /**
-   * De los artículos que encontró el filtro, cuántos quedaron afuera por tener
-   * sugerido 0.
-   */
-  ocultosSinSugerido: number;
-  /**
-   * Cuántos MÁS quedarían a la vista si además se apagara "dejar sólo con
-   * oferta". Es 0 cuando ese botón no está puesto.
-   */
-  ocultosSinOferta: number;
+  /** Ver `articulosDelFiltro` en `DashboardCompras` (lib/types.ts). */
+  articulosDelFiltro: number;
 };
 
 /**
- * Cuántos artículos esconden las reglas, para poder explicar la tabla vacía.
+ * Cuántos artículos encontró el filtro, sin los recortes.
  *
- * SE CUENTA SOBRE LOS FILTROS DE LA PERSONA SOLOS —sin las dos reglas— y las
- * reglas se aplican después con un `filter`, en la misma pasada. Así se puede
- * decir las dos cosas a la vez: cuántos hay con la oferta puesta y cuántos más
- * hay sin ella.
+ * SE LLAMA SÓLO CON LA TABLA VACÍA, y ahí es lo único útil que se puede decir:
+ * "con estos recortes no queda nada, pero la marca tiene 23 artículos". Con eso
+ * la pantalla ofrece sacarlos, en vez de quedarse en blanco como si la marca no
+ * existiera.
  *
- * SE LLAMA SÓLO CON LA TABLA VACÍA. Es una segunda pasada por la consulta
- * grande, que no es gratis: se paga únicamente en la pantalla en blanco —donde
- * no hay nada más que mostrar y estos números son lo único útil que se puede
- * decir— y nunca en el camino normal.
- *
- * Con la tabla vacía, todo lo que se cuenta acá tiene sugerido 0 (si alguno
- * tuviera, sería una fila) o no pasa el filtro de oferta. Por eso alcanza con
- * contar y no hay que volver a mirar el sugerido.
+ * Es una segunda pasada por la consulta grande, que no es gratis. Se paga
+ * únicamente en la pantalla vacía --donde no hay nada más que mostrar y este
+ * número es lo único que se puede decir-- y nunca en el camino normal.
  */
-async function contarOcultos(
-  w: Where,
-): Promise<{ sinSugerido: number; sinOferta: number }> {
-  const fila = await queryOne<{ total: string; con_oferta: string }>(
-    `${BASE}
-     select count(*) as total,
-            count(*) filter (where ${REGLA_OFERTA}) as con_oferta
-       from calculada ${w.sqlEstructural}`,
+async function contarDelFiltro(w: Where): Promise<number> {
+  const fila = await queryOne<{ v: string }>(
+    `${BASE} select count(*) as v from calculada ${w.sqlEstructural}`,
     w.params,
   );
-  const total = Number(fila?.total ?? 0);
-  const conOferta = Number(fila?.con_oferta ?? 0);
-
-  // Con la oferta puesta, lo que la persona "tiene a mano" son los que sí la
-  // tienen; el resto es lo que se destraba apagando ese botón.
-  return w.filtraPorOferta
-    ? { sinSugerido: conOferta, sinOferta: total - conOferta }
-    : { sinSugerido: total, sinOferta: 0 };
+  return Number(fila?.v ?? 0);
 }
 
 async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
@@ -515,9 +629,11 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
     `${BASE}
      select sku, producto, proveedor, grupo, marca, codigo_compra, ean, u_bulto,
             tuc, full_ml, total, costo, valor, costo_lista,
-            oferta_calculada_pct, sell_in_pct,
-            uds, ritmo_diario, cobertura, sugerido,
-            sugerido_base, sugerido_tope, factor_oferta, mediana_sell_in,
+            sell_in_pct,
+            uds, ritmo_diario, dias_ritmo, ritmo_recortado, cobertura, sugerido,
+            es_nuevo, sugerido_minimo, to_char(alta, 'YYYY-MM-DD') as alta,
+            sugerido_base, sugerido_tope, factor_oferta, habitual_sell_in,
+            meses_con_oferta, sin_oferta_por_ahora, dejo_de_tener_sell_in,
             uds_rent, rentabilidad,
             uds_mes_pasado, rent_mes_pasado,
             comprado_mes_pasado, unidades_mes_pasado, proveedor_compro,
@@ -526,17 +642,27 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
             ultima_compra
      from calculada ${w.sql}
      -- Por lo que hay que comprar, no por lo que hay: arriba lo más urgente.
-     order by sugerido * costo desc, sugerido desc
-     limit ${TOPE}`,
+     --
+     -- EL SKU AL FINAL ES EL DESEMPATE, y hace falta desde que se pueden ver
+     -- todos los artículos: ahí muchas filas empatan en el mismo sugerido, y
+     -- sin un criterio estable Postgres las puede devolver en otro orden en
+     -- cada consulta. Una tabla que se reordena sola al cambiar un filtro que
+     -- no la toca se lee como si hubieran cambiado los datos.
+     --
+     -- SIN LIMIT, a propósito. Antes había un tope de 500 y sin recortes
+     -- cortaba de verdad --GLAM tiene 981 artículos, COTY 824-- así que pedir
+     -- todos los de un proveedor devolvía la mitad. Un recorte que nadie pidió,
+     -- en la pantalla que sirve para no perderse ningún artículo, es peor que
+     -- una tabla larga.
+     order by sugerido * costo desc, sugerido desc, sku`,
     w.params,
   );
 
-  // La tabla vacía es la única que necesita explicarse, y sólo si hay alguna
-  // regla puesta que pueda ser la culpable. Ver `contarOcultos`.
-  const ocultos =
-    filas.length === 0 && (w.aplicaLaRegla || w.filtraPorOferta)
-      ? await contarOcultos(w)
-      : { sinSugerido: 0, sinOferta: 0 };
+  // La tabla vacía es la única que necesita explicarse, y sólo si hay algún
+  // recorte que pueda ser el culpable: sin ninguno, cero filas es cero
+  // artículos y no hay nada más que decir. Ver `contarDelFiltro`.
+  const articulosDelFiltro =
+    filas.length === 0 && w.recortes.length > 0 ? await contarDelFiltro(w) : 0;
 
   const mapeadas = filas.map((r) => ({
     sku: r.sku as string,
@@ -553,17 +679,23 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
     costo: num(r.costo),
     valor: num(r.valor),
     costoLista: num(r.costo_lista),
-    ofertaCalculadaPct:
-      r.oferta_calculada_pct == null ? null : num(r.oferta_calculada_pct),
     sellInPct: r.sell_in_pct == null ? null : num(r.sell_in_pct),
     uds: num(r.uds),
     ritmoDiario: num(r.ritmo_diario),
+    diasRitmo: num(r.dias_ritmo),
+    ritmoRecortado: r.ritmo_recortado === true,
+    esNuevo: r.es_nuevo === true,
+    alta: (r.alta as string | null) ?? null,
     cobertura: r.cobertura == null ? null : num(r.cobertura),
     sugerido: num(r.sugerido),
+    sugeridoMinimo: r.sugerido_minimo === true,
     sugeridoBase: num(r.sugerido_base),
     sugeridoTope: num(r.sugerido_tope),
     factorOferta: num(r.factor_oferta),
-    medianaSellIn: r.mediana_sell_in == null ? null : num(r.mediana_sell_in),
+    habitualSellIn: r.habitual_sell_in == null ? null : num(r.habitual_sell_in),
+    mesesConOferta: num(r.meses_con_oferta),
+    sinOfertaPorAhora: r.sin_oferta_por_ahora === true,
+    dejoDeTenerSellIn: r.dejo_de_tener_sell_in === true,
     udsRentabilidad: num(r.uds_rent),
     rentabilidad: r.rentabilidad == null ? null : num(r.rentabilidad),
     udsMesPasado: num(r.uds_mes_pasado),
@@ -577,11 +709,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
     ultimaCompra: (r.ultima_compra as string | null) ?? null,
   }));
 
-  return {
-    filas: mapeadas,
-    ocultosSinSugerido: ocultos.sinSugerido,
-    ocultosSinOferta: ocultos.sinOferta,
-  };
+  return { filas: mapeadas, articulosDelFiltro };
 }
 
 /**
@@ -711,9 +839,7 @@ async function getDashboardComprasDirecto(
 
   return {
     filas: listado.filas,
-    ocultosSinSugerido: listado.ocultosSinSugerido,
-    ocultosSinOferta: listado.ocultosSinOferta,
-    recortada: listado.filas.length === TOPE,
+    articulosDelFiltro: listado.articulosDelFiltro,
     mesPasado,
     ventana: f.ventana ?? VENTANA_POR_DEFECTO,
     cobertura: coberturaValida(f.cobertura),

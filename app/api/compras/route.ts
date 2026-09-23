@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { coberturaValida } from "@/lib/compras";
+import { coberturaValida, recortesValidos } from "@/lib/compras";
 import { lista } from "@/lib/filtros";
 import {
   enConstruccion,
@@ -49,8 +49,12 @@ export async function GET(request: NextRequest) {
     // Se recorta contra el máximo acá y otra vez en la consulta. No es de más:
     // esto es lo que puede llegar de una URL escrita a mano.
     cobertura: coberturaValida(Number(sp.get("cobertura"))),
-    todos: sp.get("todos") === "1",
-    soloOferta: sp.get("soloOferta") === "1",
+    // Se sanean contra los que existen: esto llega de una query string que se
+    // puede escribir a mano, y un recorte inventado no puede terminar en un
+    // `where`. Ojo: acá NO se aplica el defecto de la pantalla -- una URL sin
+    // `recorte` es "sin recortes", no "los de siempre", porque si no nunca se
+    // podría pedir la lista completa.
+    recortes: recortesValidos(sp.getAll("recortes")),
   };
 
   try {

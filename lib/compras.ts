@@ -20,7 +20,7 @@ import {
   PLAZO_REPOSICION_DIAS,
 } from "@/lib/stock";
 import type { CeldaXlsx, ColumnaXlsx, LibroXlsx } from "@/lib/xlsx";
-import type { FilaCompra } from "@/lib/types";
+import type { FilaCompra, RecorteCompras } from "@/lib/types";
 
 /** Sobre cuántos meses se mide la rentabilidad de venta del artículo. */
 export const MESES_RENTABILIDAD = 3;
@@ -94,17 +94,120 @@ export const RENTABILIDAD_COMPRA_DISCRETA = 15;
  * el único caso que sí vale la pena: margen flojo pero un descuento que antes no
  * teníamos.
  *
- * Se mide contra la MEDIANA de los últimos meses y no contra la diferencia en
- * puntos, y los datos dicen por qué. Los cuatro Almond Breeze tienen sell in del
- * 50 % con mediana 42,5 %: son 7,5 puntos de ventaja sobre una oferta que el
- * proveedor viene dando SIEMPRE, y el artículo igual pierde plata (-28 %, -9,6 %).
- * El Scotch-Brite tiene 40 % con mediana 0: ese descuento no existía.
+ * Se mide contra EL DESCUENTO HABITUAL del artículo y no contra la diferencia
+ * en puntos, y los datos dicen por qué. Los cuatro Almond Breeze tienen sell in
+ * del 50 % con un habitual de 42,5 %: son 7,5 puntos de ventaja sobre una oferta
+ * que el proveedor viene dando SIEMPRE, y el artículo igual pierde plata
+ * (-28 %, -9,6 %). El Scotch-Brite tiene 40 % y nunca tuvo oferta antes: ese
+ * descuento no existía.
  *
- * En puntos los dos casos se parecen. Contra la mediana no: 50 sobre 42,5 no
- * llega al doble, 40 sobre 0 sí. Mediana 0 quiere decir "nunca hubo oferta", así
- * que cualquier descuento de hoy es nuevo.
+ * En puntos los dos casos se parecen. Contra lo habitual no: 50 sobre 42,5 no
+ * llega al doble, 40 sobre nada sí. Un artículo sin oferta previa cuenta como
+ * habitual 0, así que cualquier descuento de hoy es nuevo.
  */
-export const VECES_SOBRE_LA_MEDIANA_PARA_INFLAR = 2;
+export const VECES_SOBRE_LO_HABITUAL_PARA_INFLAR = 2;
+
+/**
+ * DESDE CUANDO UN ARTICULO DEJA DE SER NUEVO.
+ *
+ * Un artículo dado de alta hace poco no se puede juzgar con las mismas reglas
+ * que el resto: si todavía no vendió nada, el cálculo no tiene con qué sugerir
+ * --no hay ritmo-- y el artículo desaparece de la tabla sin que eso signifique
+ * que no hay que comprarlo. Hoy son 526 en esta situación: 243 que ya tienen
+ * stock y no arrancaron, y 283 que están cargados en Sigma y nunca se
+ * compraron.
+ *
+ * TRES MESES y no la ventana del ritmo, que se elige en pantalla: si dependiera
+ * del selector, el mismo artículo sería nuevo con 120 días y viejo con 30, y
+ * "nuevo" dejaría de querer decir algo.
+ *
+ * Se mide contra `fechaAlta` del maestro de Sigma, que está completo en los
+ * 8.265 artículos. Ojo: 3.987 tienen el 05/03/2025, que es el día en que se
+ * cargó el sistema --no son altas de verdad-- pero quedan muy afuera de esta
+ * ventana, así que no ensucian nada.
+ */
+export const DIAS_ARTICULO_NUEVO = 90;
+
+/**
+ * Los recortes que se pueden aplicar a la tabla, como van en la lista.
+ *
+ * Viven acá y no escritos a mano en el componente porque los lee también el
+ * saneador de abajo, y el día que se agregue un tercero tiene que aparecer en
+ * los dos lados solo.
+ */
+export const RECORTES_COMPRAS = [
+  {
+    valor: "sugerido",
+    etiqueta: "Hay que comprar",
+    ayuda:
+      "Deja sólo los artículos a los que el cálculo les pide reposición. Es el recorte de siempre.",
+  },
+  {
+    valor: "oferta",
+    etiqueta: "Con oferta del mes",
+    ayuda:
+      "Deja sólo los que tienen sell in del proveedor vigente en el mes elegido.",
+  },
+  {
+    // EL RECORTE QUE HACE VISIBLE LO QUE EL CALCULO NO PUEDE JUZGAR.
+    //
+    // Sin ventas no hay ritmo, así que estos artículos nunca entran por
+    // "Hay que comprar": los que no tienen stock traen el mínimo de un bulto y
+    // los que sí tienen no traen nada. Sin una forma de pedirlos, la única
+    // manera de encontrarlos sería sacar todos los recortes y buscarlos entre
+    // miles de filas.
+    valor: "sin_ventas",
+    etiqueta: "Sin ventas",
+    ayuda:
+      "Deja sólo los artículos que no vendieron nada en la ventana del ritmo: los que recién se dieron de alta y los que dejaron de moverse. El cálculo no los puede juzgar, así que se deciden a mano.",
+  },
+] as const satisfies readonly {
+  valor: RecorteCompras;
+  etiqueta: string;
+  ayuda: string;
+}[];
+
+/**
+ * ARRANCA CON "HAY QUE COMPRAR" PUESTO. Son ~8.200 artículos con stock y la
+ * orden típica tiene decenas: empezar con todo obligaría a buscar los que
+ * importan entre los que no. Sacarlo es un click.
+ */
+export const RECORTES_POR_DEFECTO: RecorteCompras[] = ["sugerido"];
+
+/**
+ * Los recortes válidos de una lista que puede venir de cualquier lado.
+ *
+ * Existe porque esto llega de una query string que se puede escribir a mano, y
+ * un valor inventado no puede terminar en un `where`. Se descartan los que no
+ * existen y los repetidos --marcar dos veces lo mismo agregaría la condición
+ * dos veces-- y se devuelven en el orden de `RECORTES_COMPRAS`, para que dos
+ * URLs con los mismos recortes en distinto orden den la misma clave de caché.
+ */
+export function recortesValidos(v: unknown): RecorteCompras[] {
+  const pedidos = Array.isArray(v) ? v : [];
+  return RECORTES_COMPRAS.filter((r) => pedidos.includes(r.valor)).map(
+    (r) => r.valor,
+  );
+}
+
+/**
+ * CUANTOS MESES SEGUIDOS SIN OFERTA HACEN FALTA PARA VOLVER A SUGERIR.
+ *
+ * Un artículo que el proveedor viene bonificando y este mes no, NO se compra:
+ * pedirlo ahora es pagar a precio de lista algo que el mes que viene vuelve a
+ * tener descuento. El cálculo deja el sugerido en 0 --ni siquiera el mínimo--
+ * y la pantalla dice por qué.
+ *
+ * Pero eso no puede ser para siempre: si la oferta no vuelve, el artículo se
+ * quedaría sin reponer nunca. Pasados estos meses seguidos sin nada se asume
+ * que el descuento se terminó y se vuelve a sugerir lo que haga falta, con el
+ * aviso al lado.
+ *
+ * 3 es la ventana que pidió el negocio, contando el mes elegido: con el mes
+ * pasado en 0 y el anterior en 0, el de ahora en 0 ya es una tendencia y no un
+ * mes salteado.
+ */
+export const MESES_SIN_SELL_IN_PARA_SUGERIR = 3;
 
 /**
  * PARA CUÁNTOS DÍAS SE ESTÁ COMPRANDO.
@@ -253,7 +356,19 @@ export function renglonInicial(f: FilaCompra): RenglonOrden {
   const unidad = unidadPorDefecto(f.unidadesPorBulto);
   return {
     unidad,
-    cantidad: cantidadSugerida(f.sugerido, unidad, f.unidadesPorBulto),
+    // EL MINIMO SE MUESTRA PERO NO SE CARGA SOLO, y la diferencia es de
+    // tamaño: hoy hay 4.475 artículos sin ventas en la ventana, y un bulto a
+    // cada uno son $ 318 millones. Cargados de entrada, abrir Compras sin
+    // filtrar mostraría esa orden ya armada y habría que vaciarla a mano para
+    // poder trabajar.
+    //
+    // El sugerido igual se ve en su columna, marcado como "mín.", que es lo
+    // que se pidió: que el artículo sin historial proponga un bulto en vez de
+    // no proponer nada. Aceptarlo es escribirlo, o apretar "Volver al
+    // sugerido" para toda la lista de una.
+    cantidad: f.sugeridoMinimo
+      ? 0
+      : cantidadSugerida(f.sugerido, unidad, f.unidadesPorBulto),
     descuento: f.sellInPct ?? 0,
     // Vacío a propósito: ver RenglonOrden.
     descuento2: 0,
@@ -620,18 +735,83 @@ export function porQueSugerido(
   coberturaDias: number,
 ): string[] {
   if (f.cobertura == null) {
+    // EL ARTICULO NUEVO ES OTRA COSA QUE EL ARTICULO MUERTO, y el mismo número
+    // en la columna los confunde. Uno no se vende hace meses; el otro todavía
+    // no tuvo la oportunidad, y es justo el que puede necesitar la primera
+    // compra. El sugerido es el mismo --un bulto-- pero la decisión no.
+    const l = f.esNuevo
+      ? [
+          `Artículo nuevo: alta el ${f.alta ?? "—"}, todavía sin ninguna venta.`,
+          f.total > 0
+            ? `Ya hay ${Math.round(f.total)} u. en stock: llegó y todavía no arrancó.`
+            : "Y no hay stock: está cargado en Sigma pero nunca se compró.",
+        ]
+      : [
+          "Sin ventas en la ventana: no hay ritmo con el que calcular nada.",
+          `Stock hoy: ${Math.round(f.total)} u.`,
+        ];
+
+    // El freno manda por encima de todo, incluso del mínimo.
+    if (f.sinOfertaPorAhora) {
+      return [
+        ...l,
+        "",
+        "Y este mes el proveedor NO le dio sell in, habiéndoselo dado antes:" +
+          " no se sugiere nada. Comprarlo ahora sería pagar a precio de lista" +
+          " algo que viene con descuento.",
+      ];
+    }
+
+    if (f.sugeridoMinimo) {
+      return [
+        ...l,
+        "",
+        `Sin ritmo no hay nada que calcular, así que se propone el MÍNIMO:` +
+          ` 1 bulto = ${Math.round(f.unidadesPorBulto)} u.`,
+        "Es un punto de partida para ajustar a mano, no una necesidad medida:" +
+          " por debajo de un bulto no se le pide a un proveedor.",
+      ];
+    }
+
+    // NO SE VENDE Y ADEMAS YA HAY STOCK. Acá no se propone ni el mínimo:
+    // sería plata quieta pidiendo más plata quieta.
     return [
-      "Sin ventas en la ventana: no hay ritmo con el que calcular nada.",
-      `Stock hoy: ${Math.round(f.total)} u.`,
+      ...l,
+      "",
+      `No se propone nada: no se vende y ya hay ${Math.round(f.total)} u.` +
+        " en el depósito.",
+      "Si hace falta pedirlo igual, la cantidad se carga a mano.",
     ];
   }
 
   const l: string[] = [
-    `Se vende ${f.ritmoDiario.toFixed(2)} u. por día y hay ${Math.round(f.total)} u.`,
+    `Se vende ${f.ritmoDiario.toFixed(2)} u. por día` +
+      // DE DONDE SALE ESE RITMO, cuando no sale de la ventana entera. Un
+      // artículo nuevo se mide sobre los días que lleva vendiendo, y sin
+      // decirlo el número parece comparable con el de la fila de al lado.
+      (f.ritmoRecortado
+        ? ` (medido sobre ${f.diasRitmo} días: empezó a venderse hace poco)`
+        : "") +
+      ` y hay ${Math.round(f.total)} u.`,
     `Alcanza para ${Math.round(f.cobertura)} días.`,
     `Para cubrir ${coberturaDias} días de compra + ${PLAZO_REPOSICION_DIAS}` +
       ` de reposición faltan ${Math.ceil(f.sugeridoBase)} u.`,
   ];
+
+  // EL FRENO VA PRIMERO, antes que cualquier consideración de oferta o de
+  // techo: si no se va a comprar, lo único que importa es por qué.
+  if (f.sinOfertaPorAhora) {
+    return [
+      ...l,
+      "",
+      "Este mes el proveedor NO le dio sell in, y el mes pasado sí.",
+      "Por eso no se sugiere nada, ni el mínimo: comprarlo ahora sería pagar" +
+        " a precio de lista algo que viene con descuento. Lo que corresponde" +
+        " es esperar a que la oferta vuelva.",
+      `Si hiciera falta igual, se puede cargar la cantidad a mano (el cálculo` +
+        ` daría ${Math.ceil(f.sugeridoBase)} u.).`,
+    ];
+  }
 
   if (f.cobertura > COBERTURA_SIN_INFLAR_DIAS) {
     l.push(
@@ -643,9 +823,9 @@ export function porQueSugerido(
   }
 
   const vigente = f.sellInPct;
-  const mediana = f.medianaSellIn;
+  const habitual = f.habitualSellIn;
 
-  if (vigente == null || mediana == null) {
+  if (vigente == null || habitual == null) {
     l.push(
       "",
       "Sin sell in del proveedor con qué comparar: se sugiere lo que hace falta" +
@@ -654,34 +834,35 @@ export function porQueSugerido(
   } else if (
     f.factorOferta <= 1 &&
     (f.rentabilidad ?? 0) < RENTABILIDAD_COMPRA_DISCRETA / 100 &&
-    vigente > mediana
+    vigente > habitual
   ) {
     // EL CASO NUEVO, Y EL QUE MÁS FALTA HACE EXPLICAR. Sin esto el tooltip
     // diría "el descuento no supera al habitual" sobre un artículo que sí lo
     // supera -- y quien lo lea va a pensar que el número está mal.
     l.push(
       "",
-      `El descuento de este mes es ${vigente.toFixed(1)} % contra ${mediana.toFixed(1)} %` +
+      `El descuento de este mes es ${vigente.toFixed(1)} % contra ${habitual.toFixed(1)} %` +
         ` habitual, pero el artículo rinde ${((f.rentabilidad ?? 0) * 100).toFixed(1)} %,` +
         ` por debajo del ${RENTABILIDAD_COMPRA_DISCRETA} %.`,
       "COMPRA DISCRETA: sólo lo necesario. Comprar de más un artículo que no" +
         " rinde es plata quieta, por buena que esté la oferta.",
       `Se adelantaría compra si el descuento fuera al menos` +
-        ` ${VECES_SOBRE_LA_MEDIANA_PARA_INFLAR} veces el habitual` +
-        ` (${(mediana * VECES_SOBRE_LA_MEDIANA_PARA_INFLAR).toFixed(1)} %),` +
+        ` ${VECES_SOBRE_LO_HABITUAL_PARA_INFLAR} veces el habitual` +
+        ` (${(habitual * VECES_SOBRE_LO_HABITUAL_PARA_INFLAR).toFixed(1)} %),` +
         " o sea uno que antes no teníamos.",
     );
   } else if (f.factorOferta <= 1) {
     l.push(
       "",
       `El descuento de este mes (${vigente.toFixed(1)} %) no supera al habitual` +
-        ` (${mediana.toFixed(1)} %), así que no hay motivo para adelantar compra.`,
+        ` (${habitual.toFixed(1)} %), así que no hay motivo para adelantar compra.`,
     );
   } else {
     l.push(
       "",
-      `El descuento de este mes es ${vigente.toFixed(1)} % contra ${mediana.toFixed(1)} %` +
-        ` habitual: ${(vigente - mediana).toFixed(1)} puntos de ventaja.`,
+      `El descuento de este mes es ${vigente.toFixed(1)} % contra ${habitual.toFixed(1)} %` +
+        ` habitual (el promedio de los meses en que hubo oferta):` +
+        ` ${(vigente - habitual).toFixed(1)} puntos de ventaja.`,
       `Por eso se multiplica por ${f.factorOferta.toFixed(2)}` +
         ` (${PUNTOS_OFERTA_PARA_DUPLICAR} puntos = el doble, tope ${FACTOR_OFERTA_MAX}x).`,
     );
@@ -694,6 +875,20 @@ export function porQueSugerido(
     l.push(
       `Daría ${sinTope} u., pero el techo de ${COBERTURA_MAXIMA_COMPRA_DIAS} días` +
         ` de cobertura lo baja a ${f.sugerido}.`,
+    );
+  }
+
+  // El aviso del artículo al que se le terminó la oferta. Va pegado al
+  // sugerido y no en una columna aparte porque modifica cómo se lee ESE
+  // número: no es una compra en oferta, es una compra a precio de lista de
+  // algo que antes tenía descuento.
+  if (f.dejoDeTenerSellIn) {
+    l.push(
+      "",
+      `Ojo: hace ${MESES_SIN_SELL_IN_PARA_SUGERIR} meses que no tiene sell in` +
+        ` y antes sí tenía (${f.mesesConOferta} de los últimos` +
+        ` ${MESES_HISTORIA_SELL_IN}). Se sugiere igual porque la oferta no` +
+        " parece que vaya a volver, pero se compra a precio de lista.",
     );
   }
 

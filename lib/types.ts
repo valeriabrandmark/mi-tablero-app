@@ -1483,16 +1483,43 @@ export type FiltrosCompras = {
   cobertura?: number;
   /** Mes comercial del que sale la oferta del proveedor (`YYYY-MM`). */
   mes?: string;
-  /** `true` para ver también los artículos que el cálculo no pidió comprar. */
-  todos?: boolean;
   /**
-   * `true` deja sólo los artículos con oferta del proveedor vigente en el mes
-   * elegido. Es para armar la orden de una campaña de ofertas sin tener que
-   * mirar el resto del catálogo.
+   * Qué recortes se le aplican a la tabla. Sin nada, están todos los
+   * artículos; cada uno que se marca saca filas. Ver `RecorteCompras`.
    */
-  soloOferta?: boolean;
+  recortes?: RecorteCompras[];
   buscar?: string;
 };
+
+/**
+ * QUE RECORTES SE LE APLICAN A LA TABLA. Se eligen de una lista con
+ * checkboxes, como cualquier otro filtro del tablero, y SE SUMAN: cada uno
+ * saca filas, y sin ninguno marcado están todos los artículos.
+ *
+ *   (ninguno)             todos los del filtro de proveedor / marca / grupo,
+ *                         tengan o no algo para comprar. Es lo que hace falta
+ *                         para cargar cantidades a mano: un artículo sin
+ *                         faltante y sin oferta también se pide, porque se
+ *                         acordó con el proveedor o porque es marca nueva.
+ *   sugerido              sólo los que el cálculo pide reponer.
+ *   oferta                sólo los que tienen sell in vigente este mes.
+ *   sin_ventas            sólo los que no vendieron nada en la ventana: los
+ *                         recién dados de alta y los que dejaron de moverse.
+ *                         Son los que el cálculo no puede juzgar, y sin este
+ *                         recorte habría que buscarlos entre miles de filas.
+ *
+ * Y las combinaciones: `sugerido` + `oferta` es la compra de una campaña de
+ * ofertas; `sugerido` + `sin_ventas` son los que sólo traen el mínimo de un
+ * bulto.
+ *
+ * ESTABAN COMO DOS BOTONES SUELTOS en dos lugares distintos de la pantalla
+ * --"sólo los que hay que comprar" entre los filtros y "dejar sólo con oferta"
+ * abajo, en la fila de acciones de la orden-- así que el recorte que estaba
+ * aplicado había que reconstruirlo mirando dos cosas que no se veían al mismo
+ * tiempo. En una sola lista se lee de un vistazo, y se elige igual que la
+ * marca o el proveedor.
+ */
+export type RecorteCompras = "sugerido" | "oferta" | "sin_ventas";
 
 export type FilaCompra = {
   sku: string;
@@ -1537,18 +1564,32 @@ export type FilaCompra = {
    * mismo que 0.
    */
   sellInPct: number | null;
-  /**
-   * El sell in CALCULADO a partir de nuestras compras
-   * (`costos_historicos.oferta_pct`), con el que se valoriza el costo real.
-   *
-   * SE MUESTRA COMO REFERENCIA Y NO VIAJA AL ARCHIVO. No es lo que el proveedor
-   * tiene vigente: mandarlo en una orden de compra sería pedir con un descuento
-   * inventado.
-   */
-  ofertaCalculadaPct: number | null;
   /** Unidades vendidas en la ventana del ritmo. */
   uds: number;
   ritmoDiario: number;
+  /**
+   * Sobre cuántos días se midió el ritmo. Es la ventana elegida, salvo que el
+   * artículo haya vendido por primera vez adentro de ella: ahí son los días que
+   * lleva vendiendo, con un piso de `DIAS_MINIMOS_DE_RITMO`.
+   */
+  diasRitmo: number;
+  /**
+   * `true` si el ritmo se midió sobre menos días que la ventana, o sea que el
+   * artículo empezó a venderse hace poco. Un ritmo de 0,6 medido sobre 30 días
+   * y uno medido sobre 120 no se leen igual aunque el número sea el mismo.
+   */
+  ritmoRecortado: boolean;
+  /** Cuándo se dio de alta en Sigma (`YYYY-MM-DD`). */
+  alta: string | null;
+  /**
+   * `true` si se dio de alta hace menos de `DIAS_ARTICULO_NUEVO`.
+   *
+   * NO es lo mismo que `ritmoRecortado`: un artículo puede ser viejo y haber
+   * empezado a venderse recién ahora, o ser nuevo y no haber vendido nunca. El
+   * segundo caso es el que el cálculo no puede encontrar solo --sin ventas no
+   * hay ritmo-- y por eso la marca existe.
+   */
+  esNuevo: boolean;
   cobertura: number | null;
   /**
    * Cuántas unidades sugiere comprar la pantalla: la necesidad movida por la
@@ -1557,6 +1598,19 @@ export type FilaCompra = {
    * en el tooltip sin recalcular nada en el navegador.
    */
   sugerido: number;
+  /**
+   * `true` si el sugerido NO es una cuenta sino el mínimo de un bulto.
+   *
+   * Pasa cuando el artículo no vendió nada en la ventana --recién se dio de
+   * alta, o hace rato que no se mueve-- y entonces no hay ritmo con el que
+   * calcular nada. La decisión ahí es de una persona, y un bulto es el punto
+   * de partida para ajustarla: por debajo de un bulto no se le pide a un
+   * proveedor.
+   *
+   * La pantalla lo marca para que ese número no se lea como una necesidad
+   * medida, que es lo que sí son los demás.
+   */
+  sugeridoMinimo: boolean;
   /** Unidades que faltan para cubrir objetivo + reposición, sin tocar. */
   sugeridoBase: number;
   /** El techo: lo máximo que se puede pedir sin pasar la cobertura máxima. */
@@ -1564,10 +1618,35 @@ export type FilaCompra = {
   /** Por cuánto se multiplicó la base por la oferta. 1 = no se movió. */
   factorOferta: number;
   /**
-   * La mediana del descuento de los últimos meses, contra la que se compara el
-   * vigente. `null` si el artículo nunca estuvo en la planilla de sell in.
+   * EL DESCUENTO HABITUAL: el promedio de los meses en que SI hubo oferta, de
+   * los últimos seis. Es contra esto que se mide si la oferta de este mes es
+   * buena.
+   *
+   * Los meses en cero NO entran en el promedio, y eso es todo el punto: un mes
+   * sin oferta no es "una oferta del 0 %" que baje la referencia, es un mes en
+   * el que no hubo nada. Con los ceros adentro, un artículo con historia
+   * 10·10·0·10·0·0 daba 5 % de habitual, y entonces el 10 % de siempre
+   * aparecía como "5 puntos de ventaja" e inflaba el sugerido.
+   *
+   * `null` si nunca tuvo oferta en la ventana; el cálculo lo lee como 0, o sea
+   * que cualquier descuento de hoy es nuevo.
    */
-  medianaSellIn: number | null;
+  habitualSellIn: number | null;
+  /** En cuántos de los últimos seis meses tuvo oferta. 0 = nunca tuvo. */
+  mesesConOferta: number;
+  /**
+   * El proveedor mandó su sell in de este mes y a ESTE artículo no le dio nada,
+   * habiéndole dado hace poco. Es el freno: el sugerido queda en 0 aunque la
+   * cuenta diera más, porque comprarlo ahora es pagar a precio de lista algo
+   * que viene con descuento.
+   */
+  sinOfertaPorAhora: boolean;
+  /**
+   * Lleva varios meses seguidos sin oferta y antes tenía. Acá no hay oferta que
+   * esperar, así que SÍ se sugiere lo que haga falta — con el aviso al lado de
+   * que se está comprando a precio de lista.
+   */
+  dejoDeTenerSellIn: boolean;
   /** Unidades vendidas en los últimos 3 meses, y qué rentabilidad dejaron. */
   udsRentabilidad: number;
   rentabilidad: number | null;
@@ -1610,7 +1689,6 @@ export type FilaCompra = {
 
 export type DashboardCompras = {
   filas: FilaCompra[];
-  recortada: boolean;
   ventana: number;
   /**
    * Los días de cobertura con los que se calculó el sugerido.
@@ -1641,19 +1719,14 @@ export type DashboardCompras = {
    */
   sellInFoto: string | null;
   /**
-   * POR QUÉ LA TABLA SALIÓ VACÍA, en números. Los dos vienen en 0 salvo que
-   * `filas` esté vacía: es ahí donde hacen falta, para que la pantalla pueda
-   * decir "no hay nada que reponer, pero hay 23 artículos acá" en vez de
-   * quedarse en blanco como si el filtro no hubiera encontrado nada.
+   * CUANTOS ARTICULOS ENCONTRO EL FILTRO, sin los recortes.
    *
-   * `ocultosSinSugerido` son los que el filtro SÍ encontró y el cálculo no
-   * pidió reponer --se les pueden cargar cantidades a mano igual--, y
-   * `ocultosSinOferta` cuántos más aparecerían apagando "dejar sólo con
-   * oferta". Van separados porque son dos botones distintos los que los
-   * destraban.
+   * Viene en 0 salvo que `filas` esté vacía: es ahí donde hace falta, para que
+   * la pantalla pueda decir "con estos recortes no queda nada, pero el filtro
+   * tiene 23 artículos" y ofrecer sacarlos, en vez de quedarse en blanco como
+   * si la marca no existiera.
    */
-  ocultosSinSugerido: number;
-  ocultosSinOferta: number;
+  articulosDelFiltro: number;
   comprasHasta: string | null;
   generadoEn: string;
 };

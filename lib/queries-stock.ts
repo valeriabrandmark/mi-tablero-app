@@ -3,6 +3,7 @@ import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import {
   COBERTURA_OBJETIVO_DIAS,
+  DIAS_MINIMOS_DE_RITMO,
   DEPOSITO_POR_DEFECTO,
   GRUPO_PROVEEDOR_POR_DEFECTO,
   PLAZO_REPOSICION_DIAS,
@@ -114,6 +115,8 @@ antiguedad as (
 ventas as (
   select sku,
          max(fecha)                                                  as ultima_venta,
+         -- Desde cuándo este artículo pudo vender. Ver dias_ritmo más abajo.
+         min(fecha)                                                  as primera_venta,
          coalesce(sum(cantidad) filter (where fecha >= current_date - $1::int), 0) as uds,
          coalesce(sum(cantidad) filter (where fecha >= current_date - $1::int
                                           and canal = 'Mercado Libre'), 0) as uds_meli,
@@ -165,14 +168,26 @@ base as (
          ant.dias                                       as dias_en_full,
          coalesce(ant.u_mas_120, 0)                     as u_mas_120,
          coalesce(ant.u_mas_120, 0) * coalesce(c.costo_real, 0) as valor_mas_120,
-         -- El ritmo es unidades por DÍA. La planilla lo guardaba mensual y lo
-         -- llamaba "STOCK MAX", que es lo que hacía leer un ritmo como un tope.
-         coalesce(v.uds, 0)::numeric / $1::int          as ritmo_diario,
-         -- Sin ventas no hay cobertura: es null y no un número enorme. Son dos
-         -- situaciones distintas y la planilla las mezclaba en un #DIV/0!.
-         case when coalesce(v.uds, 0) = 0 then null
-              else s.total / (coalesce(v.uds, 0)::numeric / $1::int)
-         end                                            as cobertura
+         -- SOBRE CUANTOS DIAS SE MIDE EL RITMO.
+         --
+         -- La ventana entera, salvo que el artículo haya empezado a venderse
+         -- adentro de ella: ahí son los días que lleva vendiendo. Uno dado de
+         -- alta hace 30 días que vendió 20 unidades no vende 20/120 = 0,17 por
+         -- día, vende 0,67, y con la cuenta vieja aparecía con una cobertura
+         -- enorme --como si sobrara-- justo cuando está por quebrarse.
+         --
+         -- ES LA MISMA CUENTA QUE HACE COMPRAS (lib/queries-compras.ts). Tiene
+         -- que serlo: las dos pantallas muestran la cobertura del mismo
+         -- artículo, y que una diga 40 días y la otra 140 no es un matiz, es
+         -- una de las dos mintiendo.
+         --
+         -- El piso de ${DIAS_MINIMOS_DE_RITMO} días evita el otro extremo: sin
+         -- él, tres unidades vendidas ayer darían un ritmo de 3 por día.
+         case when v.primera_venta is null then $1::int
+              else least($1::int,
+                         greatest(${DIAS_MINIMOS_DE_RITMO},
+                                  current_date - v.primera_venta::date))
+         end                                            as dias_ritmo
   from stock s
   left join bronze.sigma_articulos a on trim(a.id) = s.sku
   left join bronze.proveedores_grupo pg on pg.proveedor = a."proveedorNombre"
@@ -182,6 +197,21 @@ base as (
   left join antiguedad ant on ant.sku = s.sku
   where s.total > 0
     and coalesce(a."proveedorNombre", '') <> all($2::text[])
+),
+-- El ritmo sale en su propio nivel porque depende de dias_ritmo, que se calcula
+-- arriba: en SQL una columna no se puede usar en la misma lista de select donde
+-- se define.
+con_ritmo as (
+  select b.*,
+         -- El ritmo es unidades por DÍA. La planilla lo guardaba mensual y lo
+         -- llamaba "STOCK MAX", que es lo que hacía leer un ritmo como un tope.
+         b.uds::numeric / b.dias_ritmo                  as ritmo_diario,
+         -- Sin ventas no hay cobertura: es null y no un número enorme. Son dos
+         -- situaciones distintas y la planilla las mezclaba en un #DIV/0!.
+         case when b.uds = 0 then null
+              else b.total / (b.uds::numeric / b.dias_ritmo)
+         end                                            as cobertura
+  from base b
 ),
 -- El exceso y el sugerido salen del ritmo, así que van en su propio nivel para
 -- no repetir la expresión entera en cada uno.
@@ -193,7 +223,7 @@ calculada as (
          -- mientras la reposición viaja. Sin sumar el plazo, el pedido llega
          -- justo cuando el artículo ya se quebró.
          ceil(greatest(0, b.ritmo_diario * ${COBERTURA_OBJETIVO_DIAS + PLAZO_REPOSICION_DIAS} - b.total)) as sugerido
-  from base b
+  from con_ritmo b
 )`;
 
 type Where = { sql: string; params: unknown[] };

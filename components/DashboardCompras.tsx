@@ -27,6 +27,9 @@ import {
   RENTABILIDAD_COMPRA_DISCRETA,
   COBERTURA_COMPRA_MAXIMA,
   coberturaValida,
+  RECORTES_COMPRAS,
+  RECORTES_POR_DEFECTO,
+  recortesValidos,
 } from "@/lib/compras";
 import { vacio as sinValores } from "@/lib/filtros";
 import {
@@ -136,8 +139,13 @@ export default function DashboardComprasPage({
   const inicial: FiltrosCompras = {
     ventana: VENTANA_POR_DEFECTO,
     cobertura: COBERTURA_OBJETIVO_DIAS,
+    recortes: RECORTES_POR_DEFECTO,
   };
   const [filtros, setFiltros] = useState<FiltrosCompras>(inicial);
+
+  // Se sanea acá y no se lee `filtros.recortes` a pelo: así la pantalla y el
+  // servidor miran exactamente la misma lista.
+  const recortes = recortesValidos(filtros.recortes);
   const [buscado, setBuscado] = useState("");
 
   /**
@@ -235,8 +243,9 @@ export default function DashboardComprasPage({
         ventana: [String(filtros.ventana ?? VENTANA_POR_DEFECTO)],
         cobertura: [String(filtros.cobertura ?? COBERTURA_OBJETIVO_DIAS)],
         mes: filtros.mes ? [filtros.mes] : undefined,
-        todos: filtros.todos ? ["1"] : undefined,
-        soloOferta: filtros.soloOferta ? ["1"] : undefined,
+        // Cada recorte va como un parámetro repetido (?recorte=a&recorte=b),
+        // igual que los demás filtros de lista.
+        recortes: recortes.length > 0 ? recortes : undefined,
         // RED DE SEGURIDAD. `satisfies` obliga a que estén TODAS las claves
         // de FiltrosCompras: si mañana se agrega un filtro y se olvida acá, esto
         // rompe el build.
@@ -494,12 +503,28 @@ export default function DashboardComprasPage({
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
     !filtros.buscar &&
-    !filtros.todos &&
+    recortes.join() === RECORTES_POR_DEFECTO.join() &&
     !filtros.mes &&
     (filtros.ventana ?? VENTANA_POR_DEFECTO) === VENTANA_POR_DEFECTO;
 
   const columnas: Columna<FilaCompra>[] = [
     { titulo: "SKU", celda: (f) => f.sku, orden: (f) => f.sku },
+    {
+      // EL CODIGO CON EL QUE EL PROVEEDOR LO VENDE, no el nuestro. Ya viajaba
+      // en el Excel que se le manda --él no conoce nuestro SKU-- pero no se
+      // veía en pantalla, así que para cotejar una lista de precios contra
+      // esta tabla había que abrir el Excel o buscar el artículo en Sigma.
+      titulo: "Cód. proveedor",
+      ayuda:
+        "El código con el que el proveedor identifica el artículo (codigoCompra en Sigma). Es el que va en el Excel que se le manda; sirve para cotejar contra su lista de precios. Vacío es que no está cargado en Sigma.",
+      celda: (f) =>
+        f.codigoCompra ? (
+          <span className="tabular-nums">{f.codigoCompra}</span>
+        ) : (
+          <span className="text-muted">—</span>
+        ),
+      orden: (f) => f.codigoCompra,
+    },
     {
       titulo: "Artículo",
       celda: (f) => (
@@ -514,6 +539,38 @@ export default function DashboardComprasPage({
       // El recuento va en esta columna y no en la del SKU para no pisar
       // la etiqueta "Total", que es la que dice si la tabla está recortada.
       total: `${fmtNumero(contarSkus(filas, (f) => f.sku))} SKU`,
+    },
+    {
+      // LA MARCA DE LOS ARTICULOS NUEVOS.
+      //
+      // Un artículo dado de alta hace poco que todavía no vendió nada no tiene
+      // ritmo, así que el sugerido no lo puede encontrar: queda en "—" al lado
+      // de los que no se venden hace dos años, y son dos cosas opuestas. Uno
+      // está muerto; el otro todavía no tuvo la oportunidad y puede ser el que
+      // falta comprar por primera vez.
+      //
+      // Ordenando por acá, los nuevos quedan todos juntos arriba.
+      titulo: "Alta",
+      ayuda:
+        "Cuándo se dio de alta el artículo en Sigma. Los de los últimos 3 meses se marcan como nuevos: si todavía no vendieron, el cálculo no los puede sugerir y hay que decidirlos a mano. Ordená por esta columna para verlos juntos.",
+      celda: (f) => {
+        if (!f.alta) return <span className="text-muted">—</span>;
+        const fecha = fmtFechaCortaConAnio(f.alta);
+        if (!f.esNuevo) return <span className="text-muted">{fecha}</span>;
+        return (
+          <span
+            className="whitespace-nowrap text-amber-400"
+            title={
+              f.uds > 0
+                ? `Artículo nuevo (alta ${fecha}). El ritmo se mide sobre los días que lleva vendiendo, no sobre la ventana entera.`
+                : `Artículo nuevo (alta ${fecha}) y todavía sin ventas: el cálculo no puede sugerir nada, se decide a mano.`
+            }
+          >
+            {fecha} <span className="text-[10px]">nuevo</span>
+          </span>
+        );
+      },
+      orden: (f) => f.alta,
     },
     {
       titulo: "U. x bulto",
@@ -568,10 +625,38 @@ export default function DashboardComprasPage({
           f,
           data?.cobertura ?? coberturaElegida,
         ).join("\n");
+        // EL FRENO SE VE, no sólo se lee en el tooltip. Un "—" a secas en un
+        // artículo que se venía comprando se lee como "no hace falta", y acá
+        // la verdad es la contraria: hace falta, pero no a este precio.
+        if (f.sinOfertaPorAhora) {
+          return (
+            <span
+              title={texto}
+              className="cursor-help whitespace-nowrap text-amber-400 decoration-dotted underline underline-offset-2"
+            >
+              sin oferta
+            </span>
+          );
+        }
         if (f.sugerido <= 0) {
           return (
             <span className="text-muted" title={texto}>
               —
+            </span>
+          );
+        }
+        // EL MINIMO NO ES UNA CUENTA, y no puede parecerlo. Se muestra apagado
+        // y con la palabra al lado: quien está armando una orden tiene que
+        // poder separar de un vistazo los renglones que el cálculo midió de los
+        // que son un punto de partida para decidir.
+        if (f.sugeridoMinimo) {
+          return (
+            <span
+              title={texto}
+              className="text-muted cursor-help whitespace-nowrap decoration-dotted underline underline-offset-2"
+            >
+              {fmtNumero(f.sugerido)}{" "}
+              <span className="text-[10px]">mín.</span>
             </span>
           );
         }
@@ -589,6 +674,16 @@ export default function DashboardComprasPage({
           >
             {fmtNumero(f.sugerido)}
             {f.factorOferta > 1 ? ` ×${f.factorOferta.toFixed(1)}` : ""}
+            {/* Se sugiere, pero a precio de lista: el proveedor le sacó la
+                oferta hace varios meses y no parece que vuelva. */}
+            {f.dejoDeTenerSellIn && (
+              <span
+                className="ml-1 text-amber-400"
+                title="Hace varios meses que no tiene sell in y antes sí tenía: esta compra va a precio de lista."
+              >
+                !
+              </span>
+            )}
           </span>
         );
       },
@@ -744,26 +839,6 @@ export default function DashboardComprasPage({
       },
       numerica: true,
       orden: (f) => orden.get(f.sku)?.descuento2 ?? 0,
-    },
-    {
-      // REFERENCIA, NO VIAJA AL ARCHIVO. Es el sell in calculado con nuestras
-      // compras (costos_historicos.oferta_pct), con el que se viene costeando.
-      // Se muestra para poder comparar contra el del proveedor, y el título dice
-      // qué es: puesto como "oferta" a secas se copiaría a la orden pensando
-      // que es el descuento con el que se pide.
-      titulo: "s/ n. compras %",
-      ayuda:
-        "El descuento que se deduce de lo que efectivamente pagamos en nuestras compras. Se muestra como referencia y NO viaja a la orden: mandarlo sería pedirle al proveedor un descuento que él no ofreció.",
-      celda: (f) => (
-        <span
-          className="text-muted"
-          title="Sell in calculado con nuestras compras. No va al archivo."
-        >
-          {f.ofertaCalculadaPct == null ? "—" : f.ofertaCalculadaPct.toFixed(2)}
-        </span>
-      ),
-      numerica: true,
-      orden: (f) => f.ofertaCalculadaPct,
     },
     {
       // De dónde sale depende de qué haya: el sell in del proveedor cuando esté
@@ -983,7 +1058,7 @@ export default function DashboardComprasPage({
           >
             {cargando ? "Recargando…" : "Recargar"}
           </button>
-          <BotonActualizar onDatosNuevos={recargar} />
+          <BotonActualizar onDatosNuevos={recargar} conSellIn />
         </div>
       </div>
 
@@ -1142,20 +1217,24 @@ export default function DashboardComprasPage({
             />
           </form>
 
-          <button
-            type="button"
-            onClick={() => cambiar({ ...filtros, todos: !filtros.todos })}
-            aria-pressed={filtros.todos ?? false}
-            className={`self-end rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
-              filtros.todos
-                ? "border-c1 bg-c1/15 text-c1"
-                : "border-line text-muted hover:bg-panel-2 hover:text-ink"
-            }`}
-          >
-            {filtros.todos
-              ? "Todos los artículos"
-              : "Sólo los que hay que comprar"}
-          </button>
+          {/* LOS RECORTES, EN UNA LISTA COMO CUALQUIER OTRO FILTRO.
+
+              Eran dos botones sueltos en dos lugares distintos de la pantalla
+              --"sólo los que hay que comprar" acá y "dejar sólo con oferta"
+              abajo, en la fila de acciones de la orden-- así que para saber
+              qué se estaba viendo había que mirar dos cosas que no entran en
+              la misma pantalla.
+
+              Va con el MISMO selector que marca y proveedor a propósito: se
+              abren igual, se destildan igual y "ninguno elegido" quiere decir
+              lo mismo en los tres, que es "todos". Uno menos que aprender. */}
+          <SelectorMultiple
+            etiqueta="Recortar a"
+            valores={filtros.recortes}
+            opciones={RECORTES_COMPRAS.map((r) => [r.valor, r.etiqueta])}
+            onChange={(v) => cambiar({ ...filtros, recortes: recortesValidos(v) })}
+            todos="Todos los artículos"
+          />
 
           <BotonLimpiar
             onClick={() => {
@@ -1263,26 +1342,6 @@ export default function DashboardComprasPage({
               className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1.5 text-xs"
             >
               Vaciar cantidades
-            </button>
-            {/* NO ES UN BOTÓN MÁS DE LA FILA: los de al lado tocan la orden
-                --la unidad, las cantidades--, éste toca QUÉ SE VE. Se queda
-                acá igual porque es el mismo gesto ("preparame la tabla para
-                esto") y separarlo en otra fila lo escondería. Por eso se
-                enciende como los chips de filtro y no como los de acción. */}
-            <button
-              type="button"
-              onClick={() =>
-                cambiar({ ...filtros, soloOferta: !filtros.soloOferta })
-              }
-              aria-pressed={filtros.soloOferta ?? false}
-              title="Deja sólo los artículos con sell in del proveedor cargado para el mes elegido."
-              className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
-                filtros.soloOferta
-                  ? "border-c1 bg-c1/15 text-c1"
-                  : "border-line text-muted hover:bg-panel-2 hover:text-ink"
-              }`}
-            >
-              Dejar sólo con oferta
             </button>
 
             <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -1605,9 +1664,7 @@ export default function DashboardComprasPage({
           <Panel
             titulo="Artículos"
             nota={
-              (data.recortada
-                ? `Los ${filas.length} de mayor peso`
-                : `${fmtNumero(filas.length)} artículos`) +
+              `${fmtNumero(filas.length)} artículos` +
               ` · ritmo de ${data.ventana} días` +
               (data.mes ? ` · sell in de ${fmtMes(data.mes)}` : "")
             }
@@ -1617,20 +1674,6 @@ export default function DashboardComprasPage({
               columnas={columnas}
               etiquetaTotal="Total de la orden"
               clave={(f) => f.sku}
-              /* LA TABLA VACÍA TIENE QUE DAR LA SALIDA, no sólo el
-                 diagnóstico.
-
-                 Filtrando por una marca que no se vende la pantalla quedaba
-                 en blanco. Y estaba bien que no sugiriera nada --no se vende,
-                 no hay qué reponer-- pero los artículos EXISTEN y se pueden
-                 pedir igual: es una marca nueva, una reposición puntual, algo
-                 que se acordó con el proveedor. Lo que faltaba era saberlo y
-                 poder llegar a ellos.
-
-                 Los dos botones son los dos motivos por los que la tabla
-                 puede estar vacía teniendo artículos detrás, cada uno con su
-                 número. Antes había que adivinar cuál de los dos destrabar
-                 --y con las dos reglas puestas, los dos. */
               vacio={<VacioCompras data={data} filtros={filtros} cambiar={cambiar} />}
             />
           </Panel>
@@ -1799,29 +1842,17 @@ export default function DashboardComprasPage({
               <strong>0 y hay que ponerla a mano</strong>. Cero acá quiere decir
               «no lo sabemos», no «sin descuento».
             </p>
-            <p className="mt-1">
-              La columna <strong>«s/ n. compras %»</strong> es otra cosa y{" "}
-              <strong>no va al archivo</strong>: es el sell in{" "}
-              <em>calculado con nuestras compras</em> (
-              <span className="font-mono text-xs">
-                costos_historicos.oferta_pct
-              </span>
-              ), el que se usa para valorizar el costo real y trasladarlo a las
-              ofertas del mes. Sirve para comparar, no para pedir: mandarlo en
-              una orden sería pedirle al proveedor con un descuento inventado.
-              {resumen.recortados > 0 && (
-                <>
-                  {" "}
-                  <strong>
-                    Hay {fmtNumero(resumen.recortados)} con descuento mayor a{" "}
-                    {DESCUENTO_MAXIMO} %
-                  </strong>
-                  : se recortan a {DESCUENTO_MAXIMO} antes de exportar. Un
-                  descuento así es un error de carga, y en una orden de compra
-                  deja de ser un número raro en una pantalla.
-                </>
-              )}
-            </p>
+            {resumen.recortados > 0 && (
+              <p className="mt-1">
+                <strong>
+                  Hay {fmtNumero(resumen.recortados)} renglones con descuento
+                  mayor a {DESCUENTO_MAXIMO} %
+                </strong>
+                : se recortan a {DESCUENTO_MAXIMO} antes de exportar. Un
+                descuento así es un error de carga, y en una orden de compra
+                deja de ser un número raro en una pantalla.
+              </p>
+            )}
             <p className="mt-1">
               <strong>
                 El sugerido no descuenta la mercadería en tránsito.
@@ -1905,19 +1936,15 @@ export default function DashboardComprasPage({
  * ---------------------------------------------------------------------------
  * UN CARTEL QUE NO DA LA SALIDA ES UN CARTEL QUE NO SIRVE
  *
- * Esta pantalla esconde filas por dos motivos distintos, y los dos se pueden
- * dar juntos: la regla de "sólo los que hay que comprar" (que tapa lo que el
- * cálculo no pidió) y el botón de "dejar sólo con oferta" (que tapa lo que no
- * tiene sell in del mes). Con los dos puestos y un filtro por marca chica, el
- * resultado era una pantalla en blanco que parecía decir "esa marca no
- * existe", cuando lo que pasaba era que sus 23 artículos estaban detrás de dos
- * botones.
+ * Filtrando por una marca chica la pantalla quedaba en blanco y parecía decir
+ * "esa marca no existe", cuando lo que pasaba era que la vista elegida la
+ * dejaba afuera: sus artículos están, pero no hay nada que reponer o no tienen
+ * oferta este mes.
  *
  * Que no haya sugerencia NO es lo mismo que que no haya nada que pedir: una
  * marca nueva, un artículo que se repone puntualmente o algo que se acordó con
  * el proveedor se cargan a mano, y para eso el artículo tiene que estar a la
- * vista. Así que acá va el número de lo que hay detrás de cada regla y el
- * botón que la destraba.
+ * vista. Así que acá va cuántos encontró el filtro y el botón que los muestra.
  */
 function VacioCompras({
   data,
@@ -1928,67 +1955,36 @@ function VacioCompras({
   filtros: FiltrosCompras;
   cambiar: (f: FiltrosCompras) => void;
 }) {
-  const sinSugerido = data.ocultosSinSugerido;
-  const sinOferta = data.ocultosSinOferta;
+  const hay = data.articulosDelFiltro;
 
-  // Ninguna regla es la culpable: el filtro de verdad no encontró nada.
-  if (sinSugerido === 0 && sinOferta === 0) {
+  // Sin recortes no hay a quién culpar: cero filas es cero artículos.
+  if (hay === 0) {
     return <p>Ningún artículo para el filtro elegido.</p>;
   }
-
-  const estilo =
-    "border-c1 bg-c1/15 text-c1 hover:bg-c1/25 rounded-lg border px-3 py-1.5 text-xs transition-colors";
 
   return (
     <div className="flex flex-col items-center gap-3">
       <p className="mx-auto max-w-lg">
-        El cálculo no pide reponer nada con este filtro
-        {sinSugerido === 1 ? (
-          <>
-            , pero <strong className="text-ink">hay 1 artículo</strong> al que
-            podés cargarle cantidades a mano.
-          </>
-        ) : sinSugerido > 1 ? (
-          <>
-            , pero{" "}
-            <strong className="text-ink">
-              hay {fmtNumero(sinSugerido)} artículos
-            </strong>{" "}
-            a los que podés cargarles cantidades a mano.
-          </>
-        ) : (
-          <>
-            , y los que tienen sell in de {fmtMes(data.mes)} quedaron todos
-            afuera.
-          </>
-        )}
+        Con estos recortes no queda ningún artículo
+        {recortesValidos(filtros.recortes).includes("oferta")
+          ? ` (uno de ellos pide sell in de ${fmtMes(data.mes)})`
+          : ""}
+        , pero el filtro encontró{" "}
+        <strong className="text-ink">
+          {hay === 1 ? "1 artículo" : `${fmtNumero(hay)} artículos`}
+        </strong>{" "}
+        {hay === 1
+          ? "al que podés cargarle cantidades a mano."
+          : "a los que podés cargarles cantidades a mano."}
       </p>
 
-      <div className="flex flex-wrap justify-center gap-2">
-        {sinSugerido > 0 && (
-          <button
-            type="button"
-            onClick={() => cambiar({ ...filtros, todos: true })}
-            className={estilo}
-          >
-            {sinSugerido === 1
-              ? "Ver el artículo"
-              : `Ver los ${fmtNumero(sinSugerido)} artículos`}
-          </button>
-        )}
-        {sinOferta > 0 && (
-          <button
-            type="button"
-            onClick={() =>
-              cambiar({ ...filtros, todos: true, soloOferta: false })
-            }
-            className={estilo}
-          >
-            Ver los {fmtNumero(sinSugerido + sinOferta)}, con y sin sell in de{" "}
-            {fmtMes(data.mes)}
-          </button>
-        )}
-      </div>
+      <button
+        type="button"
+        onClick={() => cambiar({ ...filtros, recortes: [] })}
+        className="border-c1 bg-c1/15 text-c1 hover:bg-c1/25 rounded-lg border px-3 py-1.5 text-xs transition-colors"
+      >
+        {hay === 1 ? "Ver el artículo" : `Ver los ${fmtNumero(hay)} artículos`}
+      </button>
     </div>
   );
 }
