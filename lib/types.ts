@@ -1567,6 +1567,17 @@ export type FilaCompra = {
    * artículo empezó a venderse hace poco. Un ritmo de 0,6 medido sobre 30 días
    * y uno medido sobre 120 no se leen igual aunque el número sea el mismo.
    */
+  ritmoRecortado: boolean;
+  /** Cuándo se dio de alta en Sigma (`YYYY-MM-DD`). */
+  alta: string | null;
+  /**
+   * `true` si se dio de alta hace menos de `DIAS_ARTICULO_NUEVO`.
+   *
+   * NO es lo mismo que `ritmoRecortado`: un artículo puede ser viejo y haber
+   * empezado a venderse recién ahora, o ser nuevo y no haber vendido nunca. El
+   * segundo caso es el que el cálculo no puede encontrar solo --sin ventas no
+   * hay ritmo-- y por eso la marca existe.
+   */
   esNuevo: boolean;
   cobertura: number | null;
   /**

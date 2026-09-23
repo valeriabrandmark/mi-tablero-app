@@ -538,6 +538,38 @@ export default function DashboardComprasPage({
       total: `${fmtNumero(contarSkus(filas, (f) => f.sku))} SKU`,
     },
     {
+      // LA MARCA DE LOS ARTICULOS NUEVOS.
+      //
+      // Un artículo dado de alta hace poco que todavía no vendió nada no tiene
+      // ritmo, así que el sugerido no lo puede encontrar: queda en "—" al lado
+      // de los que no se venden hace dos años, y son dos cosas opuestas. Uno
+      // está muerto; el otro todavía no tuvo la oportunidad y puede ser el que
+      // falta comprar por primera vez.
+      //
+      // Ordenando por acá, los nuevos quedan todos juntos arriba.
+      titulo: "Alta",
+      ayuda:
+        "Cuándo se dio de alta el artículo en Sigma. Los de los últimos 3 meses se marcan como nuevos: si todavía no vendieron, el cálculo no los puede sugerir y hay que decidirlos a mano. Ordená por esta columna para verlos juntos.",
+      celda: (f) => {
+        if (!f.alta) return <span className="text-muted">—</span>;
+        const fecha = fmtFechaCortaConAnio(f.alta);
+        if (!f.esNuevo) return <span className="text-muted">{fecha}</span>;
+        return (
+          <span
+            className="whitespace-nowrap text-amber-400"
+            title={
+              f.uds > 0
+                ? `Artículo nuevo (alta ${fecha}). El ritmo se mide sobre los días que lleva vendiendo, no sobre la ventana entera.`
+                : `Artículo nuevo (alta ${fecha}) y todavía sin ventas: el cálculo no puede sugerir nada, se decide a mano.`
+            }
+          >
+            {fecha} <span className="text-[10px]">nuevo</span>
+          </span>
+        );
+      },
+      orden: (f) => f.alta,
+    },
+    {
       titulo: "U. x bulto",
       ayuda:
         "Cuántas unidades trae un bulto, según el maestro de Sigma. Es lo que convierte la cantidad cuando se pide por bulto; los artículos que no se compran así figuran en 1.",

@@ -52,6 +52,8 @@ function fila(cambios: Partial<FilaCompra>): FilaCompra {
     uds: 74,
     ritmoDiario: 0.62,
     diasRitmo: 120,
+    ritmoRecortado: false,
+    alta: "2025-03-05",
     esNuevo: false,
     cobertura: 2,
     sugerido: 24,

@@ -108,18 +108,25 @@ export const RENTABILIDAD_COMPRA_DISCRETA = 15;
 export const VECES_SOBRE_LO_HABITUAL_PARA_INFLAR = 2;
 
 /**
- * EL PISO DE DIAS SOBRE LOS QUE SE MIDE UN RITMO.
+ * DESDE CUANDO UN ARTICULO DEJA DE SER NUEVO.
  *
- * El ritmo de un artículo nuevo se mide sobre los días que lleva vendiendo y no
- * sobre la ventana entera (ver `dias_ritmo` en lib/queries-compras.ts). Sin un
- * piso eso se vuelve peligroso justo en el borde: un artículo que vendió 3
- * unidades ayer daría un ritmo de 3 por día. Medido contra la base, sin piso el
- * peor caso sugería 800 unidades; con este piso queda en 58.
+ * Un artículo dado de alta hace poco no se puede juzgar con las mismas reglas
+ * que el resto: si todavía no vendió nada, el cálculo no tiene con qué sugerir
+ * --no hay ritmo-- y el artículo desaparece de la tabla sin que eso signifique
+ * que no hay que comprarlo. Hoy son 526 en esta situación: 243 que ya tienen
+ * stock y no arrancaron, y 283 que están cargados en Sigma y nunca se
+ * compraron.
  *
- * Dos semanas es lo mínimo para que un promedio diario signifique algo: menos
- * que eso es un fin de semana con suerte, no un ritmo.
+ * TRES MESES y no la ventana del ritmo, que se elige en pantalla: si dependiera
+ * del selector, el mismo artículo sería nuevo con 120 días y viejo con 30, y
+ * "nuevo" dejaría de querer decir algo.
+ *
+ * Se mide contra `fechaAlta` del maestro de Sigma, que está completo en los
+ * 8.265 artículos. Ojo: 3.987 tienen el 05/03/2025, que es el día en que se
+ * cargó el sistema --no son altas de verdad-- pero quedan muy afuera de esta
+ * ventana, así que no ensucian nada.
  */
-export const DIAS_MINIMOS_DE_RITMO = 14;
+export const DIAS_ARTICULO_NUEVO = 90;
 
 /**
  * Las tres vistas, en el orden en que van en la pantalla: de la más ancha a la
@@ -696,6 +703,19 @@ export function porQueSugerido(
   coberturaDias: number,
 ): string[] {
   if (f.cobertura == null) {
+    // EL ARTICULO NUEVO ES OTRA COSA QUE EL ARTICULO MUERTO, y el mismo "—" en
+    // la columna los confunde. Uno no se vende hace meses; el otro todavía no
+    // tuvo la oportunidad, y es justo el que puede necesitar la primera compra.
+    if (f.esNuevo) {
+      return [
+        `Artículo nuevo: alta el ${f.alta ?? "—"}, todavía sin ninguna venta.`,
+        "Sin ventas no hay ritmo, así que el cálculo no puede sugerir nada." +
+          " Esto se decide a mano.",
+        f.total > 0
+          ? `Ya hay ${Math.round(f.total)} u. en stock: llegó y todavía no arrancó.`
+          : "Y no hay stock: está cargado en Sigma pero nunca se compró.",
+      ];
+    }
     return [
       "Sin ventas en la ventana: no hay ritmo con el que calcular nada.",
       `Stock hoy: ${Math.round(f.total)} u.`,
@@ -707,7 +727,7 @@ export function porQueSugerido(
       // DE DONDE SALE ESE RITMO, cuando no sale de la ventana entera. Un
       // artículo nuevo se mide sobre los días que lleva vendiendo, y sin
       // decirlo el número parece comparable con el de la fila de al lado.
-      (f.esNuevo
+      (f.ritmoRecortado
         ? ` (medido sobre ${f.diasRitmo} días: empezó a venderse hace poco)`
         : "") +
       ` y hay ${Math.round(f.total)} u.`,

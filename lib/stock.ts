@@ -27,6 +27,30 @@
  */
 
 /**
+ * EL PISO DE DIAS SOBRE LOS QUE SE MIDE UN RITMO.
+ *
+ * El ritmo de un artículo que empezó a venderse hace poco se mide sobre los
+ * días que lleva vendiendo y no sobre la ventana entera: uno dado de alta hace
+ * 30 días que vendió 20 unidades no vende 20/120 = 0,17 por día, vende 0,67.
+ * Con la ventana entera el ritmo queda por debajo de lo real, la cobertura
+ * aparece enorme --como si sobrara-- y el sugerido no da nada, justo en el
+ * artículo que está arrancando.
+ *
+ * Sin un piso eso se vuelve peligroso en el otro extremo: un artículo que
+ * vendió 3 unidades ayer daría un ritmo de 3 por día. Medido contra la base,
+ * sin piso el peor caso sugería 800 unidades; con este piso queda en 58.
+ *
+ * Dos semanas es lo mínimo para que un promedio diario signifique algo: menos
+ * que eso es un fin de semana con suerte, no un ritmo.
+ *
+ * VIVE ACA, con las demás constantes del ritmo, porque lo usan los dos
+ * tableros: Stock y Compras tienen que medir la cobertura del mismo artículo de
+ * la misma manera. Que una pantalla diga 40 días y la otra 140 no es un matiz,
+ * es una de las dos mintiendo.
+ */
+export const DIAS_MINIMOS_DE_RITMO = 14;
+
+/**
  * Cuántos días de venta se quiere tener en stock. Definido por el negocio.
  *
  * Es UN número y no dos porque la planilla usaba 30 en una hoja y 60 en otra,

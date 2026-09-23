@@ -6,7 +6,7 @@ import {
   COBERTURA_MAXIMA_COMPRA_DIAS,
   COBERTURA_SIN_INFLAR_DIAS,
   RENTABILIDAD_COMPRA_DISCRETA,
-  DIAS_MINIMOS_DE_RITMO,
+  DIAS_ARTICULO_NUEVO,
   MESES_SIN_SELL_IN_PARA_SUGERIR,
   VECES_SOBRE_LO_HABITUAL_PARA_INFLAR,
   vistaValida,
@@ -18,6 +18,7 @@ import {
 } from "@/lib/compras";
 import {
   COBERTURA_OBJETIVO_DIAS,
+  DIAS_MINIMOS_DE_RITMO,
   GRUPO_PROVEEDOR_POR_DEFECTO,
   PLAZO_REPOSICION_DIAS,
   PROVEEDORES_NO_MERCADERIA,
@@ -284,6 +285,9 @@ base as (
          -- cargue. (Sin backticks: esto vive adentro de un template literal.)
          coalesce(pg.grupo, '${GRUPO_PROVEEDOR_POR_DEFECTO}') as grupo,
          a."attributes.marca"                           as marca,
+         a."fechaAlta"::date                            as alta,
+         -- DADO DE ALTA HACE POCO. Ver DIAS_ARTICULO_NUEVO en lib/compras.ts.
+         (a."fechaAlta"::date >= current_date - ${DIAS_ARTICULO_NUEVO})  as es_nuevo,
          -- LOS DOS CÓDIGOS QUE NO SON NUESTROS. Van sólo al Excel que se le
          -- manda al proveedor, no al archivo de Sigma: el proveedor no conoce
          -- nuestro SKU, conoce el código con el que él lo vende y el EAN.
@@ -373,7 +377,12 @@ con_ritmo as (
          -- arriba se midió sobre menos días que los demás. La pantalla lo dice:
          -- un ritmo medido sobre 30 días y uno medido sobre 120 no se leen
          -- igual aunque el número sea el mismo.
-         (b.dias_ritmo < $1::int)                       as es_nuevo
+         --
+         -- NO ES LO MISMO QUE es_nuevo, que mira la fecha de alta: un
+         -- artículo puede ser viejo y haber empezado a venderse recién ahora
+         -- (ritmo recortado, alta vieja), o ser nuevo y no haber vendido nunca
+         -- (alta reciente, sin ritmo que recortar).
+         (b.dias_ritmo < $1::int)                       as ritmo_recortado
   from base b
 ),
 con_base as (
@@ -596,7 +605,8 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
      select sku, producto, proveedor, grupo, marca, codigo_compra, ean, u_bulto,
             tuc, full_ml, total, costo, valor, costo_lista,
             sell_in_pct,
-            uds, ritmo_diario, dias_ritmo, es_nuevo, cobertura, sugerido,
+            uds, ritmo_diario, dias_ritmo, ritmo_recortado, cobertura, sugerido,
+            es_nuevo, to_char(alta, 'YYYY-MM-DD') as alta,
             sugerido_base, sugerido_tope, factor_oferta, habitual_sell_in,
             meses_con_oferta, sin_oferta_por_ahora, dejo_de_tener_sell_in,
             uds_rent, rentabilidad,
@@ -648,7 +658,9 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
     uds: num(r.uds),
     ritmoDiario: num(r.ritmo_diario),
     diasRitmo: num(r.dias_ritmo),
+    ritmoRecortado: r.ritmo_recortado === true,
     esNuevo: r.es_nuevo === true,
+    alta: (r.alta as string | null) ?? null,
     cobertura: r.cobertura == null ? null : num(r.cobertura),
     sugerido: num(r.sugerido),
     sugeridoBase: num(r.sugerido_base),
