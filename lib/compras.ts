@@ -400,19 +400,17 @@ export function renglonInicial(f: FilaCompra): RenglonOrden {
   const unidad = unidadPorDefecto(f.unidadesPorBulto);
   return {
     unidad,
-    // EL MINIMO SE MUESTRA PERO NO SE CARGA SOLO, y la diferencia es de
-    // tamaño: hoy hay 4.475 artículos sin ventas en la ventana, y un bulto a
-    // cada uno son $ 318 millones. Cargados de entrada, abrir Compras sin
-    // filtrar mostraría esa orden ya armada y habría que vaciarla a mano para
-    // poder trabajar.
+    // EL MINIMO TAMBIEN SE CARGA SOLO. Se probó al revés --mostrarlo en la
+    // columna y dejar la cantidad en cero-- y en la práctica obligaba a
+    // tipear a mano artículo por artículo justo en las filas donde el cálculo
+    // no ayuda. Ahora la orden arranca armada y lo que hay que hacer es
+    // sacar, que es más rápido que poner.
     //
-    // El sugerido igual se ve en su columna, marcado como "mín.", que es lo
-    // que se pidió: que el artículo sin historial proponga un bulto en vez de
-    // no proponer nada. Aceptarlo es escribirlo, o apretar "Volver al
-    // sugerido" para toda la lista de una.
-    cantidad: f.sugeridoMinimo
-      ? 0
-      : cantidadSugerida(f.sugerido, unidad, f.unidadesPorBulto),
+    // LO QUE NO PUEDE PASAR ES QUE SE CUELE SIN QUE SE VEA, porque son
+    // cantidades sin respaldo de ventas: la celda va marcada en ámbar, y el
+    // resumen de arriba cuenta aparte cuántos renglones de la orden son de
+    // este tipo.
+    cantidad: cantidadSugerida(f.sugerido, unidad, f.unidadesPorBulto),
     descuento: f.sellInPct ?? 0,
     // Vacío a propósito: ver RenglonOrden.
     descuento2: 0,

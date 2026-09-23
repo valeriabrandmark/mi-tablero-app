@@ -367,10 +367,16 @@ export default function DashboardComprasPage({
     // el proveedor los vende. No rompen nada —van al Excel con la celda
     // vacía— pero el que recibe el mail no los va a poder identificar.
     let sinCodigo = 0;
+    // Renglones cuya cantidad NO sale de una cuenta sino del mínimo de un
+    // bulto, porque el artículo no vendió nada en la ventana. Se cargan solos
+    // como los demás, así que sin contarlos no habría forma de saber cuánto de
+    // la orden es "esto hace falta" y cuánto es "esto habría que mirarlo".
+    let minimos = 0;
     for (const f of filas) {
       const r = orden.get(f.sku);
       if (!r || !(r.cantidad > 0)) continue;
       renglones += 1;
+      if (f.sugeridoMinimo) minimos += 1;
       if (!f.codigoCompra) sinCodigo += 1;
       const u = aUnidades(r.cantidad, r.unidad, f.unidadesPorBulto);
       unidades += u;
@@ -381,7 +387,16 @@ export default function DashboardComprasPage({
       bruto += u * lista;
       neto += u * lista * factorNeto(r.descuento, r.descuento2);
     }
-    return { renglones, unidades, bultos, bruto, neto, recortados, sinCodigo };
+    return {
+      renglones,
+      unidades,
+      bultos,
+      bruto,
+      neto,
+      recortados,
+      sinCodigo,
+      minimos,
+    };
   }, [filas, orden]);
 
   /**
@@ -528,50 +543,39 @@ export default function DashboardComprasPage({
     },
     {
       titulo: "Artículo",
-      celda: (f) => (
-        <span
-          className="block max-w-[136px] truncate sm:max-w-[240px]"
-          title={f.producto ?? undefined}
-        >
-          {f.producto ?? "—"}
-        </span>
-      ),
+      // LA FECHA DE ALTA VIVE ACA Y NO EN SU PROPIA COLUMNA. Es un dato que se
+      // consulta de a uno --"¿este es nuevo o hace años que está?"-- y no se
+      // compara entre filas, así que una columna entera para él era ancho
+      // gastado en una tabla que ya no entraba en la pantalla.
+      //
+      // LO QUE SI TIENE QUE VERSE SIN PASAR EL MOUSE es que el artículo es
+      // nuevo, porque eso cambia cómo se lee todo lo demás de la fila: un
+      // ritmo flojo en un artículo de tres semanas no quiere decir lo mismo
+      // que en uno de tres años. Por eso el nombre va en ámbar.
+      celda: (f) => {
+        const alta = f.alta ? fmtFechaCortaConAnio(f.alta) : null;
+        return (
+          <span
+            className={`block max-w-[136px] truncate sm:max-w-[240px] ${
+              f.esNuevo ? "text-amber-400" : ""
+            }`}
+            title={
+              (f.producto ?? "—") +
+              (alta ? `\n\nAlta en Sigma: ${alta}` : "") +
+              (f.esNuevo
+                ? " — ARTÍCULO NUEVO. Su ritmo se mide sobre los días que" +
+                  " lleva vendiendo, no sobre la ventana entera."
+                : "")
+            }
+          >
+            {f.producto ?? "—"}
+          </span>
+        );
+      },
       orden: (f) => f.producto,
       // El recuento va en esta columna y no en la del SKU para no pisar
       // la etiqueta "Total", que es la que dice si la tabla está recortada.
       total: `${fmtNumero(contarSkus(filas, (f) => f.sku))} SKU`,
-    },
-    {
-      // LA MARCA DE LOS ARTICULOS NUEVOS.
-      //
-      // Un artículo dado de alta hace poco que todavía no vendió nada no tiene
-      // ritmo, así que el sugerido no lo puede encontrar: queda en "—" al lado
-      // de los que no se venden hace dos años, y son dos cosas opuestas. Uno
-      // está muerto; el otro todavía no tuvo la oportunidad y puede ser el que
-      // falta comprar por primera vez.
-      //
-      // Ordenando por acá, los nuevos quedan todos juntos arriba.
-      titulo: "Alta",
-      ayuda:
-        "Cuándo se dio de alta el artículo en Sigma. Los de los últimos 3 meses se marcan como nuevos: si todavía no vendieron, el cálculo no los puede sugerir y hay que decidirlos a mano. Ordená por esta columna para verlos juntos.",
-      celda: (f) => {
-        if (!f.alta) return <span className="text-muted">—</span>;
-        const fecha = fmtFechaCortaConAnio(f.alta);
-        if (!f.esNuevo) return <span className="text-muted">{fecha}</span>;
-        return (
-          <span
-            className="whitespace-nowrap text-amber-400"
-            title={
-              f.uds > 0
-                ? `Artículo nuevo (alta ${fecha}). El ritmo se mide sobre los días que lleva vendiendo, no sobre la ventana entera.`
-                : `Artículo nuevo (alta ${fecha}) y todavía sin ventas: el cálculo no puede sugerir nada, se decide a mano.`
-            }
-          >
-            {fecha} <span className="text-[10px]">nuevo</span>
-          </span>
-        );
-      },
-      orden: (f) => f.alta,
     },
     {
       titulo: "U. x bulto",
@@ -759,6 +763,17 @@ export default function DashboardComprasPage({
         "Lo que se va a pedir, en la unidad de la columna anterior. Arranca en el sugerido y se puede escribir encima; vaciar la celda vuelve al sugerido.",
       celda: (f) => {
         const r = orden.get(f.sku);
+        // LA ALERTA VA EN ESTA CELDA Y NO EN OTRA. Es la cantidad que va a
+        // viajar a la orden, y es donde está el ojo mientras se carga: un
+        // aviso en otra columna se lee después de haber decidido, que es
+        // tarde. El borde ámbar dice "esto lo puso un mínimo, no una cuenta".
+        const aviso = f.sugeridoMinimo
+          ? f.esNuevo
+            ? `Artículo NUEVO (alta ${f.alta ? fmtFechaCortaConAnio(f.alta) : "—"}) y todavía sin ninguna venta. ` +
+              `Esta cantidad es el mínimo de 1 bulto (${fmtNumero(f.unidadesPorBulto)} u.), no una necesidad medida: revisala antes de mandar.`
+            : `SIN VENTAS en los últimos ${f.diasRitmo} días. ` +
+              `Esta cantidad es el mínimo de 1 bulto (${fmtNumero(f.unidadesPorBulto)} u.), no una necesidad medida: revisala antes de mandar.`
+          : undefined;
         return (
           <input
             type="number"
@@ -770,8 +785,14 @@ export default function DashboardComprasPage({
                 cantidad: Math.max(0, Math.floor(Number(e.target.value) || 0)),
               })
             }
-            className={CLASE_CELDA_EDITABLE}
-            aria-label={`Cantidad a comprar de ${f.sku}`}
+            className={`${CLASE_CELDA_EDITABLE} ${
+              aviso ? "border-amber-500/70 bg-amber-500/5" : ""
+            }`}
+            title={aviso}
+            aria-label={
+              `Cantidad a comprar de ${f.sku}` +
+              (aviso ? " (mínimo sin ventas que lo respalden)" : "")
+            }
           />
         );
       },
@@ -827,6 +848,41 @@ export default function DashboardComprasPage({
       orden: (f) => orden.get(f.sku)?.descuento ?? 0,
     },
     {
+      // EL SEGUNDO DESCUENTO ARRANCA VACÍO Y NO SALE DE NINGÚN DATO: es el que
+      // se negocia por fuera del sell in de lista. Se aplica EN CASCADA sobre
+      // lo que quedó del primero, no sumado -- ver factorNeto en lib/compras.
+      titulo: "Desc 2 %",
+      ayuda:
+        "Un segundo descuento, a mano y vacío por defecto. Se aplica EN CASCADA sobre el primero: 15 % y 10 % no son 25 % sino 23,5 %.",
+      celda: (f) => {
+        const r = orden.get(f.sku);
+        const excedido = (r?.descuento2 ?? 0) > DESCUENTO_MAXIMO;
+        const d1 = descuentoValido(r?.descuento ?? 0);
+        const d2 = descuentoValido(r?.descuento2 ?? 0);
+        return (
+          <input
+            type="number"
+            min={0}
+            max={DESCUENTO_MAXIMO}
+            step={0.5}
+            value={sinCero(r?.descuento2)}
+            onChange={(e) =>
+              editar(f.sku, { descuento2: Number(e.target.value) || 0 })
+            }
+            className={`${CLASE_CELDA_EDITABLE} ${excedido ? "border-rose-500/60" : ""}`}
+            title={
+              d2 > 0
+                ? `${d1} % y ${d2} % en cascada = ${((1 - factorNeto(d1, d2)) * 100).toFixed(2)} % de descuento total (no ${(d1 + d2).toFixed(2)} %)`
+                : "Segundo descuento, a mano. Se aplica sobre lo que queda después del Desc 1, no se suma."
+            }
+            aria-label={`Desc 2 de ${f.sku}`}
+          />
+        );
+      },
+      numerica: true,
+      orden: (f) => orden.get(f.sku)?.descuento2 ?? 0,
+    },
+    {
       // EL NUMERO QUE FALTABA PARA PODER LEER EL SUGERIDO.
       //
       // El sugerido proyecta hacia adelante las unidades de atrás, y las
@@ -834,9 +890,11 @@ export default function DashboardComprasPage({
       // voló con 40 % de sell in no tiene por qué volar al 10 %: el ritmo, que
       // sólo mira unidades, pide lo mismo igual.
       //
-      // Puesto al lado del Desc 1 se leen de a pares --con cuánto se vendió,
-      // con cuánto se compra ahora-- que es la comparación que decide si la
-      // proyección se sostiene.
+      // Va DESPUES de los dos descuentos editables y no entre ellos: los dos
+      // primeros son lo que se está por pedir --se escriben-- y éste es
+      // historia, que no se toca. Metido en el medio cortaba el par de campos
+      // que se cargan juntos. Igual queda a un golpe de vista del Desc 1, que
+      // es contra el que se compara.
       titulo: "Sell in vendido %",
       ayuda:
         "Con qué sell in se compró lo que se vendió en la ventana del ritmo, ponderado por unidades. Es contra lo que se compara el descuento de este mes: si el ritmo se hizo con una oferta que ya no está, puede no repetirse. Vacío es que ninguna de esas ventas tiene sell in conocido.",
@@ -872,41 +930,6 @@ export default function DashboardComprasPage({
       },
       numerica: true,
       orden: (f) => f.sellInVendidoPct,
-    },
-    {
-      // EL SEGUNDO DESCUENTO ARRANCA VACÍO Y NO SALE DE NINGÚN DATO: es el que
-      // se negocia por fuera del sell in de lista. Se aplica EN CASCADA sobre
-      // lo que quedó del primero, no sumado -- ver factorNeto en lib/compras.
-      titulo: "Desc 2 %",
-      ayuda:
-        "Un segundo descuento, a mano y vacío por defecto. Se aplica EN CASCADA sobre el primero: 15 % y 10 % no son 25 % sino 23,5 %.",
-      celda: (f) => {
-        const r = orden.get(f.sku);
-        const excedido = (r?.descuento2 ?? 0) > DESCUENTO_MAXIMO;
-        const d1 = descuentoValido(r?.descuento ?? 0);
-        const d2 = descuentoValido(r?.descuento2 ?? 0);
-        return (
-          <input
-            type="number"
-            min={0}
-            max={DESCUENTO_MAXIMO}
-            step={0.5}
-            value={sinCero(r?.descuento2)}
-            onChange={(e) =>
-              editar(f.sku, { descuento2: Number(e.target.value) || 0 })
-            }
-            className={`${CLASE_CELDA_EDITABLE} ${excedido ? "border-rose-500/60" : ""}`}
-            title={
-              d2 > 0
-                ? `${d1} % y ${d2} % en cascada = ${((1 - factorNeto(d1, d2)) * 100).toFixed(2)} % de descuento total (no ${(d1 + d2).toFixed(2)} %)`
-                : "Segundo descuento, a mano. Se aplica sobre lo que queda después del Desc 1, no se suma."
-            }
-            aria-label={`Desc 2 de ${f.sku}`}
-          />
-        );
-      },
-      numerica: true,
-      orden: (f) => orden.get(f.sku)?.descuento2 ?? 0,
     },
     {
       // De dónde sale depende de qué haya: el sell in del proveedor cuando esté
@@ -961,32 +984,6 @@ export default function DashboardComprasPage({
         );
       },
       total: fmtMoneda(resumen.neto),
-    },
-    {
-      // Para saber si se vende bien o si se estaba liquidando. Son dos motivos
-      // distintos para el mismo ritmo de venta, y llevan a comprar distinto.
-      titulo: `Rent. ${MESES_RENTABILIDAD} meses`,
-      ayuda: `La rentabilidad del artículo en los últimos ${MESES_RENTABILIDAD} meses. Dice si el artículo deja plata, no si hace falta comprarlo.`,
-      celda: (f) =>
-        f.rentabilidad == null ? (
-          <span className="text-muted">sin venta</span>
-        ) : (
-          <span
-            style={{
-              color:
-                f.rentabilidad < 0
-                  ? TEMA.negativo
-                  : f.rentabilidad < 0.1
-                    ? PALETA[3]
-                    : undefined,
-            }}
-            title={`${fmtNumero(f.udsRentabilidad)} unidades vendidas`}
-          >
-            {fmtPct(f.rentabilidad)}
-          </span>
-        ),
-      numerica: true,
-      orden: (f) => f.rentabilidad,
     },
     {
       // La del mes que acaba de cerrar, aparte de la ventana móvil: es contra
@@ -1348,7 +1345,15 @@ export default function DashboardComprasPage({
           <TarjetaKpi
             titulo="Renglones en la orden"
             valor={fmtNumero(resumen.renglones)}
-            detalle={`de ${fmtNumero(filas.length)} artículos a la vista`}
+            detalle={
+              // Cuántos de esos renglones son mínimos sin respaldo de ventas.
+              // Va acá y no en un aviso aparte porque es una propiedad DE LA
+              // ORDEN: el número de al lado se lee distinto si un tercio de él
+              // son artículos que nadie midió.
+              resumen.minimos > 0
+                ? `${fmtNumero(resumen.minimos)} sin ventas que lo respalden · de ${fmtNumero(filas.length)} a la vista`
+                : `de ${fmtNumero(filas.length)} artículos a la vista`
+            }
           />
           <TarjetaKpi
             titulo="Unidades a pedir"
@@ -1484,6 +1489,21 @@ export default function DashboardComprasPage({
                 Se va a cargar una orden de compra en Sigma. No se puede
                 deshacer desde acá: si sale mal, hay que anularla en Sigma.
               </p>
+              {/* LA ULTIMA CHANCE DE VER LOS MINIMOS. Ahora se cargan solos,
+                  así que pueden llegar hasta acá sin que nadie los haya
+                  mirado: son cantidades que ninguna venta respalda, en una
+                  orden que después no se puede deshacer desde el tablero. */}
+              {resumen.minimos > 0 && (
+                <p className="text-xs text-amber-400">
+                  <strong>
+                    {fmtNumero(resumen.minimos)} de los{" "}
+                    {fmtNumero(resumen.renglones)} renglones
+                  </strong>{" "}
+                  son el mínimo de un bulto de artículos que no vendieron nada
+                  en la ventana —nuevos, o que dejaron de moverse—. Están
+                  marcados en ámbar en la columna Cantidad.
+                </p>
+              )}
               <div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
                 <div className="flex justify-between gap-3">
                   <span className="text-muted">Proveedor</span>
@@ -1742,6 +1762,12 @@ export default function DashboardComprasPage({
               columnas={columnas}
               etiquetaTotal="Total de la orden"
               clave={(f) => f.sku}
+              /* SKU, código del proveedor y artículo se quedan quietos. Son
+                 las tres que contestan "¿de qué fila es este número?", y sin
+                 ellas a la vista los veinte campos de la derecha no se pueden
+                 leer: hay que arrastrar hasta el borde para saber de qué
+                 artículo se estaba hablando, y volver. */
+              fijas={3}
               vacio={<VacioCompras data={data} filtros={filtros} cambiar={cambiar} />}
             />
           </Panel>
@@ -1975,13 +2001,13 @@ export default function DashboardComprasPage({
               , y el título de la columna dice cuál de los dos se está viendo.
             </p>
             <p className="mt-1">
-              <strong>
-                La rentabilidad es de los últimos {MESES_RENTABILIDAD} meses
-              </strong>
-              , de todos los canales, sobre la facturación neta y sin descontar
-              flete. Sirve para separar «se vende porque gusta» de «se vendía
-              porque estaba liquidado»: son el mismo ritmo y llevan a comprar
-              distinto.
+              <strong>La rentabilidad</strong> que se muestra es la del mes que
+              acaba de cerrar, de todos los canales, sobre la facturación neta y
+              sin descontar flete. Sirve para separar «se vende porque gusta» de
+              «se vendía porque estaba liquidado»: son el mismo ritmo y llevan a
+              comprar distinto. La de los últimos {MESES_RENTABILIDAD} meses
+              sigue entrando en el cálculo del sugerido —es la que frena las
+              compras grandes de lo que no rinde— pero ya no ocupa una columna.
             </p>
             <p className="mt-1">
               La columna «Última compra» es un piso: sólo hay comprobantes
