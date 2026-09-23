@@ -160,24 +160,27 @@ export const DIAS_ARTICULO_NUEVO = 90;
 export const PREFIJOS_DISCONTINUO = ["DF ", "DD "] as const;
 
 /**
- * Los recortes que se pueden aplicar a la tabla, como van en la lista.
+ * Los grupos de artículos que se pueden mostrar, como van en la lista.
+ *
+ * SE SUMAN entre ellos: marcar dos muestra los de los dos, no los que cumplen
+ * las dos cosas. Ver `RecorteCompras` en lib/types.ts.
  *
  * Viven acá y no escritos a mano en el componente porque los lee también el
- * saneador de abajo, y el día que se agregue un tercero tiene que aparecer en
- * los dos lados solo.
+ * saneador de abajo, y el día que se agregue uno tiene que aparecer en los dos
+ * lados solo.
  */
 export const RECORTES_COMPRAS = [
   {
     valor: "sugerido",
     etiqueta: "Hay que comprar",
     ayuda:
-      "Deja sólo los artículos a los que el cálculo les pide reposición. Es el recorte de siempre.",
+      "Los artículos a los que el cálculo les pide reposición. Es el grupo de siempre.",
   },
   {
     valor: "oferta",
     etiqueta: "Con oferta del mes",
     ayuda:
-      "Deja sólo los que tienen sell in del proveedor vigente en el mes elegido.",
+      "Los que tienen sell in del proveedor vigente en el mes elegido, haga falta reponerlos o no.",
   },
   {
     // LO QUE NO SE COMPRA, PERO A VECES SI.
@@ -190,7 +193,7 @@ export const RECORTES_COMPRAS = [
     valor: "discontinuos",
     etiqueta: "Discontinuos",
     ayuda:
-      "Deja sólo los artículos que el proveedor está discontinuando (los que empiezan con DF o DD). No se sugieren nunca, pero sirven cuando se ofrecen a liquidación.",
+      "Los que el proveedor está discontinuando (empiezan con DF o DD). No se sugieren nunca, pero sirven cuando se ofrecen a liquidación.",
   },
   {
     // EL RECORTE QUE HACE VISIBLE LO QUE EL CALCULO NO PUEDE JUZGAR.
@@ -203,7 +206,7 @@ export const RECORTES_COMPRAS = [
     valor: "sin_ventas",
     etiqueta: "Sin ventas",
     ayuda:
-      "Deja sólo los artículos que no vendieron nada en la ventana del ritmo: los que recién se dieron de alta y los que dejaron de moverse. El cálculo no los puede juzgar, así que se deciden a mano.",
+      "Los que no vendieron nada en la ventana del ritmo: los recién dados de alta y los que dejaron de moverse. El cálculo no los puede juzgar, así que se deciden a mano.",
   },
 ] as const satisfies readonly {
   valor: RecorteCompras;

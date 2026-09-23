@@ -628,9 +628,17 @@ function where(f: FiltrosCompras, mes: string): Where {
     estructurales.push(buscadorDeArticulo(f.buscar, params.length));
   }
 
-  // LOS RECORTES, que no eligen QUÉ artículos sino CUÁLES DE ESOS se muestran.
-  // SE SUMAN: cada uno que esté marcado agrega una condición, y sin ninguno
-  // están todos. El porqué está en `RecorteCompras` (lib/types.ts).
+  // QUE ARTICULOS SE MUESTRAN. Cada grupo marcado SUMA los suyos: van en `or`
+  // entre ellos, y el conjunto entero en `and` con los filtros de arriba.
+  //
+  // EN `OR` Y NO EN `AND`, que es lo natural para grupos y no para
+  // condiciones. Con `and`, marcar "hay que comprar" y después "con oferta del
+  // mes" DEJABA MENOS filas que la primera sola --la intersección de las dos--
+  // y eso es al revés de lo que dice el gesto: agregar una casilla tiene que
+  // agregar artículos. Con `or`, cada una suma su grupo.
+  //
+  // Sin ninguna marcada están todos, igual que en los demás filtros del
+  // tablero.
   const recortes = recortesValidos(f.recortes);
 
   const condicion: Record<RecorteCompras, string> = {
@@ -640,10 +648,14 @@ function where(f: FiltrosCompras, mes: string): Where {
     sin_ventas: "uds = 0",
   };
 
+  const grupos = recortes.map((r) => condicion[r]);
   const armar = (cs: string[]) => (cs.length ? `where ${cs.join(" and ")}` : "");
 
   return {
-    sql: armar([...estructurales, ...recortes.map((r) => condicion[r])]),
+    sql: armar([
+      ...estructurales,
+      ...(grupos.length ? [`(${grupos.join(" or ")})`] : []),
+    ]),
     sqlEstructural: armar(estructurales),
     recortes,
     params,

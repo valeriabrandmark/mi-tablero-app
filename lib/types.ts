@@ -1492,35 +1492,30 @@ export type FiltrosCompras = {
 };
 
 /**
- * QUE RECORTES SE LE APLICAN A LA TABLA. Se eligen de una lista con
- * checkboxes, como cualquier otro filtro del tablero, y SE SUMAN: cada uno
- * saca filas, y sin ninguno marcado están todos los artículos.
+ * QUE GRUPOS DE ARTICULOS SE MUESTRAN. Se eligen de una lista con checkboxes,
+ * como cualquier otro filtro del tablero.
  *
- *   (ninguno)             todos los del filtro de proveedor / marca / grupo,
- *                         tengan o no algo para comprar. Es lo que hace falta
- *                         para cargar cantidades a mano: un artículo sin
- *                         faltante y sin oferta también se pide, porque se
- *                         acordó con el proveedor o porque es marca nueva.
- *   sugerido              sólo los que el cálculo pide reponer.
- *   oferta                sólo los que tienen sell in vigente este mes.
- *   discontinuos          sólo los que el proveedor está dando de baja (los
- *                         que empiezan con DF o DD). No se sugieren nunca,
- *                         pero se compran a liquidación.
- *   sin_ventas            sólo los que no vendieron nada en la ventana: los
- *                         recién dados de alta y los que dejaron de moverse.
- *                         Son los que el cálculo no puede juzgar, y sin este
- *                         recorte habría que buscarlos entre miles de filas.
+ *   (ninguno)      todos los del filtro de proveedor / marca / grupo.
+ *   sugerido       los que el cálculo pide reponer.
+ *   oferta         los que tienen sell in vigente este mes.
+ *   discontinuos   los que el proveedor está dando de baja (DF o DD). No se
+ *                  sugieren nunca, pero se compran a liquidación.
+ *   sin_ventas     los que no vendieron nada en la ventana: los recién dados
+ *                  de alta y los que dejaron de moverse. Son los que el
+ *                  cálculo no puede juzgar, y sin esta opción habría que
+ *                  buscarlos entre miles de filas.
  *
- * Y las combinaciones: `sugerido` + `oferta` es la compra de una campaña de
- * ofertas; `sugerido` + `sin_ventas` son los que sólo traen el mínimo de un
- * bulto.
+ * SE SUMAN, NO SE CRUZAN. Marcar "hay que comprar" y después "con oferta del
+ * mes" muestra los de los dos grupos, no los que cumplen las dos cosas.
  *
- * ESTABAN COMO DOS BOTONES SUELTOS en dos lugares distintos de la pantalla
+ * Estaban en `and` y era al revés de lo que dice el gesto: agregar una casilla
+ * DEJABA MENOS filas que antes de marcarla, porque pasaba a pedir la
+ * intersección. Marcar algo tiene que agregar artículos.
+ *
+ * ANTES ERAN DOS BOTONES SUELTOS en dos lugares distintos de la pantalla
  * --"sólo los que hay que comprar" entre los filtros y "dejar sólo con oferta"
- * abajo, en la fila de acciones de la orden-- así que el recorte que estaba
- * aplicado había que reconstruirlo mirando dos cosas que no se veían al mismo
- * tiempo. En una sola lista se lee de un vistazo, y se elige igual que la
- * marca o el proveedor.
+ * abajo, en la fila de acciones de la orden-- así que lo que estaba aplicado
+ * había que reconstruirlo mirando dos cosas que no se veían al mismo tiempo.
  */
 export type RecorteCompras =
   | "sugerido"
