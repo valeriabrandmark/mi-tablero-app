@@ -1,4 +1,5 @@
 import { query, queryOne } from "@/lib/db";
+import { buscadorDeArticulo } from "@/lib/sql-ean";
 import {
   DIFERENCIA_MINIMA_VISIBLE,
   GRUPOS_INFORMATIVOS,
@@ -405,7 +406,13 @@ function condicionesDeFiltro(
     // decirnos cuál de las dos cosas está haciendo.
     params.push(`%${filtros.busqueda}%`);
     partes.push(
-      `and (p.sku ilike $${params.length} or a.descripcion ilike $${params.length})`,
+      "and " +
+        buscadorDeArticulo(
+          filtros.busqueda,
+          params.length,
+          "p.sku",
+          "a.descripcion",
+        ),
     );
   }
 
@@ -827,7 +834,15 @@ function cuerpoDeCambios(filtros: FiltrosCambiosTn, params: unknown[]): string {
   }
   if (filtros.busqueda) {
     params.push(`%${filtros.busqueda}%`);
-    partes.push(`and (c.sku ilike $${params.length} or a.descripcion ilike $${params.length})`);
+    partes.push(
+      "and " +
+        buscadorDeArticulo(
+          filtros.busqueda,
+          params.length,
+          "c.sku",
+          "a.descripcion",
+        ),
+    );
   }
   // LAS FECHAS SE COMPARAN EN LA ZONA DE ARGENTINA, no en UTC. Un cambio
   // escrito a las 22:30 de Buenos Aires es del dia siguiente en UTC, y filtrar

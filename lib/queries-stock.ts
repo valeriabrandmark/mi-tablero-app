@@ -1,6 +1,7 @@
 import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
+import { buscadorDeArticulo } from "@/lib/sql-ean";
 import {
   COBERTURA_OBJETIVO_DIAS,
   DIAS_MINIMOS_DE_RITMO,
@@ -243,7 +244,7 @@ function where(f: FiltrosStock): Where {
 
   if (f.buscar) {
     params.push(`%${f.buscar}%`);
-    clauses.push(`(sku ilike $${params.length} or producto ilike $${params.length})`);
+    clauses.push(buscadorDeArticulo(f.buscar, params.length));
   }
 
   // El tramo se filtra con los mismos bordes que usa `tramoCobertura`, escritos

@@ -1,6 +1,7 @@
 import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
+import { buscadorDeArticulo } from "@/lib/sql-ean";
 import { COSTOS_VIGENTES_POR_MES, ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import {
   COBERTURA_MAXIMA_COMPRA_DIAS,
@@ -624,9 +625,7 @@ function where(f: FiltrosCompras, mes: string): Where {
 
   if (f.buscar) {
     params.push(`%${f.buscar}%`);
-    estructurales.push(
-      `(sku ilike $${params.length} or producto ilike $${params.length})`,
-    );
+    estructurales.push(buscadorDeArticulo(f.buscar, params.length));
   }
 
   // LOS RECORTES, que no eligen QUÉ artículos sino CUÁLES DE ESOS se muestran.

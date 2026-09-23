@@ -1,6 +1,7 @@
 import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
+import { buscadorDeArticulo } from "@/lib/sql-ean";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import {
@@ -230,7 +231,7 @@ function where(f: FiltrosAntiguedad): Where {
 
   if (f.buscar) {
     params.push(`%${f.buscar}%`);
-    clauses.push(`(sku ilike $${params.length} or producto ilike $${params.length})`);
+    clauses.push(buscadorDeArticulo(f.buscar, params.length));
   }
 
   // Los dos tramos filtran por "tiene alguna unidad ahí" y no por el promedio
