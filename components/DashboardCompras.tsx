@@ -895,12 +895,16 @@ export default function DashboardComprasPage({
       // historia, que no se toca. Metido en el medio cortaba el par de campos
       // que se cargan juntos. Igual queda a un golpe de vista del Desc 1, que
       // es contra el que se compara.
-      titulo: "Sell in vendido %",
+      // "Sell in AL VENDER" y no "vendido": lo que se vendió es el artículo,
+      // no el sell in. El título viejo se leía como si el descuento fuera la
+      // mercadería.
+      titulo: "Sell in al vender %",
       ayuda:
-        "Con qué sell in se compró lo que se vendió en la ventana del ritmo, ponderado por unidades. Es contra lo que se compara el descuento de este mes: si el ritmo se hizo con una oferta que ya no está, puede no repetirse. Vacío es que ninguna de esas ventas tiene sell in conocido.",
+        "Con qué descuento de compra se había comprado lo que se vendió en la ventana del ritmo, ponderado por unidades. Es contra lo que se compara el Desc 1 de este mes: si el ritmo se hizo con una oferta que ya no está, puede no repetirse. La tilde ~ adelante quiere decir que no todas esas ventas tienen el dato, y cuánto exactamente lo dice el tooltip. Vacío es que ninguna lo tiene.",
       celda: (f) => {
         if (f.sellInVendidoPct == null) return <span className="text-muted">—</span>;
         const cob = f.sellInVendidoCobertura ?? 0;
+        const parcial = cob < 0.9;
         const cayo =
           f.sellInVendidoPct - (f.sellInPct ?? 0) >= CAIDA_SELL_IN_PARA_AVISAR;
         return (
@@ -909,22 +913,24 @@ export default function DashboardComprasPage({
               cayo ? "text-amber-400" : "text-muted"
             }`}
             title={
-              `Lo vendido en la ventana se compró con ${f.sellInVendidoPct.toFixed(2)} % ` +
-              `de sell in (hay dato para el ${Math.round(cob * 100)} % de esas unidades).` +
+              `Lo que se vendió en estos ${f.diasRitmo} días se había comprado con ` +
+              `${f.sellInVendidoPct.toFixed(2)} % de descuento.` +
+              (parcial
+                ? ` Ojo: sólo el ${Math.round(cob * 100)} % de esas unidades tiene el dato cargado, así que es aproximado.`
+                : "") +
               (cayo
                 ? ` Este mes hay ${(f.sellInPct ?? 0).toFixed(2)} %: ese ritmo se hizo con una oferta que ahora no está.`
                 : "")
             }
           >
+            {/* UN SOLO NUMERO. Antes iban dos porcentajes pegados --"21.67
+                35%"-- y no había forma de saber cuál era cuál: los dos
+                terminaban en % y ninguno decía qué era. La cobertura pasa a
+                ser una TILDE, que se lee "aproximado" sin explicación y no se
+                puede confundir con otro porcentaje. El número exacto sigue
+                estando, en el tooltip. */}
+            {parcial ? "~" : ""}
             {f.sellInVendidoPct.toFixed(2)}
-            {/* La cobertura sólo se nombra cuando es floja: decir "100 %" en
-                cada fila sería ruido, y no decirlo cuando es 20 % es dejar
-                leer un promedio de tres unidades como si fuera el de todas. */}
-            {cob < 0.9 && (
-              <span className="ml-1 text-[10px] opacity-70">
-                {Math.round(cob * 100)}%
-              </span>
-            )}
           </span>
         );
       },
@@ -1282,7 +1288,8 @@ export default function DashboardComprasPage({
             />
           </form>
 
-          {/* LOS RECORTES, EN UNA LISTA COMO CUALQUIER OTRO FILTRO.
+          {/* LOS GRUPOS QUE SE MUESTRAN, EN UNA LISTA COMO CUALQUIER OTRO
+              FILTRO. Se SUMAN entre ellos: marcar dos muestra los de los dos.
 
               Eran dos botones sueltos en dos lugares distintos de la pantalla
               --"sólo los que hay que comprar" acá y "dejar sólo con oferta"
@@ -1294,7 +1301,7 @@ export default function DashboardComprasPage({
               abren igual, se destildan igual y "ninguno elegido" quiere decir
               lo mismo en los tres, que es "todos". Uno menos que aprender. */}
           <SelectorMultiple
-            etiqueta="Recortar a"
+            etiqueta="Mostrar"
             valores={filtros.recortes}
             opciones={RECORTES_COMPRAS.map((r) => [r.valor, r.etiqueta])}
             onChange={(v) => cambiar({ ...filtros, recortes: recortesValidos(v) })}
@@ -2059,11 +2066,8 @@ function VacioCompras({
   return (
     <div className="flex flex-col items-center gap-3">
       <p className="mx-auto max-w-lg">
-        Con estos recortes no queda ningún artículo
-        {recortesValidos(filtros.recortes).includes("oferta")
-          ? ` (uno de ellos pide sell in de ${fmtMes(data.mes)})`
-          : ""}
-        , pero el filtro encontró{" "}
+        Ninguno de los grupos elegidos tiene artículos con este filtro, pero
+        hay{" "}
         <strong className="text-ink">
           {hay === 1 ? "1 artículo" : `${fmtNumero(hay)} artículos`}
         </strong>{" "}
