@@ -6,6 +6,7 @@ import {
   COBERTURA_MAXIMA_COMPRA_DIAS,
   COBERTURA_SIN_INFLAR_DIAS,
   RENTABILIDAD_COMPRA_DISCRETA,
+  DIAS_MINIMOS_DE_RITMO,
   MESES_SIN_SELL_IN_PARA_SUGERIR,
   VECES_SOBRE_LO_HABITUAL_PARA_INFLAR,
   vistaValida,
@@ -236,6 +237,9 @@ hist_calculado as (
 ventas as (
   select sku,
          max(fecha) as ultima_venta,
+         -- DESDE CUANDO ESTE ARTICULO PUDO VENDER. Es lo que convierte el
+         -- ritmo en un ritmo y no en un promedio diluido: ver dias_ritmo.
+         min(fecha) as primera_venta,
          coalesce(sum(cantidad) filter (where fecha >= current_date - $1::int), 0) as uds,
          -- La rentabilidad de los ÚLTIMOS 3 MESES va con su propia ventana y no
          -- con la del ritmo: son dos preguntas distintas. El ritmo dice cuánto
@@ -320,10 +324,28 @@ base as (
          coalesce(hs.oferta_reciente, false)            as oferta_reciente,
          (pcsi.proveedor is not null)                   as proveedor_mando_sell_in,
          hc.historia                                    as hist_calculado,
-         coalesce(v.uds, 0)::numeric / $1::int          as ritmo_diario,
-         case when coalesce(v.uds, 0) = 0 then null
-              else s.total / (coalesce(v.uds, 0)::numeric / $1::int)
-         end                                            as cobertura
+         -- SOBRE CUANTOS DIAS SE MIDE EL RITMO.
+         --
+         -- Era siempre la ventana entera, y para un artículo nuevo eso es una
+         -- cuenta mal hecha: uno que se dio de alta hace 30 días y vendió 20
+         -- unidades no vende 20/120 = 0,17 por día, vende 0,67. Dividido por
+         -- 120 el ritmo queda por debajo de lo que hace falta para que el
+         -- sugerido dé algo, y el artículo que MAS necesita reposición --el
+         -- que recién arranca y se está vendiendo-- es justo el que no aparece.
+         --
+         -- Hoy son 1.718 artículos con primera venta dentro de la ventana; 75
+         -- de ellos no dan ningún sugerido por esto.
+         --
+         -- EL PISO DE ${DIAS_MINIMOS_DE_RITMO} DIAS NO ES DECORATIVO. Sin él,
+         -- un artículo que vendió 3 unidades ayer daría un ritmo de 3 por día
+         -- y pediría cientos: medido, el peor caso sin piso sugería 800
+         -- unidades, y con el piso queda en 58. Dos semanas es lo mínimo para
+         -- que un promedio diario signifique algo.
+         case when v.primera_venta is null then $1::int
+              else least($1::int,
+                         greatest(${DIAS_MINIMOS_DE_RITMO},
+                                  current_date - v.primera_venta::date))
+         end                                            as dias_ritmo
   from stock s
   left join bronze.sigma_articulos a on trim(a.id) = s.sku
   left join bronze.proveedores_grupo pg on pg.proveedor = a."proveedorNombre"
@@ -337,6 +359,22 @@ base as (
   left join hist_sell_in hs on hs.sku = s.sku
   left join hist_calculado hc on hc.sku = s.sku
   where coalesce(a."proveedorNombre", '') <> all($2::text[])
+),
+-- El ritmo y la cobertura salen aca y no de base porque los dos dependen de
+-- dias_ritmo, que se calcula ahi: en SQL una columna no se puede usar en la
+-- misma lista de select donde se define. (Sin backticks: template literal.)
+con_ritmo as (
+  select b.*,
+         b.uds::numeric / b.dias_ritmo                  as ritmo_diario,
+         case when b.uds = 0 then null
+              else b.total / (b.uds::numeric / b.dias_ritmo)
+         end                                            as cobertura,
+         -- Vendió por primera vez DENTRO de la ventana, o sea que el ritmo de
+         -- arriba se midió sobre menos días que los demás. La pantalla lo dice:
+         -- un ritmo medido sobre 30 días y uno medido sobre 120 no se leen
+         -- igual aunque el número sea el mismo.
+         (b.dias_ritmo < $1::int)                       as es_nuevo
+  from base b
 ),
 con_base as (
   select b.*,
@@ -378,7 +416,7 @@ con_base as (
           and coalesce(b.sell_in_pct, 0) = 0
           and not b.oferta_reciente
           and b.meses_con_oferta > 0)                                                        as dejo_de_tener_sell_in
-  from base b
+  from con_ritmo b
 ),
 con_factor as (
   select c.*,
@@ -558,7 +596,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
      select sku, producto, proveedor, grupo, marca, codigo_compra, ean, u_bulto,
             tuc, full_ml, total, costo, valor, costo_lista,
             sell_in_pct,
-            uds, ritmo_diario, cobertura, sugerido,
+            uds, ritmo_diario, dias_ritmo, es_nuevo, cobertura, sugerido,
             sugerido_base, sugerido_tope, factor_oferta, habitual_sell_in,
             meses_con_oferta, sin_oferta_por_ahora, dejo_de_tener_sell_in,
             uds_rent, rentabilidad,
@@ -609,6 +647,8 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
     sellInPct: r.sell_in_pct == null ? null : num(r.sell_in_pct),
     uds: num(r.uds),
     ritmoDiario: num(r.ritmo_diario),
+    diasRitmo: num(r.dias_ritmo),
+    esNuevo: r.es_nuevo === true,
     cobertura: r.cobertura == null ? null : num(r.cobertura),
     sugerido: num(r.sugerido),
     sugeridoBase: num(r.sugerido_base),

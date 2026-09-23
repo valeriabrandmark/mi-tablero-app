@@ -1556,6 +1556,18 @@ export type FilaCompra = {
   /** Unidades vendidas en la ventana del ritmo. */
   uds: number;
   ritmoDiario: number;
+  /**
+   * Sobre cuántos días se midió el ritmo. Es la ventana elegida, salvo que el
+   * artículo haya vendido por primera vez adentro de ella: ahí son los días que
+   * lleva vendiendo, con un piso de `DIAS_MINIMOS_DE_RITMO`.
+   */
+  diasRitmo: number;
+  /**
+   * `true` si el ritmo se midió sobre menos días que la ventana, o sea que el
+   * artículo empezó a venderse hace poco. Un ritmo de 0,6 medido sobre 30 días
+   * y uno medido sobre 120 no se leen igual aunque el número sea el mismo.
+   */
+  esNuevo: boolean;
   cobertura: number | null;
   /**
    * Cuántas unidades sugiere comprar la pantalla: la necesidad movida por la

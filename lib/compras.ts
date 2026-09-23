@@ -108,6 +108,20 @@ export const RENTABILIDAD_COMPRA_DISCRETA = 15;
 export const VECES_SOBRE_LO_HABITUAL_PARA_INFLAR = 2;
 
 /**
+ * EL PISO DE DIAS SOBRE LOS QUE SE MIDE UN RITMO.
+ *
+ * El ritmo de un artículo nuevo se mide sobre los días que lleva vendiendo y no
+ * sobre la ventana entera (ver `dias_ritmo` en lib/queries-compras.ts). Sin un
+ * piso eso se vuelve peligroso justo en el borde: un artículo que vendió 3
+ * unidades ayer daría un ritmo de 3 por día. Medido contra la base, sin piso el
+ * peor caso sugería 800 unidades; con este piso queda en 58.
+ *
+ * Dos semanas es lo mínimo para que un promedio diario signifique algo: menos
+ * que eso es un fin de semana con suerte, no un ritmo.
+ */
+export const DIAS_MINIMOS_DE_RITMO = 14;
+
+/**
  * Las tres vistas, en el orden en que van en la pantalla: de la más ancha a la
  * más angosta. El orden importa --es el que hace que el selector se lea como
  * un embudo-- así que vive acá y no escrito a mano en el componente.
@@ -689,7 +703,14 @@ export function porQueSugerido(
   }
 
   const l: string[] = [
-    `Se vende ${f.ritmoDiario.toFixed(2)} u. por día y hay ${Math.round(f.total)} u.`,
+    `Se vende ${f.ritmoDiario.toFixed(2)} u. por día` +
+      // DE DONDE SALE ESE RITMO, cuando no sale de la ventana entera. Un
+      // artículo nuevo se mide sobre los días que lleva vendiendo, y sin
+      // decirlo el número parece comparable con el de la fila de al lado.
+      (f.esNuevo
+        ? ` (medido sobre ${f.diasRitmo} días: empezó a venderse hace poco)`
+        : "") +
+      ` y hay ${Math.round(f.total)} u.`,
     `Alcanza para ${Math.round(f.cobertura)} días.`,
     `Para cubrir ${coberturaDias} días de compra + ${PLAZO_REPOSICION_DIAS}` +
       ` de reposición faltan ${Math.ceil(f.sugeridoBase)} u.`,

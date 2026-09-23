@@ -51,6 +51,8 @@ function fila(cambios: Partial<FilaCompra>): FilaCompra {
     sellInPct: 10,
     uds: 74,
     ritmoDiario: 0.62,
+    diasRitmo: 120,
+    esNuevo: false,
     cobertura: 2,
     sugerido: 24,
     sugeridoBase: 24,
