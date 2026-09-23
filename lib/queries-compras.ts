@@ -7,6 +7,7 @@ import {
   COBERTURA_SIN_INFLAR_DIAS,
   RENTABILIDAD_COMPRA_DISCRETA,
   DIAS_ARTICULO_NUEVO,
+  PREFIJOS_DISCONTINUO,
   MESES_SIN_SELL_IN_PARA_SUGERIR,
   VECES_SOBRE_LO_HABITUAL_PARA_INFLAR,
   recortesValidos,
@@ -32,6 +33,17 @@ import type {
   FiltrosCompras,
   RecorteCompras,
 } from "@/lib/types";
+
+/**
+ * Cómo se reconoce un discontinuo en SQL.
+ *
+ * Se arma desde `PREFIJOS_DISCONTINUO` y no escrito a mano para que agregar un
+ * prefijo sea una sola línea en un solo lugar. Los valores son constantes del
+ * código, no entran por parámetro, así que interpolarlos es seguro.
+ */
+const CONDICION_DISCONTINUO = PREFIJOS_DISCONTINUO.map(
+  (p) => `a.descripcion like '${p}%'`,
+).join(" or ");
 
 /**
  * Consultas del panel de Compras.
@@ -235,6 +247,38 @@ hist_calculado as (
          on c.sku = s.sku and c.mes_comercial = m.mes
   group by s.sku
 ),
+-- CON QUE OFERTA SE COMPRO LO QUE SE VENDIO EN LA VENTANA.
+--
+-- El sugerido proyecta hacia adelante lo que se vendió hacia atrás, y eso
+-- esconde un supuesto: que las condiciones de compra son las mismas. No
+-- siempre lo son. Un artículo que voló el mes pasado con 40 % de sell in no
+-- tiene por qué volar este mes al 10 %, y sin embargo el ritmo --que sólo mira
+-- unidades-- pide lo mismo.
+--
+-- Acá se pone ese número al lado: el sell in que el proveedor daba EN EL MES
+-- DE CADA VENTA, ponderado por las unidades de esa venta. Ponderado y no
+-- promedio simple porque lo que interesa es con qué descuento se compró el
+-- grueso de lo que salió, no cuántos meses distintos hubo.
+--
+-- OJO CON LA COBERTURA: bronze.sell_in tiene 2.399 SKU y arranca en
+-- 2025-12, así que para muchos artículos no hay dato. Por eso viajan también
+-- las unidades que SI lo tienen: un promedio sobre el 20 % de lo vendido no
+-- se puede leer igual que uno sobre el 100 %.
+sell_in_vendido as (
+  select fv.sku,
+         sum(si.descuento_pct * fv.cantidad)
+           / nullif(sum(fv.cantidad) filter (where si.descuento_pct is not null), 0)
+                                                                    as pct,
+         sum(fv.cantidad) filter (where si.descuento_pct is not null) as uds_con_dato,
+         sum(fv.cantidad)                                             as uds
+  from gold.fact_ventas fv
+  left join bronze.sell_in si
+         on si.sku = fv.sku
+        and si.mes_comercial = to_char(fv.fecha, 'YYYY-MM')
+        and si.evento = ''
+  where fv.fecha >= current_date - $1::int
+  group by fv.sku
+),
 ventas as (
   select sku,
          max(fecha) as ultima_venta,
@@ -285,6 +329,9 @@ base as (
          -- cargue. (Sin backticks: esto vive adentro de un template literal.)
          coalesce(pg.grupo, '${GRUPO_PROVEEDOR_POR_DEFECTO}') as grupo,
          a."attributes.marca"                           as marca,
+         -- DISCONTINUO: lo dice el prefijo de la descripción, que es donde el
+         -- negocio lo anota. Ver PREFIJOS_DISCONTINUO en lib/compras.ts.
+         (${CONDICION_DISCONTINUO})                     as es_discontinuo,
          a."fechaAlta"::date                            as alta,
          -- DADO DE ALTA HACE POCO. Ver DIAS_ARTICULO_NUEVO en lib/compras.ts.
          (a."fechaAlta"::date >= current_date - ${DIAS_ARTICULO_NUEVO})  as es_nuevo,
@@ -322,6 +369,12 @@ base as (
          coalesce(co.comprado_mes_pasado, false)        as comprado_mes_pasado,
          coalesce(co.unidades_mes_pasado, 0)            as unidades_mes_pasado,
          (pmp.proveedor is not null)                    as proveedor_compro,
+         siv.pct                                        as sell_in_vendido_pct,
+         -- Qué parte de lo vendido tiene sell in conocido, de 0 a 1. Sin esto
+         -- el promedio de al lado no se puede interpretar.
+         case when coalesce(siv.uds, 0) = 0 then null
+              else coalesce(siv.uds_con_dato, 0)::numeric / siv.uds
+         end                                            as sell_in_vendido_cobertura,
          hs.historia                                    as hist_sell_in,
          hs.habitual                                    as habitual_sell_in,
          coalesce(hs.meses_con_oferta, 0)               as meses_con_oferta,
@@ -359,6 +412,7 @@ base as (
   left join ventas v on v.sku = s.sku
   left join compras co on co.sku = s.sku
   left join proveedores_mes_pasado pmp on pmp.proveedor = a."proveedorNombre"
+  left join sell_in_vendido siv on siv.sku = s.sku
   left join proveedores_con_sell_in pcsi on pcsi.proveedor = a."proveedorNombre"
   left join hist_sell_in hs on hs.sku = s.sku
   left join hist_calculado hc on hc.sku = s.sku
@@ -495,12 +549,25 @@ calculada as (
          -- NO ES UNA NECESIDAD MEDIDA y la pantalla lo dice: viaja
          -- sugerido_minimo para que la celda y el tooltip no lo hagan pasar
          -- por una cuenta.
-         case when f.sin_oferta_por_ahora then 0
+         -- DOS FRENOS DUROS ANTES QUE CUALQUIER CUENTA:
+         --
+         -- El DISCONTINUO no se repone: el proveedor lo está dando de baja.
+         -- Si lo ofrece a liquidación se compra igual, pero eso es una
+         -- decisión, no una sugerencia. Son 820 artículos.
+         --
+         -- Y el COSTO 0 no se puede ni mandar: Sigma rechaza una orden de
+         -- compra con precio 0, así que sugerirlo es fabricar un renglón que
+         -- va a hacer fallar la importación. Suelen ser artículos de prueba
+         -- que se colaron en el maestro. Son 1.137.
+         case when f.es_discontinuo then 0
+              when f.costo = 0 then 0
+              when f.sin_oferta_por_ahora then 0
               when f.uds = 0 and f.total = 0 then f.u_bulto
               when f.uds = 0 then 0
               else ceil(least(f.sugerido_base * f.factor_oferta, f.sugerido_tope))
          end as sugerido,
-         (not f.sin_oferta_por_ahora and f.uds = 0 and f.total = 0) as sugerido_minimo
+         (not f.es_discontinuo and f.costo > 0 and not f.sin_oferta_por_ahora
+          and f.uds = 0 and f.total = 0)                as sugerido_minimo
   from con_factor f
 )`;
 
@@ -570,6 +637,7 @@ function where(f: FiltrosCompras, mes: string): Where {
   const condicion: Record<RecorteCompras, string> = {
     sugerido: "sugerido > 0",
     oferta: REGLA_OFERTA,
+    discontinuos: "es_discontinuo",
     sin_ventas: "uds = 0",
   };
 
@@ -631,7 +699,9 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
             tuc, full_ml, total, costo, valor, costo_lista,
             sell_in_pct,
             uds, ritmo_diario, dias_ritmo, ritmo_recortado, cobertura, sugerido,
-            es_nuevo, sugerido_minimo, to_char(alta, 'YYYY-MM-DD') as alta,
+            es_nuevo, sugerido_minimo, es_discontinuo,
+            sell_in_vendido_pct, sell_in_vendido_cobertura,
+            to_char(alta, 'YYYY-MM-DD') as alta,
             sugerido_base, sugerido_tope, factor_oferta, habitual_sell_in,
             meses_con_oferta, sin_oferta_por_ahora, dejo_de_tener_sell_in,
             uds_rent, rentabilidad,
@@ -689,6 +759,13 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
     cobertura: r.cobertura == null ? null : num(r.cobertura),
     sugerido: num(r.sugerido),
     sugeridoMinimo: r.sugerido_minimo === true,
+    esDiscontinuo: r.es_discontinuo === true,
+    sellInVendidoPct:
+      r.sell_in_vendido_pct == null ? null : num(r.sell_in_vendido_pct),
+    sellInVendidoCobertura:
+      r.sell_in_vendido_cobertura == null
+        ? null
+        : num(r.sell_in_vendido_cobertura),
     sugeridoBase: num(r.sugerido_base),
     sugeridoTope: num(r.sugerido_tope),
     factorOferta: num(r.factor_oferta),

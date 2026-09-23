@@ -26,6 +26,7 @@ import {
   COBERTURAS_COMPRA,
   RENTABILIDAD_COMPRA_DISCRETA,
   COBERTURA_COMPRA_MAXIMA,
+  CAIDA_SELL_IN_PARA_AVISAR,
   coberturaValida,
   RECORTES_COMPRAS,
   RECORTES_POR_DEFECTO,
@@ -628,6 +629,26 @@ export default function DashboardComprasPage({
         // EL FRENO SE VE, no sólo se lee en el tooltip. Un "—" a secas en un
         // artículo que se venía comprando se lee como "no hace falta", y acá
         // la verdad es la contraria: hace falta, pero no a este precio.
+        if (f.esDiscontinuo) {
+          return (
+            <span
+              title={texto}
+              className="cursor-help whitespace-nowrap text-amber-400 decoration-dotted underline underline-offset-2"
+            >
+              discontinuo
+            </span>
+          );
+        }
+        if (f.costo === 0) {
+          return (
+            <span
+              title={texto}
+              className="text-negativo cursor-help whitespace-nowrap decoration-dotted underline underline-offset-2"
+            >
+              sin costo
+            </span>
+          );
+        }
         if (f.sinOfertaPorAhora) {
           return (
             <span
@@ -804,6 +825,53 @@ export default function DashboardComprasPage({
       },
       numerica: true,
       orden: (f) => orden.get(f.sku)?.descuento ?? 0,
+    },
+    {
+      // EL NUMERO QUE FALTABA PARA PODER LEER EL SUGERIDO.
+      //
+      // El sugerido proyecta hacia adelante las unidades de atrás, y las
+      // unidades solas no dicen en qué condiciones salieron. Un artículo que
+      // voló con 40 % de sell in no tiene por qué volar al 10 %: el ritmo, que
+      // sólo mira unidades, pide lo mismo igual.
+      //
+      // Puesto al lado del Desc 1 se leen de a pares --con cuánto se vendió,
+      // con cuánto se compra ahora-- que es la comparación que decide si la
+      // proyección se sostiene.
+      titulo: "Sell in vendido %",
+      ayuda:
+        "Con qué sell in se compró lo que se vendió en la ventana del ritmo, ponderado por unidades. Es contra lo que se compara el descuento de este mes: si el ritmo se hizo con una oferta que ya no está, puede no repetirse. Vacío es que ninguna de esas ventas tiene sell in conocido.",
+      celda: (f) => {
+        if (f.sellInVendidoPct == null) return <span className="text-muted">—</span>;
+        const cob = f.sellInVendidoCobertura ?? 0;
+        const cayo =
+          f.sellInVendidoPct - (f.sellInPct ?? 0) >= CAIDA_SELL_IN_PARA_AVISAR;
+        return (
+          <span
+            className={`cursor-help decoration-dotted underline underline-offset-2 ${
+              cayo ? "text-amber-400" : "text-muted"
+            }`}
+            title={
+              `Lo vendido en la ventana se compró con ${f.sellInVendidoPct.toFixed(2)} % ` +
+              `de sell in (hay dato para el ${Math.round(cob * 100)} % de esas unidades).` +
+              (cayo
+                ? ` Este mes hay ${(f.sellInPct ?? 0).toFixed(2)} %: ese ritmo se hizo con una oferta que ahora no está.`
+                : "")
+            }
+          >
+            {f.sellInVendidoPct.toFixed(2)}
+            {/* La cobertura sólo se nombra cuando es floja: decir "100 %" en
+                cada fila sería ruido, y no decirlo cuando es 20 % es dejar
+                leer un promedio de tres unidades como si fuera el de todas. */}
+            {cob < 0.9 && (
+              <span className="ml-1 text-[10px] opacity-70">
+                {Math.round(cob * 100)}%
+              </span>
+            )}
+          </span>
+        );
+      },
+      numerica: true,
+      orden: (f) => f.sellInVendidoPct,
     },
     {
       // EL SEGUNDO DESCUENTO ARRANCA VACÍO Y NO SALE DE NINGÚN DATO: es el que
