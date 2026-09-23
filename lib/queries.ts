@@ -1,4 +1,5 @@
 import { cacheado } from "@/lib/cache";
+import { buscadorDeArticulo } from "@/lib/sql-ean";
 import { query, queryOne } from "@/lib/db";
 import {
   CANAL_MAYORISTA,
@@ -73,12 +74,15 @@ function whereBase(
   // cruzados, salen de un click y comparan por valor exacto. Los dos pueden
   // estar puestos a la vez y se aplican en AND, que es lo que se espera.
   if (!omitir.includes("buscar") && f.buscar && f.buscar.trim() !== "") {
-    params.push(`%${f.buscar.trim()}%`);
+    const termino = f.buscar.trim();
+    params.push(`%${termino}%`);
     const i = params.length;
+    // El cliente es de esta pantalla; el resto --SKU, producto y EAN-- lo arma
+    // el mismo buscador que usan los demás tableros, para que un código de
+    // barras encuentre lo mismo acá que en Stock.
     clauses.push(
-      `(${alias}.cliente ilike $${i}
-       or ${alias}.sku ilike $${i}
-       or ${alias}.producto ilike $${i})`,
+      `(${alias}.cliente ilike $${i}` +
+        ` or ${buscadorDeArticulo(termino, i, `${alias}.sku`, `${alias}.producto`)})`,
     );
   }
 

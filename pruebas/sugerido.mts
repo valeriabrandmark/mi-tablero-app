@@ -59,6 +59,9 @@ function fila(cambios: Partial<FilaCompra>): FilaCompra {
     diasRitmo: 120,
     ritmoRecortado: false,
     alta: "2025-03-05",
+    esDiscontinuo: false,
+    sellInVendidoPct: null,
+    sellInVendidoCobertura: null,
     esNuevo: false,
     cobertura: 2,
     sugerido: 24,
@@ -233,22 +236,93 @@ revisar("con stock: dice que ya hay mercaderia",
 revisar("con stock: deja la puerta abierta para cargarlo a mano",
   dice(sinVentasConStock, "se carga a mano"));
 
+// --- Los dos frenos duros --------------------------------------------------
+//
+// Van antes que cualquier cuenta: con cualquiera de los dos puesto no hay
+// compra que sugerir, y lo unico que importa es por que.
+
+const discontinuo = fila({ esDiscontinuo: true, sugerido: 0, producto: "DF ALGO" });
+revisar("el discontinuo lo dice primero",
+  porQueSugerido(discontinuo, 30)[0].startsWith("DISCONTINUO"));
+revisar("y aclara que a liquidacion se compra igual",
+  dice(discontinuo, "liquidación"));
+// No tiene que hablar de ritmo ni de cobertura: no viene al caso.
+revisar("el discontinuo no explica cuentas",
+  !dice(discontinuo, "Se vende") && !dice(discontinuo, "Sugerido:"));
+
+const sinCosto = fila({ costo: 0, sugerido: 0 });
+revisar("el costo 0 lo dice primero",
+  porQueSugerido(sinCosto, 30)[0].startsWith("SIN COSTO CARGADO"));
+revisar("y explica que Sigma lo rechaza",
+  dice(sinCosto, "Sigma rechaza"));
+// El discontinuo manda sobre el costo 0: si es las dos cosas, el motivo que
+// importa es que el proveedor lo esta dando de baja.
+revisar("discontinuo y sin costo: manda el discontinuo",
+  porQueSugerido(fila({ esDiscontinuo: true, costo: 0 }), 30)[0]
+    .startsWith("DISCONTINUO"));
+
+// --- Con que oferta se vendio lo que se vendio -----------------------------
+//
+// El sugerido proyecta hacia adelante las unidades de atras, y las unidades
+// solas no dicen en que condiciones salieron. Hoy son 372 los articulos cuyo
+// ritmo se hizo con una oferta que este mes ya no esta.
+
+const conBuenaOfertaAntes = fila({
+  sellInVendidoPct: 40,
+  sellInVendidoCobertura: 1,
+  sellInPct: 10,
+  habitualSellIn: 25,
+  diasRitmo: 120,
+});
+revisar("dice con cuanto sell in se vendio",
+  dice(conBuenaOfertaAntes, "se compró con 40.0 % de sell in"));
+revisar("y sobre cuantos dias",
+  dice(conBuenaOfertaAntes, "en estos 120 días"));
+revisar("avisa la caida y cuantos puntos son",
+  dice(conBuenaOfertaAntes, "30.0 puntos menos"));
+revisar("y por que importa",
+  dice(conBuenaOfertaAntes, "puede no repetirse"));
+// Con cobertura entera no se nombra: decir "100 %" en cada fila es ruido.
+revisar("cobertura entera no se menciona",
+  !dice(conBuenaOfertaAntes, "de lo vendido, que es de lo que hay dato"));
+
+// Con cobertura floja SI, porque un promedio sobre el 20 % de lo vendido no se
+// puede leer como si fuera el de todas las unidades.
+revisar("cobertura floja se aclara",
+  dice(fila({ ...conBuenaOfertaAntes, sellInVendidoCobertura: 0.2 }),
+       "sobre el 20 % de lo vendido"));
+
+// Sin caida no hay aviso: el ritmo se sostiene en las mismas condiciones.
+const mismaOferta = fila({
+  sellInVendidoPct: 20,
+  sellInVendidoCobertura: 1,
+  sellInPct: 20,
+});
+revisar("sin caida, no avisa",  !dice(mismaOferta, "OJO"));
+revisar("pero igual dice con cuanto se vendio",
+  dice(mismaOferta, "se compró con 20.0 % de sell in"));
+
+// Sin dato no se inventa nada.
+revisar("sin sell in de las ventas, no dice nada",
+  !dice(fila({ sellInVendidoPct: null }), "se compró con"));
+
 // --- Los recortes de la tabla ----------------------------------------------
 //
 // Llegan de una query string que se puede escribir a mano, asi que lo que no
 // existe no puede terminar en un `where`. Y el orden importa: dos URLs con los
 // mismos recortes en distinto orden tienen que dar la misma clave de cache.
 
-revisar("los tres que existen, en su orden",
-  RECORTES_COMPRAS.map((r) => r.valor).join(" ") === "sugerido oferta sin_ventas",
+revisar("los cuatro que existen, en su orden",
+  RECORTES_COMPRAS.map((r) => r.valor).join(" ")
+    === "sugerido oferta discontinuos sin_ventas",
   RECORTES_COMPRAS.map((r) => r.valor).join(" "));
 
 revisar("arranca recortando a lo que hay que comprar",
   RECORTES_POR_DEFECTO.join() === "sugerido");
 
-revisar("los tres se aceptan",
-  recortesValidos(["sugerido", "oferta", "sin_ventas"]).join()
-    === "sugerido,oferta,sin_ventas");
+revisar("los cuatro se aceptan",
+  recortesValidos(["sugerido", "oferta", "discontinuos", "sin_ventas"]).join()
+    === "sugerido,oferta,discontinuos,sin_ventas");
 revisar("uno solo tambien",
   recortesValidos(["oferta"]).join() === "oferta");
 
@@ -267,8 +341,8 @@ revisar("y si es todo inventado no queda nada",
 revisar("no repite", recortesValidos(["oferta", "oferta"]).join() === "oferta");
 // Siempre en el orden del catalogo, venga como venga.
 revisar("normaliza el orden",
-  recortesValidos(["sin_ventas", "oferta", "sugerido"]).join()
-    === "sugerido,oferta,sin_ventas");
+  recortesValidos(["sin_ventas", "discontinuos", "oferta", "sugerido"]).join()
+    === "sugerido,oferta,discontinuos,sin_ventas");
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);

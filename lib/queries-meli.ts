@@ -1,4 +1,5 @@
 import { cacheado } from "@/lib/cache";
+import { buscadorDeArticulo } from "@/lib/sql-ean";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro, vacio } from "@/lib/filtros";
 import { hoyArgentina, sumarDias } from "@/lib/rangos";
@@ -216,8 +217,7 @@ function whereBase(
     const iLike = params.length;
 
     const partes = [
-      `${col("sku")} ilike $${iLike}`,
-      `${col("producto")} ilike $${iLike}`,
+      buscadorDeArticulo(termino, iLike, col("sku"), col("producto")),
     ];
 
     // Los dos numéricos solo si el término tiene dígitos: sin esto, buscar

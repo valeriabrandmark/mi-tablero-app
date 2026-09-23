@@ -108,6 +108,20 @@ export const RENTABILIDAD_COMPRA_DISCRETA = 15;
 export const VECES_SOBRE_LO_HABITUAL_PARA_INFLAR = 2;
 
 /**
+ * CUANTOS PUNTOS TIENE QUE HABER CAIDO EL SELL IN PARA AVISAR.
+ *
+ * El sugerido proyecta hacia adelante las unidades de atrás. Cuando esas
+ * unidades se vendieron con un descuento de compra que este mes ya no está, la
+ * proyección se apoya en algo que cambió: el número no está mal calculado,
+ * pero el supuesto dejó de valer y eso lo tiene que decidir una persona.
+ *
+ * 10 puntos porque por debajo de eso el ruido manda: el sell in del mes de la
+ * venta no está cargado para todos los artículos, así que diferencias chicas
+ * pueden venir de la cobertura del dato y no de un cambio real.
+ */
+export const CAIDA_SELL_IN_PARA_AVISAR = 10;
+
+/**
  * DESDE CUANDO UN ARTICULO DEJA DE SER NUEVO.
  *
  * Un artículo dado de alta hace poco no se puede juzgar con las mismas reglas
@@ -129,6 +143,23 @@ export const VECES_SOBRE_LO_HABITUAL_PARA_INFLAR = 2;
 export const DIAS_ARTICULO_NUEVO = 90;
 
 /**
+ * COMO SE MARCA UN ARTICULO DISCONTINUO: con un prefijo en la descripción.
+ *
+ * No hay un campo para esto en Sigma, así que la convención del negocio es
+ * escribirlo adelante del nombre: "DF - ADERMICINA CREMA...", "DD PRIME
+ * PRESERVATIVO...". Hoy son 841 artículos (776 con DF y 65 con DD), y los dos
+ * prefijos vienen SIEMPRE con un espacio detrás --verificado contra la base--
+ * así que pedir el espacio evita llevarse puesta una marca que empiece con
+ * esas letras.
+ *
+ * A un discontinuo no se le sugiere comprar: el proveedor lo está dando de
+ * baja. Pero se lo tiene que poder encontrar, porque a veces lo ofrece a
+ * liquidación y ahí sí conviene cargar cantidad a mano. Para eso está el
+ * recorte "Discontinuos" de acá abajo.
+ */
+export const PREFIJOS_DISCONTINUO = ["DF ", "DD "] as const;
+
+/**
  * Los recortes que se pueden aplicar a la tabla, como van en la lista.
  *
  * Viven acá y no escritos a mano en el componente porque los lee también el
@@ -147,6 +178,19 @@ export const RECORTES_COMPRAS = [
     etiqueta: "Con oferta del mes",
     ayuda:
       "Deja sólo los que tienen sell in del proveedor vigente en el mes elegido.",
+  },
+  {
+    // LO QUE NO SE COMPRA, PERO A VECES SI.
+    //
+    // Un discontinuo no entra nunca por "Hay que comprar" --el sugerido le
+    // queda en 0 a propósito-- así que sin este recorte la única forma de
+    // verlos sería destildar todo y buscarlos entre miles de filas. Y hacen
+    // falta: cuando el proveedor los ofrece a liquidación, la compra se decide
+    // igual, sólo que a mano.
+    valor: "discontinuos",
+    etiqueta: "Discontinuos",
+    ayuda:
+      "Deja sólo los artículos que el proveedor está discontinuando (los que empiezan con DF o DD). No se sugieren nunca, pero sirven cuando se ofrecen a liquidación.",
   },
   {
     // EL RECORTE QUE HACE VISIBLE LO QUE EL CALCULO NO PUEDE JUZGAR.
@@ -734,6 +778,28 @@ export function porQueSugerido(
    */
   coberturaDias: number,
 ): string[] {
+  // LOS DOS FRENOS DUROS VAN PRIMERO, antes incluso de mirar si hay ritmo:
+  // con cualquiera de los dos puesto no hay compra que sugerir, y lo único
+  // que importa es por qué.
+  if (f.esDiscontinuo) {
+    return [
+      "DISCONTINUO: la descripción lo marca como artículo que el proveedor" +
+        " está dando de baja.",
+      "Por eso no se sugiere reponerlo, tenga el ritmo que tenga.",
+      "Si lo ofrece a liquidación se compra igual: cargá la cantidad a mano.",
+    ];
+  }
+
+  if (f.costo === 0) {
+    return [
+      "SIN COSTO CARGADO: este artículo tiene costo 0 en el maestro.",
+      "Sigma rechaza una orden de compra con precio 0, así que sugerirlo" +
+        " sería armar un renglón que hace fallar la importación.",
+      "Suele pasar con artículos de prueba que quedaron en el maestro. Si es" +
+        " un artículo de verdad, hay que cargarle el costo en Sigma.",
+    ];
+  }
+
   if (f.cobertura == null) {
     // EL ARTICULO NUEVO ES OTRA COSA QUE EL ARTICULO MUERTO, y el mismo número
     // en la columna los confunde. Uno no se vende hace meses; el otro todavía
@@ -876,6 +942,35 @@ export function porQueSugerido(
       `Daría ${sinTope} u., pero el techo de ${COBERTURA_MAXIMA_COMPRA_DIAS} días` +
         ` de cobertura lo baja a ${f.sugerido}.`,
     );
+  }
+
+  // CON QUE OFERTA SE VENDIO LO QUE SE VENDIO.
+  //
+  // El sugerido proyecta hacia adelante las unidades de atrás, y las unidades
+  // solas no dicen en qué condiciones salieron. Si ese ritmo se hizo con 40 %
+  // de sell in y este mes hay 10 %, la proyección está apoyada en algo que ya
+  // no está: no es que el número esté mal calculado, es que el supuesto
+  // cambió, y eso lo tiene que decidir una persona.
+  if (f.sellInVendidoPct != null) {
+    const cobertura = f.sellInVendidoCobertura ?? 0;
+    const sobre =
+      cobertura < 0.9
+        ? ` (sobre el ${Math.round(cobertura * 100)} % de lo vendido, que es de lo que hay dato)`
+        : "";
+    l.push(
+      "",
+      `Lo que se vendió en estos ${f.diasRitmo} días se compró con` +
+        ` ${f.sellInVendidoPct.toFixed(1)} % de sell in${sobre}.`,
+    );
+
+    const hoy = f.sellInPct ?? 0;
+    if (f.sellInVendidoPct - hoy >= CAIDA_SELL_IN_PARA_AVISAR) {
+      l.push(
+        `OJO: este mes hay ${hoy.toFixed(1)} %, o sea` +
+          ` ${(f.sellInVendidoPct - hoy).toFixed(1)} puntos menos. Ese ritmo se` +
+          " hizo con una oferta que ahora no está, así que puede no repetirse.",
+      );
+    }
   }
 
   // El aviso del artículo al que se le terminó la oferta. Va pegado al

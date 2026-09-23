@@ -1503,6 +1503,9 @@ export type FiltrosCompras = {
  *                         acordó con el proveedor o porque es marca nueva.
  *   sugerido              sólo los que el cálculo pide reponer.
  *   oferta                sólo los que tienen sell in vigente este mes.
+ *   discontinuos          sólo los que el proveedor está dando de baja (los
+ *                         que empiezan con DF o DD). No se sugieren nunca,
+ *                         pero se compran a liquidación.
  *   sin_ventas            sólo los que no vendieron nada en la ventana: los
  *                         recién dados de alta y los que dejaron de moverse.
  *                         Son los que el cálculo no puede juzgar, y sin este
@@ -1519,7 +1522,11 @@ export type FiltrosCompras = {
  * tiempo. En una sola lista se lee de un vistazo, y se elige igual que la
  * marca o el proveedor.
  */
-export type RecorteCompras = "sugerido" | "oferta" | "sin_ventas";
+export type RecorteCompras =
+  | "sugerido"
+  | "oferta"
+  | "discontinuos"
+  | "sin_ventas";
 
 export type FilaCompra = {
   sku: string;
@@ -1581,6 +1588,33 @@ export type FilaCompra = {
   ritmoRecortado: boolean;
   /** Cuándo se dio de alta en Sigma (`YYYY-MM-DD`). */
   alta: string | null;
+  /**
+   * `true` si el proveedor lo está discontinuando: la descripción arranca con
+   * uno de los `PREFIJOS_DISCONTINUO`. No se sugiere nunca —el proveedor lo
+   * está dando de baja— pero se puede comprar a mano cuando lo ofrece a
+   * liquidación, y para eso está el recorte "Discontinuos".
+   */
+  esDiscontinuo: boolean;
+  /**
+   * CON QUE SELL IN SE COMPRO LO QUE SE VENDIO en la ventana del ritmo,
+   * ponderado por unidades.
+   *
+   * Existe porque el sugerido proyecta hacia adelante lo que se vendió hacia
+   * atrás, y eso esconde un supuesto: que las condiciones de compra son las
+   * mismas. Un artículo que voló el mes pasado con 40 % de sell in no tiene
+   * por qué volar este mes al 10 %, y el ritmo —que sólo mira unidades— pide
+   * lo mismo igual. Comparado contra `sellInPct`, este número dice si lo que
+   * se está por comprar se compra en las mismas condiciones en que se vendió.
+   *
+   * `null` cuando ninguna de las ventas de la ventana tiene sell in conocido.
+   */
+  sellInVendidoPct: number | null;
+  /**
+   * Qué parte de las unidades vendidas en la ventana tiene sell in conocido,
+   * de 0 a 1. Sin esto el promedio de arriba no se puede interpretar: uno
+   * sobre el 20 % de lo vendido no dice lo mismo que uno sobre el 100 %.
+   */
+  sellInVendidoCobertura: number | null;
   /**
    * `true` si se dio de alta hace menos de `DIAS_ARTICULO_NUEVO`.
    *
