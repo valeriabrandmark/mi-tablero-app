@@ -1483,32 +1483,37 @@ export type FiltrosCompras = {
   cobertura?: number;
   /** Mes comercial del que sale la oferta del proveedor (`YYYY-MM`). */
   mes?: string;
-  /** Qué artículos se muestran. Por defecto `sugerido`. */
-  vista?: VistaCompras;
+  /**
+   * Qué recortes se le aplican a la tabla. Sin nada, están todos los
+   * artículos; cada uno que se marca saca filas. Ver `RecorteCompras`.
+   */
+  recortes?: RecorteCompras[];
   buscar?: string;
 };
 
 /**
- * QUE ARTICULOS MUESTRA LA TABLA. Tres opciones excluyentes, de la más ancha a
- * la más angosta:
+ * QUE RECORTES SE LE APLICAN A LA TABLA. Se eligen de una lista con
+ * checkboxes, como cualquier otro filtro del tablero, y SE SUMAN: cada uno
+ * saca filas, y sin ninguno marcado están todos los artículos.
  *
- *   todos     todo lo que encontró el filtro de proveedor / marca / grupo,
- *             tenga o no algo para comprar. Es la vista para cargar cantidades
- *             a mano: un artículo sin faltante y sin oferta también se pide,
- *             porque se acordó con el proveedor o porque es una marca nueva.
- *   sugerido  sólo los que el cálculo pide reponer. El defecto: son ~3.300 SKU
- *             con stock y la orden típica tiene decenas.
- *   oferta    de esos, sólo los que tienen sell in vigente este mes. Para
- *             armar la compra de una campaña sin mirar el resto del catálogo.
+ *   (ninguno)             todos los del filtro de proveedor / marca / grupo,
+ *                         tengan o no algo para comprar. Es lo que hace falta
+ *                         para cargar cantidades a mano: un artículo sin
+ *                         faltante y sin oferta también se pide, porque se
+ *                         acordó con el proveedor o porque es marca nueva.
+ *   sugerido              sólo los que el cálculo pide reponer.
+ *   oferta                sólo los que tienen sell in vigente este mes.
+ *   sugerido + oferta     los dos a la vez: la compra de una campaña de
+ *                         ofertas, sin mirar el resto del catálogo.
  *
- * ERAN DOS BOOLEANOS SUELTOS (`todos` y `soloOferta`) y eso daba cuatro
- * combinaciones para tres estados que tienen sentido: "todos + sólo con
- * oferta" mostraba los que tienen oferta y no hay que comprar, que no es
- * ninguna de las tres preguntas que alguien se hace. Además había que
- * encontrar dos botones en dos lugares distintos de la pantalla para llegar a
- * un estado.
+ * ESTABAN COMO DOS BOTONES SUELTOS en dos lugares distintos de la pantalla
+ * --"sólo los que hay que comprar" entre los filtros y "dejar sólo con oferta"
+ * abajo, en la fila de acciones de la orden-- así que el recorte que estaba
+ * aplicado había que reconstruirlo mirando dos cosas que no se veían al mismo
+ * tiempo. En una sola lista se lee de un vistazo, y se elige igual que la
+ * marca o el proveedor.
  */
-export type VistaCompras = "todos" | "sugerido" | "oferta";
+export type RecorteCompras = "sugerido" | "oferta";
 
 export type FilaCompra = {
   sku: string;
@@ -1587,6 +1592,19 @@ export type FilaCompra = {
    * en el tooltip sin recalcular nada en el navegador.
    */
   sugerido: number;
+  /**
+   * `true` si el sugerido NO es una cuenta sino el mínimo de un bulto.
+   *
+   * Pasa cuando el artículo no vendió nada en la ventana --recién se dio de
+   * alta, o hace rato que no se mueve-- y entonces no hay ritmo con el que
+   * calcular nada. La decisión ahí es de una persona, y un bulto es el punto
+   * de partida para ajustarla: por debajo de un bulto no se le pide a un
+   * proveedor.
+   *
+   * La pantalla lo marca para que ese número no se lea como una necesidad
+   * medida, que es lo que sí son los demás.
+   */
+  sugeridoMinimo: boolean;
   /** Unidades que faltan para cubrir objetivo + reposición, sin tocar. */
   sugeridoBase: number;
   /** El techo: lo máximo que se puede pedir sin pasar la cobertura máxima. */
@@ -1695,11 +1713,11 @@ export type DashboardCompras = {
    */
   sellInFoto: string | null;
   /**
-   * CUANTOS ARTICULOS ENCONTRO EL FILTRO, sin mirar la vista.
+   * CUANTOS ARTICULOS ENCONTRO EL FILTRO, sin los recortes.
    *
    * Viene en 0 salvo que `filas` esté vacía: es ahí donde hace falta, para que
-   * la pantalla pueda decir "en esta vista no hay nada, pero el filtro tiene 23
-   * artículos" y ofrecer el salto a `todos`, en vez de quedarse en blanco como
+   * la pantalla pueda decir "con estos recortes no queda nada, pero el filtro
+   * tiene 23 artículos" y ofrecer sacarlos, en vez de quedarse en blanco como
    * si la marca no existiera.
    */
   articulosDelFiltro: number;

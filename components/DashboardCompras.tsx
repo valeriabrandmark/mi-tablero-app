@@ -27,9 +27,9 @@ import {
   RENTABILIDAD_COMPRA_DISCRETA,
   COBERTURA_COMPRA_MAXIMA,
   coberturaValida,
-  VISTA_POR_DEFECTO,
-  VISTAS_COMPRAS,
-  vistaValida,
+  RECORTES_COMPRAS,
+  RECORTES_POR_DEFECTO,
+  recortesValidos,
 } from "@/lib/compras";
 import { vacio as sinValores } from "@/lib/filtros";
 import {
@@ -139,8 +139,13 @@ export default function DashboardComprasPage({
   const inicial: FiltrosCompras = {
     ventana: VENTANA_POR_DEFECTO,
     cobertura: COBERTURA_OBJETIVO_DIAS,
+    recortes: RECORTES_POR_DEFECTO,
   };
   const [filtros, setFiltros] = useState<FiltrosCompras>(inicial);
+
+  // Se sanea acá y no se lee `filtros.recortes` a pelo: así la pantalla y el
+  // servidor miran exactamente la misma lista.
+  const recortes = recortesValidos(filtros.recortes);
   const [buscado, setBuscado] = useState("");
 
   /**
@@ -238,7 +243,9 @@ export default function DashboardComprasPage({
         ventana: [String(filtros.ventana ?? VENTANA_POR_DEFECTO)],
         cobertura: [String(filtros.cobertura ?? COBERTURA_OBJETIVO_DIAS)],
         mes: filtros.mes ? [filtros.mes] : undefined,
-        vista: filtros.vista ? [filtros.vista] : undefined,
+        // Cada recorte va como un parámetro repetido (?recorte=a&recorte=b),
+        // igual que los demás filtros de lista.
+        recortes: recortes.length > 0 ? recortes : undefined,
         // RED DE SEGURIDAD. `satisfies` obliga a que estén TODAS las claves
         // de FiltrosCompras: si mañana se agrega un filtro y se olvida acá, esto
         // rompe el build.
@@ -491,16 +498,12 @@ export default function DashboardComprasPage({
   // Hay sell in del proveedor cargado para ese mes, o todavía no.
   const sellInHayDatos = (data?.sellInCargado ?? 0) > 0;
 
-  // Se valida acá y no se lee `filtros.vista` a pelo: así la pantalla y el
-  // servidor caen siempre en la misma por defecto.
-  const vistaActual = vistaValida(filtros.vista);
-
   const sinCambios =
     sinValores(filtros.grupo) &&
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
     !filtros.buscar &&
-    vistaActual === VISTA_POR_DEFECTO &&
+    recortes.join() === RECORTES_POR_DEFECTO.join() &&
     !filtros.mes &&
     (filtros.ventana ?? VENTANA_POR_DEFECTO) === VENTANA_POR_DEFECTO;
 
@@ -639,6 +642,21 @@ export default function DashboardComprasPage({
           return (
             <span className="text-muted" title={texto}>
               —
+            </span>
+          );
+        }
+        // EL MINIMO NO ES UNA CUENTA, y no puede parecerlo. Se muestra apagado
+        // y con la palabra al lado: quien está armando una orden tiene que
+        // poder separar de un vistazo los renglones que el cálculo midió de los
+        // que son un punto de partida para decidir.
+        if (f.sugeridoMinimo) {
+          return (
+            <span
+              title={texto}
+              className="text-muted cursor-help whitespace-nowrap decoration-dotted underline underline-offset-2"
+            >
+              {fmtNumero(f.sugerido)}{" "}
+              <span className="text-[10px]">mín.</span>
             </span>
           );
         }
@@ -1199,42 +1217,24 @@ export default function DashboardComprasPage({
             />
           </form>
 
-          {/* LAS TRES VISTAS, JUNTAS Y EN ORDEN DE ANCHO A ANGOSTO.
-              Antes eran dos botones sueltos en dos lugares distintos de la
-              pantalla --"sólo los que hay que comprar" acá y "dejar sólo con
-              oferta" abajo, en la fila de acciones de la orden-- y entre los
-              dos daban cuatro combinaciones para tres estados que se
-              entienden. Puestos como un solo selector, el recorte que está
-              aplicado se lee de un vistazo en vez de reconstruirse mirando dos
-              botones que no están a la vista al mismo tiempo. */}
-          <div className="flex flex-col gap-1">
-            <span className="text-muted text-[11px]">Qué artículos</span>
-            <div
-              role="group"
-              aria-label="Qué artículos se muestran"
-              className="border-line flex overflow-hidden rounded-lg border"
-            >
-              {VISTAS_COMPRAS.map((v) => {
-                const puesta = vistaActual === v.valor;
-                return (
-                  <button
-                    key={v.valor}
-                    type="button"
-                    onClick={() => cambiar({ ...filtros, vista: v.valor })}
-                    aria-pressed={puesta}
-                    title={v.ayuda}
-                    className={`border-line px-2.5 py-1.5 text-xs transition-colors not-first:border-l ${
-                      puesta
-                        ? "bg-c1/15 text-c1"
-                        : "text-muted hover:bg-panel-2 hover:text-ink"
-                    }`}
-                  >
-                    {v.etiqueta}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          {/* LOS RECORTES, EN UNA LISTA COMO CUALQUIER OTRO FILTRO.
+
+              Eran dos botones sueltos en dos lugares distintos de la pantalla
+              --"sólo los que hay que comprar" acá y "dejar sólo con oferta"
+              abajo, en la fila de acciones de la orden-- así que para saber
+              qué se estaba viendo había que mirar dos cosas que no entran en
+              la misma pantalla.
+
+              Va con el MISMO selector que marca y proveedor a propósito: se
+              abren igual, se destildan igual y "ninguno elegido" quiere decir
+              lo mismo en los tres, que es "todos". Uno menos que aprender. */}
+          <SelectorMultiple
+            etiqueta="Recortar a"
+            valores={filtros.recortes}
+            opciones={RECORTES_COMPRAS.map((r) => [r.valor, r.etiqueta])}
+            onChange={(v) => cambiar({ ...filtros, recortes: recortesValidos(v) })}
+            todos="Todos los artículos"
+          />
 
           <BotonLimpiar
             onClick={() => {
@@ -1957,7 +1957,7 @@ function VacioCompras({
 }) {
   const hay = data.articulosDelFiltro;
 
-  // En "Todos" no hay vista que culpar: cero filas es cero artículos.
+  // Sin recortes no hay a quién culpar: cero filas es cero artículos.
   if (hay === 0) {
     return <p>Ningún artículo para el filtro elegido.</p>;
   }
@@ -1965,13 +1965,13 @@ function VacioCompras({
   return (
     <div className="flex flex-col items-center gap-3">
       <p className="mx-auto max-w-lg">
-        Con este filtro no hay nada que comprar
-        {vistaValida(filtros.vista) === "oferta"
-          ? ` con sell in de ${fmtMes(data.mes)}`
+        Con estos recortes no queda ningún artículo
+        {recortesValidos(filtros.recortes).includes("oferta")
+          ? ` (uno de ellos pide sell in de ${fmtMes(data.mes)})`
           : ""}
-        , pero{" "}
+        , pero el filtro encontró{" "}
         <strong className="text-ink">
-          {hay === 1 ? "hay 1 artículo" : `hay ${fmtNumero(hay)} artículos`}
+          {hay === 1 ? "1 artículo" : `${fmtNumero(hay)} artículos`}
         </strong>{" "}
         {hay === 1
           ? "al que podés cargarle cantidades a mano."
@@ -1980,7 +1980,7 @@ function VacioCompras({
 
       <button
         type="button"
-        onClick={() => cambiar({ ...filtros, vista: "todos" })}
+        onClick={() => cambiar({ ...filtros, recortes: [] })}
         className="border-c1 bg-c1/15 text-c1 hover:bg-c1/25 rounded-lg border px-3 py-1.5 text-xs transition-colors"
       >
         {hay === 1 ? "Ver el artículo" : `Ver los ${fmtNumero(hay)} artículos`}

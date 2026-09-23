@@ -20,7 +20,7 @@ import {
   PLAZO_REPOSICION_DIAS,
 } from "@/lib/stock";
 import type { CeldaXlsx, ColumnaXlsx, LibroXlsx } from "@/lib/xlsx";
-import type { FilaCompra, VistaCompras } from "@/lib/types";
+import type { FilaCompra, RecorteCompras } from "@/lib/types";
 
 /** Sobre cuántos meses se mide la rentabilidad de venta del artículo. */
 export const MESES_RENTABILIDAD = 3;
@@ -129,45 +129,52 @@ export const VECES_SOBRE_LO_HABITUAL_PARA_INFLAR = 2;
 export const DIAS_ARTICULO_NUEVO = 90;
 
 /**
- * Las tres vistas, en el orden en que van en la pantalla: de la más ancha a la
- * más angosta. El orden importa --es el que hace que el selector se lea como
- * un embudo-- así que vive acá y no escrito a mano en el componente.
+ * Los recortes que se pueden aplicar a la tabla, como van en la lista.
+ *
+ * Viven acá y no escritos a mano en el componente porque los lee también el
+ * saneador de abajo, y el día que se agregue un tercero tiene que aparecer en
+ * los dos lados solo.
  */
-export const VISTAS_COMPRAS = [
-  {
-    valor: "todos",
-    etiqueta: "Todos",
-    ayuda:
-      "Todos los artículos del filtro, tengan o no algo para comprar. Es la vista para cargar cantidades a mano.",
-  },
+export const RECORTES_COMPRAS = [
   {
     valor: "sugerido",
     etiqueta: "Hay que comprar",
     ayuda:
-      "Sólo los artículos a los que el cálculo les pide reposición. Es la vista de siempre.",
+      "Deja sólo los artículos a los que el cálculo les pide reposición. Es el recorte de siempre.",
   },
   {
     valor: "oferta",
-    etiqueta: "Con oferta",
+    etiqueta: "Con oferta del mes",
     ayuda:
-      "De los que hay que comprar, sólo los que tienen sell in del proveedor vigente este mes.",
+      "Deja sólo los que tienen sell in del proveedor vigente en el mes elegido.",
   },
-] as const satisfies readonly { valor: VistaCompras; etiqueta: string; ayuda: string }[];
-
-/** La vista por defecto: la orden típica tiene decenas de renglones, no miles. */
-export const VISTA_POR_DEFECTO: VistaCompras = "sugerido";
+] as const satisfies readonly {
+  valor: RecorteCompras;
+  etiqueta: string;
+  ayuda: string;
+}[];
 
 /**
- * Una vista válida, venga de donde venga.
+ * ARRANCA CON "HAY QUE COMPRAR" PUESTO. Son ~8.200 artículos con stock y la
+ * orden típica tiene decenas: empezar con todo obligaría a buscar los que
+ * importan entre los que no. Sacarlo es un click.
+ */
+export const RECORTES_POR_DEFECTO: RecorteCompras[] = ["sugerido"];
+
+/**
+ * Los recortes válidos de una lista que puede venir de cualquier lado.
  *
  * Existe porque esto llega de una query string que se puede escribir a mano, y
- * un valor inventado no puede terminar en un `where` que no filtra nada: sería
- * mostrar 8.000 artículos sin que nadie lo haya pedido.
+ * un valor inventado no puede terminar en un `where`. Se descartan los que no
+ * existen y los repetidos --marcar dos veces lo mismo agregaría la condición
+ * dos veces-- y se devuelven en el orden de `RECORTES_COMPRAS`, para que dos
+ * URLs con los mismos recortes en distinto orden den la misma clave de caché.
  */
-export function vistaValida(v: unknown): VistaCompras {
-  return VISTAS_COMPRAS.some((x) => x.valor === v)
-    ? (v as VistaCompras)
-    : VISTA_POR_DEFECTO;
+export function recortesValidos(v: unknown): RecorteCompras[] {
+  const pedidos = Array.isArray(v) ? v : [];
+  return RECORTES_COMPRAS.filter((r) => pedidos.includes(r.valor)).map(
+    (r) => r.valor,
+  );
 }
 
 /**
@@ -336,7 +343,19 @@ export function renglonInicial(f: FilaCompra): RenglonOrden {
   const unidad = unidadPorDefecto(f.unidadesPorBulto);
   return {
     unidad,
-    cantidad: cantidadSugerida(f.sugerido, unidad, f.unidadesPorBulto),
+    // EL MINIMO SE MUESTRA PERO NO SE CARGA SOLO, y la diferencia es de
+    // tamaño: hoy hay 4.475 artículos sin ventas en la ventana, y un bulto a
+    // cada uno son $ 318 millones. Cargados de entrada, abrir Compras sin
+    // filtrar mostraría esa orden ya armada y habría que vaciarla a mano para
+    // poder trabajar.
+    //
+    // El sugerido igual se ve en su columna, marcado como "mín.", que es lo
+    // que se pidió: que el artículo sin historial proponga un bulto en vez de
+    // no proponer nada. Aceptarlo es escribirlo, o apretar "Volver al
+    // sugerido" para toda la lista de una.
+    cantidad: f.sugeridoMinimo
+      ? 0
+      : cantidadSugerida(f.sugerido, unidad, f.unidadesPorBulto),
     descuento: f.sellInPct ?? 0,
     // Vacío a propósito: ver RenglonOrden.
     descuento2: 0,
@@ -703,22 +722,40 @@ export function porQueSugerido(
   coberturaDias: number,
 ): string[] {
   if (f.cobertura == null) {
-    // EL ARTICULO NUEVO ES OTRA COSA QUE EL ARTICULO MUERTO, y el mismo "—" en
-    // la columna los confunde. Uno no se vende hace meses; el otro todavía no
-    // tuvo la oportunidad, y es justo el que puede necesitar la primera compra.
-    if (f.esNuevo) {
+    // EL ARTICULO NUEVO ES OTRA COSA QUE EL ARTICULO MUERTO, y el mismo número
+    // en la columna los confunde. Uno no se vende hace meses; el otro todavía
+    // no tuvo la oportunidad, y es justo el que puede necesitar la primera
+    // compra. El sugerido es el mismo --un bulto-- pero la decisión no.
+    const l = f.esNuevo
+      ? [
+          `Artículo nuevo: alta el ${f.alta ?? "—"}, todavía sin ninguna venta.`,
+          f.total > 0
+            ? `Ya hay ${Math.round(f.total)} u. en stock: llegó y todavía no arrancó.`
+            : "Y no hay stock: está cargado en Sigma pero nunca se compró.",
+        ]
+      : [
+          "Sin ventas en la ventana: no hay ritmo con el que calcular nada.",
+          `Stock hoy: ${Math.round(f.total)} u.`,
+        ];
+
+    // El freno manda por encima de todo, incluso del mínimo.
+    if (f.sinOfertaPorAhora) {
       return [
-        `Artículo nuevo: alta el ${f.alta ?? "—"}, todavía sin ninguna venta.`,
-        "Sin ventas no hay ritmo, así que el cálculo no puede sugerir nada." +
-          " Esto se decide a mano.",
-        f.total > 0
-          ? `Ya hay ${Math.round(f.total)} u. en stock: llegó y todavía no arrancó.`
-          : "Y no hay stock: está cargado en Sigma pero nunca se compró.",
+        ...l,
+        "",
+        "Y este mes el proveedor NO le dio sell in, habiéndoselo dado antes:" +
+          " no se sugiere nada. Comprarlo ahora sería pagar a precio de lista" +
+          " algo que viene con descuento.",
       ];
     }
+
     return [
-      "Sin ventas en la ventana: no hay ritmo con el que calcular nada.",
-      `Stock hoy: ${Math.round(f.total)} u.`,
+      ...l,
+      "",
+      `Sin ritmo no hay nada que calcular, así que se propone el MÍNIMO:` +
+        ` 1 bulto = ${Math.round(f.unidadesPorBulto)} u.`,
+      "Es un punto de partida para ajustar a mano, no una necesidad medida:" +
+        " por debajo de un bulto no se le pide a un proveedor.",
     ];
   }
 

@@ -9,7 +9,7 @@ import {
   DIAS_ARTICULO_NUEVO,
   MESES_SIN_SELL_IN_PARA_SUGERIR,
   VECES_SOBRE_LO_HABITUAL_PARA_INFLAR,
-  vistaValida,
+  recortesValidos,
   FACTOR_OFERTA_MAX,
   MESES_HISTORIA_SELL_IN,
   MESES_RENTABILIDAD,
@@ -30,7 +30,7 @@ import type {
   DashboardCompras,
   FilaCompra,
   FiltrosCompras,
-  VistaCompras,
+  RecorteCompras,
 } from "@/lib/types";
 
 /**
@@ -471,14 +471,28 @@ calculada as (
          -- techo. El least va al final y no antes para que el tope sea siempre
          -- lo último que manda.
          --
-         -- Y ARRIBA DE TODO, EL FRENO: a un artículo al que este mes le
-         -- sacaron la oferta que venía teniendo no se le sugiere nada. La
-         -- cuenta de al lado se calcula igual --sugerido_base y factor_oferta
-         -- siguen ahí-- para que el tooltip pueda decir cuánto habría dado y
-         -- por qué no se pide. (Sin backticks: template literal.)
+         -- ARRIBA DE TODO, EL FRENO: a un artículo al que este mes le sacaron
+         -- la oferta que venía teniendo no se le sugiere nada. La cuenta de al
+         -- lado se calcula igual --sugerido_base y factor_oferta siguen ahí--
+         -- para que el tooltip pueda decir cuánto habría dado y por qué no se
+         -- pide. (Sin backticks: template literal.)
+         --
+         -- Y DESPUES, EL MINIMO DE UN BULTO PARA LO QUE NO TIENE HISTORIAL.
+         -- Sin ventas en la ventana no hay ritmo, así que la cuenta da 0 y el
+         -- artículo desaparece de la tabla: pasa con el que recién se dio de
+         -- alta y con el que hace rato no se mueve, que son dos casos donde la
+         -- decisión es de una persona y no del cálculo. Un bulto es el piso de
+         -- cualquier compra --por debajo no se le pide a un proveedor-- así que
+         -- sirve de punto de partida para ajustar a mano.
+         --
+         -- NO ES UNA NECESIDAD MEDIDA y la pantalla lo dice: viaja
+         -- sugerido_minimo para que la celda y el tooltip no lo hagan pasar
+         -- por una cuenta.
          case when f.sin_oferta_por_ahora then 0
+              when f.uds = 0 then f.u_bulto
               else ceil(least(f.sugerido_base * f.factor_oferta, f.sugerido_tope))
-         end as sugerido
+         end as sugerido,
+         (not f.sin_oferta_por_ahora and f.uds = 0) as sugerido_minimo
   from con_factor f
 )`;
 
@@ -495,11 +509,11 @@ const REGLA_OFERTA = "coalesce(sell_in_pct, 0) > 0";
 /**
  * El `where` de la consulta, despiezado.
  *
- * LO QUE RECORTA LA VISTA VA APARTE de los filtros que eligió la persona,
- * porque cuando la tabla sale vacía hay que poder contestar cuál de las dos
- * cosas la vació: si el filtro no encontró ningún artículo, o si los encontró
- * y la vista los dejó afuera. Con un solo texto de `where` no se distinguen, y
- * la pantalla queda en blanco sin poder decir nada.
+ * LOS RECORTES VAN APARTE de los filtros que eligió la persona, porque cuando
+ * la tabla sale vacía hay que poder contestar cuál de las dos cosas la vació:
+ * si el filtro no encontró ningún artículo, o si los encontró y los recortes
+ * los dejaron afuera. Con un solo texto de `where` no se distinguen, y la
+ * pantalla queda en blanco sin poder decir nada.
  *
  * El caso que lo motivó: filtrando por la marca BUBBA quedaban 23 artículos,
  * uno solo tenía sell in de septiembre y a ese el cálculo no le pedía reponer
@@ -511,8 +525,8 @@ type Where = {
   sql: string;
   /** Sólo los filtros de la persona: proveedor, grupo, marca, búsqueda. */
   sqlEstructural: string;
-  /** La vista elegida, ya validada. */
-  vista: VistaCompras;
+  /** Los recortes que se pidieron, ya saneados. */
+  recortes: RecorteCompras[];
   params: unknown[];
 };
 
@@ -540,20 +554,22 @@ function where(f: FiltrosCompras, mes: string): Where {
     );
   }
 
-  // LA VISTA, que no elige QUÉ artículos sino CUÁLES DE ESOS se muestran. Las
-  // tres y el porqué de que sean tres están en `VistaCompras` (lib/types.ts).
-  const vista = vistaValida(f.vista);
+  // LOS RECORTES, que no eligen QUÉ artículos sino CUÁLES DE ESOS se muestran.
+  // SE SUMAN: cada uno que esté marcado agrega una condición, y sin ninguno
+  // están todos. El porqué está en `RecorteCompras` (lib/types.ts).
+  const recortes = recortesValidos(f.recortes);
 
-  const todas = [...estructurales];
-  if (vista !== "todos") todas.push("sugerido > 0");
-  if (vista === "oferta") todas.push(REGLA_OFERTA);
+  const condicion: Record<RecorteCompras, string> = {
+    sugerido: "sugerido > 0",
+    oferta: REGLA_OFERTA,
+  };
 
   const armar = (cs: string[]) => (cs.length ? `where ${cs.join(" and ")}` : "");
 
   return {
-    sql: armar(todas),
+    sql: armar([...estructurales, ...recortes.map((r) => condicion[r])]),
     sqlEstructural: armar(estructurales),
-    vista,
+    recortes,
     params,
   };
 }
@@ -579,12 +595,12 @@ type Listado = {
 };
 
 /**
- * Cuántos artículos encontró el filtro, sin mirar la vista.
+ * Cuántos artículos encontró el filtro, sin los recortes.
  *
  * SE LLAMA SÓLO CON LA TABLA VACÍA, y ahí es lo único útil que se puede decir:
- * "en esta vista no hay nada, pero la marca tiene 23 artículos". Con eso la
- * pantalla ofrece el salto a "Todos" en vez de quedarse en blanco como si la
- * marca no existiera.
+ * "con estos recortes no queda nada, pero la marca tiene 23 artículos". Con eso
+ * la pantalla ofrece sacarlos, en vez de quedarse en blanco como si la marca no
+ * existiera.
  *
  * Es una segunda pasada por la consulta grande, que no es gratis. Se paga
  * únicamente en la pantalla vacía --donde no hay nada más que mostrar y este
@@ -606,7 +622,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
             tuc, full_ml, total, costo, valor, costo_lista,
             sell_in_pct,
             uds, ritmo_diario, dias_ritmo, ritmo_recortado, cobertura, sugerido,
-            es_nuevo, to_char(alta, 'YYYY-MM-DD') as alta,
+            es_nuevo, sugerido_minimo, to_char(alta, 'YYYY-MM-DD') as alta,
             sugerido_base, sugerido_tope, factor_oferta, habitual_sell_in,
             meses_con_oferta, sin_oferta_por_ahora, dejo_de_tener_sell_in,
             uds_rent, rentabilidad,
@@ -618,26 +634,26 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
      from calculada ${w.sql}
      -- Por lo que hay que comprar, no por lo que hay: arriba lo más urgente.
      --
-     -- EL SKU AL FINAL ES EL DESEMPATE, y hace falta desde que existe la vista
-     -- "Todos": ahí la mayoría de las filas tienen sugerido 0 y empatan entre
-     -- sí, y sin un criterio estable Postgres las puede devolver en otro orden
-     -- en cada consulta. Una tabla que se reordena sola al cambiar un filtro
-     -- que no la toca se lee como si hubiera cambiado de datos.
+     -- EL SKU AL FINAL ES EL DESEMPATE, y hace falta desde que se pueden ver
+     -- todos los artículos: ahí muchas filas empatan en el mismo sugerido, y
+     -- sin un criterio estable Postgres las puede devolver en otro orden en
+     -- cada consulta. Una tabla que se reordena sola al cambiar un filtro que
+     -- no la toca se lee como si hubieran cambiado los datos.
      --
-     -- SIN LIMIT, a propósito. Antes había un tope de 500 y en "Todos" cortaba
-     -- de verdad --GLAM tiene 981 artículos, COTY 824-- así que pedir "todos
-     -- los artículos de este proveedor" devolvía la mitad. Un recorte que nadie
-     -- pidió en una pantalla que sirve para no perderse ningún artículo es peor
-     -- que una tabla larga.
+     -- SIN LIMIT, a propósito. Antes había un tope de 500 y sin recortes
+     -- cortaba de verdad --GLAM tiene 981 artículos, COTY 824-- así que pedir
+     -- todos los de un proveedor devolvía la mitad. Un recorte que nadie pidió,
+     -- en la pantalla que sirve para no perderse ningún artículo, es peor que
+     -- una tabla larga.
      order by sugerido * costo desc, sugerido desc, sku`,
     w.params,
   );
 
-  // La tabla vacía es la única que necesita explicarse, y sólo si la vista pudo
-  // ser la culpable: en "Todos" no hay nada que recorte, así que cero filas es
-  // cero artículos y no hay nada más que decir. Ver `contarDelFiltro`.
+  // La tabla vacía es la única que necesita explicarse, y sólo si hay algún
+  // recorte que pueda ser el culpable: sin ninguno, cero filas es cero
+  // artículos y no hay nada más que decir. Ver `contarDelFiltro`.
   const articulosDelFiltro =
-    filas.length === 0 && w.vista !== "todos" ? await contarDelFiltro(w) : 0;
+    filas.length === 0 && w.recortes.length > 0 ? await contarDelFiltro(w) : 0;
 
   const mapeadas = filas.map((r) => ({
     sku: r.sku as string,
@@ -663,6 +679,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
     alta: (r.alta as string | null) ?? null,
     cobertura: r.cobertura == null ? null : num(r.cobertura),
     sugerido: num(r.sugerido),
+    sugeridoMinimo: r.sugerido_minimo === true,
     sugeridoBase: num(r.sugerido_base),
     sugeridoTope: num(r.sugerido_tope),
     factorOferta: num(r.factor_oferta),

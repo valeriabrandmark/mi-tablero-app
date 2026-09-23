@@ -16,7 +16,12 @@
  *     node --experimental-strip-types --import ./pruebas/registrar.mjs pruebas/sugerido.mts
  */
 
-import { porQueSugerido, VISTAS_COMPRAS, VISTA_POR_DEFECTO, vistaValida } from "@/lib/compras";
+import {
+  porQueSugerido,
+  RECORTES_COMPRAS,
+  RECORTES_POR_DEFECTO,
+  recortesValidos,
+} from "@/lib/compras";
 import type { FilaCompra } from "@/lib/types";
 
 const FALLOS: string[] = [];
@@ -57,6 +62,7 @@ function fila(cambios: Partial<FilaCompra>): FilaCompra {
     esNuevo: false,
     cobertura: 2,
     sugerido: 24,
+    sugeridoMinimo: false,
     sugeridoBase: 24,
     sugeridoTope: 55,
     factorOferta: 1,
@@ -159,27 +165,92 @@ revisar("sin sell in cargado, se dice que no hay con qué comparar",
 revisar("lo que ya sobra no se infla por una oferta",
   dice(fila({ cobertura: 200 }), "la oferta no infla la compra"));
 
-// --- Las tres vistas de la tabla -------------------------------------------
+// --- El minimo de un bulto cuando no hay historial de venta ----------------
 //
-// El valor llega de una query string que se puede escribir a mano, y una vista
-// inventada no puede terminar en un `where` que no filtra nada: seria mostrar
-// 8.265 articulos sin que nadie lo haya pedido.
+// Sin ventas en la ventana no hay ritmo, asi que la cuenta da 0 y el articulo
+// desaparecia de la tabla. Ahora se propone un bulto, y el tooltip tiene que
+// dejar claro que ese numero NO es una cuenta: es un punto de partida.
 
-revisar("las tres, y en orden de ancho a angosto",
-  VISTAS_COMPRAS.map((v) => v.valor).join(" ") === "todos sugerido oferta",
-  VISTAS_COMPRAS.map((v) => v.valor).join(" "));
+const sinHistorial = fila({
+  cobertura: null,
+  uds: 0,
+  ritmoDiario: 0,
+  sugerido: 12,
+  sugeridoMinimo: true,
+  unidadesPorBulto: 12,
+  total: 0,
+  esNuevo: false,
+});
 
-for (const v of VISTAS_COMPRAS) {
-  revisar(`"${v.valor}" se acepta tal cual`, vistaValida(v.valor) === v.valor);
-}
+revisar("dice que es el minimo y cuantas unidades son",
+  dice(sinHistorial, "MÍNIMO: 1 bulto = 12 u."));
+revisar("y que no es una necesidad medida",
+  dice(sinHistorial, "no una necesidad medida"));
+revisar("sigue diciendo que no hay ritmo",
+  dice(sinHistorial, "no hay ritmo con el que calcular nada"));
 
-revisar("una vista inventada cae en la de siempre",
-  vistaValida("todo") === VISTA_POR_DEFECTO);
-revisar("sin vista, la de siempre", vistaValida(undefined) === VISTA_POR_DEFECTO);
-revisar("null tampoco pasa", vistaValida(null) === VISTA_POR_DEFECTO);
-// Lo que mas duele si se cuela: cualquier cosa que no sea una de las tres
-// tiene que caer en "sugerido", nunca en "todos".
-revisar("y lo que caiga NO es 'todos'", VISTA_POR_DEFECTO !== "todos");
+// El articulo nuevo sin ventas lleva el mismo minimo pero otra explicacion:
+// uno esta muerto y el otro todavia no tuvo la oportunidad.
+const nuevoSinVentas = fila({
+  ...sinHistorial,
+  esNuevo: true,
+  alta: "2026-08-12",
+});
+revisar("el nuevo dice desde cuando existe",
+  dice(nuevoSinVentas, "alta el 2026-08-12"));
+revisar("y que nunca se compro, si no tiene stock",
+  dice(nuevoSinVentas, "nunca se compró"));
+revisar("y tambien propone el minimo",
+  dice(nuevoSinVentas, "MÍNIMO: 1 bulto"));
+
+// EL FRENO MANDA POR ENCIMA DEL MINIMO. Un articulo al que le sacaron la
+// oferta no se compra, tenga o no historial: proponerle un bulto seria
+// justamente pagar a precio de lista lo que el mes que viene tiene descuento.
+const sinVentasYFrenado = fila({
+  ...sinHistorial,
+  sugerido: 0,
+  sugeridoMinimo: false,
+  sinOfertaPorAhora: true,
+});
+revisar("frenado: no propone ningun minimo",
+  !dice(sinVentasYFrenado, "MÍNIMO"));
+revisar("frenado: dice por que",
+  dice(sinVentasYFrenado, "NO le dio sell in"));
+
+// --- Los recortes de la tabla ----------------------------------------------
+//
+// Llegan de una query string que se puede escribir a mano, asi que lo que no
+// existe no puede terminar en un `where`. Y el orden importa: dos URLs con los
+// mismos recortes en distinto orden tienen que dar la misma clave de cache.
+
+revisar("los dos que existen, en su orden",
+  RECORTES_COMPRAS.map((r) => r.valor).join(" ") === "sugerido oferta",
+  RECORTES_COMPRAS.map((r) => r.valor).join(" "));
+
+revisar("arranca recortando a lo que hay que comprar",
+  RECORTES_POR_DEFECTO.join() === "sugerido");
+
+revisar("los dos se aceptan",
+  recortesValidos(["sugerido", "oferta"]).join() === "sugerido,oferta");
+revisar("uno solo tambien",
+  recortesValidos(["oferta"]).join() === "oferta");
+
+// Sin nada marcado son TODOS los articulos: es el caso que hace falta para
+// cargar cantidades a mano en lo que el calculo no pidio.
+revisar("lista vacia es lista vacia", recortesValidos([]).length === 0);
+revisar("undefined tambien", recortesValidos(undefined).length === 0);
+revisar("y algo que no es lista", recortesValidos("sugerido").length === 0);
+
+revisar("lo inventado se descarta",
+  recortesValidos(["sugerido", "todos", "xx"]).join() === "sugerido");
+revisar("y si es todo inventado no queda nada",
+  recortesValidos(["todos"]).length === 0);
+
+// Repetido una sola vez: marcarlo dos veces agregaria la condicion dos veces.
+revisar("no repite", recortesValidos(["oferta", "oferta"]).join() === "oferta");
+// Siempre en el orden del catalogo, venga como venga.
+revisar("normaliza el orden",
+  recortesValidos(["oferta", "sugerido"]).join() === "sugerido,oferta");
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);
