@@ -217,21 +217,38 @@ revisar("frenado: no propone ningun minimo",
 revisar("frenado: dice por que",
   dice(sinVentasYFrenado, "NO le dio sell in"));
 
+// SIN VENTAS PERO CON STOCK: tampoco el minimo. Proponer un bulto de algo que
+// no se vende y que ademas ya esta en el deposito es plata quieta pidiendo mas
+// plata quieta. Son 875 de los 4.475 sin ventas.
+const sinVentasConStock = fila({
+  ...sinHistorial,
+  total: 40,
+  sugerido: 0,
+  sugeridoMinimo: false,
+});
+revisar("con stock: no propone el minimo",
+  !dice(sinVentasConStock, "MÍNIMO"));
+revisar("con stock: dice que ya hay mercaderia",
+  dice(sinVentasConStock, "ya hay 40 u. en el depósito"));
+revisar("con stock: deja la puerta abierta para cargarlo a mano",
+  dice(sinVentasConStock, "se carga a mano"));
+
 // --- Los recortes de la tabla ----------------------------------------------
 //
 // Llegan de una query string que se puede escribir a mano, asi que lo que no
 // existe no puede terminar en un `where`. Y el orden importa: dos URLs con los
 // mismos recortes en distinto orden tienen que dar la misma clave de cache.
 
-revisar("los dos que existen, en su orden",
-  RECORTES_COMPRAS.map((r) => r.valor).join(" ") === "sugerido oferta",
+revisar("los tres que existen, en su orden",
+  RECORTES_COMPRAS.map((r) => r.valor).join(" ") === "sugerido oferta sin_ventas",
   RECORTES_COMPRAS.map((r) => r.valor).join(" "));
 
 revisar("arranca recortando a lo que hay que comprar",
   RECORTES_POR_DEFECTO.join() === "sugerido");
 
-revisar("los dos se aceptan",
-  recortesValidos(["sugerido", "oferta"]).join() === "sugerido,oferta");
+revisar("los tres se aceptan",
+  recortesValidos(["sugerido", "oferta", "sin_ventas"]).join()
+    === "sugerido,oferta,sin_ventas");
 revisar("uno solo tambien",
   recortesValidos(["oferta"]).join() === "oferta");
 
@@ -250,7 +267,8 @@ revisar("y si es todo inventado no queda nada",
 revisar("no repite", recortesValidos(["oferta", "oferta"]).join() === "oferta");
 // Siempre en el orden del catalogo, venga como venga.
 revisar("normaliza el orden",
-  recortesValidos(["oferta", "sugerido"]).join() === "sugerido,oferta");
+  recortesValidos(["sin_ventas", "oferta", "sugerido"]).join()
+    === "sugerido,oferta,sin_ventas");
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);

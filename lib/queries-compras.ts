@@ -485,14 +485,22 @@ calculada as (
          -- cualquier compra --por debajo no se le pide a un proveedor-- así que
          -- sirve de punto de partida para ajustar a mano.
          --
+         -- SOLO SI NO HAY STOCK. Un artículo que no se vende Y que además ya
+         -- tiene mercadería en el depósito no necesita que le propongan
+         -- comprar más: es plata quieta pidiendo más plata quieta. Son 875 de
+         -- los 4.475 sin ventas, y sacarlos baja la propuesta de $ 318 a
+         -- $ 275 millones. Siguen estando en la tabla y se les puede cargar
+         -- una cantidad a mano; lo que no hay es una sugerencia.
+         --
          -- NO ES UNA NECESIDAD MEDIDA y la pantalla lo dice: viaja
          -- sugerido_minimo para que la celda y el tooltip no lo hagan pasar
          -- por una cuenta.
          case when f.sin_oferta_por_ahora then 0
-              when f.uds = 0 then f.u_bulto
+              when f.uds = 0 and f.total = 0 then f.u_bulto
+              when f.uds = 0 then 0
               else ceil(least(f.sugerido_base * f.factor_oferta, f.sugerido_tope))
          end as sugerido,
-         (not f.sin_oferta_por_ahora and f.uds = 0) as sugerido_minimo
+         (not f.sin_oferta_por_ahora and f.uds = 0 and f.total = 0) as sugerido_minimo
   from con_factor f
 )`;
 
@@ -562,6 +570,7 @@ function where(f: FiltrosCompras, mes: string): Where {
   const condicion: Record<RecorteCompras, string> = {
     sugerido: "sugerido > 0",
     oferta: REGLA_OFERTA,
+    sin_ventas: "uds = 0",
   };
 
   const armar = (cs: string[]) => (cs.length ? `where ${cs.join(" and ")}` : "");

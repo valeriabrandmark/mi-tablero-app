@@ -1503,8 +1503,14 @@ export type FiltrosCompras = {
  *                         acordó con el proveedor o porque es marca nueva.
  *   sugerido              sólo los que el cálculo pide reponer.
  *   oferta                sólo los que tienen sell in vigente este mes.
- *   sugerido + oferta     los dos a la vez: la compra de una campaña de
- *                         ofertas, sin mirar el resto del catálogo.
+ *   sin_ventas            sólo los que no vendieron nada en la ventana: los
+ *                         recién dados de alta y los que dejaron de moverse.
+ *                         Son los que el cálculo no puede juzgar, y sin este
+ *                         recorte habría que buscarlos entre miles de filas.
+ *
+ * Y las combinaciones: `sugerido` + `oferta` es la compra de una campaña de
+ * ofertas; `sugerido` + `sin_ventas` son los que sólo traen el mínimo de un
+ * bulto.
  *
  * ESTABAN COMO DOS BOTONES SUELTOS en dos lugares distintos de la pantalla
  * --"sólo los que hay que comprar" entre los filtros y "dejar sólo con oferta"
@@ -1513,7 +1519,7 @@ export type FiltrosCompras = {
  * tiempo. En una sola lista se lee de un vistazo, y se elige igual que la
  * marca o el proveedor.
  */
-export type RecorteCompras = "sugerido" | "oferta";
+export type RecorteCompras = "sugerido" | "oferta" | "sin_ventas";
 
 export type FilaCompra = {
   sku: string;

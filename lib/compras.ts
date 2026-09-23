@@ -148,6 +148,19 @@ export const RECORTES_COMPRAS = [
     ayuda:
       "Deja sólo los que tienen sell in del proveedor vigente en el mes elegido.",
   },
+  {
+    // EL RECORTE QUE HACE VISIBLE LO QUE EL CALCULO NO PUEDE JUZGAR.
+    //
+    // Sin ventas no hay ritmo, así que estos artículos nunca entran por
+    // "Hay que comprar": los que no tienen stock traen el mínimo de un bulto y
+    // los que sí tienen no traen nada. Sin una forma de pedirlos, la única
+    // manera de encontrarlos sería sacar todos los recortes y buscarlos entre
+    // miles de filas.
+    valor: "sin_ventas",
+    etiqueta: "Sin ventas",
+    ayuda:
+      "Deja sólo los artículos que no vendieron nada en la ventana del ritmo: los que recién se dieron de alta y los que dejaron de moverse. El cálculo no los puede juzgar, así que se deciden a mano.",
+  },
 ] as const satisfies readonly {
   valor: RecorteCompras;
   etiqueta: string;
@@ -749,13 +762,25 @@ export function porQueSugerido(
       ];
     }
 
+    if (f.sugeridoMinimo) {
+      return [
+        ...l,
+        "",
+        `Sin ritmo no hay nada que calcular, así que se propone el MÍNIMO:` +
+          ` 1 bulto = ${Math.round(f.unidadesPorBulto)} u.`,
+        "Es un punto de partida para ajustar a mano, no una necesidad medida:" +
+          " por debajo de un bulto no se le pide a un proveedor.",
+      ];
+    }
+
+    // NO SE VENDE Y ADEMAS YA HAY STOCK. Acá no se propone ni el mínimo:
+    // sería plata quieta pidiendo más plata quieta.
     return [
       ...l,
       "",
-      `Sin ritmo no hay nada que calcular, así que se propone el MÍNIMO:` +
-        ` 1 bulto = ${Math.round(f.unidadesPorBulto)} u.`,
-      "Es un punto de partida para ajustar a mano, no una necesidad medida:" +
-        " por debajo de un bulto no se le pide a un proveedor.",
+      `No se propone nada: no se vende y ya hay ${Math.round(f.total)} u.` +
+        " en el depósito.",
+      "Si hace falta pedirlo igual, la cantidad se carga a mano.",
     ];
   }
 
