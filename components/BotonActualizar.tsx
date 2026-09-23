@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  faltanMinutos,
   haceCuanto,
   RUTA_ACTUALIZAR,
   type EstadoActualizacion,
@@ -47,6 +48,20 @@ import {
 const PASO_SEGUNDOS = 10;
 
 /**
+ * Cada cuánto se refresca la cuenta regresiva del "en N min".
+ *
+ * MEDIO MINUTO Y NO UN MINUTO porque el número que se muestra está redondeado
+ * hacia abajo: con un refresco de 60 s, un cartel que dice "3 min" podría
+ * quedarse ahí casi dos minutos y leerse como congelado.
+ *
+ * Y se vuelve a PREGUNTARLE AL SERVIDOR en vez de descontar de a uno en el
+ * navegador: mientras se espera puede correr el pipeline solo --o puede pedirlo
+ * otra persona-- y ahí ya no hay nada que esperar. Descontando a ciegas, el
+ * cartel seguiría contando hasta cero sobre datos que ya llegaron.
+ */
+const REFRESCO_ESPERA_SEGUNDOS = 30;
+
+/**
  * Cuánto se espera antes de soltar.
  *
  * Una corrida normal son ~2 minutos y la más pesada del día ~21. Los 25 no son
@@ -68,9 +83,24 @@ type Fase =
 
 export default function BotonActualizar({
   onDatosNuevos,
+  conSellIn = false,
 }: {
   /** Se llama cuando llegaron datos nuevos, para releer el tablero. */
   onDatosNuevos: () => void;
+  /**
+   * SOLO PARA COMPRAS. Enciende dos avisos que en los demás tableros serían
+   * ruido:
+   *
+   *   1. Que la planilla del sell in llegó después de la última corrida, o sea
+   *      que los descuentos de la pantalla todavía son los de antes.
+   *   2. La cuenta regresiva de cuándo se puede volver a pedir una corrida,
+   *      bajando sola.
+   *
+   * Los dos son del flujo de Compras: ahí se edita la planilla y se quiere ver
+   * el descuento nuevo YA. En Meli o en Objetivos nadie edita nada antes de
+   * apretar, así que "ya estaban al día" alcanza y sobra.
+   */
+  conSellIn?: boolean;
 }) {
   const [estado, setEstado] = useState<EstadoActualizacion | null>(null);
   const [fase, setFase] = useState<Fase>({ tipo: "quieto" });
@@ -128,6 +158,24 @@ export default function BotonActualizar({
     return () => clearInterval(id);
   }, [fase]);
 
+  // LA CUENTA REGRESIVA. Mientras la fase sea "al_dia" y todavía falten
+  // minutos, se vuelve a preguntar; cuando llega a cero la fase vuelve a
+  // "quieto" y el botón queda como si nada hubiera pasado, que es la verdad:
+  // ya se puede pedir de nuevo.
+  useEffect(() => {
+    if (fase.tipo !== "al_dia" || !conSellIn) return;
+
+    const id = setInterval(async () => {
+      const r = await fetch(RUTA_ACTUALIZAR, { cache: "no-store" }).catch(() => null);
+      const d: EstadoActualizacion | null = r?.ok ? await r.json().catch(() => null) : null;
+      if (!d) return;
+      setEstado(d);
+      if (faltanMinutos(d) === 0) setFase({ tipo: "quieto" });
+    }, REFRESCO_ESPERA_SEGUNDOS * 1000);
+
+    return () => clearInterval(id);
+  }, [fase, conSellIn]);
+
   const pedir = useCallback(async () => {
     setFase({ tipo: "pidiendo" });
 
@@ -147,6 +195,7 @@ export default function BotonActualizar({
       version: cuerpo.version,
       minutos: cuerpo.minutos,
       esperaMinutos: cuerpo.esperaMinutos,
+      sellInPendiente: cuerpo.sellInPendiente === true,
     });
 
     if (resultado === "al_dia") {
@@ -179,7 +228,7 @@ export default function BotonActualizar({
       >
         {trabajando ? "Actualizando…" : "Actualizar ahora"}
       </button>
-      <Leyenda fase={fase} estado={estado} />
+      <Leyenda fase={fase} estado={estado} conSellIn={conSellIn} />
     </div>
   );
 }
@@ -187,9 +236,11 @@ export default function BotonActualizar({
 function Leyenda({
   fase,
   estado,
+  conSellIn,
 }: {
   fase: Fase;
   estado: EstadoActualizacion | null;
+  conSellIn: boolean;
 }) {
   // El "hace N min" se recalcula solo: sin esto, dejar la pestaña abierta
   // congela el número en el que tenía al abrirla, que es justo el error que
@@ -217,9 +268,23 @@ function Leyenda({
     return <p className="text-c1 text-[11px]">Listo: datos nuevos.</p>;
   }
   if (fase.tipo === "al_dia") {
+    const faltan = faltanMinutos(estado);
+    // El caso que motivó todo esto: la planilla se subió DESPUES de la última
+    // corrida, así que "ya estaban al día" es verdad y al mismo tiempo no
+    // contesta lo que la persona quiere saber. Se dice qué falta y cuándo.
+    if (conSellIn && estado?.sellInPendiente && faltan > 0) {
+      return (
+        <p className="max-w-[15rem] text-right text-[11px] text-amber-400">
+          Los datos son de {haceCuanto(fase.minutos)}, pero tu planilla llegó
+          después: estos descuentos todavía no la incluyen. Probá de nuevo en{" "}
+          {faltan} min.
+        </p>
+      );
+    }
     return (
-      <p className="text-muted text-[11px]">
+      <p className="text-muted max-w-[15rem] text-right text-[11px]">
         Ya estaban al día ({haceCuanto(fase.minutos)}).
+        {conSellIn && faltan > 0 && ` Se puede pedir otra en ${faltan} min.`}
       </p>
     );
   }
@@ -233,6 +298,16 @@ function Leyenda({
   }
 
   if (!estado) return null;
+  // Antes de que nadie apriete nada: si la planilla ya llegó y el pipeline
+  // todavía no la vio, decirlo acá ahorra el viaje de apretar para enterarse.
+  if (conSellIn && estado.sellInPendiente) {
+    return (
+      <p className="max-w-[15rem] text-right text-[11px] text-amber-400">
+        Tu planilla del sell in llegó después de la última corrida
+        ({haceCuanto(estado.minutos)}): apretá para traer los descuentos nuevos.
+      </p>
+    );
+  }
   return (
     <p className="text-muted text-[11px]">Datos actualizados {haceCuanto(estado.minutos)}</p>
   );

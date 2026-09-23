@@ -15,7 +15,12 @@
  *     node --experimental-strip-types --import ./pruebas/registrar.mjs pruebas/actualizar.mts
  */
 
-import { haceCuanto, interpretarDespertador } from "@/lib/actualizar";
+import {
+  faltanMinutos,
+  haceCuanto,
+  interpretarDespertador,
+  type EstadoActualizacion,
+} from "@/lib/actualizar";
 
 const FALLOS: string[] = [];
 
@@ -69,6 +74,35 @@ revisar("una hora justa", haceCuanto(60), "hace 1 h 0 min");
 revisar("varias horas", haceCuanto(200), "hace 3 h 20 min");
 revisar("un día", haceCuanto(60 * 25), "hace 1 día");
 revisar("varios días", haceCuanto(60 * 24 * 3), "hace 3 días");
+
+// --- La cuenta regresiva de "cuándo puedo volver a pedir" -------------------
+//
+// El caso que la hizo falta: se edita la planilla del sell in, se sube con el
+// menú y se aprieta "Actualizar ahora". Si el pipeline corrió hace 4 minutos la
+// función de la base no dispara nada y contesta "ok:", que es verdad y a la vez
+// la respuesta equivocada --los descuentos nuevos no están--. Lo único útil que
+// se puede decir ahí es EN CUANTO se va a poder, y para eso tiene que bajar
+// solo.
+
+const est = (minutos: number | null): EstadoActualizacion => ({
+  version: "20260923073208",
+  minutos,
+  esperaMinutos: 15,
+  sellInPendiente: false,
+});
+
+revisar("recién corrió: falta toda la espera", faltanMinutos(est(0)), 15);
+revisar("corrió hace 4: faltan 11", faltanMinutos(est(4)), 11);
+revisar("corrió hace 14: falta 1", faltanMinutos(est(14)), 1);
+revisar("justo en el borde: ya se puede", faltanMinutos(est(15)), 0);
+// Nunca negativo: con el pipeline parado hace horas, "faltan -180 min" sería
+// un cartel roto en la pantalla.
+revisar("hace mucho que no corre", faltanMinutos(est(200)), 0);
+
+// Ante la duda se deja pedir: hacer esperar por algo que no se sabe es peor que
+// una corrida de más, que además la función de la base vuelve a filtrar.
+revisar("nunca corrió", faltanMinutos(est(null)), 0);
+revisar("todavía no llegó el estado", faltanMinutos(null), 0);
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);

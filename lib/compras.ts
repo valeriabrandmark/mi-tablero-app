@@ -94,17 +94,37 @@ export const RENTABILIDAD_COMPRA_DISCRETA = 15;
  * el único caso que sí vale la pena: margen flojo pero un descuento que antes no
  * teníamos.
  *
- * Se mide contra la MEDIANA de los últimos meses y no contra la diferencia en
- * puntos, y los datos dicen por qué. Los cuatro Almond Breeze tienen sell in del
- * 50 % con mediana 42,5 %: son 7,5 puntos de ventaja sobre una oferta que el
- * proveedor viene dando SIEMPRE, y el artículo igual pierde plata (-28 %, -9,6 %).
- * El Scotch-Brite tiene 40 % con mediana 0: ese descuento no existía.
+ * Se mide contra EL DESCUENTO HABITUAL del artículo y no contra la diferencia
+ * en puntos, y los datos dicen por qué. Los cuatro Almond Breeze tienen sell in
+ * del 50 % con un habitual de 42,5 %: son 7,5 puntos de ventaja sobre una oferta
+ * que el proveedor viene dando SIEMPRE, y el artículo igual pierde plata
+ * (-28 %, -9,6 %). El Scotch-Brite tiene 40 % y nunca tuvo oferta antes: ese
+ * descuento no existía.
  *
- * En puntos los dos casos se parecen. Contra la mediana no: 50 sobre 42,5 no
- * llega al doble, 40 sobre 0 sí. Mediana 0 quiere decir "nunca hubo oferta", así
- * que cualquier descuento de hoy es nuevo.
+ * En puntos los dos casos se parecen. Contra lo habitual no: 50 sobre 42,5 no
+ * llega al doble, 40 sobre nada sí. Un artículo sin oferta previa cuenta como
+ * habitual 0, así que cualquier descuento de hoy es nuevo.
  */
-export const VECES_SOBRE_LA_MEDIANA_PARA_INFLAR = 2;
+export const VECES_SOBRE_LO_HABITUAL_PARA_INFLAR = 2;
+
+/**
+ * CUANTOS MESES SEGUIDOS SIN OFERTA HACEN FALTA PARA VOLVER A SUGERIR.
+ *
+ * Un artículo que el proveedor viene bonificando y este mes no, NO se compra:
+ * pedirlo ahora es pagar a precio de lista algo que el mes que viene vuelve a
+ * tener descuento. El cálculo deja el sugerido en 0 --ni siquiera el mínimo--
+ * y la pantalla dice por qué.
+ *
+ * Pero eso no puede ser para siempre: si la oferta no vuelve, el artículo se
+ * quedaría sin reponer nunca. Pasados estos meses seguidos sin nada se asume
+ * que el descuento se terminó y se vuelve a sugerir lo que haga falta, con el
+ * aviso al lado.
+ *
+ * 3 es la ventana que pidió el negocio, contando el mes elegido: con el mes
+ * pasado en 0 y el anterior en 0, el de ahora en 0 ya es una tendencia y no un
+ * mes salteado.
+ */
+export const MESES_SIN_SELL_IN_PARA_SUGERIR = 3;
 
 /**
  * PARA CUÁNTOS DÍAS SE ESTÁ COMPRANDO.
@@ -633,6 +653,21 @@ export function porQueSugerido(
       ` de reposición faltan ${Math.ceil(f.sugeridoBase)} u.`,
   ];
 
+  // EL FRENO VA PRIMERO, antes que cualquier consideración de oferta o de
+  // techo: si no se va a comprar, lo único que importa es por qué.
+  if (f.sinOfertaPorAhora) {
+    return [
+      ...l,
+      "",
+      "Este mes el proveedor NO le dio sell in, y el mes pasado sí.",
+      "Por eso no se sugiere nada, ni el mínimo: comprarlo ahora sería pagar" +
+        " a precio de lista algo que viene con descuento. Lo que corresponde" +
+        " es esperar a que la oferta vuelva.",
+      `Si hiciera falta igual, se puede cargar la cantidad a mano (el cálculo` +
+        ` daría ${Math.ceil(f.sugeridoBase)} u.).`,
+    ];
+  }
+
   if (f.cobertura > COBERTURA_SIN_INFLAR_DIAS) {
     l.push(
       "",
@@ -643,9 +678,9 @@ export function porQueSugerido(
   }
 
   const vigente = f.sellInPct;
-  const mediana = f.medianaSellIn;
+  const habitual = f.habitualSellIn;
 
-  if (vigente == null || mediana == null) {
+  if (vigente == null || habitual == null) {
     l.push(
       "",
       "Sin sell in del proveedor con qué comparar: se sugiere lo que hace falta" +
@@ -654,34 +689,35 @@ export function porQueSugerido(
   } else if (
     f.factorOferta <= 1 &&
     (f.rentabilidad ?? 0) < RENTABILIDAD_COMPRA_DISCRETA / 100 &&
-    vigente > mediana
+    vigente > habitual
   ) {
     // EL CASO NUEVO, Y EL QUE MÁS FALTA HACE EXPLICAR. Sin esto el tooltip
     // diría "el descuento no supera al habitual" sobre un artículo que sí lo
     // supera -- y quien lo lea va a pensar que el número está mal.
     l.push(
       "",
-      `El descuento de este mes es ${vigente.toFixed(1)} % contra ${mediana.toFixed(1)} %` +
+      `El descuento de este mes es ${vigente.toFixed(1)} % contra ${habitual.toFixed(1)} %` +
         ` habitual, pero el artículo rinde ${((f.rentabilidad ?? 0) * 100).toFixed(1)} %,` +
         ` por debajo del ${RENTABILIDAD_COMPRA_DISCRETA} %.`,
       "COMPRA DISCRETA: sólo lo necesario. Comprar de más un artículo que no" +
         " rinde es plata quieta, por buena que esté la oferta.",
       `Se adelantaría compra si el descuento fuera al menos` +
-        ` ${VECES_SOBRE_LA_MEDIANA_PARA_INFLAR} veces el habitual` +
-        ` (${(mediana * VECES_SOBRE_LA_MEDIANA_PARA_INFLAR).toFixed(1)} %),` +
+        ` ${VECES_SOBRE_LO_HABITUAL_PARA_INFLAR} veces el habitual` +
+        ` (${(habitual * VECES_SOBRE_LO_HABITUAL_PARA_INFLAR).toFixed(1)} %),` +
         " o sea uno que antes no teníamos.",
     );
   } else if (f.factorOferta <= 1) {
     l.push(
       "",
       `El descuento de este mes (${vigente.toFixed(1)} %) no supera al habitual` +
-        ` (${mediana.toFixed(1)} %), así que no hay motivo para adelantar compra.`,
+        ` (${habitual.toFixed(1)} %), así que no hay motivo para adelantar compra.`,
     );
   } else {
     l.push(
       "",
-      `El descuento de este mes es ${vigente.toFixed(1)} % contra ${mediana.toFixed(1)} %` +
-        ` habitual: ${(vigente - mediana).toFixed(1)} puntos de ventaja.`,
+      `El descuento de este mes es ${vigente.toFixed(1)} % contra ${habitual.toFixed(1)} %` +
+        ` habitual (el promedio de los meses en que hubo oferta):` +
+        ` ${(vigente - habitual).toFixed(1)} puntos de ventaja.`,
       `Por eso se multiplica por ${f.factorOferta.toFixed(2)}` +
         ` (${PUNTOS_OFERTA_PARA_DUPLICAR} puntos = el doble, tope ${FACTOR_OFERTA_MAX}x).`,
     );
@@ -694,6 +730,20 @@ export function porQueSugerido(
     l.push(
       `Daría ${sinTope} u., pero el techo de ${COBERTURA_MAXIMA_COMPRA_DIAS} días` +
         ` de cobertura lo baja a ${f.sugerido}.`,
+    );
+  }
+
+  // El aviso del artículo al que se le terminó la oferta. Va pegado al
+  // sugerido y no en una columna aparte porque modifica cómo se lee ESE
+  // número: no es una compra en oferta, es una compra a precio de lista de
+  // algo que antes tenía descuento.
+  if (f.dejoDeTenerSellIn) {
+    l.push(
+      "",
+      `Ojo: hace ${MESES_SIN_SELL_IN_PARA_SUGERIR} meses que no tiene sell in` +
+        ` y antes sí tenía (${f.mesesConOferta} de los últimos` +
+        ` ${MESES_HISTORIA_SELL_IN}). Se sugiere igual porque la oferta no` +
+        " parece que vaya a volver, pero se compra a precio de lista.",
     );
   }
 

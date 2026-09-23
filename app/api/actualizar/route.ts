@@ -58,15 +58,30 @@ async function autorizar() {
  * la pantalla todavía sirviendo la respuesta cacheada de antes.
  */
 async function leerEstado(): Promise<EstadoActualizacion> {
-  const fila = await queryOne<{ version: string | null; minutos: number | null }>(
-    `select to_char(actualizado, 'YYYYMMDDHH24MISS') as version,
-            floor(extract(epoch from (now() - actualizado)) / 60)::int as minutos
-       from ops.estado where clave = 'pasos'`,
+  const fila = await queryOne<{
+    version: string | null;
+    minutos: number | null;
+    sell_in_pendiente: boolean | null;
+  }>(
+    // La foto del sell in se compara contra `actualizado` y no contra el reloj:
+    // lo que hay que saber no es si la planilla es reciente sino si el pipeline
+    // YA LA VIO. Una planilla de hace tres horas está bien si la corrida de
+    // hace dos la procesó; una de hace dos minutos no, si la última corrida fue
+    // hace cinco.
+    //
+    // `bronze.sell_in_crudo` tiene cinco filas --las últimas cinco fotos, el
+    // resto lo poda el pipeline-- así que el max sale en nada.
+    `select to_char(e.actualizado, 'YYYYMMDDHH24MISS') as version,
+            floor(extract(epoch from (now() - e.actualizado)) / 60)::int as minutos,
+            (select max(recibido) > e.actualizado from bronze.sell_in_crudo)
+              as sell_in_pendiente
+       from ops.estado e where e.clave = 'pasos'`,
   );
   return {
     version: fila?.version ?? null,
     minutos: fila?.minutos ?? null,
     esperaMinutos: ESPERA_MINUTOS,
+    sellInPendiente: fila?.sell_in_pendiente === true,
   };
 }
 

@@ -102,4 +102,31 @@ export type EstadoActualizacion = {
   minutos: number | null;
   /** Después de cuántos minutos el botón vuelve a pedir una corrida. */
   esperaMinutos: number;
+  /**
+   * LA PLANILLA DEL SELL IN LLEGO DESPUES DE LA ULTIMA CORRIDA, o sea que los
+   * descuentos que se ven en Compras todavía no la incluyen.
+   *
+   * Existe porque el camino del sell in tiene una escala invisible. El botón de
+   * la planilla sube la foto cruda a la base EN EL ACTO, pero el panel lee la
+   * tabla ya procesada, y quien la procesa es el pipeline. Entre las dos cosas
+   * hay una corrida de por medio.
+   *
+   * Sin este dato, apretar "Actualizar ahora" a los dos minutos de subir la
+   * planilla contesta "ya estaban al día" --es verdad, el pipeline corrió hace
+   * poco-- y esa buena noticia es exactamente la equivocada: los descuentos
+   * nuevos NO están. Con esto la pantalla puede decir la diferencia.
+   */
+  sellInPendiente: boolean;
 };
+
+/**
+ * Cuántos minutos faltan para que el botón pueda volver a pedir una corrida.
+ *
+ * 0 es "ahora mismo". Sin datos --o sin ninguna corrida todavía-- también es 0:
+ * ante la duda se deja pedir, que es barato, en vez de hacer esperar por algo
+ * que no se sabe.
+ */
+export function faltanMinutos(estado: EstadoActualizacion | null): number {
+  if (!estado || estado.minutos === null) return 0;
+  return Math.max(0, estado.esperaMinutos - estado.minutos);
+}

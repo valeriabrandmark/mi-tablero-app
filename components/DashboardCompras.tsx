@@ -501,6 +501,22 @@ export default function DashboardComprasPage({
   const columnas: Columna<FilaCompra>[] = [
     { titulo: "SKU", celda: (f) => f.sku, orden: (f) => f.sku },
     {
+      // EL CODIGO CON EL QUE EL PROVEEDOR LO VENDE, no el nuestro. Ya viajaba
+      // en el Excel que se le manda --él no conoce nuestro SKU-- pero no se
+      // veía en pantalla, así que para cotejar una lista de precios contra
+      // esta tabla había que abrir el Excel o buscar el artículo en Sigma.
+      titulo: "Cód. proveedor",
+      ayuda:
+        "El código con el que el proveedor identifica el artículo (codigoCompra en Sigma). Es el que va en el Excel que se le manda; sirve para cotejar contra su lista de precios. Vacío es que no está cargado en Sigma.",
+      celda: (f) =>
+        f.codigoCompra ? (
+          <span className="tabular-nums">{f.codigoCompra}</span>
+        ) : (
+          <span className="text-muted">—</span>
+        ),
+      orden: (f) => f.codigoCompra,
+    },
+    {
       titulo: "Artículo",
       celda: (f) => (
         <span
@@ -568,6 +584,19 @@ export default function DashboardComprasPage({
           f,
           data?.cobertura ?? coberturaElegida,
         ).join("\n");
+        // EL FRENO SE VE, no sólo se lee en el tooltip. Un "—" a secas en un
+        // artículo que se venía comprando se lee como "no hace falta", y acá
+        // la verdad es la contraria: hace falta, pero no a este precio.
+        if (f.sinOfertaPorAhora) {
+          return (
+            <span
+              title={texto}
+              className="cursor-help whitespace-nowrap text-amber-400 decoration-dotted underline underline-offset-2"
+            >
+              sin oferta
+            </span>
+          );
+        }
         if (f.sugerido <= 0) {
           return (
             <span className="text-muted" title={texto}>
@@ -589,6 +618,16 @@ export default function DashboardComprasPage({
           >
             {fmtNumero(f.sugerido)}
             {f.factorOferta > 1 ? ` ×${f.factorOferta.toFixed(1)}` : ""}
+            {/* Se sugiere, pero a precio de lista: el proveedor le sacó la
+                oferta hace varios meses y no parece que vuelva. */}
+            {f.dejoDeTenerSellIn && (
+              <span
+                className="ml-1 text-amber-400"
+                title="Hace varios meses que no tiene sell in y antes sí tenía: esta compra va a precio de lista."
+              >
+                !
+              </span>
+            )}
           </span>
         );
       },
@@ -983,7 +1022,7 @@ export default function DashboardComprasPage({
           >
             {cargando ? "Recargando…" : "Recargar"}
           </button>
-          <BotonActualizar onDatosNuevos={recargar} />
+          <BotonActualizar onDatosNuevos={recargar} conSellIn />
         </div>
       </div>
 

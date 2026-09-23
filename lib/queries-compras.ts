@@ -6,7 +6,8 @@ import {
   COBERTURA_MAXIMA_COMPRA_DIAS,
   COBERTURA_SIN_INFLAR_DIAS,
   RENTABILIDAD_COMPRA_DISCRETA,
-  VECES_SOBRE_LA_MEDIANA_PARA_INFLAR,
+  MESES_SIN_SELL_IN_PARA_SUGERIR,
+  VECES_SOBRE_LO_HABITUAL_PARA_INFLAR,
   FACTOR_OFERTA_MAX,
   MESES_HISTORIA_SELL_IN,
   MESES_RENTABILIDAD,
@@ -94,6 +95,23 @@ oferta as (
   from (${COSTOS_VIGENTES_POR_MES}) cv
   where mes_comercial = $3::text
 ),
+-- QUE PROVEEDORES YA MANDARON SU SELL IN DE ESTE MES.
+--
+-- Es el seguro de la regla de más abajo. Sin esto, el día 1 de cada mes
+-- --antes de que entre ninguna planilla-- TODOS los artículos con historia
+-- quedarían con sugerido 0, y el panel aparecería vacío justo cuando hay que
+-- armar la compra del mes. Con esto, "no dio oferta" sólo se puede afirmar de
+-- un proveedor que efectivamente mandó su lista: del que no mandó nada no
+-- sabemos, y no saber no es lo mismo que un no.
+proveedores_con_sell_in as (
+  select distinct a."proveedorNombre" as proveedor
+  from bronze.sell_in si
+  join bronze.sigma_articulos a on trim(a.id) = si.sku
+  where si.mes_comercial = $3::text
+    and si.evento = ''
+    and si.descuento_pct > 0
+    and a."proveedorNombre" is not null
+),
 compras as (
   select it->>'articuloId' as sku,
          max(c."fechaFactura") as ultima_compra,
@@ -146,7 +164,11 @@ proveedores_mes_pasado as (
 -- mes. La historia es contra qué se compara el vigente, no el vigente otra vez.
 meses_hist as (
   select to_char(to_date($3::text || '-01', 'YYYY-MM-DD') - (n || ' month')::interval,
-                 'YYYY-MM') as mes
+                 'YYYY-MM')          as mes,
+         -- "Reciente" son los meses anteriores que, junto con el elegido,
+         -- forman la ventana de ${MESES_SIN_SELL_IN_PARA_SUGERIR} meses de la
+         -- regla de abajo. Con la ventana en 3, son los dos anteriores.
+         n < ${MESES_SIN_SELL_IN_PARA_SUGERIR} as reciente
   from generate_series(1, ${MESES_HISTORIA_SELL_IN}) as n
 ),
 -- Van los dos: el sell in del proveedor y el calculado con nuestras compras. La
@@ -157,14 +179,33 @@ meses_hist as (
 -- además duplicaba filas --en 2026-07 hay 302 SKU con las dos-- y eso inflaba
 -- los totales de la tabla, no sólo esta columna.
 --
--- La MEDIANA sale de acá y no de un promedio: con seis valores donde varios son
--- 0, un solo mes de oferta grande corre el promedio y haría ver como "oferta
--- excepcional" algo que pasó el mes pasado. La mediana aguanta ese caso.
+-- EL "HABITUAL" ES EL PROMEDIO DE LOS MESES EN QUE HUBO OFERTA, y los meses en
+-- cero NO entran en esa cuenta. La diferencia decide compras:
+--
+--   historia 10 · 10 · 0 · 10 · 0 · 0
+--   con los ceros adentro (la mediana que había acá antes) da 5 %, y entonces
+--   un 10 % de este mes aparecía como "5 puntos de ventaja" y multiplicaba el
+--   sugerido por 1,17. Pero 10 % es exactamente lo que ese proveedor da CADA
+--   VEZ QUE DA ALGO: no hay ninguna ventaja que aprovechar.
+--
+-- Con el promedio de los meses con oferta da 10 %, la ventaja da 0 y el
+-- sugerido queda en lo que hace falta. Un mes sin oferta no es "una oferta del
+-- 0 %" que baje el promedio: es un mes en el que no hubo nada que comparar.
+--
+-- Queda NULL para los artículos que nunca tuvieron oferta en la ventana, y más
+-- abajo eso se lee como 0: ahí cualquier descuento de hoy es nuevo.
 hist_sell_in as (
   select s.sku,
          jsonb_agg(jsonb_build_object('mes', m.mes, 'pct', coalesce(si.descuento_pct, 0))
                    order by m.mes desc)                                        as historia,
-         percentile_cont(0.5) within group (order by coalesce(si.descuento_pct, 0)) as mediana
+         avg(si.descuento_pct) filter (where coalesce(si.descuento_pct, 0) > 0) as habitual,
+         -- En cuántos de los ${MESES_HISTORIA_SELL_IN} meses anteriores hubo
+         -- oferta. 0 es "este proveedor nunca le dio descuento a este
+         -- artículo", que es distinto de "se lo sacó".
+         count(*) filter (where coalesce(si.descuento_pct, 0) > 0)             as meses_con_oferta,
+         -- Si tuvo oferta en alguno de los meses recientes. Es lo que separa
+         -- "justo este mes no la dio" de "hace rato que no la da".
+         coalesce(bool_or(m.reciente and coalesce(si.descuento_pct, 0) > 0), false) as oferta_reciente
   from (select distinct sku from bronze.sell_in where evento = '') s
   cross join meses_hist m
   left join bronze.sell_in si
@@ -266,7 +307,10 @@ base as (
          coalesce(co.unidades_mes_pasado, 0)            as unidades_mes_pasado,
          (pmp.proveedor is not null)                    as proveedor_compro,
          hs.historia                                    as hist_sell_in,
-         hs.mediana                                     as mediana_sell_in,
+         hs.habitual                                    as habitual_sell_in,
+         coalesce(hs.meses_con_oferta, 0)               as meses_con_oferta,
+         coalesce(hs.oferta_reciente, false)            as oferta_reciente,
+         (pcsi.proveedor is not null)                   as proveedor_mando_sell_in,
          hc.historia                                    as hist_calculado,
          coalesce(v.uds, 0)::numeric / $1::int          as ritmo_diario,
          case when coalesce(v.uds, 0) = 0 then null
@@ -281,6 +325,7 @@ base as (
   left join ventas v on v.sku = s.sku
   left join compras co on co.sku = s.sku
   left join proveedores_mes_pasado pmp on pmp.proveedor = a."proveedorNombre"
+  left join proveedores_con_sell_in pcsi on pcsi.proveedor = a."proveedorNombre"
   left join hist_sell_in hs on hs.sku = s.sku
   left join hist_calculado hc on hc.sku = s.sku
   where coalesce(a."proveedorNombre", '') <> all($2::text[])
@@ -307,7 +352,24 @@ con_base as (
          -- Cuánto está EL DESCUENTO DE ESTE MES por encima de lo habitual, en
          -- puntos. Sin sell in vigente cargado no hay ventaja que medir: queda
          -- en 0 y el factor da 1, o sea el sugerido de siempre.
-         greatest(0, coalesce(b.sell_in_pct, 0) - coalesce(b.mediana_sell_in, 0))                   as ventaja_pp
+         greatest(0, coalesce(b.sell_in_pct, 0) - coalesce(b.habitual_sell_in, 0))                   as ventaja_pp,
+         -- SE LE SACO LA OFERTA ESTE MES, Y HASTA EL MES PASADO LA TENIA.
+         --
+         -- Comprar ahora es pagarlo a precio de lista algo que el proveedor
+         -- viene bonificando: lo que corresponde es esperar a que vuelva la
+         -- oferta, no adelantar la compra. Por eso NO se sugiere nada, ni el
+         -- mínimo.
+         (b.proveedor_mando_sell_in
+          and coalesce(b.sell_in_pct, 0) = 0
+          and b.oferta_reciente)                                                             as sin_oferta_por_ahora,
+         -- DEJO DE TENER OFERTA: ${MESES_SIN_SELL_IN_PARA_SUGERIR} meses
+         -- seguidos sin nada, incluido el elegido, pero antes sí tenía. Acá no
+         -- hay oferta que esperar --se terminó-- así que se sugiere lo que
+         -- haga falta y la pantalla lo avisa.
+         (b.proveedor_mando_sell_in
+          and coalesce(b.sell_in_pct, 0) = 0
+          and not b.oferta_reciente
+          and b.meses_con_oferta > 0)                                                        as dejo_de_tener_sell_in
   from base b
 ),
 con_factor as (
@@ -338,8 +400,8 @@ con_factor as (
            -- descuento de hoy es nuevo y pasa.
            when coalesce(c.rentabilidad, 0) < ${RENTABILIDAD_COMPRA_DISCRETA} / 100.0
                 and not (coalesce(c.sell_in_pct, 0)
-                         >= greatest(coalesce(c.mediana_sell_in, 0), 0.0001)
-                            * ${VECES_SOBRE_LA_MEDIANA_PARA_INFLAR})
+                         >= greatest(coalesce(c.habitual_sell_in, 0), 0.0001)
+                            * ${VECES_SOBRE_LO_HABITUAL_PARA_INFLAR})
              then 1::numeric
            else least(
              ${FACTOR_OFERTA_MAX}::numeric,
@@ -353,7 +415,15 @@ calculada as (
          -- El sugerido final: la necesidad, movida por la oferta, contra el
          -- techo. El least va al final y no antes para que el tope sea siempre
          -- lo último que manda.
-         ceil(least(f.sugerido_base * f.factor_oferta, f.sugerido_tope)) as sugerido
+         --
+         -- Y ARRIBA DE TODO, EL FRENO: a un artículo al que este mes le
+         -- sacaron la oferta que venía teniendo no se le sugiere nada. La
+         -- cuenta de al lado se calcula igual --sugerido_base y factor_oferta
+         -- siguen ahí-- para que el tooltip pueda decir cuánto habría dado y
+         -- por qué no se pide. (Sin backticks: template literal.)
+         case when f.sin_oferta_por_ahora then 0
+              else ceil(least(f.sugerido_base * f.factor_oferta, f.sugerido_tope))
+         end as sugerido
   from con_factor f
 )`;
 
@@ -517,7 +587,8 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
             tuc, full_ml, total, costo, valor, costo_lista,
             oferta_calculada_pct, sell_in_pct,
             uds, ritmo_diario, cobertura, sugerido,
-            sugerido_base, sugerido_tope, factor_oferta, mediana_sell_in,
+            sugerido_base, sugerido_tope, factor_oferta, habitual_sell_in,
+            meses_con_oferta, sin_oferta_por_ahora, dejo_de_tener_sell_in,
             uds_rent, rentabilidad,
             uds_mes_pasado, rent_mes_pasado,
             comprado_mes_pasado, unidades_mes_pasado, proveedor_compro,
@@ -563,7 +634,10 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
     sugeridoBase: num(r.sugerido_base),
     sugeridoTope: num(r.sugerido_tope),
     factorOferta: num(r.factor_oferta),
-    medianaSellIn: r.mediana_sell_in == null ? null : num(r.mediana_sell_in),
+    habitualSellIn: r.habitual_sell_in == null ? null : num(r.habitual_sell_in),
+    mesesConOferta: num(r.meses_con_oferta),
+    sinOfertaPorAhora: r.sin_oferta_por_ahora === true,
+    dejoDeTenerSellIn: r.dejo_de_tener_sell_in === true,
     udsRentabilidad: num(r.uds_rent),
     rentabilidad: r.rentabilidad == null ? null : num(r.rentabilidad),
     udsMesPasado: num(r.uds_mes_pasado),

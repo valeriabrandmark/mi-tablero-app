@@ -1564,10 +1564,35 @@ export type FilaCompra = {
   /** Por cuánto se multiplicó la base por la oferta. 1 = no se movió. */
   factorOferta: number;
   /**
-   * La mediana del descuento de los últimos meses, contra la que se compara el
-   * vigente. `null` si el artículo nunca estuvo en la planilla de sell in.
+   * EL DESCUENTO HABITUAL: el promedio de los meses en que SI hubo oferta, de
+   * los últimos seis. Es contra esto que se mide si la oferta de este mes es
+   * buena.
+   *
+   * Los meses en cero NO entran en el promedio, y eso es todo el punto: un mes
+   * sin oferta no es "una oferta del 0 %" que baje la referencia, es un mes en
+   * el que no hubo nada. Con los ceros adentro, un artículo con historia
+   * 10·10·0·10·0·0 daba 5 % de habitual, y entonces el 10 % de siempre
+   * aparecía como "5 puntos de ventaja" e inflaba el sugerido.
+   *
+   * `null` si nunca tuvo oferta en la ventana; el cálculo lo lee como 0, o sea
+   * que cualquier descuento de hoy es nuevo.
    */
-  medianaSellIn: number | null;
+  habitualSellIn: number | null;
+  /** En cuántos de los últimos seis meses tuvo oferta. 0 = nunca tuvo. */
+  mesesConOferta: number;
+  /**
+   * El proveedor mandó su sell in de este mes y a ESTE artículo no le dio nada,
+   * habiéndole dado hace poco. Es el freno: el sugerido queda en 0 aunque la
+   * cuenta diera más, porque comprarlo ahora es pagar a precio de lista algo
+   * que viene con descuento.
+   */
+  sinOfertaPorAhora: boolean;
+  /**
+   * Lleva varios meses seguidos sin oferta y antes tenía. Acá no hay oferta que
+   * esperar, así que SÍ se sugiere lo que haga falta — con el aviso al lado de
+   * que se está comprando a precio de lista.
+   */
+  dejoDeTenerSellIn: boolean;
   /** Unidades vendidas en los últimos 3 meses, y qué rentabilidad dejaron. */
   udsRentabilidad: number;
   rentabilidad: number | null;
