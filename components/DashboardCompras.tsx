@@ -367,10 +367,16 @@ export default function DashboardComprasPage({
     // el proveedor los vende. No rompen nada —van al Excel con la celda
     // vacía— pero el que recibe el mail no los va a poder identificar.
     let sinCodigo = 0;
+    // Renglones cuya cantidad NO sale de una cuenta sino del mínimo de un
+    // bulto, porque el artículo no vendió nada en la ventana. Se cargan solos
+    // como los demás, así que sin contarlos no habría forma de saber cuánto de
+    // la orden es "esto hace falta" y cuánto es "esto habría que mirarlo".
+    let minimos = 0;
     for (const f of filas) {
       const r = orden.get(f.sku);
       if (!r || !(r.cantidad > 0)) continue;
       renglones += 1;
+      if (f.sugeridoMinimo) minimos += 1;
       if (!f.codigoCompra) sinCodigo += 1;
       const u = aUnidades(r.cantidad, r.unidad, f.unidadesPorBulto);
       unidades += u;
@@ -381,7 +387,16 @@ export default function DashboardComprasPage({
       bruto += u * lista;
       neto += u * lista * factorNeto(r.descuento, r.descuento2);
     }
-    return { renglones, unidades, bultos, bruto, neto, recortados, sinCodigo };
+    return {
+      renglones,
+      unidades,
+      bultos,
+      bruto,
+      neto,
+      recortados,
+      sinCodigo,
+      minimos,
+    };
   }, [filas, orden]);
 
   /**
@@ -759,6 +774,17 @@ export default function DashboardComprasPage({
         "Lo que se va a pedir, en la unidad de la columna anterior. Arranca en el sugerido y se puede escribir encima; vaciar la celda vuelve al sugerido.",
       celda: (f) => {
         const r = orden.get(f.sku);
+        // LA ALERTA VA EN ESTA CELDA Y NO EN OTRA. Es la cantidad que va a
+        // viajar a la orden, y es donde está el ojo mientras se carga: un
+        // aviso en otra columna se lee después de haber decidido, que es
+        // tarde. El borde ámbar dice "esto lo puso un mínimo, no una cuenta".
+        const aviso = f.sugeridoMinimo
+          ? f.esNuevo
+            ? `Artículo NUEVO (alta ${f.alta ? fmtFechaCortaConAnio(f.alta) : "—"}) y todavía sin ninguna venta. ` +
+              `Esta cantidad es el mínimo de 1 bulto (${fmtNumero(f.unidadesPorBulto)} u.), no una necesidad medida: revisala antes de mandar.`
+            : `SIN VENTAS en los últimos ${f.diasRitmo} días. ` +
+              `Esta cantidad es el mínimo de 1 bulto (${fmtNumero(f.unidadesPorBulto)} u.), no una necesidad medida: revisala antes de mandar.`
+          : undefined;
         return (
           <input
             type="number"
@@ -770,8 +796,14 @@ export default function DashboardComprasPage({
                 cantidad: Math.max(0, Math.floor(Number(e.target.value) || 0)),
               })
             }
-            className={CLASE_CELDA_EDITABLE}
-            aria-label={`Cantidad a comprar de ${f.sku}`}
+            className={`${CLASE_CELDA_EDITABLE} ${
+              aviso ? "border-amber-500/70 bg-amber-500/5" : ""
+            }`}
+            title={aviso}
+            aria-label={
+              `Cantidad a comprar de ${f.sku}` +
+              (aviso ? " (mínimo sin ventas que lo respalden)" : "")
+            }
           />
         );
       },
@@ -1348,7 +1380,15 @@ export default function DashboardComprasPage({
           <TarjetaKpi
             titulo="Renglones en la orden"
             valor={fmtNumero(resumen.renglones)}
-            detalle={`de ${fmtNumero(filas.length)} artículos a la vista`}
+            detalle={
+              // Cuántos de esos renglones son mínimos sin respaldo de ventas.
+              // Va acá y no en un aviso aparte porque es una propiedad DE LA
+              // ORDEN: el número de al lado se lee distinto si un tercio de él
+              // son artículos que nadie midió.
+              resumen.minimos > 0
+                ? `${fmtNumero(resumen.minimos)} sin ventas que lo respalden · de ${fmtNumero(filas.length)} a la vista`
+                : `de ${fmtNumero(filas.length)} artículos a la vista`
+            }
           />
           <TarjetaKpi
             titulo="Unidades a pedir"
@@ -1484,6 +1524,21 @@ export default function DashboardComprasPage({
                 Se va a cargar una orden de compra en Sigma. No se puede
                 deshacer desde acá: si sale mal, hay que anularla en Sigma.
               </p>
+              {/* LA ULTIMA CHANCE DE VER LOS MINIMOS. Ahora se cargan solos,
+                  así que pueden llegar hasta acá sin que nadie los haya
+                  mirado: son cantidades que ninguna venta respalda, en una
+                  orden que después no se puede deshacer desde el tablero. */}
+              {resumen.minimos > 0 && (
+                <p className="text-xs text-amber-400">
+                  <strong>
+                    {fmtNumero(resumen.minimos)} de los{" "}
+                    {fmtNumero(resumen.renglones)} renglones
+                  </strong>{" "}
+                  son el mínimo de un bulto de artículos que no vendieron nada
+                  en la ventana —nuevos, o que dejaron de moverse—. Están
+                  marcados en ámbar en la columna Cantidad.
+                </p>
+              )}
               <div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
                 <div className="flex justify-between gap-3">
                   <span className="text-muted">Proveedor</span>
