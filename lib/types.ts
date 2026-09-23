@@ -1537,15 +1537,6 @@ export type FilaCompra = {
    * mismo que 0.
    */
   sellInPct: number | null;
-  /**
-   * El sell in CALCULADO a partir de nuestras compras
-   * (`costos_historicos.oferta_pct`), con el que se valoriza el costo real.
-   *
-   * SE MUESTRA COMO REFERENCIA Y NO VIAJA AL ARCHIVO. No es lo que el proveedor
-   * tiene vigente: mandarlo en una orden de compra sería pedir con un descuento
-   * inventado.
-   */
-  ofertaCalculadaPct: number | null;
   /** Unidades vendidas en la ventana del ritmo. */
   uds: number;
   ritmoDiario: number;

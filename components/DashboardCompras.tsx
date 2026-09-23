@@ -785,26 +785,6 @@ export default function DashboardComprasPage({
       orden: (f) => orden.get(f.sku)?.descuento2 ?? 0,
     },
     {
-      // REFERENCIA, NO VIAJA AL ARCHIVO. Es el sell in calculado con nuestras
-      // compras (costos_historicos.oferta_pct), con el que se viene costeando.
-      // Se muestra para poder comparar contra el del proveedor, y el título dice
-      // qué es: puesto como "oferta" a secas se copiaría a la orden pensando
-      // que es el descuento con el que se pide.
-      titulo: "s/ n. compras %",
-      ayuda:
-        "El descuento que se deduce de lo que efectivamente pagamos en nuestras compras. Se muestra como referencia y NO viaja a la orden: mandarlo sería pedirle al proveedor un descuento que él no ofreció.",
-      celda: (f) => (
-        <span
-          className="text-muted"
-          title="Sell in calculado con nuestras compras. No va al archivo."
-        >
-          {f.ofertaCalculadaPct == null ? "—" : f.ofertaCalculadaPct.toFixed(2)}
-        </span>
-      ),
-      numerica: true,
-      orden: (f) => f.ofertaCalculadaPct,
-    },
-    {
       // De dónde sale depende de qué haya: el sell in del proveedor cuando esté
       // cargado, el calculado mientras tanto. EL TÍTULO DICE CUÁL, que es lo que
       // evita leer un número como si fuera el otro.
@@ -1838,29 +1818,17 @@ export default function DashboardComprasPage({
               <strong>0 y hay que ponerla a mano</strong>. Cero acá quiere decir
               «no lo sabemos», no «sin descuento».
             </p>
-            <p className="mt-1">
-              La columna <strong>«s/ n. compras %»</strong> es otra cosa y{" "}
-              <strong>no va al archivo</strong>: es el sell in{" "}
-              <em>calculado con nuestras compras</em> (
-              <span className="font-mono text-xs">
-                costos_historicos.oferta_pct
-              </span>
-              ), el que se usa para valorizar el costo real y trasladarlo a las
-              ofertas del mes. Sirve para comparar, no para pedir: mandarlo en
-              una orden sería pedirle al proveedor con un descuento inventado.
-              {resumen.recortados > 0 && (
-                <>
-                  {" "}
-                  <strong>
-                    Hay {fmtNumero(resumen.recortados)} con descuento mayor a{" "}
-                    {DESCUENTO_MAXIMO} %
-                  </strong>
-                  : se recortan a {DESCUENTO_MAXIMO} antes de exportar. Un
-                  descuento así es un error de carga, y en una orden de compra
-                  deja de ser un número raro en una pantalla.
-                </>
-              )}
-            </p>
+            {resumen.recortados > 0 && (
+              <p className="mt-1">
+                <strong>
+                  Hay {fmtNumero(resumen.recortados)} renglones con descuento
+                  mayor a {DESCUENTO_MAXIMO} %
+                </strong>
+                : se recortan a {DESCUENTO_MAXIMO} antes de exportar. Un
+                descuento así es un error de carga, y en una orden de compra
+                deja de ser un número raro en una pantalla.
+              </p>
+            )}
             <p className="mt-1">
               <strong>
                 El sugerido no descuenta la mercadería en tránsito.

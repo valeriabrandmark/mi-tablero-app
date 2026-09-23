@@ -84,14 +84,17 @@ sell_in as (
   where mes_comercial = $3::text
     and evento = ''
 ),
--- El costo de lista y el sell in calculado del mes elegido. El calculado se
--- MUESTRA como referencia —es con lo que venimos costeando— pero no viaja al
--- archivo.
+-- El costo de lista del mes elegido: el número sobre el que se aplica el
+-- descuento para llegar a lo que se paga.
 oferta as (
   -- UNA fila por SKU: el tramo que rige hoy dentro de ese mes. Desde que un
   -- mes puede tener varios costos, traerlos todos duplicaría cada artículo de
   -- la tabla. Ver lib/sql-costos.ts.
-  select sku, oferta_pct, costo_teorico
+  --
+  -- QUEDA POR EL COSTO DE LISTA, que es sobre lo que se aplica el descuento.
+  -- El oferta_pct de este mismo CTE se usaba para la columna
+  -- "s/ n. compras %", que se sacó de la pantalla.
+  select sku, costo_teorico
   from (${COSTOS_VIGENTES_POR_MES}) cv
   where mes_comercial = $3::text
 ),
@@ -290,7 +293,6 @@ base as (
          -- El costo de lista del mes elegido, que es sobre el que se aplica el
          -- descuento. Si ese mes no está cargado, cae al último costo conocido.
          coalesce(o.costo_teorico, c.costo_teorico, c.costo_real, 0) as costo_lista,
-         o.oferta_pct                                   as oferta_calculada_pct,
          si.descuento_pct                               as sell_in_pct,
          coalesce(v.uds, 0)                             as uds,
          v.ultima_venta,
@@ -585,7 +587,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
     `${BASE}
      select sku, producto, proveedor, grupo, marca, codigo_compra, ean, u_bulto,
             tuc, full_ml, total, costo, valor, costo_lista,
-            oferta_calculada_pct, sell_in_pct,
+            sell_in_pct,
             uds, ritmo_diario, cobertura, sugerido,
             sugerido_base, sugerido_tope, factor_oferta, habitual_sell_in,
             meses_con_oferta, sin_oferta_por_ahora, dejo_de_tener_sell_in,
@@ -624,8 +626,6 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
     costo: num(r.costo),
     valor: num(r.valor),
     costoLista: num(r.costo_lista),
-    ofertaCalculadaPct:
-      r.oferta_calculada_pct == null ? null : num(r.oferta_calculada_pct),
     sellInPct: r.sell_in_pct == null ? null : num(r.sell_in_pct),
     uds: num(r.uds),
     ritmoDiario: num(r.ritmo_diario),

@@ -49,7 +49,6 @@ function fila(cambios: Partial<FilaCompra>): FilaCompra {
     valor: 1000,
     costoLista: 1000,
     sellInPct: 10,
-    ofertaCalculadaPct: null,
     uds: 74,
     ritmoDiario: 0.62,
     cobertura: 2,
