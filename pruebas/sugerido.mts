@@ -275,9 +275,12 @@ const conBuenaOfertaAntes = fila({
   diasRitmo: 120,
 });
 revisar("dice con cuanto sell in se vendio",
-  dice(conBuenaOfertaAntes, "se compró con 40.0 % de sell in"));
-revisar("y sobre cuantos dias",
-  dice(conBuenaOfertaAntes, "en estos 120 días"));
+  dice(conBuenaOfertaAntes, "se había comprado con 40.0 % de sell in"));
+// NO nombra los dias. Este promedio sale de la ventana entera, mientras que
+// `diasRitmo` es por articulo: poner ese numero decia "en estos 100 dias" en
+// una fila y "120" en la de al lado, por un motivo que no viene al caso.
+revisar("y NO inventa una cantidad de dias por articulo",
+  !dice(fila({ ...conBuenaOfertaAntes, diasRitmo: 100 }), "en estos 100 días"));
 revisar("avisa la caida y cuantos puntos son",
   dice(conBuenaOfertaAntes, "30.0 puntos menos"));
 revisar("y por que importa",
@@ -300,11 +303,11 @@ const mismaOferta = fila({
 });
 revisar("sin caida, no avisa",  !dice(mismaOferta, "OJO"));
 revisar("pero igual dice con cuanto se vendio",
-  dice(mismaOferta, "se compró con 20.0 % de sell in"));
+  dice(mismaOferta, "se había comprado con 20.0 % de sell in"));
 
 // Sin dato no se inventa nada.
 revisar("sin sell in de las ventas, no dice nada",
-  !dice(fila({ sellInVendidoPct: null }), "se compró con"));
+  !dice(fila({ sellInVendidoPct: null }), "se había comprado con"));
 
 // --- Los recortes de la tabla ----------------------------------------------
 //
