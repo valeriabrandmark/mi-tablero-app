@@ -27,6 +27,9 @@ import {
   RENTABILIDAD_COMPRA_DISCRETA,
   COBERTURA_COMPRA_MAXIMA,
   coberturaValida,
+  VISTA_POR_DEFECTO,
+  VISTAS_COMPRAS,
+  vistaValida,
 } from "@/lib/compras";
 import { vacio as sinValores } from "@/lib/filtros";
 import {
@@ -235,8 +238,7 @@ export default function DashboardComprasPage({
         ventana: [String(filtros.ventana ?? VENTANA_POR_DEFECTO)],
         cobertura: [String(filtros.cobertura ?? COBERTURA_OBJETIVO_DIAS)],
         mes: filtros.mes ? [filtros.mes] : undefined,
-        todos: filtros.todos ? ["1"] : undefined,
-        soloOferta: filtros.soloOferta ? ["1"] : undefined,
+        vista: filtros.vista ? [filtros.vista] : undefined,
         // RED DE SEGURIDAD. `satisfies` obliga a que estén TODAS las claves
         // de FiltrosCompras: si mañana se agrega un filtro y se olvida acá, esto
         // rompe el build.
@@ -489,12 +491,16 @@ export default function DashboardComprasPage({
   // Hay sell in del proveedor cargado para ese mes, o todavía no.
   const sellInHayDatos = (data?.sellInCargado ?? 0) > 0;
 
+  // Se valida acá y no se lee `filtros.vista` a pelo: así la pantalla y el
+  // servidor caen siempre en la misma por defecto.
+  const vistaActual = vistaValida(filtros.vista);
+
   const sinCambios =
     sinValores(filtros.grupo) &&
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
     !filtros.buscar &&
-    !filtros.todos &&
+    vistaActual === VISTA_POR_DEFECTO &&
     !filtros.mes &&
     (filtros.ventana ?? VENTANA_POR_DEFECTO) === VENTANA_POR_DEFECTO;
 
@@ -1161,20 +1167,42 @@ export default function DashboardComprasPage({
             />
           </form>
 
-          <button
-            type="button"
-            onClick={() => cambiar({ ...filtros, todos: !filtros.todos })}
-            aria-pressed={filtros.todos ?? false}
-            className={`self-end rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
-              filtros.todos
-                ? "border-c1 bg-c1/15 text-c1"
-                : "border-line text-muted hover:bg-panel-2 hover:text-ink"
-            }`}
-          >
-            {filtros.todos
-              ? "Todos los artículos"
-              : "Sólo los que hay que comprar"}
-          </button>
+          {/* LAS TRES VISTAS, JUNTAS Y EN ORDEN DE ANCHO A ANGOSTO.
+              Antes eran dos botones sueltos en dos lugares distintos de la
+              pantalla --"sólo los que hay que comprar" acá y "dejar sólo con
+              oferta" abajo, en la fila de acciones de la orden-- y entre los
+              dos daban cuatro combinaciones para tres estados que se
+              entienden. Puestos como un solo selector, el recorte que está
+              aplicado se lee de un vistazo en vez de reconstruirse mirando dos
+              botones que no están a la vista al mismo tiempo. */}
+          <div className="flex flex-col gap-1">
+            <span className="text-muted text-[11px]">Qué artículos</span>
+            <div
+              role="group"
+              aria-label="Qué artículos se muestran"
+              className="border-line flex overflow-hidden rounded-lg border"
+            >
+              {VISTAS_COMPRAS.map((v) => {
+                const puesta = vistaActual === v.valor;
+                return (
+                  <button
+                    key={v.valor}
+                    type="button"
+                    onClick={() => cambiar({ ...filtros, vista: v.valor })}
+                    aria-pressed={puesta}
+                    title={v.ayuda}
+                    className={`border-line px-2.5 py-1.5 text-xs transition-colors not-first:border-l ${
+                      puesta
+                        ? "bg-c1/15 text-c1"
+                        : "text-muted hover:bg-panel-2 hover:text-ink"
+                    }`}
+                  >
+                    {v.etiqueta}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           <BotonLimpiar
             onClick={() => {
@@ -1282,26 +1310,6 @@ export default function DashboardComprasPage({
               className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1.5 text-xs"
             >
               Vaciar cantidades
-            </button>
-            {/* NO ES UN BOTÓN MÁS DE LA FILA: los de al lado tocan la orden
-                --la unidad, las cantidades--, éste toca QUÉ SE VE. Se queda
-                acá igual porque es el mismo gesto ("preparame la tabla para
-                esto") y separarlo en otra fila lo escondería. Por eso se
-                enciende como los chips de filtro y no como los de acción. */}
-            <button
-              type="button"
-              onClick={() =>
-                cambiar({ ...filtros, soloOferta: !filtros.soloOferta })
-              }
-              aria-pressed={filtros.soloOferta ?? false}
-              title="Deja sólo los artículos con sell in del proveedor cargado para el mes elegido."
-              className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
-                filtros.soloOferta
-                  ? "border-c1 bg-c1/15 text-c1"
-                  : "border-line text-muted hover:bg-panel-2 hover:text-ink"
-              }`}
-            >
-              Dejar sólo con oferta
             </button>
 
             <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -1624,9 +1632,7 @@ export default function DashboardComprasPage({
           <Panel
             titulo="Artículos"
             nota={
-              (data.recortada
-                ? `Los ${filas.length} de mayor peso`
-                : `${fmtNumero(filas.length)} artículos`) +
+              `${fmtNumero(filas.length)} artículos` +
               ` · ritmo de ${data.ventana} días` +
               (data.mes ? ` · sell in de ${fmtMes(data.mes)}` : "")
             }
@@ -1636,20 +1642,6 @@ export default function DashboardComprasPage({
               columnas={columnas}
               etiquetaTotal="Total de la orden"
               clave={(f) => f.sku}
-              /* LA TABLA VACÍA TIENE QUE DAR LA SALIDA, no sólo el
-                 diagnóstico.
-
-                 Filtrando por una marca que no se vende la pantalla quedaba
-                 en blanco. Y estaba bien que no sugiriera nada --no se vende,
-                 no hay qué reponer-- pero los artículos EXISTEN y se pueden
-                 pedir igual: es una marca nueva, una reposición puntual, algo
-                 que se acordó con el proveedor. Lo que faltaba era saberlo y
-                 poder llegar a ellos.
-
-                 Los dos botones son los dos motivos por los que la tabla
-                 puede estar vacía teniendo artículos detrás, cada uno con su
-                 número. Antes había que adivinar cuál de los dos destrabar
-                 --y con las dos reglas puestas, los dos. */
               vacio={<VacioCompras data={data} filtros={filtros} cambiar={cambiar} />}
             />
           </Panel>
@@ -1912,19 +1904,15 @@ export default function DashboardComprasPage({
  * ---------------------------------------------------------------------------
  * UN CARTEL QUE NO DA LA SALIDA ES UN CARTEL QUE NO SIRVE
  *
- * Esta pantalla esconde filas por dos motivos distintos, y los dos se pueden
- * dar juntos: la regla de "sólo los que hay que comprar" (que tapa lo que el
- * cálculo no pidió) y el botón de "dejar sólo con oferta" (que tapa lo que no
- * tiene sell in del mes). Con los dos puestos y un filtro por marca chica, el
- * resultado era una pantalla en blanco que parecía decir "esa marca no
- * existe", cuando lo que pasaba era que sus 23 artículos estaban detrás de dos
- * botones.
+ * Filtrando por una marca chica la pantalla quedaba en blanco y parecía decir
+ * "esa marca no existe", cuando lo que pasaba era que la vista elegida la
+ * dejaba afuera: sus artículos están, pero no hay nada que reponer o no tienen
+ * oferta este mes.
  *
  * Que no haya sugerencia NO es lo mismo que que no haya nada que pedir: una
  * marca nueva, un artículo que se repone puntualmente o algo que se acordó con
  * el proveedor se cargan a mano, y para eso el artículo tiene que estar a la
- * vista. Así que acá va el número de lo que hay detrás de cada regla y el
- * botón que la destraba.
+ * vista. Así que acá va cuántos encontró el filtro y el botón que los muestra.
  */
 function VacioCompras({
   data,
@@ -1935,67 +1923,36 @@ function VacioCompras({
   filtros: FiltrosCompras;
   cambiar: (f: FiltrosCompras) => void;
 }) {
-  const sinSugerido = data.ocultosSinSugerido;
-  const sinOferta = data.ocultosSinOferta;
+  const hay = data.articulosDelFiltro;
 
-  // Ninguna regla es la culpable: el filtro de verdad no encontró nada.
-  if (sinSugerido === 0 && sinOferta === 0) {
+  // En "Todos" no hay vista que culpar: cero filas es cero artículos.
+  if (hay === 0) {
     return <p>Ningún artículo para el filtro elegido.</p>;
   }
-
-  const estilo =
-    "border-c1 bg-c1/15 text-c1 hover:bg-c1/25 rounded-lg border px-3 py-1.5 text-xs transition-colors";
 
   return (
     <div className="flex flex-col items-center gap-3">
       <p className="mx-auto max-w-lg">
-        El cálculo no pide reponer nada con este filtro
-        {sinSugerido === 1 ? (
-          <>
-            , pero <strong className="text-ink">hay 1 artículo</strong> al que
-            podés cargarle cantidades a mano.
-          </>
-        ) : sinSugerido > 1 ? (
-          <>
-            , pero{" "}
-            <strong className="text-ink">
-              hay {fmtNumero(sinSugerido)} artículos
-            </strong>{" "}
-            a los que podés cargarles cantidades a mano.
-          </>
-        ) : (
-          <>
-            , y los que tienen sell in de {fmtMes(data.mes)} quedaron todos
-            afuera.
-          </>
-        )}
+        Con este filtro no hay nada que comprar
+        {vistaValida(filtros.vista) === "oferta"
+          ? ` con sell in de ${fmtMes(data.mes)}`
+          : ""}
+        , pero{" "}
+        <strong className="text-ink">
+          {hay === 1 ? "hay 1 artículo" : `hay ${fmtNumero(hay)} artículos`}
+        </strong>{" "}
+        {hay === 1
+          ? "al que podés cargarle cantidades a mano."
+          : "a los que podés cargarles cantidades a mano."}
       </p>
 
-      <div className="flex flex-wrap justify-center gap-2">
-        {sinSugerido > 0 && (
-          <button
-            type="button"
-            onClick={() => cambiar({ ...filtros, todos: true })}
-            className={estilo}
-          >
-            {sinSugerido === 1
-              ? "Ver el artículo"
-              : `Ver los ${fmtNumero(sinSugerido)} artículos`}
-          </button>
-        )}
-        {sinOferta > 0 && (
-          <button
-            type="button"
-            onClick={() =>
-              cambiar({ ...filtros, todos: true, soloOferta: false })
-            }
-            className={estilo}
-          >
-            Ver los {fmtNumero(sinSugerido + sinOferta)}, con y sin sell in de{" "}
-            {fmtMes(data.mes)}
-          </button>
-        )}
-      </div>
+      <button
+        type="button"
+        onClick={() => cambiar({ ...filtros, vista: "todos" })}
+        className="border-c1 bg-c1/15 text-c1 hover:bg-c1/25 rounded-lg border px-3 py-1.5 text-xs transition-colors"
+      >
+        {hay === 1 ? "Ver el artículo" : `Ver los ${fmtNumero(hay)} artículos`}
+      </button>
     </div>
   );
 }

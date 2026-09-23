@@ -8,6 +8,7 @@ import {
   RENTABILIDAD_COMPRA_DISCRETA,
   MESES_SIN_SELL_IN_PARA_SUGERIR,
   VECES_SOBRE_LO_HABITUAL_PARA_INFLAR,
+  vistaValida,
   FACTOR_OFERTA_MAX,
   MESES_HISTORIA_SELL_IN,
   MESES_RENTABILIDAD,
@@ -23,7 +24,12 @@ import {
 } from "@/lib/stock";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import type { ArticuloParaOrden } from "@/lib/sigma-orden";
-import type { DashboardCompras, FilaCompra, FiltrosCompras } from "@/lib/types";
+import type {
+  DashboardCompras,
+  FilaCompra,
+  FiltrosCompras,
+  VistaCompras,
+} from "@/lib/types";
 
 /**
  * Consultas del panel de Compras.
@@ -442,26 +448,24 @@ const REGLA_OFERTA = "coalesce(sell_in_pct, 0) > 0";
 /**
  * El `where` de la consulta, despiezado.
  *
- * LAS DOS REGLAS QUE ESCONDEN FILAS VAN APARTE de los filtros que eligió la
- * persona --"sólo los que hay que comprar" (`sugerido > 0`) y "dejar sólo con
- * oferta"-- porque cuando la tabla sale vacía hay que poder contestar CUÁL DE
- * LAS TRES COSAS la vació. Con un solo texto de `where` no se distinguen, y la
- * pantalla queda en blanco sin poder decir nada.
+ * LO QUE RECORTA LA VISTA VA APARTE de los filtros que eligió la persona,
+ * porque cuando la tabla sale vacía hay que poder contestar cuál de las dos
+ * cosas la vació: si el filtro no encontró ningún artículo, o si los encontró
+ * y la vista los dejó afuera. Con un solo texto de `where` no se distinguen, y
+ * la pantalla queda en blanco sin poder decir nada.
  *
- * El caso que lo motivó fue exactamente ese, con las dos reglas apiladas:
- * filtrando por la marca BUBBA quedaban 23 artículos, uno solo tenía sell in
- * de septiembre y a ese el cálculo no le pedía reponer nada. Cero filas, y la
- * marca entera escondida detrás de dos botones que había que adivinar.
+ * El caso que lo motivó: filtrando por la marca BUBBA quedaban 23 artículos,
+ * uno solo tenía sell in de septiembre y a ese el cálculo no le pedía reponer
+ * nada. Cero filas, y la marca entera escondida detrás de un botón que había
+ * que adivinar.
  */
 type Where = {
-  /** Lo que se consulta: los filtros de la persona más las reglas que estén puestas. */
+  /** Lo que se consulta: los filtros de la persona más lo que recorta la vista. */
   sql: string;
   /** Sólo los filtros de la persona: proveedor, grupo, marca, búsqueda. */
   sqlEstructural: string;
-  /** Si "dejar sólo con oferta" está puesto. */
-  filtraPorOferta: boolean;
-  /** Si "sólo los que hay que comprar" está puesto. */
-  aplicaLaRegla: boolean;
+  /** La vista elegida, ya validada. */
+  vista: VistaCompras;
   params: unknown[];
 };
 
@@ -489,26 +493,20 @@ function where(f: FiltrosCompras, mes: string): Where {
     );
   }
 
-  // LAS REGLAS, que no eligen QUÉ artículos sino CUÁLES DE ESOS se muestran.
-  //
-  // Por defecto sólo lo que hay que comprar: son ~3.300 SKU con stock y la
-  // orden típica tiene decenas, así que arrancar con todo obligaría a buscar
-  // los que importan entre los que no. El switch de "ver todos" está en la
-  // pantalla para cuando se quiere agregar algo que el cálculo no pidió.
-  const aplicaLaRegla = !f.todos;
-  const filtraPorOferta = f.soloOferta === true;
+  // LA VISTA, que no elige QUÉ artículos sino CUÁLES DE ESOS se muestran. Las
+  // tres y el porqué de que sean tres están en `VistaCompras` (lib/types.ts).
+  const vista = vistaValida(f.vista);
 
   const todas = [...estructurales];
-  if (filtraPorOferta) todas.push(REGLA_OFERTA);
-  if (aplicaLaRegla) todas.push("sugerido > 0");
+  if (vista !== "todos") todas.push("sugerido > 0");
+  if (vista === "oferta") todas.push(REGLA_OFERTA);
 
   const armar = (cs: string[]) => (cs.length ? `where ${cs.join(" and ")}` : "");
 
   return {
     sql: armar(todas),
     sqlEstructural: armar(estructurales),
-    filtraPorOferta,
-    aplicaLaRegla,
+    vista,
     params,
   };
 }
@@ -526,59 +524,31 @@ function historia(v: unknown): { mes: string; pct: number }[] {
     }));
 }
 
-/** Tope de filas. Una orden de compra de más de 500 renglones no existe. */
-const TOPE = 500;
-
-/** Lo que la pantalla muestra, y lo que le escondieron las reglas. */
+/** Lo que la pantalla muestra, y cuántos artículos hay detrás del filtro. */
 type Listado = {
   filas: FilaCompra[];
-  /**
-   * De los artículos que encontró el filtro, cuántos quedaron afuera por tener
-   * sugerido 0.
-   */
-  ocultosSinSugerido: number;
-  /**
-   * Cuántos MÁS quedarían a la vista si además se apagara "dejar sólo con
-   * oferta". Es 0 cuando ese botón no está puesto.
-   */
-  ocultosSinOferta: number;
+  /** Ver `articulosDelFiltro` en `DashboardCompras` (lib/types.ts). */
+  articulosDelFiltro: number;
 };
 
 /**
- * Cuántos artículos esconden las reglas, para poder explicar la tabla vacía.
+ * Cuántos artículos encontró el filtro, sin mirar la vista.
  *
- * SE CUENTA SOBRE LOS FILTROS DE LA PERSONA SOLOS —sin las dos reglas— y las
- * reglas se aplican después con un `filter`, en la misma pasada. Así se puede
- * decir las dos cosas a la vez: cuántos hay con la oferta puesta y cuántos más
- * hay sin ella.
+ * SE LLAMA SÓLO CON LA TABLA VACÍA, y ahí es lo único útil que se puede decir:
+ * "en esta vista no hay nada, pero la marca tiene 23 artículos". Con eso la
+ * pantalla ofrece el salto a "Todos" en vez de quedarse en blanco como si la
+ * marca no existiera.
  *
- * SE LLAMA SÓLO CON LA TABLA VACÍA. Es una segunda pasada por la consulta
- * grande, que no es gratis: se paga únicamente en la pantalla en blanco —donde
- * no hay nada más que mostrar y estos números son lo único útil que se puede
- * decir— y nunca en el camino normal.
- *
- * Con la tabla vacía, todo lo que se cuenta acá tiene sugerido 0 (si alguno
- * tuviera, sería una fila) o no pasa el filtro de oferta. Por eso alcanza con
- * contar y no hay que volver a mirar el sugerido.
+ * Es una segunda pasada por la consulta grande, que no es gratis. Se paga
+ * únicamente en la pantalla vacía --donde no hay nada más que mostrar y este
+ * número es lo único que se puede decir-- y nunca en el camino normal.
  */
-async function contarOcultos(
-  w: Where,
-): Promise<{ sinSugerido: number; sinOferta: number }> {
-  const fila = await queryOne<{ total: string; con_oferta: string }>(
-    `${BASE}
-     select count(*) as total,
-            count(*) filter (where ${REGLA_OFERTA}) as con_oferta
-       from calculada ${w.sqlEstructural}`,
+async function contarDelFiltro(w: Where): Promise<number> {
+  const fila = await queryOne<{ v: string }>(
+    `${BASE} select count(*) as v from calculada ${w.sqlEstructural}`,
     w.params,
   );
-  const total = Number(fila?.total ?? 0);
-  const conOferta = Number(fila?.con_oferta ?? 0);
-
-  // Con la oferta puesta, lo que la persona "tiene a mano" son los que sí la
-  // tienen; el resto es lo que se destraba apagando ese botón.
-  return w.filtraPorOferta
-    ? { sinSugerido: conOferta, sinOferta: total - conOferta }
-    : { sinSugerido: total, sinOferta: 0 };
+  return Number(fila?.v ?? 0);
 }
 
 async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
@@ -599,17 +569,27 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
             ultima_compra
      from calculada ${w.sql}
      -- Por lo que hay que comprar, no por lo que hay: arriba lo más urgente.
-     order by sugerido * costo desc, sugerido desc
-     limit ${TOPE}`,
+     --
+     -- EL SKU AL FINAL ES EL DESEMPATE, y hace falta desde que existe la vista
+     -- "Todos": ahí la mayoría de las filas tienen sugerido 0 y empatan entre
+     -- sí, y sin un criterio estable Postgres las puede devolver en otro orden
+     -- en cada consulta. Una tabla que se reordena sola al cambiar un filtro
+     -- que no la toca se lee como si hubiera cambiado de datos.
+     --
+     -- SIN LIMIT, a propósito. Antes había un tope de 500 y en "Todos" cortaba
+     -- de verdad --GLAM tiene 981 artículos, COTY 824-- así que pedir "todos
+     -- los artículos de este proveedor" devolvía la mitad. Un recorte que nadie
+     -- pidió en una pantalla que sirve para no perderse ningún artículo es peor
+     -- que una tabla larga.
+     order by sugerido * costo desc, sugerido desc, sku`,
     w.params,
   );
 
-  // La tabla vacía es la única que necesita explicarse, y sólo si hay alguna
-  // regla puesta que pueda ser la culpable. Ver `contarOcultos`.
-  const ocultos =
-    filas.length === 0 && (w.aplicaLaRegla || w.filtraPorOferta)
-      ? await contarOcultos(w)
-      : { sinSugerido: 0, sinOferta: 0 };
+  // La tabla vacía es la única que necesita explicarse, y sólo si la vista pudo
+  // ser la culpable: en "Todos" no hay nada que recorte, así que cero filas es
+  // cero artículos y no hay nada más que decir. Ver `contarDelFiltro`.
+  const articulosDelFiltro =
+    filas.length === 0 && w.vista !== "todos" ? await contarDelFiltro(w) : 0;
 
   const mapeadas = filas.map((r) => ({
     sku: r.sku as string,
@@ -651,11 +631,7 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
     ultimaCompra: (r.ultima_compra as string | null) ?? null,
   }));
 
-  return {
-    filas: mapeadas,
-    ocultosSinSugerido: ocultos.sinSugerido,
-    ocultosSinOferta: ocultos.sinOferta,
-  };
+  return { filas: mapeadas, articulosDelFiltro };
 }
 
 /**
@@ -785,9 +761,7 @@ async function getDashboardComprasDirecto(
 
   return {
     filas: listado.filas,
-    ocultosSinSugerido: listado.ocultosSinSugerido,
-    ocultosSinOferta: listado.ocultosSinOferta,
-    recortada: listado.filas.length === TOPE,
+    articulosDelFiltro: listado.articulosDelFiltro,
     mesPasado,
     ventana: f.ventana ?? VENTANA_POR_DEFECTO,
     cobertura: coberturaValida(f.cobertura),

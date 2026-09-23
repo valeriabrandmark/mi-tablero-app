@@ -16,7 +16,7 @@
  *     node --experimental-strip-types --import ./pruebas/registrar.mjs pruebas/sugerido.mts
  */
 
-import { porQueSugerido } from "@/lib/compras";
+import { porQueSugerido, VISTAS_COMPRAS, VISTA_POR_DEFECTO, vistaValida } from "@/lib/compras";
 import type { FilaCompra } from "@/lib/types";
 
 const FALLOS: string[] = [];
@@ -154,6 +154,28 @@ revisar("sin sell in cargado, se dice que no hay con qué comparar",
        "Sin sell in del proveedor con qué comparar"));
 revisar("lo que ya sobra no se infla por una oferta",
   dice(fila({ cobertura: 200 }), "la oferta no infla la compra"));
+
+// --- Las tres vistas de la tabla -------------------------------------------
+//
+// El valor llega de una query string que se puede escribir a mano, y una vista
+// inventada no puede terminar en un `where` que no filtra nada: seria mostrar
+// 8.265 articulos sin que nadie lo haya pedido.
+
+revisar("las tres, y en orden de ancho a angosto",
+  VISTAS_COMPRAS.map((v) => v.valor).join(" ") === "todos sugerido oferta",
+  VISTAS_COMPRAS.map((v) => v.valor).join(" "));
+
+for (const v of VISTAS_COMPRAS) {
+  revisar(`"${v.valor}" se acepta tal cual`, vistaValida(v.valor) === v.valor);
+}
+
+revisar("una vista inventada cae en la de siempre",
+  vistaValida("todo") === VISTA_POR_DEFECTO);
+revisar("sin vista, la de siempre", vistaValida(undefined) === VISTA_POR_DEFECTO);
+revisar("null tampoco pasa", vistaValida(null) === VISTA_POR_DEFECTO);
+// Lo que mas duele si se cuela: cualquier cosa que no sea una de las tres
+// tiene que caer en "sugerido", nunca en "todos".
+revisar("y lo que caiga NO es 'todos'", VISTA_POR_DEFECTO !== "todos");
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);

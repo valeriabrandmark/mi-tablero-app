@@ -20,7 +20,7 @@ import {
   PLAZO_REPOSICION_DIAS,
 } from "@/lib/stock";
 import type { CeldaXlsx, ColumnaXlsx, LibroXlsx } from "@/lib/xlsx";
-import type { FilaCompra } from "@/lib/types";
+import type { FilaCompra, VistaCompras } from "@/lib/types";
 
 /** Sobre cuántos meses se mide la rentabilidad de venta del artículo. */
 export const MESES_RENTABILIDAD = 3;
@@ -106,6 +106,48 @@ export const RENTABILIDAD_COMPRA_DISCRETA = 15;
  * habitual 0, así que cualquier descuento de hoy es nuevo.
  */
 export const VECES_SOBRE_LO_HABITUAL_PARA_INFLAR = 2;
+
+/**
+ * Las tres vistas, en el orden en que van en la pantalla: de la más ancha a la
+ * más angosta. El orden importa --es el que hace que el selector se lea como
+ * un embudo-- así que vive acá y no escrito a mano en el componente.
+ */
+export const VISTAS_COMPRAS = [
+  {
+    valor: "todos",
+    etiqueta: "Todos",
+    ayuda:
+      "Todos los artículos del filtro, tengan o no algo para comprar. Es la vista para cargar cantidades a mano.",
+  },
+  {
+    valor: "sugerido",
+    etiqueta: "Hay que comprar",
+    ayuda:
+      "Sólo los artículos a los que el cálculo les pide reposición. Es la vista de siempre.",
+  },
+  {
+    valor: "oferta",
+    etiqueta: "Con oferta",
+    ayuda:
+      "De los que hay que comprar, sólo los que tienen sell in del proveedor vigente este mes.",
+  },
+] as const satisfies readonly { valor: VistaCompras; etiqueta: string; ayuda: string }[];
+
+/** La vista por defecto: la orden típica tiene decenas de renglones, no miles. */
+export const VISTA_POR_DEFECTO: VistaCompras = "sugerido";
+
+/**
+ * Una vista válida, venga de donde venga.
+ *
+ * Existe porque esto llega de una query string que se puede escribir a mano, y
+ * un valor inventado no puede terminar en un `where` que no filtra nada: sería
+ * mostrar 8.000 artículos sin que nadie lo haya pedido.
+ */
+export function vistaValida(v: unknown): VistaCompras {
+  return VISTAS_COMPRAS.some((x) => x.valor === v)
+    ? (v as VistaCompras)
+    : VISTA_POR_DEFECTO;
+}
 
 /**
  * CUANTOS MESES SEGUIDOS SIN OFERTA HACEN FALTA PARA VOLVER A SUGERIR.

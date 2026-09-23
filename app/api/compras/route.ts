@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { coberturaValida } from "@/lib/compras";
+import { coberturaValida, vistaValida } from "@/lib/compras";
 import { lista } from "@/lib/filtros";
 import {
   enConstruccion,
@@ -49,8 +49,10 @@ export async function GET(request: NextRequest) {
     // Se recorta contra el máximo acá y otra vez en la consulta. No es de más:
     // esto es lo que puede llegar de una URL escrita a mano.
     cobertura: coberturaValida(Number(sp.get("cobertura"))),
-    todos: sp.get("todos") === "1",
-    soloOferta: sp.get("soloOferta") === "1",
+    // Se valida contra las tres que existen: esto llega de una query string
+    // que se puede escribir a mano, y una vista inventada no puede terminar en
+    // un `where` que no filtra nada.
+    vista: vistaValida(sp.get("vista")),
   };
 
   try {

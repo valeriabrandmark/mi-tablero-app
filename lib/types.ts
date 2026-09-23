@@ -1483,16 +1483,32 @@ export type FiltrosCompras = {
   cobertura?: number;
   /** Mes comercial del que sale la oferta del proveedor (`YYYY-MM`). */
   mes?: string;
-  /** `true` para ver también los artículos que el cálculo no pidió comprar. */
-  todos?: boolean;
-  /**
-   * `true` deja sólo los artículos con oferta del proveedor vigente en el mes
-   * elegido. Es para armar la orden de una campaña de ofertas sin tener que
-   * mirar el resto del catálogo.
-   */
-  soloOferta?: boolean;
+  /** Qué artículos se muestran. Por defecto `sugerido`. */
+  vista?: VistaCompras;
   buscar?: string;
 };
+
+/**
+ * QUE ARTICULOS MUESTRA LA TABLA. Tres opciones excluyentes, de la más ancha a
+ * la más angosta:
+ *
+ *   todos     todo lo que encontró el filtro de proveedor / marca / grupo,
+ *             tenga o no algo para comprar. Es la vista para cargar cantidades
+ *             a mano: un artículo sin faltante y sin oferta también se pide,
+ *             porque se acordó con el proveedor o porque es una marca nueva.
+ *   sugerido  sólo los que el cálculo pide reponer. El defecto: son ~3.300 SKU
+ *             con stock y la orden típica tiene decenas.
+ *   oferta    de esos, sólo los que tienen sell in vigente este mes. Para
+ *             armar la compra de una campaña sin mirar el resto del catálogo.
+ *
+ * ERAN DOS BOOLEANOS SUELTOS (`todos` y `soloOferta`) y eso daba cuatro
+ * combinaciones para tres estados que tienen sentido: "todos + sólo con
+ * oferta" mostraba los que tienen oferta y no hay que comprar, que no es
+ * ninguna de las tres preguntas que alguien se hace. Además había que
+ * encontrar dos botones en dos lugares distintos de la pantalla para llegar a
+ * un estado.
+ */
+export type VistaCompras = "todos" | "sugerido" | "oferta";
 
 export type FilaCompra = {
   sku: string;
@@ -1626,7 +1642,6 @@ export type FilaCompra = {
 
 export type DashboardCompras = {
   filas: FilaCompra[];
-  recortada: boolean;
   ventana: number;
   /**
    * Los días de cobertura con los que se calculó el sugerido.
@@ -1657,19 +1672,14 @@ export type DashboardCompras = {
    */
   sellInFoto: string | null;
   /**
-   * POR QUÉ LA TABLA SALIÓ VACÍA, en números. Los dos vienen en 0 salvo que
-   * `filas` esté vacía: es ahí donde hacen falta, para que la pantalla pueda
-   * decir "no hay nada que reponer, pero hay 23 artículos acá" en vez de
-   * quedarse en blanco como si el filtro no hubiera encontrado nada.
+   * CUANTOS ARTICULOS ENCONTRO EL FILTRO, sin mirar la vista.
    *
-   * `ocultosSinSugerido` son los que el filtro SÍ encontró y el cálculo no
-   * pidió reponer --se les pueden cargar cantidades a mano igual--, y
-   * `ocultosSinOferta` cuántos más aparecerían apagando "dejar sólo con
-   * oferta". Van separados porque son dos botones distintos los que los
-   * destraban.
+   * Viene en 0 salvo que `filas` esté vacía: es ahí donde hace falta, para que
+   * la pantalla pueda decir "en esta vista no hay nada, pero el filtro tiene 23
+   * artículos" y ofrecer el salto a `todos`, en vez de quedarse en blanco como
+   * si la marca no existiera.
    */
-  ocultosSinSugerido: number;
-  ocultosSinOferta: number;
+  articulosDelFiltro: number;
   comprasHasta: string | null;
   generadoEn: string;
 };
