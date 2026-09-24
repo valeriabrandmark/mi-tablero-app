@@ -960,7 +960,13 @@ export function porQueSugerido(
         : "";
     l.push(
       "",
-      `Lo que se vendió en estos ${f.diasRitmo} días se compró con` +
+      // SIN NOMBRAR LOS DIAS, a propósito. Este promedio se calcula sobre la
+      // ventana entera y no sobre `diasRitmo`, que es por artículo: poner acá
+      // el número del ritmo decía "en estos 100 días" en una fila y "en estos
+      // 120" en la de al lado, por un motivo que no tiene nada que ver con lo
+      // que se está explicando. (Da lo mismo igual: si el artículo no existía
+      // hace 110 días, no hay ventas ahí para promediar.)
+      `Lo que se vendió en la ventana se había comprado con` +
         ` ${f.sellInVendidoPct.toFixed(1)} % de sell in${sobre}.`,
     );
 

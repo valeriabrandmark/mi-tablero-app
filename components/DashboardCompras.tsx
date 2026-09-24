@@ -913,8 +913,14 @@ export default function DashboardComprasPage({
               cayo ? "text-amber-400" : "text-muted"
             }`}
             title={
-              `Lo que se vendió en estos ${f.diasRitmo} días se había comprado con ` +
-              `${f.sellInVendidoPct.toFixed(2)} % de descuento.` +
+              // LOS DIAS SON LOS DE LA VENTANA ELEGIDA, no los de `diasRitmo`.
+              // Este promedio se calcula sobre la ventana entera; `diasRitmo`
+              // es por artículo --se acorta en los que empezaron a venderse
+              // hace poco-- y ponerlo acá hacía que el cartel dijera "en estos
+              // 100 días" en una fila y "120" en la de al lado, por un motivo
+              // que no viene al caso.
+              `Lo que se vendió en los últimos ${data?.ventana ?? filtros.ventana ?? VENTANA_POR_DEFECTO} días ` +
+              `se había comprado con ${f.sellInVendidoPct.toFixed(2)} % de descuento.` +
               (parcial
                 ? ` Ojo: sólo el ${Math.round(cob * 100)} % de esas unidades tiene el dato cargado, así que es aproximado.`
                 : "") +
