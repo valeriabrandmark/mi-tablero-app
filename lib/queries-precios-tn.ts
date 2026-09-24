@@ -94,6 +94,36 @@ const OBJETIVO = `
 `;
 
 /**
+ * UNA PROPUESTA QUE PROPONE EL PRECIO QUE YA ESTA PUESTO.
+ *
+ * ---------------------------------------------------------------------------
+ * ES LO QUE HIZO QUE 151 AUTORIZACIONES NO ESCRIBIERAN NADA, y conviene contar
+ * el caso entero porque desde la pantalla era invisible.
+ *
+ * Cuando la competencia esta POR DEBAJO de nuestro piso, el motor calcula el
+ * objetivo (2 % abajo del mercado), lo sube al piso porque no se vende a
+ * perdida, y ahi el precio resultante es el que ya estaba: `accion` queda en
+ * "mantener" y `precio_propuesto` sale igual a `precio_actual`. No hay nada
+ * que escribir y esta bien que no lo haya.
+ *
+ * Pero la clasificacion mira el OBJETIVO --no el precio propuesto-- asi que
+ * esas filas caian en "mas caros que la competencia" con un numero sugerido
+ * mas bajo al lado. Se tildaban, se autorizaban, y despues `precios aplicar`
+ * las vetaba una por una con "el precio vigente ya es el aprobado" y las
+ * marcaba vencidas. Desde el tablero se veia asi: la barra llegaba al final,
+ * no aparecia ningun cambio aplicado, y al recargar era como si nunca se
+ * hubiera autorizado nada.
+ *
+ * Asi que se declara una vez y se usa en los dos lados: para sacarlas de la
+ * tarjeta equivocada, y --sobre todo-- para que NINGUN camino de aprobacion
+ * pueda poner en cola algo que no tiene precio nuevo que escribir.
+ * ---------------------------------------------------------------------------
+ */
+const SIN_CAMBIO = `
+  p.precio_propuesto is not distinct from p.precio_actual
+`;
+
+/**
  * En qué grupo de alerta cae cada propuesta.
  *
  * El orden de los `when` ES la prioridad: una propuesta que está bajo el piso
@@ -135,11 +165,26 @@ const CLASIFICACION = `
     --
     -- Y va antes de "caros" porque decir "más caros que la competencia"
     -- promete que se puede bajar. No se puede: bajar más es vender a pérdida.
-    when p.estado = 'aplicada'
-         and p.referencia_competencia is not null
+    --
+    -- Y NO HACE FALTA QUE YA SE HAYA ESCRITO. Antes esta rama pedia el estado
+    -- 'aplicada', y con eso las que todavia estaban pendientes --el
+    -- mismo articulo, la misma imposibilidad, un dia antes-- se iban derecho a
+    -- "mas caros". Eran 83 en la ultima corrida y son las que se autorizaron
+    -- para nada. Lo que define al grupo no es quien escribio el precio, es que
+    -- NO HAY OTRO PRECIO POSIBLE: el mercado esta abajo del piso y el motor no
+    -- propone moverse. Ver SIN_CAMBIO, sin backticks porque esto viaja
+    -- dentro de un template literal de JS.
+    --
+    -- Y SE MIDE CONTRA EL OBJETIVO, no contra el mercado pelado, por lo mismo
+    -- que "en precio" (ver OBJETIVO): lo que el motor sube hasta el piso es el
+    -- objetivo. Con la referencia se escapaba el caso en que el mercado queda
+    -- un peso ARRIBA del piso y el objetivo --2 % mas abajo-- queda debajo: el
+    -- motor no puede moverse igual, y esa fila se iba sola a "caros".
+    when p.referencia_competencia is not null
          and p.piso is not null
-         and ${PRECIO_VIGENTE} > p.referencia_competencia
-         and p.referencia_competencia < p.piso
+         and ${PRECIO_VIGENTE} > ${OBJETIVO}
+         and ${OBJETIVO} < p.piso
+         and (p.estado = 'aplicada' or ${SIN_CAMBIO})
       then 'corregidos_sin_competir'
     -- CAROS Y BARATOS TAMBIEN CONTRA EL OBJETIVO, y no es opcional: si "en
     -- precio" midiera contra el objetivo y estas dos contra el mercado, un
@@ -663,6 +708,12 @@ export async function decidirPropuesta(
       `update precios.propuesta
           set estado = $2, decidida_por = $3, decidida_en = now()
         where id = $1 and estado = 'pendiente'
+          -- RECHAZAR SIEMPRE SE PUEDE; APROBAR LO QUE YA ESTA PUESTO, NO.
+          -- Ver SIN_CAMBIO: aprobar una propuesta cuyo precio propuesto es
+          -- el que la tienda ya tiene la manda a una cola que despues la veta
+          -- y la marca vencida. La fila no se actualiza y la ruta contesta que
+          -- no se pudo, igual que cuando otra persona ya la decidio.
+          and ($2 <> 'aprobada' or precio_propuesto is distinct from precio_actual)
         returning id`,
       [id, decision, quien],
     );
@@ -694,6 +745,12 @@ export async function decidirPropuesta(
         -- la decidio. El comando de aplicar vuelve a mirar el piso contra el
         -- costo de HOY antes de escribir, asi que son dos puertas y no una.
         and ($2::numeric >= piso or piso is null)
+        -- Y TAMPOCO A MANO SE AUTORIZA EL PRECIO QUE YA ESTA. Se compara el
+        -- numero TECLEADO contra el precio actual, y no precio_propuesto
+        -- contra precio_actual: en este mismo update precio_propuesto esta
+        -- por pasar a valer $2, asi que mirar la columna vieja dejaria pasar
+        -- justo el caso que se quiere atajar.
+        and $2::numeric is distinct from precio_actual
       returning id`,
     [id, precioManual, quien],
   );
@@ -742,6 +799,13 @@ export async function aprobarFiltradas(
               ${cuerpo}
                 and p.estado = 'pendiente'
                 and p.precio_propuesto is not null
+                -- LA RED DE ABAJO DE TODO, y no sobra con la clasificacion.
+                -- Ver SIN_CAMBIO (sin backticks: template literal de JS): una
+                -- propuesta que propone el precio que ya
+                -- esta puesto no se autoriza por ningun camino, caiga en la
+                -- tarjeta que caiga. El contador de al lado usa el mismo
+                -- filtro, asi que no pueden decir numeros distintos.
+                and not (${SIN_CAMBIO})
                 and ${CLASIFICACION} <> 'no_competible'
                 -- Los grupos informativos no se aprueban en bloque aunque se
                 -- los esté mirando. Los que están en precio son de accion
@@ -786,6 +850,7 @@ export async function contarAprobables(filtros: FiltrosPreciosTn): Promise<{
        ${cuerpo}
         and p.estado = 'pendiente'
         and p.precio_propuesto is not null
+        and not (${SIN_CAMBIO})
         and ${CLASIFICACION} <> 'no_competible'
         and ${CLASIFICACION} not in (${GRUPOS_INFORMATIVOS_SQL})`,
     params,
@@ -1181,6 +1246,11 @@ export async function aprobarPorIds(ids: number[], quien: string): Promise<numbe
       where id = any($1::bigint[])
         and estado = 'pendiente'
         and precio_propuesto is not null
+        -- Ver SIN_CAMBIO. Aca va escrito sin el alias porque este update no
+        -- lo tiene; es la misma condicion. Las que quedan afuera hacen que el
+        -- total devuelto sea menor que el pedido, que es lo que la pantalla
+        -- necesita para poder decirlo en vez de mentir un "6 autorizadas".
+        and precio_propuesto is distinct from precio_actual
       returning id`,
     [limpios, quien],
   );

@@ -122,8 +122,17 @@ function enCastellano(nombre: string): string {
     "Leer nuestros precios de Tienda Nube": "Leyendo nuestros precios",
     "Bajar precios de la competencia": "Bajando precios de la competencia",
     "Proponer precios": "Calculando las propuestas",
+    Pruebas: "Probando el motor",
     Simulacro: "Simulacro (no escribe nada)",
-    Aplicar: "Escribiendo en Tienda Nube",
+    // EL NOMBRE DEL PASO, COPIADO DEL YAML. Decia `Aplicar`, que es el nombre
+    // del COMANDO y no el del paso: el paso se llama "Escribir los precios
+    // aprobados" desde que ese workflow hace dos cosas, asi que la entrada
+    // nunca coincidia y la barra mostraba el nombre crudo justo en el minuto
+    // que importa --el unico paso que toca la tienda.
+    "Escribir los precios aprobados": "Escribiendo en Tienda Nube",
+    "Simulacro de correccion de tachados": "Simulacro de los tachados",
+    "Corregir los tachados": "Corrigiendo los precios tachados",
+    "Sonda de oferta": "Sondeando la oferta",
   };
   return mapa[limpio] ?? limpio;
 }
