@@ -2036,3 +2036,65 @@ export type CambioPrecioTn = {
   margen: number | null;
   yaSeDeshizo: boolean;
 };
+
+
+/* -------------------------------------------------------------------------
+ *  Rentabilidad y markup por proveedor
+ *
+ *  MARKUP NO ES MARGEN, y toda esta pantalla vive de esa distinción:
+ *
+ *    markup  se mide SOBRE EL COSTO   — cuánto le sumo a lo que pagué
+ *    margen  se mide SOBRE LA VENTA   — cuánto me queda de lo que cobré
+ *
+ *  Un markup del 100 % es un margen del 50 %. La planilla con la que compras
+ *  discutía markup los confundía, y además dividía un precio CON IVA por un
+ *  costo SIN IVA: daba 112,96 % donde el markup real era 76 %.
+ * ------------------------------------------------------------------------- */
+
+/** Los números del negocio, no de un artículo. */
+export type ResumenRentabilidad = {
+  corridaId: number;
+  articulos: number;
+  proveedores: number;
+  /** Artículos donde el mercado no permite el markup que hace falta. */
+  noDan: number;
+  /** Fracción de la facturación que absorbemos en fletes. */
+  fletePct: number;
+  /** Costo de las cuotas YA ponderado por cuánto se usan. */
+  cuotasPct: number;
+  /** Qué parte de lo facturado se pagó en cuotas. Explica el número de arriba. */
+  parteEnCuotas: number;
+  /**
+   * De cuántos pedidos salen el flete y las cuotas.
+   *
+   * VIAJA A PROPÓSITO. Con 38 pedidos estos porcentajes sirven para decidir y
+   * no para jurar, y una pantalla que los muestre sin decir de dónde salen los
+   * convierte en una ley.
+   */
+  pedidosMedidos: number;
+};
+
+/** Un renglón por proveedor. Todos los markups son MEDIANAS, no promedios. */
+export type ProveedorRentabilidad = {
+  proveedor: string;
+  articulos: number;
+  markupActual: number | null;
+  markupNecesario: number | null;
+  markupMercado: number | null;
+  margenCompleto: number | null;
+  noDan: number;
+};
+
+/** El detalle de un artículo. */
+export type FilaRentabilidad = {
+  sku: string;
+  descripcion: string;
+  marca: string | null;
+  costo: number | null;
+  precioActual: number | null;
+  mejorCompetencia: number | null;
+  markupActual: number | null;
+  markupNecesario: number | null;
+  markupMercado: number | null;
+  margenCompleto: number | null;
+};

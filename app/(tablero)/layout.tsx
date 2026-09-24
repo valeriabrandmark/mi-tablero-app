@@ -72,6 +72,15 @@ const NAV: ItemNav[] = [
       // distinta — de hecho es la única entrada del tablero que no ven todos
       // los administradores (ver `admin_tn` en lib/permisos.ts).
       { href: "/precios-tn", label: "Precios TN — Comparador", icono: "precios" },
+      // La rentabilidad va al lado del comparador y no en otra rama: las dos
+      // salen de la MISMA corrida y se miran en la misma conversacion --a
+      // cuanto vender, y si a ese costo se puede--. Hereda el permiso del
+      // modulo por el prefijo /precios-tn/ (ver lib/permisos.ts).
+      {
+        href: "/precios-tn/rentabilidad",
+        label: "Rentabilidad por proveedor",
+        icono: "precios",
+      },
     ],
   },
 ];

@@ -126,11 +126,20 @@ export const ALERTAS = [
     // corrigió y lo que queda es una decisión de si este canal sirve para
     // estos productos.
     clave: "corregidos_sin_competir",
-    titulo: "Corregidos pero sin competir",
+    titulo: "Al mínimo y sin competir",
+    // EL TÍTULO DECÍA "Corregidos pero sin competir" Y DEJÓ DE SER CIERTO.
+    //
+    // La tarjeta pedía que el precio ya se hubiera escrito, así que las mismas
+    // filas todavía pendientes caían en "más caros que la competencia" con un
+    // precio sugerido más bajo al lado — uno que el piso no deja poner. Se
+    // autorizaron 151 así y no se escribió ninguna. Ahora entran las dos: las
+    // que corregimos y las que ya estaban en su mínimo. Lo que define al grupo
+    // no es quién puso el precio, es que no hay otro posible.
     detalle:
-      "Ya se les escribió el precio nuevo y quedaron igual por encima del " +
-      "mercado: la competencia vende por debajo de nuestro piso. No hay nada " +
-      "que autorizar acá; hay que decidir si conviene seguir vendiéndolos.",
+      "Están en el precio más bajo que podemos hacer y aun así quedan por " +
+      "encima del mercado: la competencia vende por debajo de nuestro piso. " +
+      "No hay nada que autorizar acá —el sugerido sería el mismo precio que " +
+      "ya está puesto—; hay que decidir si conviene seguir vendiéndolos.",
     tono: "aviso",
   },
   {

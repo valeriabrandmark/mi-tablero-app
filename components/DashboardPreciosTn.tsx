@@ -483,6 +483,29 @@ function CostoConOferta({ fila }: { fila: FilaPrecioTn }) {
   );
 }
 
+/**
+ * Si esta fila tiene un precio NUEVO que escribir.
+ *
+ * ---------------------------------------------------------------------------
+ * NO ALCANZA CON QUE HAYA PRECIO PROPUESTO. Cuando la competencia queda por
+ * debajo de nuestro piso, el motor sube el objetivo hasta el piso y termina
+ * proponiendo el precio que la tienda YA TIENE. La fila muestra igual un
+ * sugerido --el objetivo, que es mas bajo-- y eso invitaba a autorizarla.
+ *
+ * Se autorizaron 151 asi. Ninguna se escribio: el comando de aplicar las veta
+ * una por una con "el precio vigente ya es el aprobado" y las marca vencidas,
+ * asi que al volver a la pantalla no quedaba ni el cambio ni la autorizacion.
+ * Un boton que no puede hacer nada no se muestra.
+ *
+ * El servidor lo verifica igual en cada camino de aprobacion --ver `SIN_CAMBIO`
+ * en `queries-precios-tn`--; esto es para que no haya que apretarlo para
+ * enterarse.
+ * ---------------------------------------------------------------------------
+ */
+function hayPrecioNuevo(f: FilaPrecioTn): boolean {
+  return f.precioPropuesto !== null && f.precioPropuesto !== f.precioActual;
+}
+
 function MarcaDeEstado({ estado }: { estado: string }) {
   const marca = MARCAS_DE_ESTADO[estado];
   // Pendiente sin precio propuesto cae acá y no tiene marca: no se decidió
@@ -526,11 +549,13 @@ function columnas(
       titulo: "✓",
       ayuda:
         "Tildá varias y autorizalas juntas con el botón de arriba. Sólo tienen casilla las " +
-        "que están pendientes y tienen precio propuesto. Las ya decididas muestran en qué " +
+        "que están pendientes y proponen un precio DISTINTO del que ya está puesto: si el " +
+        "piso no deja bajar más, no hay nada que escribir y autorizarla no haría nada. " +
+        "Las ya decididas muestran en qué " +
         "estado quedaron: ✓ escrita en la tienda, ⏳ autorizada esperando su turno, ✕ " +
         "rechazada, y ⌛ vencida porque el precio cambió antes de escribirla.",
       celda: (f) =>
-        f.estado === "pendiente" && f.precioPropuesto !== null ? (
+        f.estado === "pendiente" && hayPrecioNuevo(f) ? (
           <input
             type="checkbox"
             checked={seleccion.has(f.id)}
@@ -698,6 +723,19 @@ function columnas(
           <span className="text-muted text-xs">{f.estado}</span>
         ) : f.precioPropuesto === null ? (
           <span className="text-muted text-xs">sin propuesta</span>
+        ) : !hayPrecioNuevo(f) ? (
+          // Ver `hayPrecioNuevo`. Dice POR QUE no hay boton, que es lo que
+          // faltaba: un hueco se lee como "algo esta roto", y el boton que
+          // habia antes se leia como "esto va a cambiar el precio".
+          <span
+            className="text-muted text-xs"
+            title={
+              "El precio propuesto es el que la tienda ya tiene: el piso no deja bajar más. " +
+              "No hay nada que escribir. Podés poner un precio a mano si querés otro."
+            }
+          >
+            sin cambio
+          </span>
         ) : (
           <div className="flex justify-end gap-1.5">
             <button
@@ -1199,7 +1237,7 @@ export default function DashboardPreciosTn() {
    * conviene lo contrario: lo que se tilda es lo que se está mirando.
    */
   const seleccionables = useMemo(
-    () => filas.filter((f) => f.estado === "pendiente" && f.precioPropuesto !== null),
+    () => filas.filter((f) => f.estado === "pendiente" && hayPrecioNuevo(f)),
     [filas],
   );
 
