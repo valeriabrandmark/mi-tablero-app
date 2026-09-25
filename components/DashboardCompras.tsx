@@ -10,6 +10,7 @@ import {
   aTxt,
   aUnidades,
   cantidadSugerida,
+  type Combinacion,
   COLUMNAS_SIGMA,
   DESCUENTO_MAXIMO,
   descuentoValido,
@@ -31,6 +32,7 @@ import {
   RECORTES_COMPRAS,
   RECORTES_POR_DEFECTO,
   recortesValidos,
+  opcionesCruzadas,
 } from "@/lib/compras";
 import { vacio as sinValores } from "@/lib/filtros";
 import {
@@ -58,6 +60,7 @@ type Opciones = {
   proveedores: string[];
   marcas: string[];
   grupos: string[];
+  combinaciones: Combinacion[];
   meses: string[];
 };
 type Respuesta = DashboardCompras & { opciones: Opciones | null };
@@ -262,6 +265,26 @@ export default function DashboardComprasPage({
     );
 
   const filas = useMemo(() => data?.filas ?? [], [data]);
+
+  // Los tres selectores se recortan entre sí. Se recalcula en el navegador
+  // --son 380 combinaciones-- así que elegir un proveedor achica la lista de
+  // marcas al instante, sin ir al servidor.
+  const combinaciones = useMemo(
+    () => data?.opciones?.combinaciones ?? [],
+    [data],
+  );
+  const opcionesGrupo = useMemo(
+    () => opcionesCruzadas("grupo", combinaciones, filtros),
+    [combinaciones, filtros],
+  );
+  const opcionesProveedor = useMemo(
+    () => opcionesCruzadas("proveedor", combinaciones, filtros),
+    [combinaciones, filtros],
+  );
+  const opcionesMarca = useMemo(
+    () => opcionesCruzadas("marca", combinaciones, filtros),
+    [combinaciones, filtros],
+  );
 
   /**
    * La orden como está ahora: el sugerido de cada artículo, con lo editado
@@ -1147,19 +1170,19 @@ export default function DashboardComprasPage({
           <SelectorMultiple
             etiqueta="Empresa"
             valores={filtros.grupo}
-            opciones={data?.opciones?.grupos ?? []}
+            opciones={opcionesGrupo}
             onChange={(v) => cambiar({ ...filtros, grupo: v })}
           />
           <SelectorMultiple
             etiqueta="Proveedor"
             valores={filtros.proveedor}
-            opciones={data?.opciones?.proveedores ?? []}
+            opciones={opcionesProveedor}
             onChange={(v) => cambiar({ ...filtros, proveedor: v })}
           />
           <SelectorMultiple
             etiqueta="Marca"
             valores={filtros.marca}
-            opciones={data?.opciones?.marcas ?? []}
+            opciones={opcionesMarca}
             onChange={(v) => cambiar({ ...filtros, marca: v })}
           />
 

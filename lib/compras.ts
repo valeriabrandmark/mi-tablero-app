@@ -20,7 +20,7 @@ import {
   PLAZO_REPOSICION_DIAS,
 } from "@/lib/stock";
 import type { CeldaXlsx, ColumnaXlsx, LibroXlsx } from "@/lib/xlsx";
-import type { FilaCompra, RecorteCompras } from "@/lib/types";
+import type { FilaCompra, FiltrosCompras, RecorteCompras } from "@/lib/types";
 
 /** Sobre cuántos meses se mide la rentabilidad de venta del artículo. */
 export const MESES_RENTABILIDAD = 3;
@@ -996,4 +996,49 @@ export function porQueSugerido(
 
   l.push("", `Sugerido: ${f.sugerido} u.`);
   return l;
+}
+
+
+/** Una combinación que existe de verdad en el maestro. */
+export type Combinacion = {
+  grupo: string | null;
+  proveedor: string | null;
+  marca: string | null;
+};
+
+/**
+ * Las opciones de un selector, según lo que ya está elegido en los otros.
+ *
+ * SI FILTRO EL PROVEEDOR IMPROM, MARCA TIENE QUE OFRECER SUS CUATRO MARCAS Y
+ * NO LAS 350. Antes cada selector mostraba la lista entera, así que había que
+ * saberse de memoria qué marca es de qué proveedor: elegir una que no convive
+ * con el proveedor elegido devolvía una pantalla vacía, y no había forma de
+ * darse cuenta mirando.
+ *
+ * El cruce es con los OTROS filtros, nunca con el propio: si Marca se filtrara
+ * a sí misma, al elegir NUK desaparecerían las demás y no se podría agregar
+ * una segunda.
+ *
+ * LO YA ELEGIDO SIEMPRE APARECE, aunque el cruce lo deje afuera. Si alguien
+ * elige la marca NUK y después el proveedor Carrefour, NUK tiene que seguir
+ * visible --y marcada-- para poder destildarla. Sin esto el filtro quedaría
+ * puesto, invisible y sin pantalla que lo explique.
+ */
+export function opcionesCruzadas(
+  campo: "grupo" | "proveedor" | "marca",
+  combinaciones: Combinacion[],
+  filtros: FiltrosCompras,
+): string[] {
+  const otros = (["grupo", "proveedor", "marca"] as const).filter((c) => c !== campo);
+  const convive = combinaciones.filter((c) =>
+    otros.every((o) => {
+      // Sin nada elegido en ese filtro, no recorta: no es lo mismo "no elegí
+      // proveedor" que "elegí una lista vacía de proveedores".
+      const elegidos = filtros[o] ?? [];
+      return !elegidos.length || (c[o] !== null && elegidos.includes(c[o]));
+    }),
+  );
+  const valores = new Set<string>(filtros[campo] ?? []);
+  for (const c of convive) if (c[campo]) valores.add(c[campo]);
+  return [...valores].sort((a, b) => a.localeCompare(b, "es"));
 }

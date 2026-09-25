@@ -864,30 +864,38 @@ async function getOpcionesComprasDirecto() {
     "",
     COBERTURA_OBJETIVO_DIAS,
   ];
-  const [proveedores, marcas, grupos, meses] = await Promise.all([
-    query<{ v: string }>(
-      `${BASE} select distinct proveedor as v from calculada
-       where proveedor is not null order by 1`,
-      params,
-    ),
-    query<{ v: string }>(
-      `${BASE} select distinct marca as v from calculada
-       where marca is not null order by 1`,
-      params,
-    ),
-    // Igual que en Stock: salen de los datos, así que un grupo nuevo en la
-    // tabla aparece en el selector sin tocar código.
-    query<{ v: string }>(
-      `${BASE} select distinct grupo as v from calculada
-       where grupo is not null order by 1`,
+
+  // SE TRAEN LAS COMBINACIONES, NO TRES LISTAS SUELTAS.
+  //
+  // Antes eran tres `select distinct` --uno por selector-- y cada uno corría
+  // el CTE entero: tres pasadas por el maestro para llenar tres desplegables.
+  // Peor que el costo: con las listas sueltas, el selector de Marca ofrecía
+  // las 350 marcas aunque estuviera filtrado un proveedor que tiene cuatro.
+  //
+  // Una sola consulta devuelve las ternas (grupo, proveedor, marca) que
+  // existen de verdad. Son 380 filas: el navegador puede cruzarlas al vuelo y
+  // cada selector muestra solo lo que convive con lo ya elegido, sin volver
+  // al servidor.
+  const [combinaciones, meses] = await Promise.all([
+    query<{ grupo: string | null; proveedor: string | null; marca: string | null }>(
+      `${BASE} select distinct grupo, proveedor, marca from calculada`,
       params,
     ),
     getMeses(),
   ]);
+
+  const unicos = (valores: (string | null)[]) =>
+    [...new Set(valores.filter((v): v is string => !!v))].sort((a, b) =>
+      a.localeCompare(b, "es"),
+    );
+
   return {
-    proveedores: proveedores.map((r) => r.v),
-    marcas: marcas.map((r) => r.v),
-    grupos: grupos.map((r) => r.v),
+    // Las tres listas completas se siguen mandando: son las que ve el selector
+    // cuando no hay nada elegido, y el piso al que vuelve al limpiar.
+    proveedores: unicos(combinaciones.map((c) => c.proveedor)),
+    marcas: unicos(combinaciones.map((c) => c.marca)),
+    grupos: unicos(combinaciones.map((c) => c.grupo)),
+    combinaciones,
     meses,
   };
 }
