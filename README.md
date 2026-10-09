@@ -497,7 +497,8 @@ segura y no la peligrosa.
 ### Cómo se cambian los objetivos
 
 **Con un Excel en el repo del pipeline**, como los costos:
-`objetivos_mensuales/AAAA-MM.xlsx` en
+`objetivos_mensuales/2026-10 objetivos.xlsx` (el mes, y « objetivos» para no
+confundirlo con la lista de costos, que se llama `2026-10.xlsx`) en
 [tablero_quo](https://github.com/valeriabrandmark/tablero_quo), una fila por
 objetivo (mes comercial, nombre, SKU o MIX, a qué vendedores aplica y cuánto).
 Se copia `PLANTILLA.xlsx`, o el archivo del mes anterior, se sube a `main`, y
