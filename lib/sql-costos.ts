@@ -44,11 +44,25 @@
  * `vigente_desde <= current_date` es lo que impide que una lista cargada con
  * fecha futura (el aumento que entra el lunes) valorice el stock de hoy.
  */
-export const ULTIMO_COSTO_VIGENTE = `
-  select distinct on (sku) sku, costo_real, costo_teorico
+const ULTIMO_TRAMO = `
   from bronze.costos_historicos
   where costo_real > 0 and vigente_desde <= current_date
   order by sku, mes_comercial desc, vigente_desde desc`;
+
+export const ULTIMO_COSTO_VIGENTE = `
+  select distinct on (sku) sku, costo_real, costo_teorico${ULTIMO_TRAMO}`;
+
+/**
+ * El mismo tramo que `ULTIMO_COSTO_VIGENTE`, con las dos ofertas de costo.
+ *
+ * Va aparte y no como columnas de más en el de arriba porque `oferta_pct`
+ * también es una columna de `gold.fact_ventas` (con otro significado: el
+ * descuento de la factura), y varias consultas que usan el de arriba la
+ * nombran sin calificar. Sumarla ahí las volvería ambiguas.
+ */
+export const ULTIMO_COSTO_CON_OFERTAS = `
+  select distinct on (sku) sku, costo_real, costo_teorico,
+         oferta_pct as oferta_prov_pct, desc_propio_pct as oferta_propia_pct${ULTIMO_TRAMO}`;
 
 /**
  * Una fila por (sku, mes_comercial): el tramo que rige HOY dentro de cada mes.
