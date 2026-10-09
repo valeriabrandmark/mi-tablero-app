@@ -52,6 +52,11 @@ export const MIN_UNIDADES_MARGEN = 20;
  * cargado y 0 de avance) para cuando empiece a facturar.
  *
  * El orden es el del tablero de Data Studio y define el orden del nav.
+ *
+ * HAY UNA COPIA en tablero_quo: `VENDEDORES_CON_PAGINA` de
+ * `objetivos_planilla.py`, que frena un Excel de objetivos con un vendedor que
+ * no esté acá (se cargaría y no se vería en ningún lado). Si se suma alguien,
+ * se suma en los dos lados.
  */
 export const VENDEDORES_OBJETIVOS = ["SILVIO", "GERMAN", "PABLO", "RICARDO"] as const;
 

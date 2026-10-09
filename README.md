@@ -216,7 +216,8 @@ cruza directo. Los filtros se aplican **sobre la tabla de objetivos**, no sobre
 las ventas: si no, un vendedor sin ninguna venta del mes desaparecería de la
 tabla en vez de aparecer con 0 de avance, que es justo la fila a mirar.
 
-Para cambiar un objetivo o sumar un grupo se toca solo la base, no el código.
+Para cambiar un objetivo o sumar un grupo no se toca el código: se edita el
+Excel del mes (ver «Cómo se cambian los objetivos»).
 
 ### % de facturación vencida
 
@@ -495,56 +496,22 @@ segura y no la peligrosa.
 
 ### Cómo se cambian los objetivos
 
-Todo se toca en la base, sin desplegar nada: el tablero lee en vivo, así que el
-cambio se ve al recargar.
+**Con un Excel en el repo del pipeline**, como los costos:
+`objetivos_mensuales/AAAA-MM.xlsx` en
+[tablero_quo](https://github.com/valeriabrandmark/tablero_quo), una fila por
+objetivo (mes comercial, nombre, SKU o MIX, a qué vendedores aplica y cuánto).
+Se copia `PLANTILLA.xlsx`, o el archivo del mes anterior, se sube a `main`, y
+la corrida siguiente del orquestador lo carga en estas tres tablas. Cómo se
+llena y qué frena está en el README de ese repo, en «El Excel de objetivos de
+los vendedores».
 
-**Cambiarle el número a un objetivo**
+La página se actualiza sola cuando termina esa corrida: la caché de las
+consultas lleva en la clave la hora de la última corrida (ver «La caché de las
+consultas»).
 
-```sql
-update gold.objetivos
-set cantidad = 300
-where mes_comercial = '2026-08' and vendedor = 'GERMAN'
-  and grupo = 'IMPULSE TRUE LOVE 150 ML';
-```
-
-**Copiar los objetivos de un vendedor a otro, a la mitad**
-
-```sql
-update gold.objetivos r
-set cantidad = round(s.cantidad / 2)
-from gold.objetivos s
-where s.vendedor = 'SILVIO' and r.vendedor = 'GERMAN'
-  and r.grupo = s.grupo and r.mes_comercial = s.mes_comercial;
-```
-
-**Abrir el mes siguiente** copiando el mes actual:
-
-```sql
-insert into gold.objetivos (mes_comercial, vendedor, grupo, cantidad)
-select '2026-09', vendedor, grupo, cantidad
-from gold.objetivos where mes_comercial = '2026-08'
-on conflict (mes_comercial, vendedor, grupo) do nothing;
-```
-
-**Sumar un grupo nuevo** — los tres pasos, en orden:
-
-```sql
--- 1. El grupo: cómo se matchea y cómo se mide
-insert into gold.objetivos_grupo (grupo, criterio, metrica, orden, descripcion)
-values ('SEDAL SHAMPOO', 'sku', 'unidades', 6, 'MIX de shampoos Sedal');
-
--- 2. Qué SKUs lo componen (o la marca, o las empresas)
-insert into gold.objetivos_grupo_item (grupo, valor)
-values ('SEDAL SHAMPOO', 'XX00001'), ('SEDAL SHAMPOO', 'XX00002');
-
--- 3. El objetivo de cada vendedor
-insert into gold.objetivos (mes_comercial, vendedor, grupo, cantidad)
-select '2026-08', v, 'SEDAL SHAMPOO', 240
-from unnest(array['SILVIO','GERMAN','PABLO','RICARDO']) as v;
-```
-
-**Sacar un grupo**: `delete from gold.objetivos_grupo where grupo = '...'`. Los
-items y los objetivos se van solos, por el `on delete cascade`.
+**No se tocan más a mano.** Cada Excel reemplaza su mes entero, así que un
+`update` sobre un mes que tiene archivo dura hasta que alguien edita ese
+archivo y lo vuelve a subir. Si hay que corregir algo, se corrige en el Excel.
 
 Para ver cómo quedó todo:
 
@@ -554,11 +521,6 @@ from gold.objetivos o
 join gold.objetivos_grupo g on g.grupo = o.grupo
 order by o.mes_comercial desc, o.vendedor, g.orden;
 ```
-
-Dos cosas para no pisar: el vendedor va **en mayúsculas y exacto**, y si el
-grupo no existe en `objetivos_grupo` el `insert` falla por la foreign key —
-que es lo que queremos, porque un objetivo huérfano no se mostraría en ningún
-lado.
 
 ---
 
