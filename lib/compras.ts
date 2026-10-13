@@ -1129,8 +1129,12 @@ export function opcionesSellInDesde(
     .filter((r) => r.mes || r.evento)
     .map((r) => ({
       valor: valorSellIn(r.mes, r.evento),
+      // LA ETIQUETA ES EL NOMBRE DE LA COLUMNA Y NADA MAS. De qué mes salen
+      // los costos no va acá: en un desplegable de 23 renglones es ruido, y
+      // además sólo lo necesitan dos de ellos. Se dice una vez, en el detalle
+      // del panel, que es donde se está leyendo la plata.
       etiqueta: !r.mes
-        ? `${r.evento} · costos de ${nombreDelMes(ultimoConMes)}`
+        ? r.evento
         : r.evento
           ? `${nombreDelMes(r.mes)} · ${r.evento}`
           : nombreDelMes(r.mes),

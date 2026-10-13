@@ -132,7 +132,12 @@ revisar(
 const promo = OPCIONES[5];
 revisar("la promo vale con el mes vacio", promo.valor, "|HOT SALE");
 revisar("pero sus costos salen del ultimo mes", promo.mes, "2026-10");
-revisar("y la etiqueta lo dice", promo.etiqueta, "HOT SALE · costos de mes 2026-10");
+// LA ETIQUETA ES EL NOMBRE DE LA COLUMNA Y NADA MAS. De que mes salen los
+// costos no va en el desplegable --en 23 renglones es ruido-- sino en el
+// detalle del panel, que es donde se esta leyendo la plata.
+revisar("la etiqueta de la promo es su nombre pelado", promo.etiqueta, "HOT SALE");
+revisar("la del corte lleva mes y evento", OPCIONES[3].etiqueta, "mes 2026-07 · Glam");
+revisar("y la de un mes comun es solo el mes", OPCIONES[0].etiqueta, "mes 2026-10");
 
 // Y ESTA ES LA PRUEBA QUE HABRIA ATAJADO EL BUG. La pantalla rearmaba el value
 // del <select> con valorSellIn(mes, evento) y para una promo daba
