@@ -348,6 +348,15 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
  */
 const PAGINAS_EN_CONSTRUCCION = [
   "/venta-minorista/tienda-nube/analytics",
+  // Posventa quedó en pausa hasta noviembre. NO está frenada por el código
+  // --el extractor carga las cuatro tablas en cada corrida, así que cuando se
+  // retome va a haber un mes de historia-- sino por prioridades.
+  //
+  // Hay además una razón para que todavía no la vea nadie más: los links a
+  // Mercado Libre están armados por patrón y sin confirmar, porque ML no los
+  // documenta. Publicarla antes de verificarlos sería ofrecer botones que
+  // pueden llevar a una página en blanco.
+  "/venta-minorista/mercado-libre/posventa",
 ];
 
 /** `true` si la página todavía se está construyendo. */

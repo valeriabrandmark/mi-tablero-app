@@ -1,5 +1,6 @@
 import EncabezadoCanal from "@/components/EncabezadoCanal";
 import Pestanas, { type Pestana } from "@/components/Pestanas";
+import { enConstruccion } from "@/lib/permisos";
 
 /**
  * Las pestañas del tablero de Mercado Libre. Las tres primeras son las del
@@ -51,7 +52,16 @@ export default function MercadoLibreLayout({
       <h1 className="mb-4">
         <EncabezadoCanal canal="mercado-libre" />
       </h1>
-      <Pestanas pestanas={PESTANAS} />
+      {/* La marca de obra sale de la MISMA lista que usa la barra lateral
+          (PAGINAS_EN_CONSTRUCCION en lib/permisos.ts). Escrita a mano acá
+          habría dos verdades sobre qué está en construcción, y el día que una
+          se publique alguien se olvidaría de la otra. */}
+      <Pestanas
+        pestanas={PESTANAS.map((p) => ({
+          ...p,
+          enConstruccion: enConstruccion(p.href),
+        }))}
+      />
       {children}
     </>
   );

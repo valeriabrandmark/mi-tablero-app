@@ -14,7 +14,13 @@
  */
 
 import { moduloDeRuta, moduloPermiteRuta } from "@/lib/modulos";
-import { puedeEditar, puedeVer, type Permiso } from "@/lib/permisos";
+import {
+  enConstruccion,
+  puedeEditar,
+  puedeVer,
+  puedeVerBorradores,
+  type Permiso,
+} from "@/lib/permisos";
 
 const FALLOS: string[] = [];
 
@@ -127,6 +133,53 @@ const sinNada: Permiso = {
 };
 revisar("un personalizado SIN módulos no puede", puedeVer(sinNada, ACTUALIZAR), false);
 revisar("sin sesión tampoco", puedeVer(null, ACTUALIZAR), false);
+
+// --- Páginas en construcción: las ve sólo el superadmin ---------------------
+//
+// NO ES UN PERMISO SINO UN ESTADO: la ruta sigue en el nav y cualquiera con
+// acceso a la sección la puede abrir, pero adentro sólo el superadmin ve el
+// borrador. El resto ve el cartel de "en producción".
+//
+// Lo que estas pruebas cuidan es que la lista y la puerta digan lo mismo. Una
+// ruta en la lista que la puerta no reconoce --por un typo, por una barra de
+// más-- se publica sin que nadie lo note, que es exactamente lo contrario de
+// lo que se quiso.
+
+const POSVENTA = "/venta-minorista/mercado-libre/posventa";
+
+revisar("Posventa está en construcción", enConstruccion(POSVENTA), true);
+revisar(
+  "y sus subrutas también",
+  enConstruccion(`${POSVENTA}/lo-que-venga`),
+  true,
+);
+revisar(
+  "pero el tablero de Mercado Libre NO",
+  enConstruccion("/venta-minorista/mercado-libre"),
+  false,
+);
+revisar(
+  "ni una ruta que apenas se le parece",
+  enConstruccion("/venta-minorista/mercado-libre/posventa-otra"),
+  false,
+);
+revisar(
+  "Analytics de Tienda Nube sigue en construcción",
+  enConstruccion("/venta-minorista/tienda-nube/analytics"),
+  true,
+);
+
+revisar("el superadmin ve los borradores", puedeVerBorradores({ rol: "superadmin" }), true);
+// El admin ve TODO lo publicado, pero no los borradores. Es la única
+// diferencia entre los dos roles, así que si esta prueba cae, se cayó con ella
+// la razón de que `admin` y `superadmin` sean roles distintos.
+revisar("el admin NO", puedeVerBorradores({ rol: "admin" }), false);
+revisar(
+  "el responsable de Meli tampoco, aunque la sección sea suya",
+  puedeVerBorradores({ rol: "responsable_meli" }),
+  false,
+);
+revisar("sin sesión tampoco", puedeVerBorradores(null), false);
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);
