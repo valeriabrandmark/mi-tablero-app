@@ -34,10 +34,14 @@ export async function GET(request: NextRequest) {
   const ventana =
     VENTANAS_RITMO.find((v) => v === crudaVentana) ?? VENTANA_POR_DEFECTO;
 
-  // El mes viaja como texto y se valida contra la lista real adentro de
-  // `getDashboardCompras`: acá sólo se le pone un largo máximo para que no
-  // entre un parámetro gigante.
-  const mes = sp.get("mes")?.slice(0, 7) || undefined;
+  // LA COLUMNA DEL SELL IN, que no es sólo un mes: puede venir "2026-07" o
+  // "2026-07|Glam". Por eso el recorte ya no es a 7 --eso cortaba el evento y
+  // devolvía siempre la columna común-- sino a un largo que entre cualquier
+  // encabezado de la planilla.
+  //
+  // Se valida contra la lista real adentro de `getDashboardCompras`: acá sólo
+  // se le pone un techo para que no entre un parámetro gigante.
+  const mes = sp.get("mes")?.slice(0, 80) || undefined;
 
   const filtros: FiltrosCompras = {
     proveedor: lista(sp, "proveedor"),

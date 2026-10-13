@@ -1042,3 +1042,53 @@ export function opcionesCruzadas(
   for (const c of convive) if (c[campo]) valores.add(c[campo]);
   return [...valores].sort((a, b) => a.localeCompare(b, "es"));
 }
+
+/* ---------------------------------------------------------------------------
+   QUÉ COLUMNA DEL SELL IN SE ESTÁ MIRANDO.
+
+   La planilla del sell in tiene UNA COLUMNA POR OFERTA, y no todas son un mes:
+
+       1/10/2026           la oferta de octubre                 mes, sin evento
+       1/7/2026 (Glam)     un segundo corte de julio, de GLAM   mes + evento
+       HOT SALE            una promo sin mes                    evento solo
+
+   Antes el selector listaba sólo `mes_comercial`, así que las dos últimas no
+   se podían elegir: `1/7/2026 (Glam)` se veía como "jul 2026" --idéntica a la
+   columna común-- y la consulta filtraba `evento = ''`, de modo que traía la
+   común igual. Estaban cargadas en la base y eran inalcanzables desde la
+   pantalla.
+
+   AHORA CADA COLUMNA ES UNA OPCIÓN, y el valor del desplegable lleva las dos
+   partes. El separador es `|` porque no aparece en un mes `YYYY-MM` ni en
+   ningún encabezado de la planilla.
+
+   EL MES SIGUE VIAJANDO APARTE aunque la oferta sea un evento sin mes, porque
+   de él salen DOS cosas que no son el descuento: el costo de lista sobre el
+   que se aplica, y los seis meses de historia contra los que se compara. Una
+   promo "HOT SALE" no tiene mes propio, así que usa el último mes con costos
+   cargados -- ver `getOpcionesSellIn`.
+   --------------------------------------------------------------------------- */
+
+/** El separador del valor del desplegable. No aparece en los datos. */
+const SEPARADOR_SELL_IN = "|";
+
+/** Arma el valor que viaja en el filtro para una columna del sell in. */
+export function valorSellIn(mes: string, evento = ""): string {
+  return evento ? `${mes}${SEPARADOR_SELL_IN}${evento}` : mes;
+}
+
+/**
+ * Parte el valor del filtro en sus dos mitades.
+ *
+ * Tolera lo que venga: este valor puede llegar de una URL escrita a mano. Lo
+ * que no se entiende cae como mes, que es el comportamiento de antes.
+ */
+export function partirValorSellIn(valor: string | undefined | null): {
+  mes: string;
+  evento: string;
+} {
+  const crudo = String(valor ?? "");
+  const corte = crudo.indexOf(SEPARADOR_SELL_IN);
+  if (corte < 0) return { mes: crudo, evento: "" };
+  return { mes: crudo.slice(0, corte), evento: crudo.slice(corte + 1) };
+}

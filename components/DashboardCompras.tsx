@@ -33,6 +33,7 @@ import {
   RECORTES_POR_DEFECTO,
   recortesValidos,
   opcionesCruzadas,
+  valorSellIn,
 } from "@/lib/compras";
 import { vacio as sinValores } from "@/lib/filtros";
 import {
@@ -54,7 +55,12 @@ import { useDatosTablero } from "@/lib/useDatosTablero";
 import { RESUMEN_CABECERA, type OrdenSigma } from "@/lib/sigma-orden";
 import type { OrdenEnviada } from "@/lib/queries-ordenes";
 import { aXlsx } from "@/lib/xlsx";
-import type { DashboardCompras, FilaCompra, FiltrosCompras } from "@/lib/types";
+import type {
+  DashboardCompras,
+  FilaCompra,
+  FiltrosCompras,
+  OpcionSellIn,
+} from "@/lib/types";
 
 type Opciones = {
   proveedores: string[];
@@ -63,6 +69,19 @@ type Opciones = {
   combinaciones: Combinacion[];
   meses: string[];
 };
+/**
+ * Cómo se nombra la columna del sell in que se está mirando.
+ *
+ * Sale de `opcionesSellIn` y no se vuelve a armar acá: la etiqueta de una promo
+ * sin mes dice de qué mes son los costos, y deducir eso en dos lugares es como
+ * terminan diciendo cosas distintas. Si por lo que sea no está en la lista,
+ * cae en el mes, que es como se llamaba antes.
+ */
+function etiquetaDe(data: { mes: string; evento: string; opcionesSellIn: OpcionSellIn[] }): string {
+  const valor = valorSellIn(data.mes, data.evento);
+  return data.opcionesSellIn.find((o) => o.valor === valor)?.etiqueta ?? fmtMes(data.mes);
+}
+
 type Respuesta = DashboardCompras & { opciones: Opciones | null };
 
 /**
@@ -1186,20 +1205,30 @@ export default function DashboardComprasPage({
             onChange={(v) => cambiar({ ...filtros, marca: v })}
           />
 
-          {/* El mes de la oferta: de acá sale el descuento que va al archivo. */}
+          {/* QUE COLUMNA DE LA PLANILLA. De acá sale el descuento que va al
+              archivo, así que no es un filtro de vista: cambia el número que
+              se le pide al proveedor.
+
+              UNA OPCION POR COLUMNA Y NO POR MES. La planilla tiene columnas
+              que son un corte dentro de un mes ("1/7/2026 (Glam)") y otras que
+              son una promo sin mes ("HOT SALE"). Listando sólo los meses, las
+              dos quedaban inalcanzables: la de Glam se veía igual que la común
+              de julio y traía la común igual. */}
           <div className="flex flex-col gap-1">
             <label className="text-muted text-[11px]" htmlFor="mes-oferta">
               Sell in del mes
             </label>
             <select
               id="mes-oferta"
-              value={data?.mes ?? ""}
+              value={
+                data ? valorSellIn(data.mes, data.evento) : (filtros.mes ?? "")
+              }
               onChange={(e) => cambiar({ ...filtros, mes: e.target.value })}
               className="border-line bg-panel-2 text-ink focus:border-c1 rounded-lg border px-2.5 py-1.5 text-xs outline-none"
             >
-              {(data?.meses ?? []).map((m) => (
-                <option key={m} value={m}>
-                  {fmtMes(m)}
+              {(data?.opcionesSellIn ?? []).map((o) => (
+                <option key={o.valor} value={o.valor}>
+                  {o.etiqueta}
                 </option>
               ))}
             </select>
@@ -1411,7 +1440,7 @@ export default function DashboardComprasPage({
             valor={fmtMoneda(resumen.bruto - resumen.neto)}
             detalle={
               data.sellInCargado > 0
-                ? `Sell in de ${fmtMes(data.mes)} · ${fmtNumero(data.sellInCargado)} artículos`
+                ? `Sell in de ${etiquetaDe(data)} · ${fmtNumero(data.sellInCargado)} artículos`
                 : "Sell in sin cargar: los descuentos van a mano"
             }
             acento={data.sellInCargado === 0 ? PALETA[3] : undefined}
@@ -1790,7 +1819,7 @@ export default function DashboardComprasPage({
             nota={
               `${fmtNumero(filas.length)} artículos` +
               ` · ritmo de ${data.ventana} días` +
-              (data.mes ? ` · sell in de ${fmtMes(data.mes)}` : "")
+              (data.mes ? ` · sell in de ${etiquetaDe(data)}` : "")
             }
           >
             <Tabla
