@@ -14,6 +14,9 @@ import { enConstruccion } from "@/lib/permisos";
 const PESTANAS: Pestana[] = [
   { href: "/venta-minorista/mercado-libre", label: "Tablero" },
   { href: "/venta-minorista/mercado-libre/alertas", label: "Alertas" },
+  // Precio para ganar la caja de catálogo y por qué a veces no conviene:
+  // cruza lo que dice Mercado Libre con nuestros costos.
+  { href: "/venta-minorista/mercado-libre/competencia", label: "Competencia" },
   {
     href: "/venta-minorista/mercado-libre/stock-full",
     label: "Stock Full · días sin venta",

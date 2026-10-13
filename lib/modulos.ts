@@ -106,6 +106,7 @@ export const MODULOS: Modulo[] = [
       "/api/stock-full",
       "/api/elasticidad",
       "/api/resultados-elasticidad",
+      "/api/competencia-meli",
     ],
   },
   {
