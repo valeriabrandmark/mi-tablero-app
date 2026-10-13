@@ -153,6 +153,13 @@ export type KpisLogistica = {
  */
 export type PuntoHistorial = PuntoEtiqueta & { fecha: string | null };
 
+/**
+ * Un mes de mora recuperada. `clientes` va aparte del monto a propósito: son
+ * unidades distintas, así que el gráfico pinta la plata y dice la cantidad en
+ * el tooltip, en vez de meterlas en dos ejes (ver queries-cuentas.ts).
+ */
+export type PuntoRecupero = PuntoEtiqueta & { clientes: number };
+
 export type PuntoEtiqueta = {
   label: string;
   valor: number;
@@ -243,6 +250,7 @@ export type DashboardCuentas = {
   comprobantesVencidos: ComprobanteVencido[];
   historial: PuntoHistorial[];
   cancelacionesPorVendedor: PuntoEtiqueta[];
+  cancelacionesPorMes: PuntoRecupero[];
   generadoEn: string;
 };
 
