@@ -122,8 +122,13 @@ revisar("sale una opcion por columna", OPCIONES.length, 6);
 revisar("la primera es el mes mas nuevo", OPCIONES[0].valor, "2026-10");
 revisar(
   "el corte lleva su mes y su evento",
-  { valor: OPCIONES[3].valor, mes: OPCIONES[3].mes, evento: OPCIONES[3].evento },
-  { valor: "2026-07|Glam", mes: "2026-07", evento: "Glam" },
+  {
+    valor: OPCIONES[3].valor,
+    mesColumna: OPCIONES[3].mesColumna,
+    mesCostos: OPCIONES[3].mesCostos,
+    evento: OPCIONES[3].evento,
+  },
+  { valor: "2026-07|Glam", mesColumna: "2026-07", mesCostos: "2026-07", evento: "Glam" },
 );
 
 // EL INVARIANTE QUE SE ROMPIO. Para una promo, `valor` lleva el mes VACIO
@@ -131,7 +136,12 @@ revisar(
 // Son distintos A PROPOSITO.
 const promo = OPCIONES[5];
 revisar("la promo vale con el mes vacio", promo.valor, "|HOT SALE");
-revisar("pero sus costos salen del ultimo mes", promo.mes, "2026-10");
+// LOS DOS MESES DE UNA PROMO, que son distintos y es TODO el punto. Con el de
+// costos se busca el costo de lista; con el de la columna --vacio-- se busca el
+// DESCUENTO en bronze.sell_in. Usar el de costos para buscar el descuento daba
+// cero filas y la pantalla salia sin un solo descuento.
+revisar("el mes de la columna es vacio", promo.mesColumna, "");
+revisar("pero sus costos salen del ultimo mes", promo.mesCostos, "2026-10");
 // LA ETIQUETA ES EL NOMBRE DE LA COLUMNA Y NADA MAS. De que mes salen los
 // costos no va en el desplegable --en 23 renglones es ruido-- sino en el
 // detalle del panel, que es donde se esta leyendo la plata.
@@ -145,7 +155,7 @@ revisar("y la de un mes comun es solo el mes", OPCIONES[0].etiqueta, "mes 2026-1
 // no existe no selecciona nada: mostraba la primera opcion y parecia que no
 // tomaba, aunque la tabla si estuviera mostrando la promo.
 for (const o of OPCIONES) {
-  const rearmado = valorSellIn(o.mes, o.evento);
+  const rearmado = valorSellIn(o.mesCostos, o.evento);
   const coincide = OPCIONES.some((x) => x.valor === rearmado);
   // Una promo se reconoce por su VALOR --que no lleva mes--, no por `o.mes`,
   // que nunca está vacío: siempre tiene el mes del que salen los costos. Ese
@@ -153,7 +163,7 @@ for (const o of OPCIONES) {
   const esPromo = partirValorSellIn(o.valor).mes === "";
   if (esPromo) {
     revisar(`rearmar ${o.valor} NO da una opcion valida`, coincide, false);
-    revisar(`...porque da ${rearmado}`, rearmado, `${o.mes}|${o.evento}`);
+    revisar(`...porque da ${rearmado}`, rearmado, `${o.mesCostos}|${o.evento}`);
   } else {
     revisar(`rearmar ${o.valor} da la misma opcion`, rearmado, o.valor);
   }
@@ -166,6 +176,17 @@ for (const o of OPCIONES) {
     `buscar por valor encuentra ${o.valor}`,
     OPCIONES.find((x) => x.valor === o.valor)?.etiqueta,
     o.etiqueta,
+  );
+}
+
+// EL VALOR SE ARMA CON `mesColumna`, no con `mesCostos`. Es lo que lo hace
+// coincidir con la opcion, y lo que separa "con que mes busco el descuento"
+// de "con que mes busco el costo".
+for (const o of OPCIONES) {
+  revisar(
+    `${o.valor} se arma con mesColumna`,
+    valorSellIn(o.mesColumna, o.evento),
+    o.valor,
   );
 }
 

@@ -62,8 +62,21 @@ const CONDICION_DISCONTINUO = PREFIJOS_DISCONTINUO.map(
  *   rentabilidad de 3 meses     para saber si se vende bien o si se estaba
  *                               liquidando, que es una decisión distinta
  *
- * $1 ventana del ritmo · $2 proveedores que no son mercadería · $3 mes de oferta
- * $5 el corte del sell in dentro de ese mes ('' es la columna común)
+ * $1 ventana del ritmo · $2 proveedores que no son mercadería
+ *
+ * LA COLUMNA DEL SELL IN VIAJA EN TRES PARAMETROS, y son tres porque hacen
+ * cosas distintas:
+ *
+ *   $3 el mes PROPIO de la columna. Es '' para una promo --HOT SALE no
+ *      pertenece a ningún mes-- y con eso se busca en bronze.sell_in.
+ *   $5 el evento. '' es la columna común del mes.
+ *   $6 el mes de los COSTOS y de la historia. SIEMPRE un YYYY-MM de verdad:
+ *      para una promo es el último mes con costos cargados.
+ *
+ * $3 y $6 se parecen tanto que ya se usó uno por el otro: con $3 valiendo el
+ * mes de los costos, buscar "2026-10 + Cyber Monday" en sell_in daba CERO
+ * filas --las de la promo tienen el mes vacío-- y la pantalla mostraba todos
+ * los descuentos en blanco.
  * $4 días de cobertura que se quieren comprar
  */
 const BASE = `
@@ -110,6 +123,9 @@ costo as (
 sell_in as (
   select sku, descuento_pct
   from bronze.sell_in
+  -- $3 ES EL MES PROPIO DE LA COLUMNA, no el de los costos. Para una promo
+  -- vale '' --HOT SALE no pertenece a ningún mes-- y es así como están
+  -- guardadas sus filas. Usar acá el mes de los costos ($6) devuelve cero.
   where mes_comercial = $3::text
     and evento = $5::text
 ),
@@ -123,9 +139,11 @@ oferta as (
   -- QUEDA POR EL COSTO DE LISTA, que es sobre lo que se aplica el descuento.
   -- El oferta_pct de este mismo CTE se usaba para la columna
   -- "s/ n. compras %", que se sacó de la pantalla.
+  -- $6 Y NO $3: el costo de lista siempre sale de un mes de verdad. Una promo
+  -- no tiene mes propio, así que usa el último con costos cargados.
   select sku, costo_teorico
   from (${COSTOS_VIGENTES_POR_MES}) cv
-  where mes_comercial = $3::text
+  where mes_comercial = $6::text
 ),
 -- QUE PROVEEDORES YA MANDARON SU SELL IN DE ESTE MES.
 --
@@ -195,7 +213,9 @@ proveedores_mes_pasado as (
 -- columna "Desc %", y repetirlo acá adelante hacía leer la serie corrida un
 -- mes. La historia es contra qué se compara el vigente, no el vigente otra vez.
 meses_hist as (
-  select to_char(to_date($3::text || '-01', 'YYYY-MM-DD') - (n || ' month')::interval,
+  -- $6 Y NO $3, por lo mismo que el costo: con el mes vacío de una promo,
+  -- to_date('-01') directamente revienta.
+  select to_char(to_date($6::text || '-01', 'YYYY-MM-DD') - (n || ' month')::interval,
                  'YYYY-MM')          as mes,
          -- "Reciente" son los meses anteriores que, junto con el elegido,
          -- forman la ventana de ${MESES_SIN_SELL_IN_PARA_SUGERIR} meses de la
@@ -616,15 +636,25 @@ type Where = {
   params: unknown[];
 };
 
-function where(f: FiltrosCompras, mes: string, evento: string): Where {
+function where(
+  f: FiltrosCompras,
+  mesColumna: string,
+  evento: string,
+  mesCostos: string,
+): Where {
   const params: unknown[] = [
     f.ventana ?? VENTANA_POR_DEFECTO,
     PROVEEDORES_NO_MERCADERIA,
-    mes,
+    // $3. El mes PROPIO de la columna: '' para una promo. Ver el bloque de
+    // arriba de BASE: no es el mismo que $6 y confundirlos deja la pantalla
+    // sin un solo descuento.
+    mesColumna,
     coberturaValida(f.cobertura),
-    // $5. Va acá y no al final porque los filtros de la persona se numeran con
-    // `params.length` y se corren solos; uno fijo en el medio no los rompe.
+    // $5 y $6. Van acá y no al final porque los filtros de la persona se
+    // numeran con `params.length` y se corren solos; fijos en el medio no los
+    // rompen.
     evento,
+    mesCostos,
   ];
 
   // LO QUE ELIGIÓ LA PERSONA: qué artículos mirar. Todo lo que se agregue acá
@@ -715,8 +745,13 @@ async function contarDelFiltro(w: Where): Promise<number> {
   return Number(fila?.v ?? 0);
 }
 
-async function getFilas(f: FiltrosCompras, mes: string, evento: string): Promise<Listado> {
-  const w = where(f, mes, evento);
+async function getFilas(
+  f: FiltrosCompras,
+  mesColumna: string,
+  evento: string,
+  mesCostos: string,
+): Promise<Listado> {
+  const w = where(f, mesColumna, evento, mesCostos);
   const filas = await query<Record<string, unknown>>(
     `${BASE}
      select sku, producto, proveedor, grupo, marca, codigo_compra, ean, u_bulto,
@@ -963,13 +998,15 @@ async function getDashboardComprasDirecto(
   // es la más nueva.
   const elegida =
     opcionesSellIn.find((o) => o.valor === f.mes) ?? opcionesSellIn[0];
-  const mes = elegida?.mes ?? "";
+  // Los dos meses de la columna, que NO son el mismo. Ver OpcionSellIn.
+  const mesColumna = elegida?.mesColumna ?? "";
+  const mesCostos = elegida?.mesCostos ?? "";
   const evento = elegida?.evento ?? "";
 
   const [listado, comprasHasta, sellInCargado, sellInFoto] = await Promise.all([
-    getFilas(f, mes, evento),
+    getFilas(f, mesColumna, evento, mesCostos),
     getComprasHasta(),
-    getSellInCargado(mes, evento),
+    getSellInCargado(mesColumna, evento),
     getSellInFoto(),
   ]);
 
@@ -989,7 +1026,9 @@ async function getDashboardComprasDirecto(
     mesPasado,
     ventana: f.ventana ?? VENTANA_POR_DEFECTO,
     cobertura: coberturaValida(f.cobertura),
-    mes,
+    // `mes` es el de los COSTOS: es el que la pantalla manda a la orden de
+    // Sigma, que necesita un mes de verdad para el costo de lista.
+    mes: mesCostos,
     evento,
     valorSellIn: elegida?.valor ?? "",
     opcionesSellIn,

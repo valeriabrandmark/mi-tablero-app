@@ -1483,8 +1483,21 @@ export type OpcionSellIn = {
   valor: string;
   /** Lo que se lee: "jul 2026", "jul 2026 · Glam", "HOT SALE". */
   etiqueta: string;
-  /** De dónde salen el COSTO de lista y los seis meses de historia. */
-  mes: string;
+  /**
+   * EL MES PROPIO DE LA COLUMNA, tal como está en `bronze.sell_in`. Es `""`
+   * para una promo: HOT SALE no pertenece a ningún mes. Con esto se busca el
+   * descuento.
+   */
+  mesColumna: string;
+  /**
+   * DE DONDE SALEN EL COSTO de lista y los seis meses de historia. Siempre un
+   * `YYYY-MM` de verdad; para una promo, el último mes con costos cargados.
+   *
+   * NO ES LO MISMO QUE `mesColumna` y confundirlos ya rompió la pantalla:
+   * buscando "2026-10 + Cyber Monday" en `sell_in` no hay una sola fila, así
+   * que todos los descuentos salían en blanco.
+   */
+  mesCostos: string;
   /** El corte. "" es la columna común del mes. */
   evento: string;
 };
@@ -1768,8 +1781,10 @@ export type DashboardCompras = {
    * hay para elegir.
    *
    * `mes` es SIEMPRE un `YYYY-MM` --de ahí salen el costo de lista y la
-   * historia-- y `evento` dice qué corte dentro de ese mes. Para una promo sin
-   * mes propia (`HOT SALE`), `mes` es el último con costos cargados.
+   * historia, y es el que viaja a la orden de Sigma-- y `evento` dice qué
+   * corte dentro de ese mes. Para una promo sin mes propio (`HOT SALE`), `mes`
+   * es el último con costos cargados. El mes con el que se BUSCA el descuento
+   * es otro: ver `OpcionSellIn.mesColumna`.
    */
   mes: string;
   evento: string;
