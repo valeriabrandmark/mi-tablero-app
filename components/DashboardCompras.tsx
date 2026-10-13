@@ -1451,7 +1451,14 @@ export default function DashboardComprasPage({
             valor={fmtMoneda(resumen.bruto - resumen.neto)}
             detalle={
               data.sellInCargado > 0
-                ? `Sell in de ${etiquetaDe(data)} · ${fmtNumero(data.sellInCargado)} artículos`
+                ? `Sell in de ${etiquetaDe(data)} · ${fmtNumero(data.sellInCargado)} artículos` +
+                  // De qué mes es el COSTO sobre el que se aplica el descuento.
+                  // Sólo cuando la columna no es un mes --una promo-- porque en
+                  // cualquier otro caso es el mismo que ya dice la etiqueta, y
+                  // repetirlo seria ruido.
+                  (data.evento && !data.valorSellIn.startsWith(data.mes)
+                    ? ` · costos de ${fmtMes(data.mes)}`
+                    : "")
                 : "Sell in sin cargar: los descuentos van a mano"
             }
             acento={data.sellInCargado === 0 ? PALETA[3] : undefined}
