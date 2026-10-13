@@ -8,6 +8,7 @@ import type {
   OpcionesCuentas,
   PuntoEtiqueta,
   PuntoHistorial,
+  PuntoRecupero,
 } from "@/lib/types";
 import { agregarFiltro, vacio } from "@/lib/filtros";
 
@@ -313,14 +314,105 @@ async function getHistorial(f: FiltrosCuentas): Promise<PuntoHistorial[]> {
   );
 }
 
+/* ---------------------------------------------------------------------------
+   LAS CANCELACIONES, UNA POR CLIENTE Y POR MES.
+
+   Esta sub-consulta la comparten los dos gráficos de cancelaciones, y existe
+   por dos razones que no son de gusto.
+
+   1. EL PERÍODO VIENE EN DOS FORMAS. La planilla escribía `Historial_Cancelaciones`
+      leyendo la celda de fecha con `String(...)`, así que en la tabla conviven
+
+          2026-07                                            (la forma correcta)
+          Wed Jul 01 2026 00:00:00 GMT-0300 (...)             (la vieja)
+
+      y la vieja encima en dos variantes, porque ese texto incluye EL NOMBRE DE
+      LA ZONA HORARIA y cambia con el idioma del servidor que corrió el trigger.
+      Agrupar por la columna cruda daría dos o tres barras para un mismo mes.
+
+   2. LA CLAVE PRIMARIA ES (cuit, periodo_con_mora), así que esas variantes NO
+      se pisaron entre sí al subir: los mismos 76 clientes entraron dos veces.
+      Al 13/10/2026 la tabla tiene 152 filas para 76 cancelaciones, y el
+      gráfico por vendedor venía mostrando $ 127 M donde la plata real es
+      $ 63,8 M.
+
+   El arreglo de la planilla está en `apps_script/cancelaciones_periodo.gs` del
+   orquestador, pero NO alcanza con arreglar el origen: las filas viejas se
+   quedan como están hasta que alguien las borre. Mientras existan, el
+   `distinct on` es lo que hace que la pantalla diga la verdad.
+
+   Y no es un parche: "un cliente canceló su mora del mes X" es UN hecho, así
+   que una fila por (cuit, mes) es la forma correcta de contarlo incluso con la
+   tabla limpia. Gana la detección MÁS VIEJA, que es la fecha en que el cliente
+   realmente se puso al día.
+   --------------------------------------------------------------------------- */
+const PERIODO_CANCELACION = `
+  case
+    -- La forma correcta, que es la que escribe la planilla arreglada.
+    when c.periodo_con_mora ~ '^\\d{4}-\\d{2}' then left(c.periodo_con_mora, 7)
+    -- La vieja: "Wed Jul 01 2026 ...". Se le sacan los 11 caracteres del medio
+    -- ("Jul 01 2026") y se parsean. 'Mon' en to_date es siempre inglés --no
+    -- depende de lc_time-- así que esto no se rompe según el locale del server.
+    when c.periodo_con_mora ~ '^\\w{3} \\w{3} \\d{2} \\d{4}'
+      then to_char(to_date(substring(c.periodo_con_mora from 5 for 11), 'Mon DD YYYY'), 'YYYY-MM')
+    else c.periodo_con_mora
+  end`;
+
+function cancelacionesUnicas(where: string) {
+  return `
+    normalizadas as (
+      select c.*, ${PERIODO_CANCELACION} as periodo
+      from bronze.cuentas_corrientes_cancelaciones c
+      where ${where}
+    ),
+    unicas as (
+      select distinct on (periodo, cuit) *
+      from normalizadas
+      order by periodo, cuit, to_date(fecha_deteccion, 'DD/MM/YYYY') asc
+    )`;
+}
+
+/**
+ * Cuánta mora se recuperó, mes a mes.
+ *
+ * QUÉ ES EL MES DEL EJE, porque acá se puede leer mal. Es el `periodo_con_mora`:
+ * el mes en que el cliente ADEUDABA, no el mes en que pagó. La detección es
+ * siempre posterior --la planilla compara la última foto contra el estado de
+ * hoy-- y `fecha_deteccion` la guarda aparte.
+ *
+ * Se eligió ese mes a propósito, para que este gráfico se lea JUNTO al de
+ * "Evolución del saldo vencido", que también va por período: en el mes X había
+ * tanto vencido, y de eso se terminó recuperando tanto. Con la fecha de
+ * detección en el eje los dos gráficos no se podrían comparar barra a barra.
+ *
+ * VIAJA LA CANTIDAD DE CLIENTES además del monto. $ 5 M recuperados de doce
+ * clientes y $ 5 M de uno solo son la misma barra y dos situaciones distintas,
+ * así que el número va en el tooltip. NO va como segunda serie ni como segundo
+ * eje: son unidades distintas y apilarlas daría una altura que no significa
+ * nada.
+ */
+async function getCancelacionesPorMes(f: FiltrosCuentas): Promise<PuntoRecupero[]> {
+  const w = whereCuentas(f, "c", false);
+  return query<PuntoRecupero>(
+    `with ${cancelacionesUnicas(w.sql)}
+     select periodo as label,
+            coalesce(sum(saldo_vencido_cancelado), 0)::float8 as valor,
+            count(*)::int as clientes
+     from unicas
+     group by periodo
+     order by periodo`,
+    w.params,
+  );
+}
+
 async function getCancelaciones(f: FiltrosCuentas): Promise<PuntoEtiqueta[]> {
   const w = whereCuentas(f, "c", false, ["vendedor"]);
   return query<PuntoEtiqueta>(
-    `select coalesce(c.vendedor, '—') as label,
-            coalesce(sum(c.saldo_vencido_cancelado), 0)::float8 as valor
-     from bronze.cuentas_corrientes_cancelaciones c
-     where ${w.sql}
-     group by c.vendedor order by valor desc nulls last`,
+    `with ${cancelacionesUnicas(w.sql)}
+     select coalesce(vendedor, '—') as label,
+            coalesce(sum(saldo_vencido_cancelado), 0)::float8 as valor
+     from unicas
+     group by vendedor order by valor desc nulls last`,
     w.params,
   );
 }
@@ -360,6 +452,7 @@ async function getDashboardCuentasDirecto(f: FiltrosCuentas): Promise<DashboardC
     comprobantesVencidos,
     historial,
     cancelaciones,
+    cancelacionesMes,
   ] = await Promise.all([
     getSaldos(f),
     getActividad(f),
@@ -370,6 +463,7 @@ async function getDashboardCuentasDirecto(f: FiltrosCuentas): Promise<DashboardC
     getComprobantesVencidos(f),
     getHistorial(f),
     getCancelaciones(f),
+    getCancelacionesPorMes(f),
   ]);
 
   return {
@@ -386,6 +480,7 @@ async function getDashboardCuentasDirecto(f: FiltrosCuentas): Promise<DashboardC
     comprobantesVencidos,
     historial,
     cancelacionesPorVendedor: cancelaciones,
+    cancelacionesPorMes: cancelacionesMes,
     generadoEn: new Date().toISOString(),
   };
 }

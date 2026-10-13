@@ -25,6 +25,7 @@ import type {
   FiltrosCuentas,
   OpcionesCuentas,
   PuntoHistorial,
+  PuntoRecupero,
 } from "@/lib/types";
 
 type Respuesta = DashboardCuentas & { opciones: OpcionesCuentas | null };
@@ -46,6 +47,24 @@ function notaHistorial(historial: PuntoHistorial[]): string {
   const ultima = historial[historial.length - 1].fecha;
   const periodos = `${historial.length} ${historial.length === 1 ? "período" : "períodos"}`;
   return ultima ? `${periodos} · última foto ${ultima}` : periodos;
+}
+
+/**
+ * Qué dice el pie del gráfico de mora recuperada.
+ *
+ * ACLARA QUÉ MES ES EL DEL EJE, que es lo que más se puede leer mal: es el mes
+ * en que el cliente adeudaba, no el mes en que pagó. Y da el total, porque la
+ * suma de las barras es el número que interesa --cuánta plata volvió-- y
+ * sumarlas a ojo no se puede.
+ */
+function notaRecupero(puntos: PuntoRecupero[]): string {
+  if (puntos.length === 0) return "Sin cancelaciones registradas";
+  const monto = puntos.reduce((a, d) => a + d.valor, 0);
+  const clientes = puntos.reduce((a, d) => a + d.clientes, 0);
+  return (
+    `${fmtMoneda(monto)} de ${fmtNumero(clientes)} ` +
+    `${clientes === 1 ? "cliente" : "clientes"} · por el mes en que adeudaban`
+  );
 }
 
 /** Colores fijos por categoría: el semáforo tiene que leerse igual siempre. */
@@ -498,6 +517,36 @@ export default function DashboardCuentasPage() {
               />
             </Panel>
           </div>
+
+          {/* VA PEGADO A "Evolución del saldo vencido" y los dos van por
+              período, para que se lean como un par: en el mes X había tanto
+              vencido, y de eso se terminó recuperando tanto. Separados por
+              media pantalla la comparación se pierde.
+
+              El eje es el mes en que el cliente ADEUDABA, no el mes en que
+              pagó —la detección es siempre posterior— y la nota lo dice,
+              porque leerlo al revés cambia el sentido del gráfico. */}
+          <Panel
+            titulo="Mora recuperada por mes"
+            nota={notaRecupero(data.cancelacionesPorMes)}
+          >
+            <BarrasCategoria
+              datos={data.cancelacionesPorMes.map((d) => ({
+                label: fmtMes(d.label),
+                valor: d.valor,
+                clientes: d.clientes,
+              }))}
+              formato={fmtMonedaCorta}
+              horizontal={false}
+              alturaMinima={260}
+              colorUnico={PALETA[1]}
+              detalle={(d) => {
+                const n = (d as { clientes?: number }).clientes ?? 0;
+                return n ? `${fmtNumero(n)} ${n === 1 ? "cliente" : "clientes"}` : null;
+              }}
+              vacio="Todavía no hay cancelaciones registradas."
+            />
+          </Panel>
 
           <Panel
             titulo="Evolución del saldo vencido"

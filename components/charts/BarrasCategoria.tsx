@@ -14,7 +14,7 @@ import { colorSerie, TEMA } from "@/lib/paleta";
 import type { PuntoEtiqueta } from "@/lib/types";
 import { CajaTooltip, FilaTooltip } from "./TooltipOscuro";
 
-type ItemTooltip = { payload?: PuntoEtiqueta & { fill?: string } };
+type ItemTooltip = { payload?: PuntoEtiqueta & { fill?: string } & Record<string, unknown> };
 
 /** Segunda serie apilada encima de la primera. */
 export type SerieApilada = {
@@ -30,12 +30,14 @@ function Contenido({
   formato,
   colorUnico,
   apilado,
+  detalle,
 }: {
   active?: boolean;
   payload?: ItemTooltip[];
   formato?: (n: number) => string;
   colorUnico?: string;
   apilado?: SerieApilada;
+  detalle?: (p: PuntoEtiqueta) => string | null;
 }) {
   const item = payload?.[0]?.payload;
   if (!active || !item || !formato) return null;
@@ -44,6 +46,11 @@ function Contenido({
   // alcanza. Con dos, hace falta decir cuál es cuál y cuánto suman: el alto de
   // la barra ya no es ninguna de las dos.
   if (!apilado) {
+    // `detalle` agrega UNA línea de contexto en otra unidad --cuántos clientes
+    // hay detrás del monto, por ejemplo. Va como texto y no como segunda serie
+    // justamente porque no es la misma unidad: apilarla daría una barra cuyo
+    // alto no significa nada, y un segundo eje es peor todavía.
+    const extra = detalle?.(item) ?? null;
     return (
       <CajaTooltip>
         <FilaTooltip
@@ -51,6 +58,7 @@ function Contenido({
           label={item.label}
           valor={formato(item.valor)}
         />
+        {extra && <p className="text-muted pl-4">{extra}</p>}
       </CajaTooltip>
     );
   }
@@ -94,6 +102,7 @@ export default function BarrasCategoria({
   seleccionados,
   onSeleccionar,
   apilado,
+  detalle,
 }: {
   datos: PuntoEtiqueta[];
   formato: (n: number) => string;
@@ -112,6 +121,11 @@ export default function BarrasCategoria({
    * tooltip cambia para desglosarlas.
    */
   apilado?: SerieApilada;
+  /**
+   * Una línea de contexto en el tooltip, en una unidad distinta de la barra.
+   * Devolver `null` para los puntos que no la tengan.
+   */
+  detalle?: (p: PuntoEtiqueta) => string | null;
 }) {
   if (datos.length === 0) {
     return <p className="text-muted py-16 text-center text-sm">{vacio}</p>;
@@ -176,6 +190,7 @@ export default function BarrasCategoria({
               formato={formato}
               colorUnico={colorUnico}
               apilado={apilado}
+              detalle={detalle}
             />
           }
           cursor={{ fill: "rgba(255,255,255,0.04)" }}
