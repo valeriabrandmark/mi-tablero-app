@@ -20,7 +20,12 @@ import {
   PLAZO_REPOSICION_DIAS,
 } from "@/lib/stock";
 import type { CeldaXlsx, ColumnaXlsx, LibroXlsx } from "@/lib/xlsx";
-import type { FilaCompra, FiltrosCompras, RecorteCompras } from "@/lib/types";
+import type {
+  FilaCompra,
+  FiltrosCompras,
+  OpcionSellIn,
+  RecorteCompras,
+} from "@/lib/types";
 
 /** Sobre cuántos meses se mide la rentabilidad de venta del artículo. */
 export const MESES_RENTABILIDAD = 3;
@@ -1091,4 +1096,45 @@ export function partirValorSellIn(valor: string | undefined | null): {
   const corte = crudo.indexOf(SEPARADOR_SELL_IN);
   if (corte < 0) return { mes: crudo, evento: "" };
   return { mes: crudo.slice(0, corte), evento: crudo.slice(corte + 1) };
+}
+
+/**
+ * Arma las opciones del desplegable a partir de las filas de la base.
+ *
+ * ESTA ACA Y NO EN LA CONSULTA para que se pueda probar sin base, porque tiene
+ * un invariante que ya se rompió una vez y el síntoma no se parecía a la causa:
+ *
+ *     valorSellIn(opcion.mes, opcion.evento)  !==  opcion.valor
+ *
+ * para una promo sin mes. `valor` lleva el mes VACIO --es lo que identifica la
+ * columna-- y `mes` lleva el último con costos --es de donde salen el costo de
+ * lista y la historia. La pantalla rearmaba el valor con (mes, evento) y le
+ * daba "2026-10|HOT SALE", que no es ninguna opción. Un <select> con un value
+ * que no existe no selecciona nada: el navegador mostraba la primera opción y
+ * parecía que el desplegable no tomaba, aunque la tabla de abajo sí estuviera
+ * mostrando el HOT SALE.
+ *
+ * `filas` viene ya ordenada: meses de más nuevo a más viejo y las promos al
+ * final. La primera es la que la pantalla elige sola.
+ */
+export function opcionesSellInDesde(
+  filas: { mes: string; evento: string }[],
+  nombreDelMes: (mes: string) => string,
+): OpcionSellIn[] {
+  // El mes del que salen los costos de una promo que no trae el suyo.
+  const ultimoConMes = filas.find((r) => r.mes)?.mes ?? "";
+
+  return filas
+    // Sin mes NI evento no es nada: no se puede nombrar ni valorizar.
+    .filter((r) => r.mes || r.evento)
+    .map((r) => ({
+      valor: valorSellIn(r.mes, r.evento),
+      etiqueta: !r.mes
+        ? `${r.evento} · costos de ${nombreDelMes(ultimoConMes)}`
+        : r.evento
+          ? `${nombreDelMes(r.mes)} · ${r.evento}`
+          : nombreDelMes(r.mes),
+      mes: r.mes || ultimoConMes,
+      evento: r.evento,
+    }));
 }

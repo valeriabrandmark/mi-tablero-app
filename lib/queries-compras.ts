@@ -18,7 +18,7 @@ import {
   MESES_RENTABILIDAD,
   PUNTOS_OFERTA_PARA_DUPLICAR,
   coberturaValida,
-  valorSellIn,
+  opcionesSellInDesde,
 } from "@/lib/compras";
 import {
   COBERTURA_OBJETIVO_DIAS,
@@ -863,23 +863,10 @@ async function getOpcionesSellIn(): Promise<OpcionSellIn[]> {
      order by orden, mes desc, evento`,
   );
 
-  // El mes al que se cuelgan las promos sin mes propio.
-  const ultimoConMes = filas.find((r) => r.mes)?.mes ?? "";
-
-  return filas
-    // Una columna sin mes NI evento no es nada: no se puede nombrar ni
-    // valorizar. No debería existir, y si aparece no va al desplegable.
-    .filter((r) => r.mes || r.evento)
-    .map((r) => ({
-      valor: valorSellIn(r.mes, r.evento),
-      etiqueta: !r.mes
-        ? `${r.evento} · costos de ${fmtMes(ultimoConMes)}`
-        : r.evento
-          ? `${fmtMes(r.mes)} · ${r.evento}`
-          : fmtMes(r.mes),
-      mes: r.mes || ultimoConMes,
-      evento: r.evento,
-    }));
+  // El armado vive en lib/compras.ts, que se puede probar sin base. Ver el
+  // invariante que documenta ahí: `valor` y `mes` NO son lo mismo para una
+  // promo, y rearmar uno desde el otro ya rompió el desplegable una vez.
+  return opcionesSellInDesde(filas, fmtMes);
 }
 
 /** Cuántos artículos tiene la columna elegida. `0` = todavía no se cargó. */
@@ -1004,6 +991,7 @@ async function getDashboardComprasDirecto(
     cobertura: coberturaValida(f.cobertura),
     mes,
     evento,
+    valorSellIn: elegida?.valor ?? "",
     opcionesSellIn,
     sellInCargado,
     sellInFoto,

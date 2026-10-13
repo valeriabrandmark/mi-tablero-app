@@ -33,7 +33,6 @@ import {
   RECORTES_POR_DEFECTO,
   recortesValidos,
   opcionesCruzadas,
-  valorSellIn,
 } from "@/lib/compras";
 import { vacio as sinValores } from "@/lib/filtros";
 import {
@@ -72,14 +71,23 @@ type Opciones = {
 /**
  * Cómo se nombra la columna del sell in que se está mirando.
  *
- * Sale de `opcionesSellIn` y no se vuelve a armar acá: la etiqueta de una promo
- * sin mes dice de qué mes son los costos, y deducir eso en dos lugares es como
- * terminan diciendo cosas distintas. Si por lo que sea no está en la lista,
- * cae en el mes, que es como se llamaba antes.
+ * BUSCA POR `valorSellIn`, que viene del servidor, y NO lo rearma con
+ * (mes, evento). Para una promo sin mes esos dos no alcanzan: la opción vale
+ * "|HOT SALE" pero su `mes` es el último con costos, así que rearmarlo daba
+ * "2026-10|HOT SALE" --que no existe-- y el título caía en "oct 2026" cuando
+ * la pantalla estaba mostrando el HOT SALE.
+ *
+ * Si por lo que sea no está en la lista, cae en el mes.
  */
-function etiquetaDe(data: { mes: string; evento: string; opcionesSellIn: OpcionSellIn[] }): string {
-  const valor = valorSellIn(data.mes, data.evento);
-  return data.opcionesSellIn.find((o) => o.valor === valor)?.etiqueta ?? fmtMes(data.mes);
+function etiquetaDe(data: {
+  mes: string;
+  valorSellIn: string;
+  opcionesSellIn: OpcionSellIn[];
+}): string {
+  return (
+    data.opcionesSellIn.find((o) => o.valor === data.valorSellIn)?.etiqueta ??
+    fmtMes(data.mes)
+  );
 }
 
 type Respuesta = DashboardCompras & { opciones: Opciones | null };
@@ -1220,9 +1228,12 @@ export default function DashboardComprasPage({
             </label>
             <select
               id="mes-oferta"
-              value={
-                data ? valorSellIn(data.mes, data.evento) : (filtros.mes ?? "")
-              }
+              // EL VALOR VIENE DEL SERVIDOR, no se rearma acá. Ver `etiquetaDe`:
+              // con (mes, evento) una promo daba un value que no es ninguna
+              // opción, y entonces el <select> no seleccionaba nada --el
+              // navegador mostraba la primera-- aunque la pantalla de abajo sí
+              // estuviera mostrando la promo.
+              value={data?.valorSellIn ?? filtros.mes ?? ""}
               onChange={(e) => cambiar({ ...filtros, mes: e.target.value })}
               className="border-line bg-panel-2 text-ink focus:border-c1 rounded-lg border px-2.5 py-1.5 text-xs outline-none"
             >

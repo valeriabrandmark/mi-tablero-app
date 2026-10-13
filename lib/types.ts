@@ -1773,6 +1773,17 @@ export type DashboardCompras = {
    */
   mes: string;
   evento: string;
+  /**
+   * EL VALOR DE LA OPCION ELEGIDA, tal cual está en `opcionesSellIn`.
+   *
+   * Viaja aunque `mes` y `evento` ya estén acá, porque para una promo sin mes
+   * los dos NO alcanzan para reconstruirlo: la opción vale "|HOT SALE" --mes
+   * vacío-- pero su `mes` es el último con costos, así que rearmarlo daba
+   * "2026-10|HOT SALE", que no existe en la lista. Un <select> con un value
+   * que no es ninguna opción no selecciona nada: el navegador mostraba la
+   * primera, y parecía que el desplegable no tomaba.
+   */
+  valorSellIn: string;
   opcionesSellIn: OpcionSellIn[];
   /**
    * Cuántos artículos tiene el sell in de ese mes. `0` es "todavía no se

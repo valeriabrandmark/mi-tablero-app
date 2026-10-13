@@ -20,7 +20,11 @@
  *     node --experimental-strip-types --import ./pruebas/registrar.mjs pruebas/sell-in-columna.mts
  */
 
-import { partirValorSellIn, valorSellIn } from "@/lib/compras";
+import {
+  opcionesSellInDesde,
+  partirValorSellIn,
+  valorSellIn,
+} from "@/lib/compras";
 
 const FALLOS: string[] = [];
 
@@ -95,6 +99,76 @@ revisar(
   "dos separadores: corta en el primero",
   partirValorSellIn("2026-07|a|b"),
   { mes: "2026-07", evento: "a|b" },
+);
+
+// --- LAS OPCIONES DEL DESPLEGABLE ------------------------------------------
+//
+// Las filas, en el orden en que las devuelve la consulta: los meses de más
+// nuevo a más viejo, con el corte pegado a su mes, y las promos al final.
+
+const FILAS = [
+  { mes: "2026-10", evento: "" },
+  { mes: "2026-09", evento: "" },
+  { mes: "2026-07", evento: "" },
+  { mes: "2026-07", evento: "Glam" },
+  { mes: "", evento: "Cyber Monday 2026" },
+  { mes: "", evento: "HOT SALE" },
+];
+
+const nombre = (m: string) => (m ? `mes ${m}` : "");
+const OPCIONES = opcionesSellInDesde(FILAS, nombre);
+
+revisar("sale una opcion por columna", OPCIONES.length, 6);
+revisar("la primera es el mes mas nuevo", OPCIONES[0].valor, "2026-10");
+revisar(
+  "el corte lleva su mes y su evento",
+  { valor: OPCIONES[3].valor, mes: OPCIONES[3].mes, evento: OPCIONES[3].evento },
+  { valor: "2026-07|Glam", mes: "2026-07", evento: "Glam" },
+);
+
+// EL INVARIANTE QUE SE ROMPIO. Para una promo, `valor` lleva el mes VACIO
+// --es lo que identifica la columna-- y `mes` lleva el ultimo con costos.
+// Son distintos A PROPOSITO.
+const promo = OPCIONES[5];
+revisar("la promo vale con el mes vacio", promo.valor, "|HOT SALE");
+revisar("pero sus costos salen del ultimo mes", promo.mes, "2026-10");
+revisar("y la etiqueta lo dice", promo.etiqueta, "HOT SALE · costos de mes 2026-10");
+
+// Y ESTA ES LA PRUEBA QUE HABRIA ATAJADO EL BUG. La pantalla rearmaba el value
+// del <select> con valorSellIn(mes, evento) y para una promo daba
+// "2026-10|HOT SALE", que no es ninguna opcion. Un <select> con un value que
+// no existe no selecciona nada: mostraba la primera opcion y parecia que no
+// tomaba, aunque la tabla si estuviera mostrando la promo.
+for (const o of OPCIONES) {
+  const rearmado = valorSellIn(o.mes, o.evento);
+  const coincide = OPCIONES.some((x) => x.valor === rearmado);
+  // Una promo se reconoce por su VALOR --que no lleva mes--, no por `o.mes`,
+  // que nunca está vacío: siempre tiene el mes del que salen los costos. Ese
+  // es justamente el detalle que hacía que los dos no coincidieran.
+  const esPromo = partirValorSellIn(o.valor).mes === "";
+  if (esPromo) {
+    revisar(`rearmar ${o.valor} NO da una opcion valida`, coincide, false);
+    revisar(`...porque da ${rearmado}`, rearmado, `${o.mes}|${o.evento}`);
+  } else {
+    revisar(`rearmar ${o.valor} da la misma opcion`, rearmado, o.valor);
+  }
+}
+
+// El ida y vuelta por el `valor` --que es lo que ahora hace la pantalla-- SI
+// tiene que encontrar siempre la opcion.
+for (const o of OPCIONES) {
+  revisar(
+    `buscar por valor encuentra ${o.valor}`,
+    OPCIONES.find((x) => x.valor === o.valor)?.etiqueta,
+    o.etiqueta,
+  );
+}
+
+// Una fila sin mes ni evento no puede nombrarse: no va al desplegable.
+revisar(
+  "una fila vacia no es una opcion",
+  opcionesSellInDesde([{ mes: "", evento: "" }, { mes: "2026-10", evento: "" }], nombre).length,
+  1,
 );
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
