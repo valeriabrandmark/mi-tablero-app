@@ -17,6 +17,10 @@ import { getUsuario } from "@/lib/supabase/server";
  * página principal, y así se llega a ella con un click y no con dos.
  */
 const NAV: ItemNav[] = [
+  // Arriba de todo: es lo primero que se mira al arrancar el día, antes que
+  // cualquier número. Sólo la ve el `superadmin` (ver `esDeTareas` en
+  // lib/permisos.ts), así que para el resto el nav queda como estaba.
+  { clave: "/tareas", label: "Mis tareas", icono: "tareas", href: "/tareas" },
   {
     clave: "mayoristas",
     label: "Ventas Mayoristas",

@@ -633,6 +633,38 @@ editar.
 
 ---
 
+## Mis tareas (organizador)
+
+`/tareas`: un calendario personal de tareas, con recordatorios que suenan,
+tareas que se repiten solas, tareas que se ejecutan solas y un resumen de lo
+hecho. Por ahora lo ve sólo el `superadmin` (ver `esDeTareas` en
+`lib/permisos.ts`); los datos ya van separados por el email de la sesión, así
+que abrirlo a más gente es cambiar esa sola línea.
+
+**Antes de usarlo hay que aplicar `migraciones/tareas.sql` en Supabase.** Crea
+`app.tareas` y `app.tareas_recurrentes`, y agenda en `pg_cron` el job
+`tareas-automaticas` (cada 5 minutos).
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| Recordatorio | el navegador | Sonido + notificación del sistema + cartel "Es hora". Funciona con el tablero abierto, aunque esté en otra pestaña; con el navegador cerrado no avisa. |
+| Se repite | `app.generar_tareas()` | Convierte cada regla ("lunes y jueves 9:30", "el día 6") en tareas concretas para los próximos 62 días. Lo corre el cron y también cada lectura de la pantalla. |
+| Automática | `app.correr_tareas()` vía `pg_cron` | A la hora, ejecuta la acción de la tarea aunque nadie tenga el tablero abierto. Hoy hay una: "Actualizar los datos del tablero" (lo mismo que el botón). Una acción atrasada más de 6 h no se ejecuta: queda cancelada con el motivo. |
+| Resumen y sugerencias | `lib/tareas.ts` | Hechas, atrasadas, tiempo por categoría (el real si se usó ▶ Arrancar) y avisos de patrones: tareas que se patean, que se cargan a mano una y otra vez, días sobrecargados, estimaciones cortas. |
+
+**Sugerencias más a fondo:** el botón "Copiar resumen para Claude" de la
+pestaña Resumen copia el detalle de las tareas del período en Markdown, listo
+para pegar en una conversación y pedir flujos de trabajo.
+
+**Agregar una acción automática:** un `when` en `app.ejecutar_accion`
+(migración) y una entrada en `ACCIONES` (`lib/tareas.ts`). Las dos listas
+tienen que coincidir: una clave que la pantalla ofrezca y la base no conozca
+termina en "acción desconocida", visible en la propia tarea.
+
+Pruebas: `node --experimental-strip-types --import ./pruebas/registrar.mjs pruebas/tareas.mts`.
+
+---
+
 ## Filtros
 
 **Todos los filtros son de selección múltiple.** El valor de un filtro es una

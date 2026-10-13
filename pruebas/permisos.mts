@@ -169,6 +169,18 @@ revisar(
   true,
 );
 
+// --- Mis tareas: personal, sólo superadmin ---------------------------------
+//
+// Va antes del `admin -> true` de puedeVer. Si alguien lo mueve abajo, a todos
+// los administradores les aparece un organizador que no es suyo.
+
+revisar("superadmin ve Mis tareas", puedeVer({ rol: "superadmin" }, "/tareas"), true);
+revisar("y su api", puedeVer({ rol: "superadmin" }, "/api/tareas/12"), true);
+revisar("admin NO ve Mis tareas", puedeVer({ rol: "admin" }, "/tareas"), false);
+revisar("ni su api", puedeVer({ rol: "admin" }, "/api/tareas"), false);
+revisar("a medida tampoco", puedeVer(tiendaNube, "/tareas"), false);
+revisar("/tareas-otra no es Mis tareas", puedeVer({ rol: "admin" }, "/tareas-otra"), true);
+
 revisar("el superadmin ve los borradores", puedeVerBorradores({ rol: "superadmin" }), true);
 // El admin ve TODO lo publicado, pero no los borradores. Es la única
 // diferencia entre los dos roles, así que si esta prueba cae, se cayó con ella

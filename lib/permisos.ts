@@ -253,6 +253,13 @@ function esApiPreciosTn(pathname: string): boolean {
   return APIS_PRECIOS_TN.some((r) => pathname === r || pathname.startsWith(`${r}/`));
 }
 
+/** El organizador de tareas: la página y su API. */
+const RUTAS_TAREAS = ["/tareas", "/api/tareas"];
+
+function esDeTareas(pathname: string): boolean {
+  return RUTAS_TAREAS.some((r) => pathname === r || pathname.startsWith(`${r}/`));
+}
+
 /**
  * Única regla de acceso del tablero. La usan las TRES barreras —el proxy, la
  * ruta de API y la página— para que no puedan discrepar entre sí.
@@ -294,6 +301,15 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   if (permiso.rol === "personalizado") {
     return moduloPermiteRuta(permiso.modulos, pathname);
   }
+
+  // EL ORGANIZADOR DE TAREAS ES PERSONAL, y por ahora lo usa sólo el
+  // `superadmin`. Va antes del `admin -> true` por lo mismo que Precios TN: si
+  // no, se le abriría a todos los administradores sin que nadie lo decidiera.
+  //
+  // Abrirlo a más gente es tocar SÓLO esta línea: los datos ya están separados
+  // por usuario (cada consulta filtra por el email de la sesión, ver
+  // lib/queries-tareas.ts), así que nadie vería las tareas de otro.
+  if (esDeTareas(pathname)) return permiso.rol === "superadmin";
 
   // PRECIOS TN SE RESUELVE ANTES QUE EL PERMISO GENERAL DE LOS ADMINS, y ese
   // orden ES la regla: abajo hay un `admin -> true` que, si se evaluara

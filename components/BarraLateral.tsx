@@ -33,7 +33,8 @@ export type ClaveIcono =
   | "tiendanube"
   | "stock"
   | "operaciones"
-  | "precios";
+  | "precios"
+  | "tareas";
 
 /** Subpágina de un grupo. Lleva su propia marca porque es la que se mira. */
 export type ItemHijo = {
@@ -89,7 +90,8 @@ type ClaveTrazo =
   | "objetivos"
   | "stock"
   | "operaciones"
-  | "precios";
+  | "precios"
+  | "tareas";
 
 const TRAZOS: Record<ClaveTrazo, ReactNode> = {
   ventas: (
@@ -140,6 +142,15 @@ const TRAZOS: Record<ClaveTrazo, ReactNode> = {
     <>
       <path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0l-7.2-7.2A2 2 0 0 1 3 12V4a1 1 0 0 1 1-1h8a2 2 0 0 1 1.4.6l7.2 7.2a2 2 0 0 1 0 2.8Z" />
       <circle cx="7.5" cy="7.5" r="1.3" stroke={NARANJA} />
+    </>
+  ),
+  // Hoja de calendario con una tilde: no es una fecha cualquiera, es lo que
+  // hay que hacer ese día.
+  tareas: (
+    <>
+      <rect x="3" y="4.5" width="18" height="16.5" rx="2" />
+      <path d="M3 9.5h18M8 2.5v4M16 2.5v4" />
+      <path d="m8.5 15 2.5 2.5 4.5-4.5" stroke={NARANJA} />
     </>
   ),
   // Cajas apiladas. No se repite el cubo de Logística: ése es el paquete que
