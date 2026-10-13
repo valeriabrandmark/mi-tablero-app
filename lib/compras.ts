@@ -1138,7 +1138,11 @@ export function opcionesSellInDesde(
         : r.evento
           ? `${nombreDelMes(r.mes)} · ${r.evento}`
           : nombreDelMes(r.mes),
-      mes: r.mes || ultimoConMes,
+      // LOS DOS MESES, explícitos. `mesColumna` es el de la planilla --vacío
+      // para una promo-- y `mesCostos` el del costo de lista. Derivar uno del
+      // otro es exactamente lo que hay que evitar.
+      mesColumna: r.mes,
+      mesCostos: r.mes || ultimoConMes,
       evento: r.evento,
     }));
 }
