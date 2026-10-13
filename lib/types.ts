@@ -1463,6 +1463,24 @@ export type DashboardAntiguedad = {
    Compras (Operaciones -> Stock -> Compras)
    ------------------------------------------------------------------------- */
 
+/**
+ * Una columna de la planilla del sell in, como opción del desplegable.
+ *
+ * NO ES UN MES: la planilla tiene una columna por oferta, y algunas son un
+ * corte dentro de un mes (`1/7/2026 (Glam)`) o una promo sin mes (`HOT SALE`).
+ * Ver el bloque de `valorSellIn` en lib/compras.ts.
+ */
+export type OpcionSellIn = {
+  /** Lo que viaja en el filtro: "2026-07" o "2026-07|Glam". */
+  valor: string;
+  /** Lo que se lee: "jul 2026", "jul 2026 · Glam", "HOT SALE". */
+  etiqueta: string;
+  /** De dónde salen el COSTO de lista y los seis meses de historia. */
+  mes: string;
+  /** El corte. "" es la columna común del mes. */
+  evento: string;
+};
+
 export type FiltrosCompras = {
   proveedor?: string[];
   marca?: string[];
@@ -1481,7 +1499,12 @@ export type FiltrosCompras = {
    * `cobertura` mira para adelante (cuántos días se quiere tener cubiertos).
    */
   cobertura?: number;
-  /** Mes comercial del que sale la oferta del proveedor (`YYYY-MM`). */
+  /**
+   * LA COLUMNA DEL SELL IN elegida, no un mes pelado: puede ser "2026-07" o
+   * "2026-07|Glam". El servidor la parte con `partirValorSellIn`. Se sigue
+   * llamando `mes` porque es lo que dice la URL desde siempre y renombrarlo
+   * rompería los links guardados.
+   */
   mes?: string;
   /**
    * Qué recortes se le aplican a la tabla. Sin nada, están todos los
@@ -1732,9 +1755,17 @@ export type DashboardCompras = {
    * de rentabilidad y de compra del mes pasado. Lo calcula el servidor para que
    * la pantalla no lo vuelva a deducir y los dos puedan discrepar un día 1. */
   mesPasado: string;
-  /** Mes del que sale el sell in, y los que hay para elegir. */
+  /**
+   * De qué columna del sell in salen los descuentos de la pantalla, y las que
+   * hay para elegir.
+   *
+   * `mes` es SIEMPRE un `YYYY-MM` --de ahí salen el costo de lista y la
+   * historia-- y `evento` dice qué corte dentro de ese mes. Para una promo sin
+   * mes propia (`HOT SALE`), `mes` es el último con costos cargados.
+   */
   mes: string;
-  meses: string[];
+  evento: string;
+  opcionesSellIn: OpcionSellIn[];
   /**
    * Cuántos artículos tiene el sell in de ese mes. `0` es "todavía no se
    * cargó", y la pantalla lo dice en vez de mostrar todos los descuentos en

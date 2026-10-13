@@ -1,4 +1,5 @@
 import { cacheado } from "@/lib/cache";
+import { fmtMes } from "@/lib/format";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { buscadorDeArticulo } from "@/lib/sql-ean";
@@ -17,6 +18,7 @@ import {
   MESES_RENTABILIDAD,
   PUNTOS_OFERTA_PARA_DUPLICAR,
   coberturaValida,
+  valorSellIn,
 } from "@/lib/compras";
 import {
   COBERTURA_OBJETIVO_DIAS,
@@ -29,6 +31,7 @@ import {
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import type { ArticuloParaOrden } from "@/lib/sigma-orden";
 import type {
+  OpcionSellIn,
   DashboardCompras,
   FilaCompra,
   FiltrosCompras,
@@ -60,6 +63,7 @@ const CONDICION_DISCONTINUO = PREFIJOS_DISCONTINUO.map(
  *                               liquidando, que es una decisión distinta
  *
  * $1 ventana del ritmo · $2 proveedores que no son mercadería · $3 mes de oferta
+ * $5 el corte del sell in dentro de ese mes ('' es la columna común)
  * $4 días de cobertura que se quieren comprar
  */
 const BASE = `
@@ -95,15 +99,19 @@ costo as (
 -- para valorizar lo que ya compramos; NO es lo que el proveedor tiene vigente.
 -- Mandarlo en una orden de compra sería pedir con un descuento inventado.
 --
--- SE EXCLUYEN LOS EVENTOS, por lo mismo que en la historia de más abajo: una
--- oferta de "HOT SALE" no es el descuento del mes, y con las dos cargadas el
--- join devolvía dos filas para el mismo artículo y duplicaba sus unidades en
--- todos los totales de la tabla.
+-- UNA SOLA COLUMNA DE LA PLANILLA, la que se eligió arriba. $5 es el evento:
+-- '' es la columna común del mes y cualquier otra cosa es un corte propio
+-- --"1/7/2026 (Glam)"-- o una promo --"HOT SALE"--.
+--
+-- EL FILTRO POR EVENTO NO ES COSMETICO. Sin él, un mes con dos columnas
+-- cargadas devolvía DOS filas para el mismo artículo --en 2026-07 hay 302 SKU
+-- con las dos-- y eso duplicaba sus unidades en todos los totales de la tabla,
+-- no sólo en la columna del descuento.
 sell_in as (
   select sku, descuento_pct
   from bronze.sell_in
   where mes_comercial = $3::text
-    and evento = ''
+    and evento = $5::text
 ),
 -- El costo de lista del mes elegido: el número sobre el que se aplica el
 -- descuento para llegar a lo que se paga.
@@ -132,7 +140,7 @@ proveedores_con_sell_in as (
   from bronze.sell_in si
   join bronze.sigma_articulos a on trim(a.id) = si.sku
   where si.mes_comercial = $3::text
-    and si.evento = ''
+    and si.evento = $5::text
     and si.descuento_pct > 0
     and a."proveedorNombre" is not null
 ),
@@ -198,10 +206,12 @@ meses_hist as (
 -- Van los dos: el sell in del proveedor y el calculado con nuestras compras. La
 -- pantalla muestra uno solo y el título dice cuál.
 --
--- SE EXCLUYEN LOS EVENTOS (evento <> ''). Una oferta de "HOT SALE" o "Glam" no
--- es el descuento del mes: es otra negociación, con otras fechas. Mezclarlas
--- además duplicaba filas --en 2026-07 hay 302 SKU con las dos-- y eso inflaba
--- los totales de la tabla, no sólo esta columna.
+-- LA HISTORIA ES SIEMPRE LA DE LAS COLUMNAS COMUNES (evento = ''), aunque
+-- arriba se haya elegido un corte o una promo. Y eso es a propósito, no una
+-- omisión: la historia existe para contestar "¿este descuento es bueno?", y se
+-- contesta contra lo que ese proveedor da MES A MES. Comparar un HOT SALE
+-- contra otros HOT SALE daría una serie de dos o tres puntos salteados, y
+-- comparar el corte de Glam contra sí mismo no diría nada.
 --
 -- EL "HABITUAL" ES EL PROMEDIO DE LOS MESES EN QUE HUBO OFERTA, y los meses en
 -- cero NO entran en esa cuenta. La diferencia decide compras:
@@ -606,12 +616,15 @@ type Where = {
   params: unknown[];
 };
 
-function where(f: FiltrosCompras, mes: string): Where {
+function where(f: FiltrosCompras, mes: string, evento: string): Where {
   const params: unknown[] = [
     f.ventana ?? VENTANA_POR_DEFECTO,
     PROVEEDORES_NO_MERCADERIA,
     mes,
     coberturaValida(f.cobertura),
+    // $5. Va acá y no al final porque los filtros de la persona se numeran con
+    // `params.length` y se corren solos; uno fijo en el medio no los rompe.
+    evento,
   ];
 
   // LO QUE ELIGIÓ LA PERSONA: qué artículos mirar. Todo lo que se agregue acá
@@ -702,8 +715,8 @@ async function contarDelFiltro(w: Where): Promise<number> {
   return Number(fila?.v ?? 0);
 }
 
-async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
-  const w = where(f, mes);
+async function getFilas(f: FiltrosCompras, mes: string, evento: string): Promise<Listado> {
+  const w = where(f, mes, evento);
   const filas = await query<Record<string, unknown>>(
     `${BASE}
      select sku, producto, proveedor, grupo, marca, codigo_compra, ean, u_bulto,
@@ -801,35 +814,80 @@ async function getFilas(f: FiltrosCompras, mes: string): Promise<Listado> {
 }
 
 /**
- * Los meses que tienen ofertas cargadas, del más nuevo al más viejo.
+ * Una opción por COLUMNA de la planilla del sell in, de la más nueva a la más
+ * vieja.
  *
- * La pantalla arranca en el más nuevo y NO en el mes calendario: el 1° de cada
- * mes los costos del mes nuevo todavía no están cargados, y ofrecer un mes
- * vacío mostraría todos los descuentos en cero como si el proveedor no diera
- * ninguno.
+ * ANTES ERA UNA POR MES, y por eso dos de las tres columnas con evento no se
+ * podían elegir: `1/7/2026 (Glam)` aparecía como "jul 2026" --igual que la
+ * columna común-- y `HOT SALE` no aparecía. Estaban cargadas en la base y eran
+ * inalcanzables desde la pantalla.
+ *
+ * LAS PROMOS SIN MES usan el último mes con costos. No es un detalle de
+ * implementación: de ese mes salen el costo de lista sobre el que se aplica el
+ * descuento y los seis meses de historia. Un `HOT SALE` no trae mes propio, y
+ * sin uno no habría contra qué valorizarlo. La etiqueta lo dice.
+ *
+ * SE SIGUEN SUMANDO LOS MESES DE `costos_historicos`, aunque no tengan sell in:
+ * mientras `bronze.sell_in` esté vacía el selector tiene que seguir teniendo
+ * opciones, si no la pantalla arranca sin ninguna.
  */
-async function getMeses(): Promise<string[]> {
-  // La unión de los dos: los meses que tienen sell in cargado y los que tienen
-  // costos. Mientras `bronze.sell_in` esté vacía el selector sigue teniendo los
-  // meses de siempre —si no, quedaría sin ninguna opción— y el día que se carguen
-  // los del sell in aparecen solos.
-  const filas = await query<{ v: string }>(
-    `select v from (
-       select distinct mes_comercial as v from bronze.sell_in
-       union
-       select distinct mes_comercial from bronze.costos_historicos
-     ) m
-     order by v desc
-     limit 24`,
+async function getOpcionesSellIn(): Promise<OpcionSellIn[]> {
+  // LAS PROMOS SIN MES VAN POR SEPARADO Y SIN TOPE, y no es un capricho del
+  // SQL: ordenando todo junto por mes descendente, un mes vacío queda ULTIMO,
+  // así que el día que haya más de 48 meses cargados el `limit` se comería
+  // justo HOT SALE y Cyber Monday. Desaparecerían del desplegable sin que
+  // nada avise. Son dos filas: se traen aparte y listo.
+  //
+  // Y los meses van PRIMERO porque la pantalla arranca en la primera opción:
+  // tiene que ser el mes más nuevo, no una promo de hace dos años.
+  const filas = await query<{ mes: string; evento: string; encabezado: string | null }>(
+    `with todas as (
+       select mes_comercial as mes, evento, encabezado from bronze.sell_in
+       union all
+       select mes_comercial, '', null from bronze.costos_historicos
+     ),
+     meses as (
+       select mes, evento, max(encabezado) as encabezado
+       from todas where mes <> '' group by mes, evento
+       order by mes desc, evento limit 48
+     ),
+     promos as (
+       select mes, evento, max(encabezado) as encabezado
+       from todas where mes = '' and evento <> '' group by mes, evento
+     )
+     select * from (
+       select 0 as orden, mes, evento, encabezado from meses
+       union all
+       select 1, mes, evento, encabezado from promos
+     ) t
+     order by orden, mes desc, evento`,
   );
-  return filas.map((r) => r.v);
+
+  // El mes al que se cuelgan las promos sin mes propio.
+  const ultimoConMes = filas.find((r) => r.mes)?.mes ?? "";
+
+  return filas
+    // Una columna sin mes NI evento no es nada: no se puede nombrar ni
+    // valorizar. No debería existir, y si aparece no va al desplegable.
+    .filter((r) => r.mes || r.evento)
+    .map((r) => ({
+      valor: valorSellIn(r.mes, r.evento),
+      etiqueta: !r.mes
+        ? `${r.evento} · costos de ${fmtMes(ultimoConMes)}`
+        : r.evento
+          ? `${fmtMes(r.mes)} · ${r.evento}`
+          : fmtMes(r.mes),
+      mes: r.mes || ultimoConMes,
+      evento: r.evento,
+    }));
 }
 
-/** Cuántos artículos tiene el sell in del mes elegido. `0` = todavía no se cargó. */
-async function getSellInCargado(mes: string): Promise<number> {
+/** Cuántos artículos tiene la columna elegida. `0` = todavía no se cargó. */
+async function getSellInCargado(mes: string, evento: string): Promise<number> {
   const fila = await queryOne<{ v: string }>(
-    `select count(*) as v from bronze.sell_in where mes_comercial = $1::text`,
-    [mes],
+    `select count(*) as v from bronze.sell_in
+      where mes_comercial = $1::text and evento = $2::text`,
+    [mes, evento],
   );
   return Number(fila?.v ?? 0);
 }
@@ -863,6 +921,10 @@ async function getOpcionesComprasDirecto() {
     PROVEEDORES_NO_MERCADERIA,
     "",
     COBERTURA_OBJETIVO_DIAS,
+    // $5, el corte del sell in. Para armar los desplegables da igual cuál sea
+    // --no se mira ninguna columna de descuento-- pero el parámetro tiene que
+    // estar o la consulta no liga.
+    "",
   ];
 
   // SE TRAEN LAS COMBINACIONES, NO TRES LISTAS SUELTAS.
@@ -876,13 +938,11 @@ async function getOpcionesComprasDirecto() {
   // existen de verdad. Son 380 filas: el navegador puede cruzarlas al vuelo y
   // cada selector muestra solo lo que convive con lo ya elegido, sin volver
   // al servidor.
-  const [combinaciones, meses] = await Promise.all([
-    query<{ grupo: string | null; proveedor: string | null; marca: string | null }>(
-      `${BASE} select distinct grupo, proveedor, marca from calculada`,
-      params,
-    ),
-    getMeses(),
-  ]);
+  const combinaciones = await query<{
+    grupo: string | null;
+    proveedor: string | null;
+    marca: string | null;
+  }>(`${BASE} select distinct grupo, proveedor, marca from calculada`, params);
 
   const unicos = (valores: (string | null)[]) =>
     [...new Set(valores.filter((v): v is string => !!v))].sort((a, b) =>
@@ -896,7 +956,6 @@ async function getOpcionesComprasDirecto() {
     marcas: unicos(combinaciones.map((c) => c.marca)),
     grupos: unicos(combinaciones.map((c) => c.grupo)),
     combinaciones,
-    meses,
   };
 }
 
@@ -911,15 +970,19 @@ async function getComprasHasta(): Promise<string | null> {
 async function getDashboardComprasDirecto(
   f: FiltrosCompras,
 ): Promise<DashboardCompras> {
-  const meses = await getMeses();
-  // El mes pedido sólo vale si existe: uno inventado dejaría todos los
-  // descuentos en cero sin decir por qué.
-  const mes = (f.mes && meses.includes(f.mes) ? f.mes : meses[0]) ?? "";
+  const opcionesSellIn = await getOpcionesSellIn();
+  // La columna pedida sólo vale si existe: una inventada dejaría todos los
+  // descuentos en cero sin decir por qué. Sin nada elegido va la primera, que
+  // es la más nueva.
+  const elegida =
+    opcionesSellIn.find((o) => o.valor === f.mes) ?? opcionesSellIn[0];
+  const mes = elegida?.mes ?? "";
+  const evento = elegida?.evento ?? "";
 
   const [listado, comprasHasta, sellInCargado, sellInFoto] = await Promise.all([
-    getFilas(f, mes),
+    getFilas(f, mes, evento),
     getComprasHasta(),
-    getSellInCargado(mes),
+    getSellInCargado(mes, evento),
     getSellInFoto(),
   ]);
 
@@ -940,7 +1003,8 @@ async function getDashboardComprasDirecto(
     ventana: f.ventana ?? VENTANA_POR_DEFECTO,
     cobertura: coberturaValida(f.cobertura),
     mes,
-    meses,
+    evento,
+    opcionesSellIn,
     sellInCargado,
     sellInFoto,
     comprasHasta,
