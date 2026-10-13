@@ -938,16 +938,22 @@ async function getOpcionesComprasDirecto() {
   // Las opciones de los selectores no dependen de la cobertura elegida --son
   // la lista de proveedores, marcas y grupos que existen--, así que va el
   // objetivo de siempre.
-  const params = [
-    VENTANA_POR_DEFECTO,
-    PROVEEDORES_NO_MERCADERIA,
-    "",
-    COBERTURA_OBJETIVO_DIAS,
-    // $5, el corte del sell in. Para armar los desplegables da igual cuál sea
-    // --no se mira ninguna columna de descuento-- pero el parámetro tiene que
-    // estar o la consulta no liga.
-    "",
-  ];
+  // LOS PARAMETROS SE ARMAN CON `where`, LA MISMA FUNCION QUE LA CONSULTA DE
+  // VERDAD, y no a mano acá.
+  //
+  // Armarlos a mano ya rompió la pantalla entera dos veces: se agrega un
+  // parámetro al SQL --el evento, el mes de los costos-- y esta lista se queda
+  // corta. Postgres no dice qué falta, dice
+  //
+  //     bind message supplies 5 parameters, but prepared statement "" requires 6
+  //
+  // y el panel no carga NADA. Con `where` hay un solo lugar donde se decide
+  // cuántos son y en qué orden van.
+  //
+  // Sin filtros, `where` devuelve sólo los fijos. El mes tiene que ser uno de
+  // verdad igual: `meses_hist` hace `to_date($6 || '-01')` y con vacío revienta.
+  const mesActual = new Date().toISOString().slice(0, 7);
+  const { params } = where({}, "", "", mesActual);
 
   // SE TRAEN LAS COMBINACIONES, NO TRES LISTAS SUELTAS.
   //
