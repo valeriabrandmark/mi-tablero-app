@@ -8,6 +8,12 @@ export type Pestana = {
   label: string;
   /** Página todavía sin datos: se muestra apagada y no navega. */
   pendiente?: boolean;
+  /**
+   * Página a medio construir. NO es lo mismo que `pendiente`: esta SÍ navega
+   * --el superadmin ve el borrador y el resto un cartel-- y por eso lleva el
+   * mismo punto que la barra lateral en vez de apagarse.
+   */
+  enConstruccion?: boolean;
 };
 
 /**
@@ -22,6 +28,17 @@ export type Pestana = {
  * lleva a una página vacía se lee como que el tablero está roto, y esconderla
  * hace que nadie sepa que falta.
  */
+/** El mismo punto que usa la barra lateral, para que signifique lo mismo. */
+function PuntoEnObra() {
+  return (
+    <span
+      className="bg-c3 ml-1.5 inline-block size-1.5 shrink-0 rounded-full align-middle"
+      title="En producción"
+      aria-label="En producción"
+    />
+  );
+}
+
 export default function Pestanas({ pestanas }: { pestanas: Pestana[] }) {
   const pathname = usePathname();
 
@@ -55,6 +72,7 @@ export default function Pestanas({ pestanas }: { pestanas: Pestana[] }) {
             }`}
           >
             {p.label}
+            {p.enConstruccion && <PuntoEnObra />}
           </Link>
         );
       })}
