@@ -49,6 +49,7 @@ import type {
  */
 function recorteStock(f: FiltrosMeli): string {
   const partes: string[] = [];
+  if (f.buscar?.trim()) partes.push(`de "${f.buscar.trim()}"`);
   if (f.sku?.length) {
     partes.push(f.sku.length === 1 ? "del artículo filtrado" : `de ${f.sku.length} artículos`);
   }
