@@ -11,6 +11,7 @@ import { columnasVencidos } from "@/components/columnasVencidos";
 import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import {
+  fmtFechaCortaConAnio,
   fmtMes,
   fmtMoneda,
   fmtMonedaCorta,
@@ -20,6 +21,7 @@ import {
 import { PALETA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
+  ComprobanteCliente,
   DashboardCuentas,
   FilaCliente,
   FiltrosCuentas,
@@ -64,6 +66,90 @@ function notaRecupero(puntos: PuntoRecupero[]): string {
   return (
     `${fmtMoneda(monto)} de ${fmtNumero(clientes)} ` +
     `${clientes === 1 ? "cliente" : "clientes"} · por el mes en que adeudaban`
+  );
+}
+
+/**
+ * El desglose de un cliente: sus comprobantes impagos, uno por fila.
+ *
+ * POR QUE EXISTE. La fila del cliente dice "$ 751.451 · 246 días", que leído
+ * junto suena a que todo está vencido hace ocho meses. Casi nunca es cierto:
+ * el saldo está repartido en comprobantes de antigüedades muy distintas, y el
+ * "246" es el del más viejo. Para decidir a quién llamar, eso es una lectura
+ * falsa; acá cada comprobante trae SU plata y SUS días.
+ *
+ * VAN LOS QUE NO VENCIERON TAMBIEN, en gris y con el atraso en guión. Si sólo
+ * estuvieran los vencidos, la suma de abajo no cerraría contra el saldo total
+ * de la fila y haría dudar del número de arriba.
+ */
+function DetalleComprobantes({ filas }: { filas: ComprobanteCliente[] }) {
+  const vencido = filas
+    .filter((f) => f.atraso > 0)
+    .reduce((a, f) => a + f.pendiente, 0);
+  const total = filas.reduce((a, f) => a + f.pendiente, 0);
+
+  return (
+    <div className="px-2 py-1">
+      <table className="w-full text-[11px]">
+        <thead className="text-muted">
+          <tr className="border-line/60 border-b">
+            <th className="py-1 pr-3 text-left font-normal">Comprobante</th>
+            <th className="py-1 pr-3 text-left font-normal">Fecha</th>
+            <th className="py-1 pr-3 text-left font-normal">Vencimiento</th>
+            <th className="py-1 pr-3 text-right font-normal">Total</th>
+            <th className="py-1 pr-3 text-right font-normal">Pendiente</th>
+            <th className="py-1 pr-3 text-right font-normal">Atraso</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((f, i) => {
+            const alDia = f.atraso <= 0;
+            return (
+              <tr
+                key={`${f.comprobante ?? "s/n"}-${i}`}
+                className={`border-line/30 border-b last:border-0 ${alDia ? "text-muted" : ""}`}
+              >
+                <td className="py-1 pr-3">{f.comprobante ?? "—"}</td>
+                <td className="py-1 pr-3">{f.fecha ? fmtFechaCortaConAnio(f.fecha) : "—"}</td>
+                <td className="py-1 pr-3">
+                  {f.vencimiento ? fmtFechaCortaConAnio(f.vencimiento) : "—"}
+                </td>
+                <td className="py-1 pr-3 text-right tabular-nums">
+                  {fmtMoneda(f.total)}
+                </td>
+                <td className="py-1 pr-3 text-right tabular-nums">
+                  {fmtMoneda(f.pendiente)}
+                </td>
+                {/* Los que ya vencieron, en tinta plena; los que no, en gris
+                    junto con toda su fila. El color del atraso no se escala
+                    por tramos: para eso está la tabla de comprobantes
+                    vencidos de más abajo, que es la que ordena por antigüedad. */}
+                <td className="py-1 pr-3 text-right tabular-nums">
+                  {alDia ? "—" : `${fmtNumero(f.atraso)} d`}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr className="border-line text-ink border-t">
+            <td className="py-1 pr-3" colSpan={4}>
+              {filas.length} {filas.length === 1 ? "comprobante" : "comprobantes"}
+              {vencido > 0 && (
+                <span className="text-muted">
+                  {" "}
+                  · {fmtMoneda(vencido)} vencido
+                </span>
+              )}
+            </td>
+            <td className="py-1 pr-3 text-right font-medium tabular-nums">
+              {fmtMoneda(total)}
+            </td>
+            <td />
+          </tr>
+        </tfoot>
+      </table>
+    </div>
   );
 }
 
@@ -297,6 +383,10 @@ function LeyendaEstados() {
 
 export default function DashboardCuentasPage() {
   const [filtros, setFiltros] = useState<FiltrosCuentas>({});
+  // Lo tecleado vive aparte del filtro aplicado: el filtro sólo cambia al
+  // salir del campo o al dar Enter, así que mientras tanto hay que recordar
+  // lo que la persona escribió.
+  const [buscado, setBuscado] = useState("");
 
   const { data, cargando, error, recargar, empezarCarga } =
     useDatosTablero<Respuesta>("/api/cuentas-corrientes", filtros, {
@@ -318,7 +408,8 @@ export default function DashboardCuentasPage() {
   const vacio =
     sinValores(filtros.vendedor) &&
     sinValores(filtros.empresa) &&
-    sinValores(filtros.categoria);
+    sinValores(filtros.categoria) &&
+    !filtros.buscar;
 
   return (
     <div className="space-y-4">
@@ -389,7 +480,38 @@ export default function DashboardCuentasPage() {
           opciones={opciones?.categorias ?? []}
           onChange={(v) => cambiar({ ...filtros, categoria: v })}
         />
-        <BotonLimpiar onClick={() => cambiar({})} deshabilitado={vacio} />
+        {/* EL BUSCADOR CONFIRMA AL SALIR DEL CAMPO, no en cada tecla: cada
+            cambio dispara el juego completo de consultas, y buscar "TORRES"
+            serían seis pasadas por la base para ver la última. */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            cambiar({ ...filtros, buscar: buscado.trim() || undefined });
+          }}
+          className="flex flex-col gap-1"
+        >
+          <label className="text-muted text-[11px]" htmlFor="buscar-cuentas">
+            Buscar
+          </label>
+          <input
+            id="buscar-cuentas"
+            value={buscado}
+            onChange={(e) => setBuscado(e.target.value)}
+            onBlur={() =>
+              cambiar({ ...filtros, buscar: buscado.trim() || undefined })
+            }
+            placeholder="Cliente o CUIT"
+            className="border-line bg-panel-2 text-ink placeholder:text-muted focus:border-c1 w-44 rounded-lg border px-2.5 py-1.5 text-xs outline-none"
+          />
+        </form>
+
+        <BotonLimpiar
+          onClick={() => {
+            setBuscado("");
+            cambiar({});
+          }}
+          deshabilitado={vacio}
+        />
 
         <span className="text-muted ml-auto max-w-md text-[11px] leading-tight">
           Los clientes activos/inactivos cruzan ventas con deuda por nombre
@@ -565,9 +687,15 @@ export default function DashboardCuentasPage() {
             />
           </Panel>
 
+          {/* SALE DE LA FOTO MENSUAL (`Historial_Scoring`) y no del scoring
+              vivo. La nota dice de cuándo es la foto, porque una deuda de hace
+              seis días leída como "ahora" hace llamar a quien ya pagó. */}
           <Panel
             titulo="Clientes y Saldos"
-            nota={`${data.clientes.length} ordenados por saldo vencido`}
+            nota={
+              `${data.clientes.length} ordenados por saldo vencido` +
+              (data.periodoClientes ? ` · ${data.periodoClientes}` : "")
+            }
           >
             {/* Click en una fila filtra por su CATEGORÍA, que es la dimensión de
                 esta tabla que ya existe como filtro y a la que responden los
@@ -576,7 +704,12 @@ export default function DashboardCuentasPage() {
             <Tabla
               filas={data.clientes}
               columnas={columnas(data.clientes)}
-              clave={(f) => f.razonSocial}
+              clave={(f) => f.cuit || f.razonSocial}
+              expandir={(f) => {
+                const comprobantes = data.comprobantesPorCuit[f.cuit] ?? [];
+                if (comprobantes.length === 0) return null;
+                return <DetalleComprobantes filas={comprobantes} />;
+              }}
               onClickFila={(f) =>
                 f.categoria && alternar("categoria")(f.categoria)
               }
