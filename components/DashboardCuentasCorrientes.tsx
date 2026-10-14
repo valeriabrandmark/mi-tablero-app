@@ -94,6 +94,11 @@ function DetalleComprobantes({ filas }: { filas: ComprobanteCliente[] }) {
         <thead className="text-muted">
           <tr className="border-line/60 border-b">
             <th className="py-1 pr-3 text-left font-normal">Comprobante</th>
+            {/* LA EMPRESA VA SEGUNDA, pegada al comprobante: un mismo CUIT
+                compra en varias del grupo, así que el desglose mezcla 0001 con
+                0003 y sin esta columna dos renglones parecidos se leen como un
+                duplicado cuando son de empresas distintas. */}
+            <th className="py-1 pr-3 text-left font-normal">Empresa</th>
             <th className="py-1 pr-3 text-left font-normal">Fecha</th>
             <th className="py-1 pr-3 text-left font-normal">Vencimiento</th>
             <th className="py-1 pr-3 text-right font-normal">Total</th>
@@ -110,6 +115,7 @@ function DetalleComprobantes({ filas }: { filas: ComprobanteCliente[] }) {
                 className={`border-line/30 border-b last:border-0 ${alDia ? "text-muted" : ""}`}
               >
                 <td className="py-1 pr-3">{f.comprobante ?? "—"}</td>
+                <td className="py-1 pr-3">{nombreEmpresa(f.empresa ?? "")}</td>
                 <td className="py-1 pr-3">{f.fecha ? fmtFechaCortaConAnio(f.fecha) : "—"}</td>
                 <td className="py-1 pr-3">
                   {f.vencimiento ? fmtFechaCortaConAnio(f.vencimiento) : "—"}
@@ -133,7 +139,7 @@ function DetalleComprobantes({ filas }: { filas: ComprobanteCliente[] }) {
         </tbody>
         <tfoot>
           <tr className="border-line text-ink border-t">
-            <td className="py-1 pr-3" colSpan={4}>
+            <td className="py-1 pr-3" colSpan={5}>
               {filas.length} {filas.length === 1 ? "comprobante" : "comprobantes"}
               {vencido > 0 && (
                 <span className="text-muted">
@@ -162,15 +168,33 @@ const COLOR_CATEGORIA: Record<string, string> = {
   CRÍTICO: "#f43f5e",
 };
 
-function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
+function columnas(
+  filas: FilaCliente[],
+  fechaFoto: string | null,
+): Columna<FilaCliente>[] {
   return [
     {
       titulo: "Cliente",
-      celda: (f) => (
-        <span className="block max-w-[116px] sm:max-w-[260px] truncate">
-          {f.razonSocial}
-        </span>
-      ),
+      ayuda:
+        "Las filas en gris quedaron atrás: ese cliente dejó de aparecer en el scoring —casi siempre porque canceló— así que su saldo es el del día que dice, no el de hoy. Son las que no tienen comprobantes para desglosar.",
+      celda: (f) => {
+        // UNA FILA CONGELADA ES LA QUE NO SE VOLVIO A CAPTURAR. Dentro del
+        // mismo mes conviven capturas de varios días: la de un cliente queda
+        // en la última vez que apareció, y deja de aparecer cuando canceló.
+        // Esa fila muestra una deuda que ya se pagó, así que se marca.
+        const vieja = fechaFoto != null && f.fecha != null && f.fecha !== fechaFoto;
+        return (
+          <span
+            className={`block max-w-[116px] sm:max-w-[260px] truncate ${vieja ? "text-muted" : ""}`}
+            title={vieja ? `Último dato del ${f.fecha}` : undefined}
+          >
+            {f.razonSocial}
+            {vieja && (
+              <span className="text-muted ml-1.5 text-[10px]">· {f.fecha}</span>
+            )}
+          </span>
+        );
+      },
       orden: (f) => f.razonSocial,
     },
     {
@@ -693,8 +717,23 @@ export default function DashboardCuentasPage() {
           <Panel
             titulo="Clientes y Saldos"
             nota={
-              `${data.clientes.length} ordenados por saldo vencido` +
-              (data.periodoClientes ? ` · ${data.periodoClientes}` : "")
+              [
+                `${data.clientes.length} ordenados por saldo vencido`,
+                data.periodoClientes || null,
+                // CUANTAS QUEDARON ATRAS, dicho en el pie. Es la respuesta a
+                // "¿por qué algunos no se desglosan?": no tienen comprobantes
+                // porque ya no deben nada, y su fila es de un día anterior.
+                (() => {
+                  const viejas = data.clientes.filter(
+                    (c) => data.fechaClientes && c.fecha && c.fecha !== data.fechaClientes,
+                  ).length;
+                  return viejas > 0
+                    ? `${viejas} con datos de días anteriores (en gris)`
+                    : null;
+                })(),
+              ]
+                .filter(Boolean)
+                .join(" · ")
             }
           >
             {/* Click en una fila filtra por su CATEGORÍA, que es la dimensión de
@@ -703,7 +742,7 @@ export default function DashboardCuentasPage() {
                 de una fila, que es lo que ya se está mirando. */}
             <Tabla
               filas={data.clientes}
-              columnas={columnas(data.clientes)}
+              columnas={columnas(data.clientes, data.fechaClientes)}
               clave={(f) => f.cuit || f.razonSocial}
               expandir={(f) => {
                 const comprobantes = data.comprobantesPorCuit[f.cuit] ?? [];
