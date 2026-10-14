@@ -12,6 +12,10 @@ export async function GET(request: NextRequest) {
     vendedor: lista(sp, "vendedor"),
     empresa: lista(sp, "empresa"),
     categoria: lista(sp, "categoria"),
+    // Texto libre. Se le pone un techo acá porque esto llega de una query
+    // string que se puede escribir a mano; lo que hace con él es un `like`
+    // parametrizado, así que el largo es lo único que hay que acotar.
+    buscar: sp.get("buscar")?.slice(0, 80) || undefined,
   };
 
   try {

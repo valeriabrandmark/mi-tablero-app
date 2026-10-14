@@ -1,6 +1,7 @@
 import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import type {
+  ComprobanteCliente,
   ComprobanteVencido,
   DashboardCuentas,
   FilaCliente,
@@ -45,11 +46,27 @@ function whereCuentas(
   conCategoria = true,
   omitir: (keyof FiltrosCuentas)[] = [],
 ): Where {
+  // Las tres tablas --scoring, aging e historial-- tienen `razon_social` y
+  // `cuit`, así que el buscador de abajo sirve con cualquiera de los alias.
   const params: unknown[] = [];
   const clauses: string[] = ["true"];
 
   if (!omitir.includes("vendedor")) agregarFiltro(clauses, params, `${alias}.vendedor`, f.vendedor);
   if (!omitir.includes("empresa")) agregarFiltro(clauses, params, `${alias}.empresa`, f.empresa);
+
+  // EL BUSCADOR PEGA CONTRA EL NOMBRE Y CONTRA EL CUIT. El CUIT entra sin
+  // guiones de los dos lados: en la base está "20-11111111-1" y nadie lo
+  // escribe así cuando lo está buscando.
+  if (f.buscar && f.buscar.trim() && !omitir.includes("buscar")) {
+    params.push(`%${f.buscar.trim().toUpperCase()}%`);
+    const i = params.length;
+    params.push(`%${f.buscar.replace(/[^0-9A-Za-z]/g, "")}%`);
+    const j = params.length;
+    clauses.push(
+      `(upper(${alias}.razon_social) like $${i} or ` +
+        `regexp_replace(${alias}.cuit, '[^0-9A-Za-z]', '', 'g') like $${j})`,
+    );
+  }
 
   if (!vacio(f.categoria) && !omitir.includes("categoria")) {
     params.push(f.categoria);
@@ -168,21 +185,92 @@ async function getVencidosQueCompran(f: FiltrosCuentas) {
 
 // --- Tabla y gráficos --------------------------------------------------------
 
+/**
+ * La tabla de clientes, DESDE LA FOTO MENSUAL y no desde `scoring`.
+ *
+ * POR QUE EL HISTORIAL. `scoring` se pisa entera en cada carga: es cómo está
+ * cada cliente hoy y nada más. `historial_scoring` guarda una fila por cliente
+ * y por mes, así que la misma tabla puede contestar "cómo está hoy" y "cómo
+ * estaba en agosto" sin cambiar de fuente.
+ *
+ * Y tiene MÁS CLIENTES: 211 CUIT contra los 111 de `scoring`, porque ahí sólo
+ * quedan los que hoy deben algo. Un cliente que canceló el mes pasado
+ * desaparece de `scoring` y sigue en el historial.
+ *
+ * SE TOMA EL PERIODO MAS NUEVO. Es una FOTO, no el estado en vivo: la del mes
+ * en curso se sacó el día que corrió la planilla. La pantalla lo dice, porque
+ * una deuda de hace seis días leída como "ahora" hace llamar a quien ya pagó.
+ */
 async function getClientes(f: FiltrosCuentas): Promise<FilaCliente[]> {
-  const w = whereCuentas(f, "s");
+  const w = whereCuentas(f, "h");
   return query<FilaCliente>(
-    `select s.razon_social as "razonSocial",
-            s.categoria,
-            s.vendedor,
-            coalesce(s.saldo_total, 0)::float8 as "saldoTotal",
-            coalesce(s.saldo_vencido, 0)::float8 as "saldoVencido",
-            s.atraso_max::float8 as "atrasoMax"
-     from bronze.cuentas_corrientes_scoring s
+    `select h.razon_social as "razonSocial",
+            h.categoria,
+            h.vendedor,
+            h.cuit,
+            h.periodo,
+            coalesce(h.saldo_total, 0)::float8 as "saldoTotal",
+            coalesce(h.saldo_vencido, 0)::float8 as "saldoVencido",
+            h.atraso_max::float8 as "atrasoMax"
+     from bronze.cuentas_corrientes_historial_scoring h
      where ${w.sql}
-     order by s.saldo_vencido desc nulls last, s.saldo_total desc nulls last
-     limit 100`,
+       and h.periodo = (select max(periodo) from bronze.cuentas_corrientes_historial_scoring)
+     order by h.saldo_vencido desc nulls last, h.saldo_total desc nulls last
+     limit 300`,
     w.params,
   );
+}
+
+/** De qué foto sale la tabla de clientes, para que la pantalla lo diga. */
+async function getPeriodoClientes(): Promise<string> {
+  const fila = await queryOne<{ v: string | null; f: string | null }>(
+    `select max(periodo) as v,
+            to_char(max(to_date(fecha, 'DD/MM/YYYY')), 'DD/MM/YYYY') as f
+       from bronze.cuentas_corrientes_historial_scoring`,
+  );
+  return fila?.f ? `${fila.v} · foto del ${fila.f}` : (fila?.v ?? "");
+}
+
+/**
+ * Los comprobantes de cada cliente, agrupados por CUIT.
+ *
+ * VAN TODOS DE UNA con el resto del tablero. `aging` tiene 208 filas en total,
+ * así que mandarlas enteras cuesta menos que el primer pedido extra al abrir
+ * una fila --y evita el parpadeo de abrir y esperar. El día que sean miles
+ * habrá que darlo vuelta y pedirlas por cliente.
+ *
+ * NO SE FILTRA POR `atraso > 0`: ver la nota del tipo. El desglose tiene que
+ * cerrar contra el saldo total de la fila, y ahí entran los que aún no vencen.
+ */
+async function getComprobantesPorCuit(
+  f: FiltrosCuentas,
+): Promise<Record<string, ComprobanteCliente[]>> {
+  // `false`: aging no tiene columna categoría, se resuelve por cuit.
+  const w = whereCuentas(f, "a", false);
+  const filas = await query<ComprobanteCliente & { cuit: string }>(
+    `select a.cuit,
+            a.comprobante,
+            to_char(to_date(a.fecha, 'DD/MM/YYYY'), 'YYYY-MM-DD')       as fecha,
+            to_char(to_date(a.vencimiento, 'DD/MM/YYYY'), 'YYYY-MM-DD') as vencimiento,
+            coalesce(a.total, 0)::float8     as total,
+            coalesce(a.pendiente, 0)::float8 as pendiente,
+            coalesce(a.atraso, 0)::float8    as atraso
+     from bronze.cuentas_corrientes_aging a
+     where ${w.sql}
+       and coalesce(a.pendiente, 0) > 0
+       -- Sólo la última foto, igual que la tabla de comprobantes vencidos: la
+       -- tabla guarda una por carga y sin esto cada comprobante saldría
+       -- repetido una vez por día cargado.
+       and a.fecha_carga = (select max(fecha_carga) from bronze.cuentas_corrientes_aging)
+     order by a.atraso desc nulls last, a.pendiente desc`,
+    w.params,
+  );
+
+  const porCuit: Record<string, ComprobanteCliente[]> = {};
+  for (const { cuit, ...resto } of filas) {
+    (porCuit[cuit] ??= []).push(resto);
+  }
+  return porCuit;
 }
 
 async function getPorCategoria(f: FiltrosCuentas) {
@@ -450,6 +538,8 @@ async function getDashboardCuentasDirecto(f: FiltrosCuentas): Promise<DashboardC
     categorias,
     aging,
     comprobantesVencidos,
+    comprobantesPorCuit,
+    periodoClientes,
     historial,
     cancelaciones,
     cancelacionesMes,
@@ -461,6 +551,8 @@ async function getDashboardCuentasDirecto(f: FiltrosCuentas): Promise<DashboardC
     getPorCategoria(f),
     getAging(f),
     getComprobantesVencidos(f),
+    getComprobantesPorCuit(f),
+    getPeriodoClientes(),
     getHistorial(f),
     getCancelaciones(f),
     getCancelacionesPorMes(f),
@@ -478,6 +570,8 @@ async function getDashboardCuentasDirecto(f: FiltrosCuentas): Promise<DashboardC
     clientesPorCategoria: categorias.clientes,
     aging,
     comprobantesVencidos,
+    comprobantesPorCuit,
+    periodoClientes,
     historial,
     cancelacionesPorVendedor: cancelaciones,
     cancelacionesPorMes: cancelacionesMes,

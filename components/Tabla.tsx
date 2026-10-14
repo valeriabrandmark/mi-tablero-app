@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 export type Columna<T> = {
   titulo: string;
@@ -140,6 +147,7 @@ export function Tabla<T>({
   activa,
   etiquetaTotal = "Total",
   fijas = 0,
+  expandir,
 }: {
   filas: T[];
   columnas: Columna<T>[];
@@ -174,9 +182,25 @@ export function Tabla<T>({
    * al scrollear.
    */
   fijas?: number;
+  /**
+   * EL DESGLOSE DE UNA FILA, que se abre debajo de ella.
+   *
+   * Devolver `null` para las filas que no tienen nada que abrir: esas no
+   * muestran la flecha, en vez de ofrecer un gesto que no hace nada.
+   *
+   * ES UN CLICK APARTE DEL DE LA FILA. La fila entera ya puede estar
+   * filtrando el tablero (`onClickFila`), y abrir el detalle no es filtrar:
+   * mezclarlos haría que mirar un comprobante cambie los KPI de arriba.
+   */
+  expandir?: (fila: T) => ReactNode | null;
 }) {
   // Guarda el TÍTULO y no el índice: si el tablero cambia sus columnas —pasa
   // al filtrar—, un índice apuntaría a otra columna sin avisar.
+  // Qué filas están abiertas, por su clave. En un Set y no en la fila misma
+  // porque `filas` se reemplaza entera en cada consulta: guardarlo adentro
+  // cerraría todo al refrescar.
+  const [abiertas, setAbiertas] = useState<ReadonlySet<string>>(new Set());
+
   const [orden, setOrden] = useState<{
     titulo: string;
     direccion: Direccion;
@@ -376,9 +400,12 @@ export function Tabla<T>({
               const esActiva = activa?.(fila) ?? false;
               const hayActiva =
                 activa != null && ordenadas.some((x) => activa(x));
+              const k = clave(fila, i);
+              const detalle = expandir?.(fila) ?? null;
+              const abierta = abiertas.has(k);
               return (
+                <Fragment key={k}>
                 <tr
-                  key={clave(fila, i)}
                   onClick={onClickFila ? () => onClickFila(fila) : undefined}
                   className={`group border-line/60 hover:bg-panel-2 border-b ${
                     onClickFila ? "cursor-pointer" : ""
@@ -413,10 +440,58 @@ export function Tabla<T>({
                           : ""
                       } ${bordeFijo(i)}`}
                     >
-                      {c.celda(fila)}
+                      {/* La flecha va en la PRIMERA celda, pegada al nombre:
+                          es lo que identifica la fila, y una columna propia
+                          sólo para ella robaría ancho a los números. */}
+                      {i === 0 && detalle ? (
+                        <span className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            aria-expanded={abierta}
+                            aria-label={abierta ? "Cerrar el detalle" : "Ver el detalle"}
+                            // STOPPROPAGATION: sin esto, abrir el detalle
+                            // dispararía también el onClick de la fila, que
+                            // filtra el tablero entero.
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAbiertas((previas) => {
+                                const s = new Set(previas);
+                                if (s.has(k)) s.delete(k);
+                                else s.add(k);
+                                return s;
+                              });
+                            }}
+                            className="text-muted hover:text-ink -my-1 shrink-0 rounded p-0.5"
+                          >
+                            <svg
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className={`size-3.5 transition-transform ${abierta ? "rotate-90" : ""}`}
+                              aria-hidden="true"
+                            >
+                              <path d="M9 6l6 6-6 6" />
+                            </svg>
+                          </button>
+                          <span className="min-w-0">{c.celda(fila)}</span>
+                        </span>
+                      ) : (
+                        c.celda(fila)
+                      )}
                     </td>
                   ))}
                 </tr>
+                {abierta && detalle && (
+                  <tr className="border-line/60 bg-panel-2/40 border-b">
+                    <td colSpan={columnas.length} className="px-1 py-2">
+                      {detalle}
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               );
             })}
           </tbody>

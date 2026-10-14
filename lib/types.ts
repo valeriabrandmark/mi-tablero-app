@@ -209,6 +209,8 @@ export type DashboardLogistica = {
 // --- Cuentas Corrientes -----------------------------------------------------
 
 export type FiltrosCuentas = {
+  /** Texto libre contra la razón social y el CUIT del cliente. */
+  buscar?: string;
   vendedor?: string[];
   empresa?: string[];
   categoria?: string[];
@@ -232,6 +234,29 @@ export type FilaCliente = {
   saldoTotal: number;
   saldoVencido: number;
   atrasoMax: number | null;
+  /** La clave con la que se cuelgan los comprobantes del desglose. */
+  cuit: string;
+  /** El período de la foto de la que sale la fila (`YYYY-MM`). */
+  periodo: string;
+};
+
+/**
+ * Un comprobante impago de un cliente, para abrir dentro de su fila.
+ *
+ * SE MANDAN TODOS LOS QUE TIENEN SALDO, no sólo los vencidos. La fila del
+ * cliente dice cuánto debe y desde cuándo; abrirla tiene que contestar DE QUÉ
+ * ESTÁ HECHO ese saldo, y buena parte suele ser comprobantes todavía en plazo.
+ * Un desglose que sólo muestra los vencidos no cierra contra el total de
+ * arriba, y entonces hace dudar del número y no del desglose.
+ */
+export type ComprobanteCliente = {
+  comprobante: string | null;
+  fecha: string | null;
+  vencimiento: string | null;
+  total: number;
+  pendiente: number;
+  /** Negativo o cero = todavía no venció. */
+  atraso: number;
 };
 
 export type OpcionesCuentas = {
@@ -248,6 +273,16 @@ export type DashboardCuentas = {
   aging: PuntoEtiqueta[];
   /** Los comprobantes vencidos, UNO POR UNO. Ver la nota en queries-cuentas.ts. */
   comprobantesVencidos: ComprobanteVencido[];
+  /**
+   * Los comprobantes de cada cliente, por CUIT, para el desglose de la tabla.
+   *
+   * VIAJAN TODOS DE UNA y no se piden al abrir cada fila: la tabla de aging
+   * tiene 208 filas en total, así que mandarlas enteras pesa menos que el
+   * primer pedido extra. El día que sean miles habrá que darlas vuelta.
+   */
+  comprobantesPorCuit: Record<string, ComprobanteCliente[]>;
+  /** De qué foto mensual sale la tabla de clientes. */
+  periodoClientes: string;
   historial: PuntoHistorial[];
   cancelacionesPorVendedor: PuntoEtiqueta[];
   cancelacionesPorMes: PuntoRecupero[];
