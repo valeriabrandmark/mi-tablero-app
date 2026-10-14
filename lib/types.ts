@@ -238,6 +238,16 @@ export type FilaCliente = {
   cuit: string;
   /** El período de la foto de la que sale la fila (`YYYY-MM`). */
   periodo: string;
+  /**
+   * EL DIA EN QUE SE CAPTURO ESTA FILA (`DD/MM/YYYY`).
+   *
+   * No es lo mismo que el período. Dentro de un mes puede haber capturas de
+   * varios días, y la de un cliente queda congelada en la última vez que
+   * apareció: si canceló su deuda el 8, su última captura es la del 5 y ahí se
+   * queda. La pantalla marca esas filas, porque muestran una deuda que ya no
+   * existe. Ver `periodoClientes`.
+   */
+  fecha: string | null;
 };
 
 /**
@@ -251,6 +261,14 @@ export type FilaCliente = {
  */
 export type ComprobanteCliente = {
   comprobante: string | null;
+  /**
+   * DE QUE EMPRESA DEL GRUPO es el comprobante.
+   *
+   * Importa porque un mismo CUIT compra en varias: el desglose de un cliente
+   * mezcla comprobantes de 0001 y de 0003, y sin esta columna dos renglones
+   * parecidos se leen como un duplicado cuando son de empresas distintas.
+   */
+  empresa: string | null;
   fecha: string | null;
   vencimiento: string | null;
   total: number;
@@ -283,6 +301,13 @@ export type DashboardCuentas = {
   comprobantesPorCuit: Record<string, ComprobanteCliente[]>;
   /** De qué foto mensual sale la tabla de clientes. */
   periodoClientes: string;
+  /**
+   * El día de la captura MAS NUEVA del período. Una fila con una fecha
+   * anterior quedó atrás --el cliente dejó de aparecer en el scoring, casi
+   * siempre porque canceló-- y la pantalla la marca en vez de mostrar esa
+   * deuda como si fuera de hoy.
+   */
+  fechaClientes: string | null;
   historial: PuntoHistorial[];
   cancelacionesPorVendedor: PuntoEtiqueta[];
   cancelacionesPorMes: PuntoRecupero[];

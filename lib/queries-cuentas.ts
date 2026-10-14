@@ -209,6 +209,7 @@ async function getClientes(f: FiltrosCuentas): Promise<FilaCliente[]> {
             h.vendedor,
             h.cuit,
             h.periodo,
+            h.fecha,
             coalesce(h.saldo_total, 0)::float8 as "saldoTotal",
             coalesce(h.saldo_vencido, 0)::float8 as "saldoVencido",
             h.atraso_max::float8 as "atrasoMax"
@@ -221,14 +222,27 @@ async function getClientes(f: FiltrosCuentas): Promise<FilaCliente[]> {
   );
 }
 
-/** De qué foto sale la tabla de clientes, para que la pantalla lo diga. */
-async function getPeriodoClientes(): Promise<string> {
+/**
+ * De qué foto sale la tabla de clientes, y de qué día es la captura más nueva.
+ *
+ * LOS DOS DATOS, porque no son lo mismo. El período es el mes; la fecha es el
+ * día en que se capturó. Dentro de 2026-10 conviven capturas del 05/10 al
+ * 14/10: la fila de un cliente queda congelada en la última vez que apareció
+ * en el scoring, y un cliente que canceló su deuda deja de aparecer. Por eso
+ * hay filas que muestran un saldo que ya se pagó --23 al 14/10, por
+ * $ 16.455.523-- y son exactamente las que no tienen comprobantes para
+ * desglosar.
+ */
+async function getPeriodoClientes(): Promise<{ texto: string; fecha: string | null }> {
   const fila = await queryOne<{ v: string | null; f: string | null }>(
     `select max(periodo) as v,
             to_char(max(to_date(fecha, 'DD/MM/YYYY')), 'DD/MM/YYYY') as f
        from bronze.cuentas_corrientes_historial_scoring`,
   );
-  return fila?.f ? `${fila.v} · foto del ${fila.f}` : (fila?.v ?? "");
+  return {
+    texto: fila?.f ? `${fila.v} · foto del ${fila.f}` : (fila?.v ?? ""),
+    fecha: fila?.f ?? null,
+  };
 }
 
 /**
@@ -250,6 +264,7 @@ async function getComprobantesPorCuit(
   const filas = await query<ComprobanteCliente & { cuit: string }>(
     `select a.cuit,
             a.comprobante,
+            a.empresa,
             to_char(to_date(a.fecha, 'DD/MM/YYYY'), 'YYYY-MM-DD')       as fecha,
             to_char(to_date(a.vencimiento, 'DD/MM/YYYY'), 'YYYY-MM-DD') as vencimiento,
             coalesce(a.total, 0)::float8     as total,
@@ -539,7 +554,7 @@ async function getDashboardCuentasDirecto(f: FiltrosCuentas): Promise<DashboardC
     aging,
     comprobantesVencidos,
     comprobantesPorCuit,
-    periodoClientes,
+    foto,
     historial,
     cancelaciones,
     cancelacionesMes,
@@ -571,7 +586,8 @@ async function getDashboardCuentasDirecto(f: FiltrosCuentas): Promise<DashboardC
     aging,
     comprobantesVencidos,
     comprobantesPorCuit,
-    periodoClientes,
+    periodoClientes: foto.texto,
+    fechaClientes: foto.fecha,
     historial,
     cancelacionesPorVendedor: cancelaciones,
     cancelacionesPorMes: cancelacionesMes,

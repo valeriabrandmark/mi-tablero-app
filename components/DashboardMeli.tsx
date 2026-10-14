@@ -38,6 +38,28 @@ import type {
   UltimaCargaMeli,
 } from "@/lib/types";
 
+/**
+ * Qué recorte está mirando el gráfico de stock, dicho con los filtros que
+ * efectivamente lo achican.
+ *
+ * NO TODOS LOS FILTROS DE LA PANTALLA LO TOCAN. La hora del día no: el stock se
+ * mide una vez por día y no por hora. El rango de fechas tampoco se nombra acá
+ * porque ya está en el eje. Nombrar un filtro que no se aplicó sería peor que
+ * no nombrar ninguno.
+ */
+function recorteStock(f: FiltrosMeli): string {
+  const partes: string[] = [];
+  if (f.sku?.length) {
+    partes.push(f.sku.length === 1 ? "del artículo filtrado" : `de ${f.sku.length} artículos`);
+  }
+  if (f.marca?.length) partes.push(`de ${f.marca.join(", ")}`);
+  if (f.proveedor?.length) partes.push(`de ${f.proveedor.join(", ")}`);
+
+  return partes.length === 0
+    ? "Unidades publicadas y vendibles en todo el catálogo"
+    : `Unidades publicadas y vendibles ${partes.join(" · ")}`;
+}
+
 type Respuesta = DashboardMeli & { opciones: OpcionesMeli | null };
 
 /**
@@ -836,14 +858,19 @@ export default function DashboardMeliPage({
           {data.rango.dias > 1 && (
             <Panel
               titulo="Stock publicado por día"
+              // LA NOTA TIENE QUE NOMBRAR TODO LO QUE ESTA FILTRADO, no sólo
+              // el SKU. Antes decía "en todo el catálogo" aunque hubiera una
+              // marca elegida: la serie SI venía filtrada --con BRAUN son 39
+              // unidades y no 35.000-- pero el rótulo decía lo contrario, y
+              // entonces el número correcto se leía como un número mal.
               nota={
-                (filtros.sku?.length
-                  ? `Unidades del artículo filtrado`
-                  : "Unidades publicadas y vendibles en todo el catálogo") +
-                " · medido en el último pulso de cada día" +
-                (data.stockPorDia.length > 0
-                  ? ""
-                  : " · sin mediciones en este recorte")
+                [
+                  recorteStock(filtros),
+                  "medido en el último pulso de cada día",
+                  data.stockPorDia.length > 0 ? null : "sin mediciones en este recorte",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
               }
             >
               <StockPorDia datos={data.stockPorDia} />
