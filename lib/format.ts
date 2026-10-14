@@ -86,3 +86,53 @@ export function fmtFechaCortaConAnio(iso: string): string {
 export function fmtMetrica(metrica: Metrica): (n: number | null | undefined) => string {
   return metrica === "facturacion" ? fmtMoneda : fmtNumero;
 }
+
+/**
+ * Promedio móvil centrado, para la línea de tendencia de los gráficos diarios.
+ *
+ * ---------------------------------------------------------------------------
+ * NO TOCA UN SOLO DATO
+ *
+ * Devuelve una serie NUEVA al lado de la real. La línea diaria sigue siendo la
+ * de siempre, con sus picos y sus domingos en cero; esta otra existe sólo para
+ * poder leer hacia dónde va sin seguir el serrucho punto por punto.
+ *
+ * Es la diferencia con agrupar por semana, que también limpia el gráfico pero
+ * cambia lo que cada punto SIGNIFICA: un total semanal no es un valor diario.
+ *
+ * ---------------------------------------------------------------------------
+ * CENTRADO Y NO HACIA ATRAS
+ *
+ * El promedio de los 3 días anteriores, el día y los 3 siguientes. Un promedio
+ * hacia atrás --el de los últimos 7-- corre la curva media semana a la derecha:
+ * el pico de un lunes aparecería el jueves, y sobre un gráfico que se usa para
+ * ubicar CUANDO pasó algo, eso es peor que no tener la línea.
+ *
+ * EN LAS PUNTAS SE PROMEDIA CON LO QUE HAY. Los primeros y los últimos días no
+ * tienen ventana completa; se usa la parte que existe en vez de dejarlos en
+ * `null`, que cortaría la línea justo donde se está mirando el dato más nuevo.
+ * La contra es que las puntas son menos suaves, y se ve: es honesto que así
+ * sea, porque ahí hay menos información.
+ */
+export function promedioMovil<T>(
+  datos: T[],
+  valor: (d: T) => number,
+  ventana = 7,
+): number[] {
+  const lado = Math.floor(ventana / 2);
+  return datos.map((_, i) => {
+    const desde = Math.max(0, i - lado);
+    const hasta = Math.min(datos.length - 1, i + lado);
+    let suma = 0;
+    for (let j = desde; j <= hasta; j++) suma += valor(datos[j]) || 0;
+    return suma / (hasta - desde + 1);
+  });
+}
+
+/**
+ * Desde cuántos puntos vale la pena mostrar la tendencia.
+ *
+ * Con menos, la línea diaria ya se lee sola y una tendencia sobre cinco puntos
+ * no es una tendencia: es la misma línea un poco más redonda, ocupando lugar.
+ */
+export const PUNTOS_PARA_TENDENCIA = 14;
