@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import BotonActualizar from "@/components/BotonActualizar";
+import StockPorDia from "@/components/charts/StockPorDia";
 import VentaRentabilidad from "@/components/charts/VentaRentabilidad";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
@@ -821,6 +822,31 @@ export default function DashboardMeliPage({
               nota="Venta c/IVA contra rentabilidad bruta"
             >
               <VentaRentabilidad datos={data.porDia} />
+            </Panel>
+          )}
+
+          {/* PEGADO AL DE VENTAS Y CON EL MISMO EJE DE FECHAS. Es la mitad que
+              falta para leer el de arriba: una línea de venta en cero puede ser
+              "nadie lo quiso" o "no se podía comprar", y son decisiones
+              opuestas. Acá abajo se ve cuál de las dos.
+
+              EN SU PROPIO PANEL Y NO ENCIMA. Son unidades contra pesos, y
+              meterlas en un gráfico con dos escalas dibujaría el pico de stock
+              del mismo alto que el de venta sin que tengan nada que ver. */}
+          {data.rango.dias > 1 && (
+            <Panel
+              titulo="Stock publicado por día"
+              nota={
+                (filtros.sku?.length
+                  ? `Unidades del artículo filtrado`
+                  : "Unidades publicadas y vendibles en todo el catálogo") +
+                " · medido en el último pulso de cada día" +
+                (data.stockPorDia.length > 0
+                  ? ""
+                  : " · sin mediciones en este recorte")
+              }
+            >
+              <StockPorDia datos={data.stockPorDia} />
             </Panel>
           )}
 

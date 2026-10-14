@@ -19,6 +19,7 @@ import {
   nivelDeMargen,
 } from "@/lib/meli";
 import type {
+  PuntoStockDia,
   ArticuloMeli,
   CancelacionesMeli,
   DashboardAlertasMeli,
@@ -416,6 +417,106 @@ async function getPorDia(f: FiltrosMeli): Promise<PuntoDiaMeli[]> {
   }));
 }
 
+
+/* ---------------------------------------------------------------------------
+   EL STOCK MEDIDO POR EL PULSO, DIA POR DIA.
+
+   PARA QUE SIRVE. Un artículo que no vendió en el período puede no haber
+   vendido por dos razones completamente distintas: nadie lo quiso, o no se
+   podía comprar. En el gráfico de ventas las dos se ven igual --una línea en
+   cero-- y son decisiones opuestas: una dice "bajale el precio" y la otra
+   "reponé". Esta serie contesta cuál de las dos fue.
+
+   DE DONDE SALE. `ml_estado_item` guarda TRAMOS, no fotos: una fila por
+   publicación con `desde`, `hasta` y si en ese tramo estaba `vendible`, más
+   las `unidades` que tenía. `ml_pulso_corrida` dice en qué momentos salimos a
+   mirar.
+
+   SE MIDE EN EL ULTIMO PULSO DE CADA DIA. Hay entre 18 y 20 corridas diarias,
+   así que había que elegir cuál es "el stock del día": se toma la última, que
+   es el estado con el que el día cerró. Un promedio de las 20 daría un número
+   que no existió en ningún momento.
+
+   ---------------------------------------------------------------------------
+   UN DIA SIN PULSO NO ES UN DIA SIN STOCK: ES UN DIA SIN DATO
+
+   Por eso los días salen de `ml_pulso_corrida` y no del calendario. Si el
+   pipeline se cayó un martes, ese martes no aparece en la serie --queda un
+   hueco-- en vez de aparecer en cero, que se leería como que no había nada
+   para vender en todo el catálogo. Es el mismo recorte que hace el módulo de
+   Elasticidad, y por la misma razón.
+
+   EL PULSO ARRANCA EL 21/08/2026. Para un rango anterior esta serie viene
+   vacía, y la pantalla lo dice en vez de dibujar una línea en cero.
+   --------------------------------------------------------------------------- */
+async function getStockPorDia(f: FiltrosMeli): Promise<PuntoStockDia[]> {
+  const params: unknown[] = [f.desde ?? null, f.hasta ?? null];
+  const deItem: string[] = [];
+
+  if (f.sku?.length) {
+    params.push(f.sku);
+    deItem.push(`e.sku = any($${params.length}::text[])`);
+  }
+
+  // MARCA Y PROVEEDOR SALEN DE LAS VENTAS, que es de donde los saca el resto
+  // de la pantalla: `ml_estado_item` sólo tiene el SKU, y en `sigma_articulos`
+  // la marca viene casi siempre vacía.
+  //
+  // La contra, dicha de frente: un artículo que NUNCA vendió por este canal no
+  // está en `fact_ventas`, así que al filtrar por marca desaparece de esta
+  // serie aunque tenga stock. Sin filtro de marca no se lo toca, y ahí entran
+  // los 4.468 SKU del pulso completos.
+  for (const [clave, columna] of [
+    ["marca", "marca"],
+    ["proveedor", "proveedor"],
+  ] as const) {
+    const valores = f[clave];
+    if (valores?.length) {
+      params.push(CANAL_MELI);
+      const canal = params.length;
+      params.push(valores);
+      // El canal va como PARAMETRO y no interpolado, igual que en el resto del
+      // archivo: una constante hoy, pero nada en el tipo impide que mañana sea
+      // una variable, y para entonces el `where` ya quedó escrito.
+      deItem.push(
+        `e.sku in (select distinct v.sku from gold.fact_ventas v
+                    where v.canal = $${canal}
+                      and v.${columna} = any($${params.length}::text[]))`,
+      );
+    }
+  }
+
+  const filas = await query<Record<string, string>>(
+    `with corte as (
+       select (c.momento at time zone 'America/Argentina/Buenos_Aires')::date as dia,
+              max(c.momento) as momento
+         from bronze.ml_pulso_corrida c
+        where ($1::date is null or (c.momento at time zone 'America/Argentina/Buenos_Aires')::date >= $1::date)
+          and ($2::date is null or (c.momento at time zone 'America/Argentina/Buenos_Aires')::date <= $2::date)
+        group by 1
+     )
+     select to_char(k.dia, 'YYYY-MM-DD')                                as fecha,
+            coalesce(sum(e.unidades) filter (where e.vendible), 0)      as unidades,
+            count(distinct e.sku) filter (where e.vendible)             as skus,
+            count(distinct e.item_id) filter (where e.vendible)         as publicaciones
+       from corte k
+       left join bronze.ml_estado_item e
+         on e.desde <= k.momento
+        and coalesce(e.hasta, e.visto_hasta) >= k.momento
+        ${deItem.length ? `and ${deItem.join(" and ")}` : ""}
+      group by k.dia
+      order by k.dia`,
+    params,
+  );
+
+  return filas.map((r) => ({
+    fecha: r.fecha,
+    unidades: num(r.unidades),
+    skus: num(r.skus),
+    publicaciones: num(r.publicaciones),
+  }));
+}
+
 /** Fila de artículo -> objeto. La comparten el ranking por venta y el de rentabilidad. */
 function aArticulo(r: Record<string, string>): ArticuloMeli {
   const ventaCiva = num(r.venta_civa);
@@ -748,6 +849,7 @@ async function getDashboardMeliDirecto(f: FiltrosMeli): Promise<DashboardMeli> {
   const [
     kpis,
     porDia,
+    stockPorDia,
     horasCrudas,
     porProveedor,
     topRentabilidad,
@@ -760,6 +862,7 @@ async function getDashboardMeliDirecto(f: FiltrosMeli): Promise<DashboardMeli> {
   ] = await Promise.all([
     getKpis(f),
     getPorDia(f),
+    getStockPorDia(f),
     getPorHora(f),
     getRanking(f, "proveedor", 12),
     getTopRentabilidad(f),
@@ -790,6 +893,7 @@ async function getDashboardMeliDirecto(f: FiltrosMeli): Promise<DashboardMeli> {
           }
         : null,
     porDia,
+    stockPorDia,
     porHora: completarHoras(horasCrudas, canceladasPorHora),
     porProveedor,
     topRentabilidad,
