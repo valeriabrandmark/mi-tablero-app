@@ -139,7 +139,11 @@ const CLASIFICACION = `
     -- referencia, ni piso, ni nada contra que compararse.
     when p.accion = 'omitir' and p.motivos::text like '%sin stock vendible%'
       then 'sin_stock'
-    -- SIN COMPETIDOR PERO CON PRECIO PROPUESTO: la corrida al margen objetivo.
+    -- SIN COMPETIDOR PERO CON PRECIO PROPUESTO: la corrida al margen minimo.
+    --
+    -- Solo entran SUBAS: el motor omite los que ya rinden mas que el margen
+    -- que pide la politica, y esos se quedan en "sin competencia". Ver el
+    -- comentario de la tarjeta en precios-tn.ts.
     --
     -- VA ACA ARRIBA, ANTES DE LAS DOS DE PISO, Y ES DELIBERADO. Un articulo
     -- sin competencia que quedo debajo del costo tambien esta debajo del piso,
