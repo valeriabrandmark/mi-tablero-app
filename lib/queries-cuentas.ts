@@ -18,7 +18,9 @@ import { agregarFiltro, vacio } from "@/lib/filtros";
  *
  * Tablas: `bronze.cuentas_corrientes_scoring` (una fila por cliente, es la
  * tabla madre), `_aging` (una fila por comprobante impago), `_historial_scoring`
- * (foto mensual) y `_cancelaciones` (clientes que salieron de mora).
+ * (foto mensual), `_historial_diario` (foto DIARIA, una fila por cliente y por
+ * día: es la que mide la mora promedio) y `_cancelaciones` (clientes que
+ * salieron de mora).
  * Las tres últimas cruzan con scoring por `cuit`, cobertura 100%.
  *
  * ⚠️ Diferencia con el modelo de Power BI: allá la relación con las ventas es
@@ -204,20 +206,60 @@ async function getVencidosQueCompran(f: FiltrosCuentas) {
 async function getClientes(f: FiltrosCuentas): Promise<FilaCliente[]> {
   const w = whereCuentas(f, "h");
   return query<FilaCliente>(
-    `select h.razon_social as "razonSocial",
+    `with ult as (
+       select max(periodo) as periodo from bronze.cuentas_corrientes_historial_scoring
+     ),
+     -- EL DIA DE LA CAPTURA MAS NUEVA del período. Una fila con una fecha
+     -- anterior quedó atrás: el cliente dejó de aparecer en el scoring.
+     tope as (
+       select max(to_date(fecha, 'DD/MM/YYYY')) as dia
+         from bronze.cuentas_corrientes_historial_scoring
+        where periodo = (select periodo from ult)
+     ),
+     foto as (
+       select h.*,
+              (to_date(h.fecha, 'DD/MM/YYYY') = (select dia from tope)) as vigente
+         from bronze.cuentas_corrientes_historial_scoring h
+        where ${w.sql}
+          and h.periodo = (select periodo from ult)
+     ),
+     -- LA MORA, DE LA FOTO DIARIA Y NO DE LA MENSUAL. historial_diario guarda
+     -- una fila por cliente y por día: 47 días por cliente contra 4 del cierre
+     -- mensual, así que el promedio se apoya en diez veces más mediciones.
+     -- No se filtra por vendedor ni empresa a propósito: es el comportamiento
+     -- del cliente a lo largo del tiempo, no un corte del tablero.
+     mora as (
+       select regexp_replace(cuit, '[^0-9A-Za-z]', '', 'g') as clave,
+              round(avg(atraso_prom_general))::int as prom,
+              max(atraso_max)::int                 as peor,
+              count(*)::int                        as dias
+         from bronze.cuentas_corrientes_historial_diario
+        group by 1
+     )
+     select h.razon_social as "razonSocial",
             h.categoria,
             h.vendedor,
             h.cuit,
             h.periodo,
             h.fecha,
-            coalesce(h.saldo_total, 0)::float8 as "saldoTotal",
-            coalesce(h.saldo_vencido, 0)::float8 as "saldoVencido",
-            h.atraso_max::float8 as "atrasoMax"
-     from bronze.cuentas_corrientes_historial_scoring h
-     where ${w.sql}
-       and h.periodo = (select max(periodo) from bronze.cuentas_corrientes_historial_scoring)
-     order by h.saldo_vencido desc nulls last, h.saldo_total desc nulls last
-     limit 300`,
+            h.vigente,
+            -- EL SALDO SOLO SI SIGUE DEBIENDO. El de una fila que quedó atrás
+            -- es el del día que dice, y ya se cobró: mostrarlo como deuda de
+            -- hoy hace llamar a quien ya pagó. Se guarda aparte, en
+            -- "saldoAlCerrar", para que el desglose pueda decir cuánto era.
+            case when h.vigente then coalesce(h.saldo_total, 0)::float8 end   as "saldoTotal",
+            case when h.vigente then coalesce(h.saldo_vencido, 0)::float8 end as "saldoVencido",
+            case when h.vigente then h.atraso_max::float8 end                 as "atrasoMax",
+            case when not h.vigente then coalesce(h.saldo_total, 0)::float8 end as "saldoAlCerrar",
+            m.prom               as "moraPromedio",
+            m.peor               as "moraPeor",
+            coalesce(m.dias, 0)  as "diasMedidos"
+       from foto h
+       left join mora m on m.clave = regexp_replace(h.cuit, '[^0-9A-Za-z]', '', 'g')
+      order by h.vigente desc,
+               h.saldo_vencido desc nulls last,
+               h.saldo_total desc nulls last
+      limit 300`,
     w.params,
   );
 }
