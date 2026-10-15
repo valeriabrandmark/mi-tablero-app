@@ -458,6 +458,34 @@ async function getStockPorDia(f: FiltrosMeli): Promise<PuntoStockDia[]> {
     deItem.push(`e.sku = any($${params.length}::text[])`);
   }
 
+  // EL BUSCADOR DE TEXTO, que es por donde se filtra de verdad. Faltaba, y era
+  // el caso más usado: se escribe "braun" en el campo y la pantalla entera se
+  // recorta menos este gráfico, que seguía mostrando el catálogo completo.
+  //
+  // SE RESUELVE CONTRA `fact_ventas` Y CON `buscadorDeArticulo`, el mismo
+  // helper que usa el resto de la página. No es pereza: el punto de este panel
+  // es leerlo JUNTO al de ventas, y si cada uno decide por su cuenta a qué
+  // artículos les pega el texto, los dos gráficos hablan de conjuntos
+  // distintos y la comparación no significa nada. Con "braun" son los mismos
+  // 11 SKU en los dos.
+  //
+  // El `e.sku ilike` suelto de adelante es para que pegar un CODIGO en el
+  // campo funcione incluso con un artículo que nunca vendió por este canal y
+  // por lo tanto no está en `fact_ventas`.
+  if (f.buscar && f.buscar.trim() !== "") {
+    const termino = f.buscar.trim();
+    params.push(`%${termino}%`);
+    const iLike = params.length;
+    params.push(CANAL_MELI);
+    const canal = params.length;
+    deItem.push(
+      `(e.sku ilike $${iLike}
+        or e.sku in (select distinct v.sku from gold.fact_ventas v
+                      where v.canal = $${canal}
+                        and ${buscadorDeArticulo(termino, iLike, "v.sku", "v.producto")}))`,
+    );
+  }
+
   // MARCA Y PROVEEDOR SALEN DE LAS VENTAS, que es de donde los saca el resto
   // de la pantalla: `ml_estado_item` sólo tiene el SKU, y en `sigma_articulos`
   // la marca viene casi siempre vacía.
