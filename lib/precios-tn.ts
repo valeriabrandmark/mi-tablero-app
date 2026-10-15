@@ -71,8 +71,9 @@ export const ALERTAS = [
     detalle:
       "Ninguna fuente tiene estos productos. No se pueden comparar: o no los " +
       "venden, o les falta el código de barras a ellos o a nosotros. El motor " +
-      "no opina sobre su precio salvo que la corrida se haya hecho con «llevar " +
-      "al margen objetivo»; en ese caso aparecen en la tarjeta de al lado.",
+      "no opina sobre su precio. Si la corrida se hizo con «subir al margen " +
+      "mínimo», los que estaban rindiendo poco pasan a la tarjeta de al lado; " +
+      "los que ya rendían bien se quedan acá, sin nada que sugerir.",
     tono: "neutro",
   },
   {
@@ -93,14 +94,21 @@ export const ALERTAS = [
     // EL TONO ES "aviso" Y NO "neutro" a propósito: acá hay plata que se está
     // perdiendo todos los días, y es la tarjeta que hay que mirar primero
     // después de actualizar costos.
+    //
+    // SOLO SUBEN. La regla nació como objetivo —llevar al 25 % suba o baje— y
+    // la primera corrida con ella puesta propuso 280 bajas por $3,8M por
+    // unidad: Diaper Genie −39 %, cuatro HOLA entre −64 % y −68 %. Artículos
+    // que rendían entre 42 % y 68 % y que nadie nos obliga a bajar, porque
+    // justamente no tienen competidor. Ahora los que ya rinden de más no
+    // aparecen acá: se quedan en «Sin competencia detectada».
     clave: "sin_competencia_al_margen",
-    titulo: "Sin competencia, al margen objetivo",
+    titulo: "Sin competencia, debajo del margen mínimo",
     detalle:
-      "No tienen con quién compararse, así que el motor los lleva al margen que " +
-      "fija la política (hoy 25 %) en vez de dejarlos donde estaban. Acá caen " +
-      "los que quedaron por debajo del costo cuando cambió la oferta del " +
-      "proveedor, y también los que rendían de más. Se autorizan como " +
-      "cualquier otra propuesta.",
+      "No tienen con quién compararse y están rindiendo menos de lo que pide la " +
+      "política (hoy 25 %), así que el motor los SUBE hasta ahí. Acá caen los que " +
+      "quedaron por debajo del costo cuando cambió la oferta del proveedor. Los " +
+      "que ya rinden más no se tocan. Ojo con las subas grandes: las que pasan " +
+      "del 50 % llevan un aviso en los motivos.",
     tono: "aviso",
   },
   {
