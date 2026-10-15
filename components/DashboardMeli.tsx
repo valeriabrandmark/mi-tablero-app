@@ -523,10 +523,51 @@ export default function DashboardMeliPage({
    */
   const [conCanceladas, setConCanceladas] = useState(false);
 
+  /**
+   * EL RANGO AL QUE SE VUELVE CUANDO SE SALE DE UN DIA.
+   *
+   * Clickear un día en el gráfico recorta el tablero a ese día poniendo
+   * `desde = hasta`, que es el mismo mecanismo que ya mueve la barra de
+   * filtros: todo se recalcula solo y no hay una segunda forma de filtrar que
+   * pueda discrepar de la primera.
+   *
+   * PERO EL CAMINO DE VUELTA NO SALE DE LOS FILTROS. Con un solo día el
+   * gráfico desaparece --se dibuja con `rango.dias > 1`-- así que el propio
+   * control con el que se entró deja de estar en pantalla.
+   */
+  const [rangoPrevio, setRangoPrevio] = useState<{
+    desde?: string;
+    hasta?: string;
+  } | null>(null);
+
   const cambiar = (f: FiltrosMeli) => {
     empezarCarga();
+    // Un cambio de rango hecho a mano deja sin sentido el "volver".
+    setRangoPrevio(null);
     setFiltros(f);
   };
+
+  /** Recortar a un solo día, desde el gráfico. */
+  const elegirDia = (fecha: string) => {
+    if (fecha === filtros.desde && fecha === filtros.hasta) return;
+    // Conserva el rango ORIGINAL al saltar de un día a otro: lo que se quiere
+    // recuperar es de dónde se vino, no el día anterior.
+    setRangoPrevio((previo) => previo ?? { desde: filtros.desde, hasta: filtros.hasta });
+    empezarCarga();
+    setFiltros({ ...filtros, desde: fecha, hasta: fecha });
+  };
+
+  const volverDelDia = () => {
+    if (!rangoPrevio) return;
+    empezarCarga();
+    setFiltros({ ...filtros, ...rangoPrevio });
+    setRangoPrevio(null);
+  };
+
+  const diaElegido =
+    rangoPrevio && filtros.desde && filtros.desde === filtros.hasta
+      ? filtros.desde
+      : null;
 
   const alternarEn =
     (clave: "proveedor" | "marca" | "sku" | "hora") => (valor: string) =>
@@ -607,8 +648,24 @@ export default function DashboardMeliPage({
 
       {/* Los chips solo aparecen para los filtros que no tienen selector arriba:
           proveedor y marca ya se ven en su desplegable. */}
-      {(!sinValores(filtros.sku) || !sinValores(filtros.hora)) && (
+      {(!sinValores(filtros.sku) || !sinValores(filtros.hora) || diaElegido) && (
         <div className="flex flex-wrap items-center gap-2">
+          {/* EL DIA ELEGIDO EN EL GRAFICO, con su camino de vuelta. Dice a
+              dónde vuelve y no sólo que se puede volver: con el gráfico
+              escondido, "✕" a secas dejaría la duda de a qué rango se sale. */}
+          {diaElegido && (
+            <button
+              onClick={volverDelDia}
+              className="border-c1/40 bg-c1/10 text-c1 hover:bg-c1/20 rounded-full border px-3 py-1 text-xs"
+              title="Vuelve al rango que estabas mirando antes de clickear el día"
+            >
+              Sólo {fmtFechaCorta(diaElegido)} · volver a{" "}
+              {rangoPrevio?.desde === rangoPrevio?.hasta
+                ? fmtFechaCorta(rangoPrevio?.desde ?? "")
+                : `${fmtFechaCorta(rangoPrevio?.desde ?? "")}–${fmtFechaCorta(rangoPrevio?.hasta ?? "")}`}{" "}
+              ✕
+            </button>
+          )}
           {filtros.hora?.map((h) => (
             <button
               key={`hora-${h}`}
@@ -844,7 +901,7 @@ export default function DashboardMeliPage({
               titulo="Venta y rentabilidad por día"
               nota="Venta c/IVA contra rentabilidad bruta"
             >
-              <VentaRentabilidad datos={data.porDia} />
+              <VentaRentabilidad datos={data.porDia} onElegirDia={elegirDia} />
             </Panel>
           )}
 
