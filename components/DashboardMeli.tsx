@@ -57,8 +57,8 @@ function recorteStock(f: FiltrosMeli): string {
   if (f.proveedor?.length) partes.push(`de ${f.proveedor.join(", ")}`);
 
   return partes.length === 0
-    ? "Unidades publicadas y vendibles en todo el catálogo"
-    : `Unidades publicadas y vendibles ${partes.join(" · ")}`;
+    ? "Unidades disponibles en el depósito de Full"
+    : `Unidades disponibles en Full ${partes.join(" · ")}`;
 }
 
 type Respuesta = DashboardMeli & { opciones: OpcionesMeli | null };
@@ -915,7 +915,7 @@ export default function DashboardMeliPage({
               del mismo alto que el de venta sin que tengan nada que ver. */}
           {data.rango.dias > 1 && (
             <Panel
-              titulo="Stock publicado por día"
+              titulo="Stock en Full por día"
               // LA NOTA TIENE QUE NOMBRAR TODO LO QUE ESTA FILTRADO, no sólo
               // el SKU. Antes decía "en todo el catálogo" aunque hubiera una
               // marca elegida: la serie SI venía filtrada --con BRAUN son 39
@@ -924,7 +924,7 @@ export default function DashboardMeliPage({
               nota={
                 [
                   recorteStock(filtros),
-                  "medido en el último pulso de cada día",
+                  "lo que Mercado Libre declara en su depósito",
                   data.stockPorDia.length > 0 ? null : "sin mediciones en este recorte",
                 ]
                   .filter(Boolean)

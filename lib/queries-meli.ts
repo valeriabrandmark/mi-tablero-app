@@ -419,81 +419,84 @@ async function getPorDia(f: FiltrosMeli): Promise<PuntoDiaMeli[]> {
 
 
 /* ---------------------------------------------------------------------------
-   EL STOCK MEDIDO POR EL PULSO, DIA POR DIA.
+   EL STOCK EN FULL, DIA POR DIA.
 
-   PARA QUE SIRVE. Un artículo que no vendió en el período puede no haber
-   vendido por dos razones completamente distintas: nadie lo quiso, o no se
-   podía comprar. En el gráfico de ventas las dos se ven igual --una línea en
-   cero-- y son decisiones opuestas: una dice "bajale el precio" y la otra
-   "reponé". Esta serie contesta cuál de las dos fue.
-
-   DE DONDE SALE. `ml_estado_item` guarda TRAMOS, no fotos: una fila por
-   publicación con `desde`, `hasta` y si en ese tramo estaba `vendible`, más
-   las `unidades` que tenía. `ml_pulso_corrida` dice en qué momentos salimos a
-   mirar.
-
-   SE MIDE EN EL ULTIMO PULSO DE CADA DIA. Hay entre 18 y 20 corridas diarias,
-   así que había que elegir cuál es "el stock del día": se toma la última, que
-   es el estado con el que el día cerró. Un promedio de las 20 daría un número
-   que no existió en ningún momento.
+   PARA QUE SIRVE. Un artículo que no vendió pudo no vender por dos razones
+   opuestas: nadie lo quiso, o no se podía comprar. En el gráfico de ventas las
+   dos se ven igual --una línea en cero-- y llevan a decisiones contrarias: una
+   dice "bajale el precio", la otra "reponé". Esta serie contesta cuál fue.
 
    ---------------------------------------------------------------------------
-   UN DIA SIN PULSO NO ES UN DIA SIN STOCK: ES UN DIA SIN DATO
+   POR QUE SALE DE `ml_stock_full_historico` Y NO DEL PULSO
 
-   Por eso los días salen de `ml_pulso_corrida` y no del calendario. Si el
-   pipeline se cayó un martes, ese martes no aparece en la serie --queda un
-   hueco-- en vez de aparecer en cero, que se leería como que no había nada
-   para vender en todo el catálogo. Es el mismo recorte que hace el módulo de
-   Elasticidad, y por la misma razón.
+   La primera versión de este panel sumaba el `available_quantity` de cada
+   PUBLICACION, y daba 36.555 unidades cuando en el depósito había 8.293. Tres
+   cosas distintas se sumaban juntas:
 
-   EL PULSO ARRANCA EL 21/08/2026. Para un rango anterior esta serie viene
-   vacía, y la pantalla lo dice en vez de dibujar una línea en cero.
+     SE CONTABA DOS VECES. Hay 2,04 publicaciones por inventario: varias
+     publicaciones comparten el mismo stock físico en Full y cada una lo
+     reporta entero. Sumar por publicación multiplica las mismas unidades.
+
+     HABIA CANTIDADES PUESTAS A MANO. 155 inventarios que no están en la tabla
+     de Full aportaban 9.584 unidades, con un promedio de 62 contra 6 de los
+     que sí cruzan. Son números cargados por el vendedor, no un conteo.
+
+     Y SE MEZCLABA LO QUE NO ES FULL: 75 publicaciones propias o por flex,
+     otras 4.690 unidades declaradas.
+
+   Lo que SI confirmó el cruce: donde el dato existe de verdad, 1.224 de 1.282
+   inventarios coinciden EXACTO con la API de fulfillment. El pulso no mide
+   mal; lo que estaba mal era la unidad que se sumaba.
+
+   `ml_stock_full_historico` tiene una fila por inventario y por día con lo que
+   Mercado Libre dice que hay en su depósito. Es el número con el que se decide
+   reponer, y arranca el 21/08/2026, el mismo día que el pulso.
+
+   ---------------------------------------------------------------------------
+   UN HUECO NO ES UN CERO
+
+   Los días salen de la propia tabla. Un día que el pipeline no cargó no
+   aparece --queda un hueco-- en vez de aparecer en cero, que se leería como un
+   quiebre total. Para un rango anterior al 21/08 la serie viene vacía y el
+   panel lo dice.
+
+   EL `inventory_id` MAPEA A UN SOLO SKU (verificado: cero inventarios con más
+   de uno), así que el join para filtrar no puede multiplicar filas.
    --------------------------------------------------------------------------- */
 async function getStockPorDia(f: FiltrosMeli): Promise<PuntoStockDia[]> {
   const params: unknown[] = [f.desde ?? null, f.hasta ?? null];
-  const deItem: string[] = [];
+  const delSku: string[] = [];
 
   if (f.sku?.length) {
     params.push(f.sku);
-    deItem.push(`e.sku = any($${params.length}::text[])`);
+    delSku.push(`m.sku = any($${params.length}::text[])`);
   }
 
-  // EL BUSCADOR DE TEXTO, que es por donde se filtra de verdad. Faltaba, y era
-  // el caso más usado: se escribe "braun" en el campo y la pantalla entera se
-  // recorta menos este gráfico, que seguía mostrando el catálogo completo.
-  //
-  // SE RESUELVE CONTRA `fact_ventas` Y CON `buscadorDeArticulo`, el mismo
-  // helper que usa el resto de la página. No es pereza: el punto de este panel
-  // es leerlo JUNTO al de ventas, y si cada uno decide por su cuenta a qué
-  // artículos les pega el texto, los dos gráficos hablan de conjuntos
-  // distintos y la comparación no significa nada. Con "braun" son los mismos
-  // 11 SKU en los dos.
-  //
-  // El `e.sku ilike` suelto de adelante es para que pegar un CODIGO en el
-  // campo funcione incluso con un artículo que nunca vendió por este canal y
-  // por lo tanto no está en `fact_ventas`.
+  // EL BUSCADOR DE TEXTO se resuelve con `buscadorDeArticulo` y contra
+  // `fact_ventas`, el mismo helper y la misma fuente que el resto de la
+  // página: el punto de este panel es leerlo JUNTO al de ventas, y si cada uno
+  // decide por su cuenta a qué artículos les pega el texto, los dos gráficos
+  // hablan de conjuntos distintos. El `m.sku ilike` suelto es para que pegar un
+  // CODIGO funcione aunque ese artículo nunca haya vendido por el canal.
   if (f.buscar && f.buscar.trim() !== "") {
     const termino = f.buscar.trim();
     params.push(`%${termino}%`);
     const iLike = params.length;
     params.push(CANAL_MELI);
     const canal = params.length;
-    deItem.push(
-      `(e.sku ilike $${iLike}
-        or e.sku in (select distinct v.sku from gold.fact_ventas v
+    delSku.push(
+      `(m.sku ilike $${iLike}
+        or m.sku in (select distinct v.sku from gold.fact_ventas v
                       where v.canal = $${canal}
                         and ${buscadorDeArticulo(termino, iLike, "v.sku", "v.producto")}))`,
     );
   }
 
-  // MARCA Y PROVEEDOR SALEN DE LAS VENTAS, que es de donde los saca el resto
-  // de la pantalla: `ml_estado_item` sólo tiene el SKU, y en `sigma_articulos`
-  // la marca viene casi siempre vacía.
-  //
-  // La contra, dicha de frente: un artículo que NUNCA vendió por este canal no
-  // está en `fact_ventas`, así que al filtrar por marca desaparece de esta
-  // serie aunque tenga stock. Sin filtro de marca no se lo toca, y ahí entran
-  // los 4.468 SKU del pulso completos.
+  // MARCA Y PROVEEDOR SALEN DE LAS VENTAS, igual que el resto de la pantalla:
+  // el estado de los items sólo tiene el SKU y en `sigma_articulos` la marca
+  // viene casi siempre vacía. La contra: un artículo que NUNCA vendió por este
+  // canal no está en `fact_ventas` y desaparece de la serie al filtrar por
+  // marca. Sin ese filtro no se lo toca.
   for (const [clave, columna] of [
     ["marca", "marca"],
     ["proveedor", "proveedor"],
@@ -503,11 +506,8 @@ async function getStockPorDia(f: FiltrosMeli): Promise<PuntoStockDia[]> {
       params.push(CANAL_MELI);
       const canal = params.length;
       params.push(valores);
-      // El canal va como PARAMETRO y no interpolado, igual que en el resto del
-      // archivo: una constante hoy, pero nada en el tipo impide que mañana sea
-      // una variable, y para entonces el `where` ya quedó escrito.
-      deItem.push(
-        `e.sku in (select distinct v.sku from gold.fact_ventas v
+      delSku.push(
+        `m.sku in (select distinct v.sku from gold.fact_ventas v
                     where v.canal = $${canal}
                       and v.${columna} = any($${params.length}::text[]))`,
       );
@@ -515,31 +515,36 @@ async function getStockPorDia(f: FiltrosMeli): Promise<PuntoStockDia[]> {
   }
 
   const filas = await query<Record<string, string>>(
-    `with corte as (
-       select (c.momento at time zone 'America/Argentina/Buenos_Aires')::date as dia,
-              max(c.momento) as momento
-         from bronze.ml_pulso_corrida c
-        where ($1::date is null or (c.momento at time zone 'America/Argentina/Buenos_Aires')::date >= $1::date)
-          and ($2::date is null or (c.momento at time zone 'America/Argentina/Buenos_Aires')::date <= $2::date)
-        group by 1
+    `with mapa as (
+       -- Un inventario -> un SKU. El distinct es porque el estado guarda
+       -- tramos, y el mismo par aparece una vez por tramo.
+       select distinct inventory_id, sku
+         from bronze.ml_estado_item
+        where inventory_id is not null and inventory_id <> '' and sku is not null
      )
-     select to_char(k.dia, 'YYYY-MM-DD')                                as fecha,
-            coalesce(sum(e.unidades) filter (where e.vendible), 0)      as unidades,
-            count(distinct e.sku) filter (where e.vendible)             as skus,
-            count(distinct e.item_id) filter (where e.vendible)         as publicaciones
-       from corte k
-       left join bronze.ml_estado_item e
-         on e.desde <= k.momento
-        and coalesce(e.hasta, e.visto_hasta) >= k.momento
-        ${deItem.length ? `and ${deItem.join(" and ")}` : ""}
-      group by k.dia
-      order by k.dia`,
+     select to_char(h.fecha, 'YYYY-MM-DD')                   as fecha,
+            coalesce(sum(h.available_quantity), 0)           as unidades,
+            coalesce(sum(h.not_available_quantity), 0)       as no_disponible,
+            -- SOLO LOS QUE TIENEN ALGO. La tabla trae una fila por
+            -- inventario aunque esté en cero, así que sin el filtro el tooltip
+            -- diría "8.293 unidades · 3.916 artículos" cuando los que se
+            -- podían comprar eran la mitad.
+            count(distinct m.sku) filter (where h.available_quantity > 0)          as skus,
+            count(distinct h.inventory_id) filter (where h.available_quantity > 0) as publicaciones
+       from bronze.ml_stock_full_historico h
+       join mapa m on m.inventory_id = h.inventory_id
+      where ($1::date is null or h.fecha >= $1::date)
+        and ($2::date is null or h.fecha <= $2::date)
+        ${delSku.length ? `and ${delSku.join(" and ")}` : ""}
+      group by h.fecha
+      order by h.fecha`,
     params,
   );
 
   return filas.map((r) => ({
     fecha: r.fecha,
     unidades: num(r.unidades),
+    noDisponible: num(r.no_disponible),
     skus: num(r.skus),
     publicaciones: num(r.publicaciones),
   }));
