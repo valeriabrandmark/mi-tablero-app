@@ -188,40 +188,54 @@ async function getVencidosQueCompran(f: FiltrosCuentas) {
 // --- Tabla y gráficos --------------------------------------------------------
 
 /**
- * La tabla de clientes, DESDE LA FOTO MENSUAL y no desde `scoring`.
+ * La tabla de clientes, DESDE LA FOTO DIARIA.
  *
- * POR QUE EL HISTORIAL. `scoring` se pisa entera en cada carga: es cómo está
- * cada cliente hoy y nada más. `historial_scoring` guarda una fila por cliente
- * y por mes, así que la misma tabla puede contestar "cómo está hoy" y "cómo
- * estaba en agosto" sin cambiar de fuente.
+ * POR QUE NO `scoring`. Se pisa entera en cada carga: dice cómo está cada
+ * cliente hoy y nada más, y el que canceló simplemente desaparece. La pregunta
+ * "¿quién salió de mora esta semana?" no se puede contestar ahí.
  *
- * Y tiene MÁS CLIENTES: 211 CUIT contra los 111 de `scoring`, porque ahí sólo
- * quedan los que hoy deben algo. Un cliente que canceló el mes pasado
- * desaparece de `scoring` y sigue en el historial.
+ * POR QUE NO `historial_scoring`, QUE ES LO QUE USABA ESTO. Es el CIERRE
+ * MENSUAL: `guardarSnapshot` escribe una sola foto por mes y las corridas
+ * siguientes la ven y no la duplican. Hoy parece viva --sus filas de octubre
+ * tienen fechas del 05 al 15-- pero eso es basura heredada: antes del arreglo
+ * de `normPeriodo` el chequeo de duplicados comparaba un Date contra el texto
+ * "2026-10", nunca frenaba, y cada corrida diaria apilaba otra foto del mes.
+ * `limpiarHistorialScoring` se quedó con la más nueva de cada cliente, y de ahí
+ * salen esas fechas distintas. Con el chequeo arreglado eso no vuelve a pasar:
+ * la foto de noviembre se escribe el 1° y queda congelada hasta diciembre. Esta
+ * tabla habría mostrado el saldo del día 1 durante todo el mes.
  *
- * SE TOMA EL PERIODO MAS NUEVO. Es una FOTO, no el estado en vivo: la del mes
- * en curso se sacó el día que corrió la planilla. La pantalla lo dice, porque
- * una deuda de hace seis días leída como "ahora" hace llamar a quien ya pagó.
+ * `historial_diario` es la que sí se actualiza: `guardarSnapshotDiario` agrega
+ * una fila por cliente y por día, y no duplica el día ya guardado. 47 días
+ * entre el 10/08 y el 15/10.
+ *
+ * LA FILA DE CADA CLIENTE ES SU DIA MAS NUEVO DEL MES EN CURSO. Si es el de
+ * hoy, sigue debiendo y el saldo es de hoy. Si es anterior, dejó de aparecer
+ * --canceló-- y la fila va sin saldo: ver `vigente` en `FilaCliente`. Un
+ * `distinct on` resuelve los dos casos de una, y da lo mismo que daba antes:
+ * al 15/10, 118 vigentes y 22 sin deuda por $ 14.889.788.
  */
 async function getClientes(f: FiltrosCuentas): Promise<FilaCliente[]> {
   const w = whereCuentas(f, "h");
   return query<FilaCliente>(
-    `with ult as (
-       select max(periodo) as periodo from bronze.cuentas_corrientes_historial_scoring
-     ),
-     -- EL DIA DE LA CAPTURA MAS NUEVA del período. Una fila con una fecha
-     -- anterior quedó atrás: el cliente dejó de aparecer en el scoring.
-     tope as (
+    `with tope as (
        select max(to_date(fecha, 'DD/MM/YYYY')) as dia
-         from bronze.cuentas_corrientes_historial_scoring
-        where periodo = (select periodo from ult)
+         from bronze.cuentas_corrientes_historial_diario
      ),
+     -- UNA FILA POR CLIENTE: la de su día más nuevo dentro del mes del tope.
+     -- Si ese día es el del tope sigue debiendo; si es anterior, canceló.
+     -- Se recorta al mes para que la tabla no arrastre a los que cancelaron
+     -- hace tres meses: ésos ya no son parte de la cartera de hoy.
      foto as (
-       select h.*,
-              (to_date(h.fecha, 'DD/MM/YYYY') = (select dia from tope)) as vigente
-         from bronze.cuentas_corrientes_historial_scoring h
-        where ${w.sql}
-          and h.periodo = (select periodo from ult)
+       select distinct on (regexp_replace(d.cuit, '[^0-9A-Za-z]', '', 'g'))
+              d.*,
+              to_char((select dia from tope), 'YYYY-MM') as periodo,
+              (to_date(d.fecha, 'DD/MM/YYYY') = (select dia from tope)) as vigente
+         from bronze.cuentas_corrientes_historial_diario d
+        where to_char(to_date(d.fecha, 'DD/MM/YYYY'), 'YYYY-MM')
+              = to_char((select dia from tope), 'YYYY-MM')
+        order by regexp_replace(d.cuit, '[^0-9A-Za-z]', '', 'g'),
+                 to_date(d.fecha, 'DD/MM/YYYY') desc
      ),
      -- LA MORA, DE LA FOTO DIARIA Y NO DE LA MENSUAL. historial_diario guarda
      -- una fila por cliente y por día: 47 días por cliente contra 4 del cierre
@@ -256,6 +270,9 @@ async function getClientes(f: FiltrosCuentas): Promise<FilaCliente[]> {
             coalesce(m.dias, 0)  as "diasMedidos"
        from foto h
        left join mora m on m.clave = regexp_replace(h.cuit, '[^0-9A-Za-z]', '', 'g')
+      -- El filtro va DESPUES del distinct on, sobre la fila que quedó de cada
+      -- cliente: filtrar antes podría elegirle un día más viejo del que tiene.
+      where ${w.sql}
       order by h.vigente desc,
                h.saldo_vencido desc nulls last,
                h.saldo_total desc nulls last
@@ -265,24 +282,25 @@ async function getClientes(f: FiltrosCuentas): Promise<FilaCliente[]> {
 }
 
 /**
- * De qué foto sale la tabla de clientes, y de qué día es la captura más nueva.
+ * DE QUE DIA es la tabla de clientes.
  *
- * LOS DOS DATOS, porque no son lo mismo. El período es el mes; la fecha es el
- * día en que se capturó. Dentro de 2026-10 conviven capturas del 05/10 al
- * 14/10: la fila de un cliente queda congelada en la última vez que apareció
- * en el scoring, y un cliente que canceló su deuda deja de aparecer. Por eso
- * hay filas que muestran un saldo que ya se pagó --23 al 14/10, por
- * $ 16.455.523-- y son exactamente las que no tienen comprobantes para
- * desglosar.
+ * Es la fecha de la última foto diaria, y la pantalla la dice en el pie. El
+ * proceso corre a la mañana --la carga del 15/10 fue 09:00-- así que "hoy" es
+ * el estado de esta mañana y no de este minuto: un pago de las 11 todavía no
+ * está. Decir el día es lo único que separa "debe esto" de "debía esto".
+ *
+ * Y ES LA MISMA FECHA QUE USA EL DESGLOSE, que sale de `aging`: las dos tablas
+ * las escribe la misma corrida, así que la fila y sus comprobantes son del
+ * mismo momento. Si algún día dejaran de coincidir, el desglose no cerraría
+ * contra el saldo de la fila.
  */
 async function getPeriodoClientes(): Promise<{ texto: string; fecha: string | null }> {
-  const fila = await queryOne<{ v: string | null; f: string | null }>(
-    `select max(periodo) as v,
-            to_char(max(to_date(fecha, 'DD/MM/YYYY')), 'DD/MM/YYYY') as f
-       from bronze.cuentas_corrientes_historial_scoring`,
+  const fila = await queryOne<{ f: string | null }>(
+    `select to_char(max(to_date(fecha, 'DD/MM/YYYY')), 'DD/MM/YYYY') as f
+       from bronze.cuentas_corrientes_historial_diario`,
   );
   return {
-    texto: fila?.f ? `${fila.v} · foto del ${fila.f}` : (fila?.v ?? ""),
+    texto: fila?.f ? `al ${fila.f}` : "",
     fecha: fila?.f ?? null,
   };
 }
