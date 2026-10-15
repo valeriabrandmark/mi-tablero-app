@@ -535,6 +535,7 @@ function columnas(
   // camino que se olvide del precio se ve al compilar.
   decidir: (id: number, decision: "aprobada" | "rechazada", precio?: number | null) => void,
   guardarPrecio: (id: number, precio: number) => void,
+  desautorizar: (ids: number[]) => void,
   seleccion: Set<number>,
   alternar: (id: number) => void,
 ): Columna<FilaPrecioTn>[] {
@@ -719,7 +720,25 @@ function columnas(
         "Autorizar NO cambia el precio en Tienda Nube: marca la propuesta como aprobada, " +
         "firmada con tu mail. La escritura la hace el proyecto `precios` desde su workflow.",
       celda: (f) =>
-        f.estado !== "pendiente" ? (
+        f.estado === "aprobada" ? (
+          // DESAUTORIZAR, QUE ERA EL UNICO CAMINO QUE NO EXISTIA.
+          //
+          // Una propuesta salia de «pendiente» y no volvia: «Rechazar» sólo
+          // aparece mientras está pendiente y «Deshacer» es para lo ya escrito
+          // en la tienda. Autorizar de más no tenía arreglo desde la pantalla,
+          // y hubo que resolverlo con un update a mano en la base dos veces en
+          // una misma mañana —280 propuestas la primera, 258 la segunda—.
+          //
+          // Va sólo en `aprobada`: lo ya escrito se revierte con Deshacer, que
+          // es otra cosa porque la tienda ya lo publicó.
+          <button
+            onClick={() => desautorizar([f.id])}
+            className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1 text-xs"
+            title="Saca esta propuesta de la cola y la devuelve a pendiente. No toca la tienda: todavía no se escribió nada."
+          >
+            Desautorizar
+          </button>
+        ) : f.estado !== "pendiente" ? (
           <span className="text-muted text-xs">{f.estado}</span>
         ) : f.precioPropuesto === null ? (
           <span className="text-muted text-xs">sin propuesta</span>
@@ -1034,6 +1053,7 @@ export default function DashboardPreciosTn() {
   const [corrida, setCorrida] = useState<EstadoCorrida | null>(null);
   const [escritura, setEscritura] = useState<EstadoCorrida | null>(null);
   const [confirmandoEscritura, setConfirmandoEscritura] = useState(false);
+  const [confirmandoDesautorizar, setConfirmandoDesautorizar] = useState(false);
   const [bajando, setBajando] = useState<"xlsx" | "pdf" | null>(null);
   const [recarga, setRecarga] = useState(0);
   // Dos vistas: la cola de lo que falta decidir, y el registro de lo que ya se
@@ -1350,6 +1370,40 @@ export default function DashboardPreciosTn() {
   }
 
   /**
+   * Sacar de la cola lo que ya se autorizó, para poder decidirlo de nuevo.
+   *
+   * NO TOCA LA TIENDA, y por eso no pide confirmación de a una: lo que se
+   * retira es una decisión, no un precio publicado. Lo irreversible es el otro
+   * sentido —escribir—, y ese ya tiene su confirmación.
+   *
+   * El de todas sí pregunta, porque un click puede deshacer una tarde de
+   * revisión y volver a tildar 258 filas no es gratis.
+   */
+  const desautorizar = useCallback(
+    async (ids: number[], todas = false) => {
+      const r = await fetch("/api/precios-tn/decidir", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(todas ? { desautorizar: true, todas: true } : { desautorizar: true, ids }),
+      }).catch(() => null);
+
+      if (!r?.ok) {
+        setAviso("No se pudo desautorizar. Probá de nuevo.");
+        return;
+      }
+      const { desautorizadas = 0 } = await r.json();
+      setAviso(
+        desautorizadas === 0
+          ? "No había nada autorizado para sacar de la cola."
+          : `${desautorizadas} ${desautorizadas === 1 ? "propuesta volvió" : "propuestas volvieron"} ` +
+            "a pendiente. No se tocó ningún precio de la tienda.",
+      );
+      recargar();
+    },
+    [recargar],
+  );
+
+  /**
    * Guardar un precio a mano, sin decidir nada.
    *
    * La fila queda pendiente con el numero nuevo, y cualquier camino de
@@ -1649,7 +1703,53 @@ export default function DashboardPreciosTn() {
                   ? `Escribir ${TANDA_ESCRITURA} de ${esperandoEscritura}`
                   : `Escribir en Tienda Nube (${esperandoEscritura})`}
             </button>
+
+            {/* LA SALIDA DE EMERGENCIA, Y SOLO APARECE CUANDO HAY DE DONDE
+                SALIR. Al lado del botón de escribir a propósito: es el que
+                deshace lo que ese otro está por publicar, y es donde se mira
+                cuando el contador dice un número más grande del esperado.
+
+                NO TOCA LA TIENDA. Saca de la cola decisiones que todavía no se
+                escribieron; para revertir un precio ya publicado está
+                «Deshacer», en Cambios aplicados. */}
+            {esperandoEscritura > 0 && !escribiendo && (
+              <button
+                onClick={() => setConfirmandoDesautorizar(true)}
+                disabled={confirmandoDesautorizar}
+                className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                title="Devuelve a pendiente todo lo autorizado, para volver a decidirlo. No toca la tienda."
+              >
+                Desautorizar ({esperandoEscritura})
+              </button>
+            )}
           </div>
+
+          {/* PREGUNTA ANTES, porque un click puede deshacer una tarde de
+              revisión. El de a una no pregunta: ahí lo que se pierde es un
+              click. */}
+          {confirmandoDesautorizar && (
+            <div className="border-line bg-panel-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs">
+              <span>
+                ¿Devolver {esperandoEscritura} a pendiente? No se escribe ni se borra ningún
+                precio de la tienda.
+              </span>
+              <button
+                onClick={() => {
+                  setConfirmandoDesautorizar(false);
+                  void desautorizar([], true);
+                }}
+                className="border-line hover:bg-panel rounded border px-2 py-0.5"
+              >
+                Sí, desautorizar
+              </button>
+              <button
+                onClick={() => setConfirmandoDesautorizar(false)}
+                className="text-muted hover:text-ink px-1"
+              >
+                No
+              </button>
+            </div>
+          )}
 
           {corrida?.log && (
             <a
@@ -1960,7 +2060,7 @@ export default function DashboardPreciosTn() {
       ) : (
         <Tabla
           filas={filas}
-          columnas={columnas(decidir, guardarPrecio, seleccion, alternar)}
+          columnas={columnas(decidir, guardarPrecio, desautorizar, seleccion, alternar)}
           clave={(f) => String(f.id)}
           vacio={hayFiltro ? "Nada coincide con el filtro." : "No hay propuestas para revisar."}
         />

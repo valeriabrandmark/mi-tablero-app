@@ -9,6 +9,8 @@ import {
 import {
   aprobarFiltradas,
   aprobarPorIds,
+  desautorizarPorIds,
+  desautorizarTodas,
   decidirPropuesta,
   guardarPrecioManual,
 } from "@/lib/queries-precios-tn";
@@ -65,6 +67,31 @@ export async function POST(request: NextRequest) {
   }
 
   const cuerpo = await request.json().catch(() => null);
+
+  // DESAUTORIZAR: sacar de la cola algo que todavia NO se escribio.
+  //
+  // VA ANTES QUE LOS DOS BLOQUES DE APROBAR, Y EL ORDEN ES LA REGLA. Comparte
+  // la forma del cuerpo --`ids` o `todas`-- y lo unico que lo distingue es
+  // esta llave. Puesto despues, un pedido de desautorizar con `ids` cae en el
+  // `Array.isArray(cuerpo?.ids)` de abajo y APRUEBA lo que se pidio sacar:
+  // exactamente lo contrario, y en silencio. Paso al escribir esto.
+  //
+  // NO ES «DESHACER». Deshacer revierte un precio ya publicado y vive en su
+  // propia ruta. Esto retira una decision que la tienda todavia no vio.
+  if (cuerpo?.desautorizar === true) {
+    if (cuerpo?.todas === true) {
+      const total = await desautorizarTodas(quien);
+      return NextResponse.json({ ok: true, desautorizadas: total, quien });
+    }
+    const ids = Array.isArray(cuerpo?.ids)
+      ? cuerpo.ids.map(Number).filter(Number.isInteger)
+      : [];
+    if (!ids.length) {
+      return NextResponse.json({ error: "No hay nada seleccionado" }, { status: 400 });
+    }
+    const total = await desautorizarPorIds(ids, quien);
+    return NextResponse.json({ ok: true, desautorizadas: total, pedidas: ids.length, quien });
+  }
 
   // UNA SELECCIÓN CONCRETA: los ids que la persona tildó.
   //

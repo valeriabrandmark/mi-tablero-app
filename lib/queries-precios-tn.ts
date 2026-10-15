@@ -778,6 +778,72 @@ export async function decidirPropuesta(
 }
 
 /**
+ * Devolver a «pendiente» lo que ya se autorizó, para poder decidirlo de nuevo.
+ *
+ * ---------------------------------------------------------------------------
+ * ERA EL UNICO CAMINO QUE NO EXISTIA, Y SE NOTO.
+ *
+ * Todas las consultas de esta pantalla llevan `estado = 'pendiente'` en el
+ * `where`: una propuesta sale de pendiente y no vuelve. Autorizar de más no
+ * tenia arreglo desde la pantalla --«Rechazar» solo aparece mientras está
+ * pendiente, y «Deshacer» es para lo ya escrito en la tienda, que es otra
+ * cosa-- asi que la unica salida era un update a mano en la base. Paso dos
+ * veces en una misma mañana, 280 propuestas la primera y 258 la segunda.
+ *
+ * NO ES «DESHACER» Y LA DIFERENCIA IMPORTA. Deshacer vuelve atras un precio
+ * que ya se publico y deja rastro en `precios.cambio`. Esto saca de la cola
+ * algo que todavia no toco la tienda: no hay nada que revertir, solo una
+ * decision que se retira.
+ *
+ * SOLO TOCA `aprobada`. Lo ya escrito (`aplicada`) no se puede desautorizar
+ * --para eso esta Deshacer-- y lo rechazado tampoco: el `where` lo garantiza,
+ * y el total que vuelve dice cuantas se movieron de verdad.
+ * ---------------------------------------------------------------------------
+ */
+export async function desautorizarPorIds(ids: number[], quien: string): Promise<number> {
+  const limpios = [...new Set(ids)].filter((n) => Number.isInteger(n) && n > 0);
+  if (!limpios.length) return 0;
+
+  const filas = await query<{ id: number }>(
+    `update precios.propuesta
+        set estado = 'pendiente',
+            decidida_por = null,
+            decidida_en = null,
+            nota_aplicacion = 'desautorizada por ' || $2::text ||
+                              ': vuelve a la cola para decidirla de nuevo'
+      where id = any($1::bigint[])
+        and estado = 'aprobada'
+      returning id`,
+    [limpios, quien],
+  );
+  return filas.length;
+}
+
+/**
+ * Lo mismo, para TODO lo que esté autorizado esperando escritura.
+ *
+ * NO VA ATADO AL FILTRO, al reves que el de autorizar en bloque, y es a
+ * proposito: autorizar de mas es el error peligroso y hay que poder deshacerlo
+ * entero de un gesto. Lo que esta en juego es lo contrario --sacar de la cola
+ * algo que todavia no se escribio-- asi que el riesgo de pasarse es tener que
+ * volver a tildar, no publicar un precio que nadie miro.
+ */
+export async function desautorizarTodas(quien: string): Promise<number> {
+  const filas = await query<{ id: number }>(
+    `update precios.propuesta
+        set estado = 'pendiente',
+            decidida_por = null,
+            decidida_en = null,
+            nota_aplicacion = 'desautorizada en bloque por ' || $1::text ||
+                              ': vuelve a la cola para decidirla de nuevo'
+      where estado = 'aprobada'
+      returning id`,
+    [quien],
+  );
+  return filas.length;
+}
+
+/**
  * Autorizar en bloque LO QUE ESTÁ FILTRADO, y nada más.
  *
  * POR QUÉ NO HAY UN "APROBAR TODO" A SECAS. Porque la pantalla muestra 845
