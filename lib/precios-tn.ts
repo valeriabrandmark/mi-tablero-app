@@ -70,8 +70,38 @@ export const ALERTAS = [
     titulo: "Sin competencia detectada",
     detalle:
       "Ninguna fuente tiene estos productos. No se pueden comparar: o no los " +
-      "venden, o les falta el código de barras a ellos o a nosotros.",
+      "venden, o les falta el código de barras a ellos o a nosotros. El motor " +
+      "no opina sobre su precio salvo que la corrida se haya hecho con «llevar " +
+      "al margen objetivo»; en ese caso aparecen en la tarjeta de al lado.",
     tono: "neutro",
+  },
+  {
+    // SIN COMPETENCIA, PERO CON PRECIO PROPUESTO. Y TIENE QUE SER APROBABLE.
+    //
+    // Estos salen de una corrida hecha con «llevar al margen objetivo», que se
+    // corre después de cargar una lista de costos nueva. No tienen competidor
+    // —por eso `referencia_competencia` es null— así que ninguna de las
+    // tarjetas que comparan contra el mercado los puede clasificar, y sin esta
+    // caerían en «no evaluable», que es informativa: se verían, no se podrían
+    // autorizar, y la corrida entera no serviría para nada.
+    //
+    // POR QUE EXISTEN. Un artículo sin competidores no se repreciaba nunca: su
+    // precio quedaba donde lo dejó la lista anterior, y cuando el proveedor
+    // cortaba una oferta el costo subía y el precio no. En la corrida del
+    // 14/10 había 67 vendiéndose POR DEBAJO DEL COSTO.
+    //
+    // EL TONO ES "aviso" Y NO "neutro" a propósito: acá hay plata que se está
+    // perdiendo todos los días, y es la tarjeta que hay que mirar primero
+    // después de actualizar costos.
+    clave: "sin_competencia_al_margen",
+    titulo: "Sin competencia, al margen objetivo",
+    detalle:
+      "No tienen con quién compararse, así que el motor los lleva al margen que " +
+      "fija la política (hoy 25 %) en vez de dejarlos donde estaban. Acá caen " +
+      "los que quedaron por debajo del costo cuando cambió la oferta del " +
+      "proveedor, y también los que rendían de más. Se autorizan como " +
+      "cualquier otra propuesta.",
+    tono: "aviso",
   },
   {
     // LOS QUE FALTABAN, Y NO ESTABAN EN NINGUNA TARJETA.

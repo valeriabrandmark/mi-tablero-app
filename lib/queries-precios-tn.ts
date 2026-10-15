@@ -139,6 +139,22 @@ const CLASIFICACION = `
     -- referencia, ni piso, ni nada contra que compararse.
     when p.accion = 'omitir' and p.motivos::text like '%sin stock vendible%'
       then 'sin_stock'
+    -- SIN COMPETIDOR PERO CON PRECIO PROPUESTO: la corrida al margen objetivo.
+    --
+    -- VA ACA ARRIBA, ANTES DE LAS DOS DE PISO, Y ES DELIBERADO. Un articulo
+    -- sin competencia que quedo debajo del costo tambien esta debajo del piso,
+    -- asi que sin esta rama la mitad de la corrida caeria en "bajo el piso" y
+    -- la otra mitad en otras tarjetas. Serian el mismo trabajo repartido en
+    -- tres lugares, justo el dia que se corre para revisarlo todo junto.
+    --
+    -- Y TIENE QUE SER APROBABLE. No entra en GRUPOS_INFORMATIVOS: sin esto
+    -- caerian en "no evaluable", se verian, no se podrian autorizar, y la
+    -- corrida entera no serviria para nada.
+    --
+    -- Las que siguen sin propuesta (precio_propuesto null) no llegan hasta
+    -- aca: las agarran las dos ramas de omitir de arriba.
+    when p.referencia_competencia is null and p.precio_propuesto is not null
+      then 'sin_competencia_al_margen'
     when ${PRECIO_VIGENTE} < p.piso and p.referencia_competencia < p.piso
       then 'no_competible'
     when ${PRECIO_VIGENTE} < p.piso
