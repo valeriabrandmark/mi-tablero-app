@@ -19,6 +19,7 @@ import {
   PUNTOS_PARA_TENDENCIA,
 } from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
+import type { MouseHandlerDataParam } from "recharts";
 import type { PuntoDiaMeli } from "@/lib/types";
 import { CajaTooltip, FilaTooltip } from "./TooltipOscuro";
 
@@ -71,7 +72,26 @@ function Contenido({
  * venta, así que un segundo eje escalado a la rentabilidad la haría parecer del
  * mismo tamaño que la venta.
  */
-export default function VentaRentabilidad({ datos }: { datos: PuntoDiaMeli[] }) {
+export default function VentaRentabilidad({
+  datos,
+  onElegirDia,
+}: {
+  datos: PuntoDiaMeli[];
+  /**
+   * Clickear un día recorta TODO el tablero a ese día.
+   *
+   * ES OPCIONAL A PROPOSITO. Sin esto el gráfico es el de siempre, así que
+   * una pantalla que lo use y no quiera el recorte no hereda un click que no
+   * pidió —y, sobre todo, no hereda un cursor de mano que promete algo que no
+   * va a pasar.
+   *
+   * El recorte no lo hace este componente: devuelve la fecha y el tablero
+   * decide. Es el mismo `desde`/`hasta` que ya mueve la barra de filtros, así
+   * que todo lo de la pantalla se recalcula solo y no hay una segunda forma
+   * de filtrar que pueda discrepar de la primera.
+   */
+  onElegirDia?: (fecha: string) => void;
+}) {
   // LA TENDENCIA SE CALCULA ACA Y NO EN LA BASE, a propósito: es una lectura
   // del mismo dato, no un dato nuevo. Así la serie real que viaja del servidor
   // queda intacta y la línea de arriba no puede quedar desfasada de ella.
@@ -116,10 +136,37 @@ export default function VentaRentabilidad({ datos }: { datos: PuntoDiaMeli[] }) 
             </svg>
             Rentabilidad
           </span>
+          {/* QUE SE PUEDE CLICKEAR HAY QUE DECIRLO. Un cursor de mano sólo lo
+              descubre quien ya pasa el mouse por encima, y lo que el click
+              hace --recortar el tablero entero-- no se adivina. */}
+          {onElegirDia && (
+            <span className="text-muted/70">· clickeá un día para ver sólo ese día</span>
+          )}
         </div>
       )}
     <ResponsiveContainer width="100%" height={260}>
-      <ComposedChart data={conTendencia} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+      <ComposedChart
+        data={conTendencia}
+        margin={{ top: 4, right: 8, bottom: 0, left: 8 }}
+        // EL CLICK VA EN EL GRAFICO Y NO EN CADA PUNTO. Recharts da el día
+        // bajo el cursor en `activeLabel`, que es el mismo que ya usa el
+        // tooltip: así se puede hacer click en cualquier parte de la columna
+        // del día --no hay que acertarle a un punto de la línea-- y lo que se
+        // elige es exactamente lo que el tooltip estaba mostrando.
+        onClick={
+          onElegirDia
+            ? (estado: MouseHandlerDataParam) => {
+                // `activeLabel` es `string | number | undefined` segun recharts
+                // --el eje podria ser numerico-- y el nuestro es la fecha. Se
+                // verifica en vez de castear: un cast silenciaria el dia que
+                // alguien cambie el dataKey del eje.
+                const dia = estado?.activeLabel;
+                if (typeof dia === "string" && dia) onElegirDia(dia);
+              }
+            : undefined
+        }
+        style={onElegirDia ? { cursor: "pointer" } : undefined}
+      >
         <defs>
           <linearGradient id="gradVentaDia" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={PALETA[0]} stopOpacity={0.35} />

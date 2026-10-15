@@ -591,10 +591,57 @@ export default function DashboardTiendaNubePage({
       { conOpciones: "1" },
     );
 
+  /**
+   * EL RANGO AL QUE SE VUELVE CUANDO SE SALE DE UN DIA.
+   *
+   * Clickear un día en el gráfico recorta el tablero a ese día poniendo
+   * `desde = hasta`, que es el mismo mecanismo que ya mueve la barra de
+   * filtros: todo lo de la pantalla se recalcula solo y no hay una segunda
+   * forma de filtrar que pueda discrepar de la primera.
+   *
+   * PERO EL CAMINO DE VUELTA NO SALE DE LOS FILTROS. Con un solo día el
+   * gráfico desaparece --se dibuja con `rango.dias > 1`-- así que el propio
+   * control con el que se entró deja de estar en pantalla. Sin guardar el
+   * rango anterior, volver sería adivinar dos fechas en los selectores.
+   */
+  const [rangoPrevio, setRangoPrevio] = useState<{
+    desde?: string;
+    hasta?: string;
+  } | null>(null);
+
   const cambiar = (f: FiltrosTiendaNube) => {
     empezarCarga();
+    // Cualquier cambio de rango hecho a mano deja sin sentido el "volver": el
+    // rango al que se volvería ya no es del que se salió.
+    setRangoPrevio(null);
     setFiltros(f);
   };
+
+  /** Recortar a un solo día, desde el gráfico. */
+  const elegirDia = (fecha: string) => {
+    // Ya estamos viendo ese día: no hay nada que hacer, y pisar `rangoPrevio`
+    // con el día mismo perdería el camino de vuelta.
+    if (fecha === filtros.desde && fecha === filtros.hasta) return;
+    // El `?? ` conserva el rango ORIGINAL cuando se salta de un día a otro
+    // sin volver: lo que se quiere recuperar es de dónde se vino, no el día
+    // anterior.
+    setRangoPrevio((previo) => previo ?? { desde: filtros.desde, hasta: filtros.hasta });
+    empezarCarga();
+    setFiltros({ ...filtros, desde: fecha, hasta: fecha });
+  };
+
+  const volverDelDia = () => {
+    if (!rangoPrevio) return;
+    empezarCarga();
+    setFiltros({ ...filtros, ...rangoPrevio });
+    setRangoPrevio(null);
+  };
+
+  /** Hay un día elegido desde el gráfico, y se sabe a dónde volver. */
+  const diaElegido =
+    rangoPrevio && filtros.desde && filtros.desde === filtros.hasta
+      ? filtros.desde
+      : null;
 
   const alternarEn =
     (clave: "proveedor" | "marca" | "sku" | "cliente") => (valor: string) =>
@@ -667,8 +714,26 @@ export default function DashboardTiendaNubePage({
       {/* Chips de los filtros cruzados, que no tienen selector en la barra.
           Sin esto un filtro puesto de un click quedaría invisible: el tablero
           mostraría un recorte y no habría nada en pantalla diciendo por qué. */}
-      {(!sinValores(filtros.sku) || !sinValores(filtros.cliente)) && (
+      {(!sinValores(filtros.sku) || !sinValores(filtros.cliente) || diaElegido) && (
         <div className="flex flex-wrap items-center gap-2">
+          {/* EL DIA ELEGIDO EN EL GRAFICO, con su camino de vuelta.
+              Va primero porque es el recorte más fuerte de los tres: los otros
+              sacan filas, éste deja un solo día. Y dice a dónde vuelve, no
+              sólo que se puede volver: con el gráfico escondido, "✕" a secas
+              dejaría la duda de a qué rango se sale. */}
+          {diaElegido && (
+            <button
+              onClick={volverDelDia}
+              className="border-c1/40 bg-c1/10 text-c1 hover:bg-c1/20 rounded-full border px-3 py-1 text-xs"
+              title="Vuelve al rango que estabas mirando antes de clickear el día"
+            >
+              Sólo {fmtFechaCorta(diaElegido)} · volver a{" "}
+              {rangoPrevio?.desde === rangoPrevio?.hasta
+                ? fmtFechaCorta(rangoPrevio?.desde ?? "")
+                : `${fmtFechaCorta(rangoPrevio?.desde ?? "")}–${fmtFechaCorta(rangoPrevio?.hasta ?? "")}`}{" "}
+              ✕
+            </button>
+          )}
           {filtros.cliente?.map((c) => (
             <button
               key={`cli-${c}`}
@@ -973,7 +1038,7 @@ export default function DashboardTiendaNubePage({
               titulo="Venta y rentabilidad por día"
               nota="Venta c/IVA contra rentabilidad bruta"
             >
-              <VentaRentabilidad datos={data.porDia} />
+              <VentaRentabilidad datos={data.porDia} onElegirDia={elegirDia} />
             </Panel>
           )}
 
