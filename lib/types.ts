@@ -597,17 +597,28 @@ export type KpisMeli = {
 
 /** Un punto del timeline: venta y rentabilidad del día, para leerlas juntas. */
 /**
- * El stock que el pulso midió ese día, para leerlo junto a las ventas.
+ * EL STOCK EN FULL de ese día, para leerlo junto a las ventas.
  *
- * `unidades` es la suma de lo publicado y vendible en el ÚLTIMO pulso del día
- * --el estado con el que el día cerró-- y `skus` cuántos artículos distintos
- * se podían comprar. Un día sin pulso no aparece en la serie: es un día sin
- * dato, no un día sin stock. Ver la nota larga en queries-meli.ts.
+ * `unidades` son las unidades DISPONIBLES en el depósito de Mercado Libre,
+ * contadas una vez por inventario. No es lo mismo que la cantidad publicada:
+ * varias publicaciones comparten el mismo stock físico y cada una lo reporta
+ * entero, así que sumar por publicación daba 36.555 donde había 8.293. Ver la
+ * nota larga en queries-meli.ts.
+ *
+ * `noDisponible` es lo que está en el depósito pero no se puede vender
+ * --dañado, en revisión, en transferencia. No se suma a `unidades`: no está a
+ * la venta. Va en el tooltip porque un salto ahí explica una caída de ventas
+ * que de otro modo no se entiende.
+ *
+ * Un día que el pipeline no cargó no aparece en la serie: es un día sin dato,
+ * no un día sin stock.
  */
 export type PuntoStockDia = {
   fecha: string;
   unidades: number;
+  noDisponible: number;
   skus: number;
+  /** Inventarios distintos, que es la unidad real de stock en Full. */
   publicaciones: number;
 };
 

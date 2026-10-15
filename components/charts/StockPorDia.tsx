@@ -32,20 +32,28 @@ function Contenido({
     <CajaTooltip titulo={label ? fmtFechaCorta(label) : undefined}>
       <FilaTooltip
         color={PALETA[2]}
-        label="Unidades publicadas"
+        label="Disponible en Full"
         valor={fmtNumero(p.unidades)}
       />
-      {/* CUANTOS ARTICULOS DISTINTOS, aparte de las unidades. Sin filtro son
-          dos lecturas distintas: 35.000 unidades repartidas en 1.600 SKU no es
-          lo mismo que las mismas unidades en 200. */}
+      {/* CUANTOS ARTICULOS DISTINTOS, aparte de las unidades: 8.000 unidades
+          repartidas en 1.400 SKU no es lo mismo que las mismas en 200. */}
       <div className="text-muted pl-4 text-[11px]">
         {fmtNumero(p.skus)} {p.skus === 1 ? "artículo" : "artículos"} ·{" "}
         {fmtNumero(p.publicaciones)}{" "}
-        {p.publicaciones === 1 ? "publicación" : "publicaciones"}
+        {p.publicaciones === 1 ? "inventario" : "inventarios"}
       </div>
+      {/* LO NO DISPONIBLE NO SE SUMA, pero se dice: está en el depósito y no se
+          puede vender --dañado, en revisión, en transferencia-- y un salto ahí
+          explica una caída de ventas que si no queda sin explicación. Sólo
+          aparece cuando hay algo, para no poner un cero en todos los días. */}
+      {p.noDisponible > 0 && (
+        <div className="text-muted pl-4 text-[11px]">
+          {fmtNumero(p.noDisponible)} no disponible
+        </div>
+      )}
       {p.unidades === 0 && (
         <div className="text-muted pl-4 text-[11px]">
-          No se podía comprar ese día.
+          Sin stock en Full ese día.
         </div>
       )}
     </CajaTooltip>
@@ -53,7 +61,7 @@ function Contenido({
 }
 
 /**
- * El stock que el pulso midió, día por día.
+ * El stock EN FULL, día por día.
  *
  * ---------------------------------------------------------------------------
  * PARA QUE ESTA ACA, DEBAJO DE LAS VENTAS
@@ -73,21 +81,25 @@ function Contenido({
  * misma magnitud. Es el par más separado de la paleta: ΔE 38 a vista normal y
  * 32,8 en protanopía.
  *
+ * SON UNIDADES FISICAS, no cantidades publicadas. Varias publicaciones
+ * comparten el mismo stock en Full y cada una lo reporta entero: sumar por
+ * publicación daba 36.555 donde el depósito tenía 8.293. Sale de
+ * `ml_stock_full_historico`, que es lo que contesta la API de fulfillment.
+ *
  * ---------------------------------------------------------------------------
  * UN HUECO NO ES UN CERO
  *
- * La serie sólo trae los días en que el pulso efectivamente corrió. Un día que
- * el pipeline no midió no aparece, en vez de aparecer en cero: cero significa
- * "no había nada para vender", y eso es una afirmación muy distinta de "no
- * miramos". El pulso arranca el 21/08/2026; para un rango anterior esto viene
- * vacío y lo dice.
+ * La serie sólo trae los días que el pipeline cargó. Un día que no se cargó no
+ * aparece, en vez de aparecer en cero: cero significa "no había nada para
+ * vender", y eso es una afirmación muy distinta de "no miramos". El registro
+ * arranca el 21/08/2026; para un rango anterior esto viene vacío y lo dice.
  */
 export default function StockPorDia({ datos }: { datos: PuntoStockDia[] }) {
   if (datos.length === 0) {
     return (
       <p className="text-muted py-10 text-center text-sm">
-        Sin mediciones de stock en el recorte elegido. El pulso empezó a
-        registrar el 21/08/2026.
+        Sin registro de stock en el recorte elegido. El stock de Full empezó a
+        registrarse el 21/08/2026.
       </p>
     );
   }
