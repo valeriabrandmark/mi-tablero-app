@@ -103,6 +103,7 @@ export default function BarrasCategoria({
   onSeleccionar,
   apilado,
   detalle,
+  color,
 }: {
   datos: PuntoEtiqueta[];
   formato: (n: number) => string;
@@ -126,6 +127,15 @@ export default function BarrasCategoria({
    * Devolver `null` para los puntos que no la tengan.
    */
   detalle?: (p: PuntoEtiqueta) => string | null;
+  /**
+   * El color de cada barra SEGUN SU ETIQUETA, para las escalas ordenadas.
+   *
+   * Es distinto de `colorUnico` --uno para todas-- y del ciclo por índice, que
+   * pinta por POSICION: con el ciclo, ordenar las barras de otra forma les
+   * cambia el color, y en una escala de riesgo eso significaría que CRÍTICO
+   * deja de ser rojo porque se movió de lugar.
+   */
+  color?: (label: string) => string;
 }) {
   if (datos.length === 0) {
     return <p className="text-muted py-16 text-center text-sm">{vacio}</p>;
@@ -213,7 +223,7 @@ export default function BarrasCategoria({
           {datos.map((d, i) => (
             <Cell
               key={d.label}
-              fill={colorUnico ?? colorSerie(i)}
+              fill={color?.(d.label) ?? colorUnico ?? colorSerie(i)}
               // Con algo seleccionado, el resto se atenúa en vez de desaparecer.
               fillOpacity={!seleccionados?.length || seleccionados.includes(d.label) ? 1 : 0.25}
             />
