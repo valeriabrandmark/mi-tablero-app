@@ -120,12 +120,27 @@ export function SelectorMultiple({
 
   const hayBuscador = pares.length >= MINIMO_PARA_BUSCAR;
 
+  // LO ELEGIDO SALE DE LA LISTA DE ABAJO, porque queda fijo arriba. Repetir la
+  // misma opción en los dos lugares obliga a mirar cuál de las dos está
+  // tildada, y alarga justo la lista que hay que recorrer para agregar otra.
+  // Abajo queda "lo que falta elegir", arriba "lo elegido": son dos preguntas
+  // distintas y cada una tiene su lugar.
+  const sinElegir = pares.filter(([v]) => !elegidos.includes(v));
+
   // Sin `useMemo`: `opciones` y `formato` llegan nuevos en cada render de cada
   // tablero, así que memorizar esto no ahorraría una sola pasada --recalcularía
   // igual-- y a cambio escondería que son unos cientos de `includes`.
   const visibles = termino
-    ? pares.filter(([v, txt]) => coincide(v, txt, termino))
-    : pares;
+    ? sinElegir.filter(([v, txt]) => coincide(v, txt, termino))
+    : sinElegir;
+
+  // Lo elegido, con su texto, EN EL ORDEN EN QUE SE FUE ELIGIENDO y no en el
+  // alfabético: la última que se tocó queda al final, que es donde la vista la
+  // deja. Reordenarlas alfabéticamente haría saltar de lugar a las demás cada
+  // vez que se agrega una.
+  const fijados = elegidos.map(
+    (v) => [v, pares.find(([x]) => x === v)?.[1] ?? v] as [string, string],
+  );
 
   /** Cerrar deja el buscador limpio: reabrirlo tiene que mostrar todo de nuevo. */
   const cerrar = () => {
@@ -241,6 +256,49 @@ export function SelectorMultiple({
             {todos}
           </button>
 
+          {/* LO ELEGIDO, FIJO ARRIBA Y CON SU X.
+              Antes lo tildado quedaba desperdigado en una lista de cientos: para
+              ver qué había elegido, o para sacar una, había que scrollear
+              buscándola de memoria. Acá está siempre a la vista y se saca de a
+              una sin abrir nada.
+
+              NO LO AFECTA EL BUSCADOR, a propósito: escribir en el campo recorta
+              lo que falta elegir, no lo ya elegido. Si se fuera de la vista al
+              escribir, sacar una marca mientras se busca otra sería imposible. */}
+          {fijados.length > 0 && (
+            <>
+              <div className="border-line my-1 shrink-0 border-t" />
+              <div className="flex max-h-28 shrink-0 flex-wrap gap-1 overflow-y-auto px-1 py-0.5">
+                {fijados.map(([v, txt]) => (
+                  <span
+                    key={v}
+                    className="border-c1/40 bg-c1/15 text-ink flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-xs"
+                  >
+                    <span className="truncate">{txt}</span>
+                    <button
+                      type="button"
+                      onClick={() => alternarUno(v)}
+                      aria-label={`Sacar ${txt} de ${etiqueta}`}
+                      className="text-muted hover:text-ink shrink-0 leading-none"
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        className="size-3"
+                        aria-hidden="true"
+                      >
+                        <path d="M6 6l12 12M18 6L6 18" />
+                      </svg>
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+
           <div className="border-line my-1 shrink-0 border-t" />
 
           <div className="max-h-60 overflow-y-auto">
@@ -250,7 +308,9 @@ export function SelectorMultiple({
                  marcas cargadas", que es otra cosa y manda a buscar un
                  problema donde no lo hay. */
               <p className="text-muted px-2 py-3 text-center text-xs">
-                Ninguna de las {pares.length} coincide con «{termino}».
+                {termino
+                  ? `Ninguna de las ${sinElegir.length} que faltan coincide con «${termino}».`
+                  : "Ya están todas elegidas."}
               </p>
             ) : (
               visibles.map(([v, txt]) => {
