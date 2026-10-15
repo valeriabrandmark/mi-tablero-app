@@ -18,7 +18,11 @@ import {
   fmtNumero,
   fmtPct,
 } from "@/lib/format";
-import { PALETA } from "@/lib/paleta";
+import {
+  colorCategoria,
+  COLOR_TRAMO_AGING,
+  PALETA,
+} from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
   ComprobanteCliente,
@@ -82,7 +86,48 @@ function notaRecupero(puntos: PuntoRecupero[]): string {
  * estuvieran los vencidos, la suma de abajo no cerraría contra el saldo total
  * de la fila y haría dudar del número de arriba.
  */
-function DetalleComprobantes({ filas }: { filas: ComprobanteCliente[] }) {
+function DetalleComprobantes({
+  filas,
+  cliente,
+  fechaFoto,
+}: {
+  filas: ComprobanteCliente[];
+  cliente: FilaCliente;
+  fechaFoto: string | null;
+}) {
+  // SIN COMPROBANTES NO ES UN HUECO: es una respuesta, y hay tres distintas.
+  // Dejar el panel vacío obligaría a adivinar cuál de las tres.
+  if (filas.length === 0) {
+    const congelada =
+      fechaFoto != null && cliente.fecha != null && cliente.fecha !== fechaFoto;
+    const aFavor = cliente.saldoTotal < 0;
+
+    return (
+      <p className="text-muted px-3 py-2 text-[11px] leading-relaxed">
+        {aFavor ? (
+          <>
+            Este cliente tiene <strong>saldo a favor</strong> (
+            {fmtMoneda(cliente.saldoTotal)}): no hay comprobantes impagos que
+            desglosar.
+          </>
+        ) : congelada ? (
+          <>
+            El último dato de este cliente es del <strong>{cliente.fecha}</strong>
+            , y la foto más nueva es del {fechaFoto}. Dejó de aparecer en el
+            scoring —casi siempre porque canceló— así que sus comprobantes ya no
+            están en el aging. El saldo que muestra la fila es el de aquel día,
+            no el de hoy.
+          </>
+        ) : (
+          <>
+            No hay comprobantes con saldo pendiente para este cliente en la
+            última carga del aging.
+          </>
+        )}
+      </p>
+    );
+  }
+
   const vencido = filas
     .filter((f) => f.atraso > 0)
     .reduce((a, f) => a + f.pendiente, 0);
@@ -159,14 +204,8 @@ function DetalleComprobantes({ filas }: { filas: ComprobanteCliente[] }) {
   );
 }
 
-/** Colores fijos por categoría: el semáforo tiene que leerse igual siempre. */
-const COLOR_CATEGORIA: Record<string, string> = {
-  "AL DÍA": PALETA[1],
-  BUENO: PALETA[4],
-  OBSERVACIÓN: PALETA[2],
-  RIESGOSO: PALETA[5],
-  CRÍTICO: "#f43f5e",
-};
+/* La escala vive en lib/paleta.ts, con el porqué de cada paso y las medidas
+   de separación. Acá sólo se usa. */
 
 function columnas(
   filas: FilaCliente[],
@@ -203,7 +242,7 @@ function columnas(
         "Clasificación de riesgo del cliente, calculada por el orquestador a partir de su deuda y su antigüedad.",
       celda: (f) => (
         <span
-          style={{ color: COLOR_CATEGORIA[f.categoria ?? ""] ?? undefined }}
+          style={{ color: colorCategoria(f.categoria) }}
         >
           {f.categoria ?? "—"}
         </span>
@@ -317,12 +356,24 @@ const FILAS_LEYENDA: {
   },
 ];
 
+/**
+ * Los mismos cinco pasos de COLOR_CATEGORIA, en clases de Tailwind.
+ *
+ * TIENEN QUE SER LOS MISMOS. Antes "Al día" era celeste acá y "Riesgoso"
+ * rosa: la leyenda que explica la escala usaba otros colores que los gráficos
+ * que la aplican, así que enseñaba a leer mal justo el cuadro que viene a
+ * enseñar a leer.
+ *
+ * Son clases y no los hex de la paleta porque acá hay tres capas --borde,
+ * fondo y texto-- con opacidades distintas, y eso en Tailwind se escribe una
+ * vez y en `style` serían tres interpolaciones por estado.
+ */
 const TONO_ESTADO = {
-  bueno: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
-  aldia: "border-sky-500/40 bg-sky-500/10 text-sky-300",
-  observacion: "border-amber-500/40 bg-amber-500/10 text-amber-300",
-  riesgoso: "border-rose-500/30 bg-rose-500/10 text-rose-300",
-  critico: "border-rose-500/60 bg-rose-500/20 text-rose-200",
+  bueno: "border-green-600/40 bg-green-600/10 text-green-400",
+  aldia: "border-emerald-400/40 bg-emerald-400/10 text-emerald-300",
+  observacion: "border-yellow-300/40 bg-yellow-300/10 text-yellow-200",
+  riesgoso: "border-orange-400/40 bg-orange-400/10 text-orange-300",
+  critico: "border-red-600/50 bg-red-600/15 text-red-300",
 } as const;
 
 function LeyendaEstados() {
@@ -618,6 +669,7 @@ export default function DashboardCuentasPage() {
           <div className="grid gap-4 xl:grid-cols-2">
             <Panel titulo="Cantidad de clientes por categoría">
               <TortaProveedores
+                color={colorCategoria}
                 datos={data.clientesPorCategoria.map((d) => ({
                   label: d.label,
                   total: d.valor,
@@ -634,6 +686,7 @@ export default function DashboardCuentasPage() {
               <BarrasCategoria
                 datos={data.deudaPorCategoria}
                 formato={fmtMonedaCorta}
+                color={colorCategoria}
                 seleccionados={filtros.categoria}
                 onSeleccionar={alternar("categoria")}
               />
@@ -642,24 +695,45 @@ export default function DashboardCuentasPage() {
               titulo="Antigüedad de la deuda"
               nota="Saldo pendiente por bucket de atraso"
             >
+              {/* MISMA ESCALA QUE LAS CATEGORIAS, a propósito: es el mismo eje
+                  --qué tan vencido está-- medido en días en vez de en
+                  categorías. Con otra paleta, dos gráficos que dicen lo mismo
+                  se leerían como si dijeran cosas distintas. */}
               <BarrasCategoria
                 datos={data.aging}
                 formato={fmtMonedaCorta}
                 horizontal={false}
                 alturaMinima={280}
-                colorUnico={PALETA[2]}
+                color={(l) => COLOR_TRAMO_AGING[l] ?? PALETA[2]}
               />
             </Panel>
             <Panel
               titulo="Saldo vencido cancelado por vendedor"
               nota="Clientes que salieron de mora"
             >
+              {/* EL NOMBRE, NO EL CODIGO. La tabla guarda "007" y el resto de
+                  la pantalla ya lo traduce; este gráfico era el único que
+                  seguía mostrando el número.
+
+                  El valor que viaja al filtro sigue siendo el CODIGO --es lo
+                  que entiende la consulta-- así que `onSeleccionar` recibe la
+                  etiqueta y la vuelve a convertir. Si se mandara el nombre, el
+                  filtro cruzado no encontraría nada. */}
               <BarrasCategoria
-                datos={data.cancelacionesPorVendedor}
+                datos={data.cancelacionesPorVendedor.map((d) => ({
+                  ...d,
+                  label: nombreVendedor(d.label),
+                }))}
                 formato={fmtMonedaCorta}
                 colorUnico={PALETA[1]}
-                seleccionados={filtros.vendedor}
-                onSeleccionar={alternar("vendedor")}
+                seleccionados={filtros.vendedor?.map(nombreVendedor)}
+                onSeleccionar={(nombre) => {
+                  const codigo =
+                    data.cancelacionesPorVendedor.find(
+                      (d) => nombreVendedor(d.label) === nombre,
+                    )?.label ?? nombre;
+                  alternar("vendedor")(codigo);
+                }}
               />
             </Panel>
           </div>
@@ -740,15 +814,27 @@ export default function DashboardCuentasPage() {
                 esta tabla que ya existe como filtro y a la que responden los
                 KPIs de arriba. Filtrar por el cliente suelto dejaría un tablero
                 de una fila, que es lo que ya se está mirando. */}
+            {/* TODAS LAS FILAS SE ABREN, incluso las que no tienen
+                comprobantes. Antes esas no mostraban flecha y el resultado era
+                un dedo que no hace nada: la pregunta "¿por qué éste no se
+                desglosa?" se la llevaba puesta quien miraba.
+
+                Y la respuesta no es un error de datos, es información: al
+                15/10 son 24, de los cuales 21 figuran en la tabla de
+                cancelaciones --pagaron, y sus comprobantes salieron del
+                aging-- y 2 tienen saldo A FAVOR. Decirlo es más útil que
+                esconder la flecha. */}
             <Tabla
               filas={data.clientes}
               columnas={columnas(data.clientes, data.fechaClientes)}
               clave={(f) => f.cuit || f.razonSocial}
-              expandir={(f) => {
-                const comprobantes = data.comprobantesPorCuit[f.cuit] ?? [];
-                if (comprobantes.length === 0) return null;
-                return <DetalleComprobantes filas={comprobantes} />;
-              }}
+              expandir={(f) => (
+                <DetalleComprobantes
+                  filas={data.comprobantesPorCuit[f.cuit] ?? []}
+                  cliente={f}
+                  fechaFoto={data.fechaClientes}
+                />
+              )}
               onClickFila={(f) =>
                 f.categoria && alternar("categoria")(f.categoria)
               }

@@ -39,6 +39,7 @@ export default function TortaProveedores({
   totalGeneral,
   seleccionados,
   onSeleccionar,
+  color,
 }: {
   datos: PuntoProveedor[];
   /** Facturación neta de TODOS los proveedores, no solo los del top 12:
@@ -48,6 +49,14 @@ export default function TortaProveedores({
   seleccionados?: string[];
   /** Si se omite, la torta es solo de lectura (sin filtro cruzado). */
   onSeleccionar?: (proveedor: string) => void;
+  /**
+   * El color de cada porción SEGUN SU ETIQUETA, para las escalas ordenadas.
+   *
+   * Sin esto el color sale del ciclo por POSICION, y como la torta se ordena
+   * por tamaño, la categoría más grande se queda con el primer color: CRÍTICO
+   * sería azul un día y verde al otro según cuánta plata tenga.
+   */
+  color?: (label: string) => string;
 }) {
   if (datos.length === 0) {
     return (
@@ -85,7 +94,7 @@ export default function TortaProveedores({
               {datos.map((d, i) => (
                 <Cell
                   key={d.label}
-                  fill={colorSerie(i)}
+                  fill={color?.(d.label) ?? colorSerie(i)}
                   // Al seleccionar uno, los demás se atenúan en vez de desaparecer.
                   fillOpacity={
                     !seleccionados?.length || seleccionados.includes(d.label)
@@ -123,7 +132,7 @@ export default function TortaProveedores({
                 >
                   <span
                     className="size-2.5 shrink-0 rounded-full"
-                    style={{ background: colorSerie(i) }}
+                    style={{ background: color?.(d.label) ?? colorSerie(i) }}
                   />
                   <span
                     className={`truncate ${activo ? "text-ink" : "text-muted"}`}
