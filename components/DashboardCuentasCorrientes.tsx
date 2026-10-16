@@ -98,9 +98,7 @@ function DetalleComprobantes({
   // SIN COMPROBANTES NO ES UN HUECO: es una respuesta, y hay tres distintas.
   // Dejar el panel vacío obligaría a adivinar cuál de las tres.
   if (filas.length === 0) {
-    const congelada =
-      fechaFoto != null && cliente.fecha != null && cliente.fecha !== fechaFoto;
-    const aFavor = cliente.saldoTotal < 0;
+    const aFavor = (cliente.saldoTotal ?? 0) < 0;
 
     return (
       <p className="text-muted px-3 py-2 text-[11px] leading-relaxed">
@@ -110,13 +108,29 @@ function DetalleComprobantes({
             {fmtMoneda(cliente.saldoTotal)}): no hay comprobantes impagos que
             desglosar.
           </>
-        ) : congelada ? (
+        ) : !cliente.vigente ? (
+          // ACA SI VA EL MONTO VIEJO. En la columna de saldo sería una deuda
+          // de hoy que no existe; dicho con la fecha al lado es el dato útil:
+          // cuánto se cobró y cuándo.
           <>
-            El último dato de este cliente es del <strong>{cliente.fecha}</strong>
-            , y la foto más nueva es del {fechaFoto}. Dejó de aparecer en el
-            scoring —casi siempre porque canceló— así que sus comprobantes ya no
-            están en el aging. El saldo que muestra la fila es el de aquel día,
-            no el de hoy.
+            Este cliente <strong>ya no debe nada</strong>. Su último dato es del{" "}
+            {cliente.fecha}
+            {cliente.saldoAlCerrar != null && cliente.saldoAlCerrar > 0 && (
+              <>
+                , cuando debía {fmtMoneda(cliente.saldoAlCerrar)}
+              </>
+            )}
+            {fechaFoto != null && <> y la foto más nueva es del {fechaFoto}</>}.
+            Dejó de aparecer en el scoring —casi siempre porque canceló— así que
+            sus comprobantes salieron del aging y no hay nada que desglosar.
+            {moraConfiable(cliente) && (
+              <>
+                {" "}
+                Mientras debía estuvo en promedio{" "}
+                <strong>{cliente.moraPromedio} días</strong> de atraso
+                {cliente.moraPeor != null && <> (peor: {cliente.moraPeor})</>}.
+              </>
+            )}
           </>
         ) : (
           <>
@@ -207,33 +221,49 @@ function DetalleComprobantes({
 /* La escala vive en lib/paleta.ts, con el porqué de cada paso y las medidas
    de separación. Acá sólo se usa. */
 
-function columnas(
-  filas: FilaCliente[],
-  fechaFoto: string | null,
-): Columna<FilaCliente>[] {
+/**
+ * CUANTAS FOTOS DIARIAS HACEN FALTA para decir una mora promedio.
+ *
+ * Con menos de cinco, el promedio es el de un día o dos y no describe nada: un
+ * cliente que apareció una sola vez, el día que no tenía nada vencido, daría
+ * "0 d" --que se lee como "paga al día"-- sin que eso se haya medido. Son 4 de
+ * 140 al 15/10. Esas filas dicen "—" y el motivo en el título, que es la
+ * respuesta correcta a una pregunta que todavía no se puede contestar.
+ */
+const MINIMO_DIAS_MORA = 5;
+
+/**
+ * Si la mora de esta fila se midió lo suficiente para mostrarla.
+ *
+ * Devuelve un type predicate y no un boolean para que después de llamarla
+ * `moraPromedio` sea un número y no `number | null`: así comparar contra
+ * `moraPeor` no necesita un `!` que después nadie sabe si era seguro.
+ */
+function moraConfiable(
+  f: FilaCliente,
+): f is FilaCliente & { moraPromedio: number } {
+  return f.moraPromedio != null && f.diasMedidos >= MINIMO_DIAS_MORA;
+}
+
+function columnas(filas: FilaCliente[]): Columna<FilaCliente>[] {
   return [
     {
       titulo: "Cliente",
       ayuda:
-        "Las filas en gris quedaron atrás: ese cliente dejó de aparecer en el scoring —casi siempre porque canceló— así que su saldo es el del día que dice, no el de hoy. Son las que no tienen comprobantes para desglosar.",
-      celda: (f) => {
-        // UNA FILA CONGELADA ES LA QUE NO SE VOLVIO A CAPTURAR. Dentro del
-        // mismo mes conviven capturas de varios días: la de un cliente queda
-        // en la última vez que apareció, y deja de aparecer cuando canceló.
-        // Esa fila muestra una deuda que ya se pagó, así que se marca.
-        const vieja = fechaFoto != null && f.fecha != null && f.fecha !== fechaFoto;
-        return (
-          <span
-            className={`block max-w-[116px] sm:max-w-[260px] truncate ${vieja ? "text-muted" : ""}`}
-            title={vieja ? `Último dato del ${f.fecha}` : undefined}
-          >
-            {f.razonSocial}
-            {vieja && (
-              <span className="text-muted ml-1.5 text-[10px]">· {f.fecha}</span>
-            )}
-          </span>
-        );
-      },
+        "Las filas en gris ya no deben nada: ese cliente dejó de aparecer en el scoring —casi siempre porque canceló— así que sus columnas de saldo van vacías. Lo que debía el día que dice está en el desglose. La mora promedio sí se sigue mostrando: es su historia, no su deuda.",
+      celda: (f) => (
+        // QUIEN YA NO DEBE SE MARCA, NO SE ESCONDE. Su fila sigue acá con la
+        // categoría y la mora --que es lo que dice cómo paga-- pero sin saldo.
+        <span
+          className={`block max-w-[116px] sm:max-w-[260px] truncate ${f.vigente ? "" : "text-muted"}`}
+          title={f.vigente ? undefined : `Sin deuda desde el ${f.fecha}`}
+        >
+          {f.razonSocial}
+          {!f.vigente && (
+            <span className="text-muted ml-1.5 text-[10px]">· canceló</span>
+          )}
+        </span>
+      ),
       orden: (f) => f.razonSocial,
     },
     {
@@ -292,6 +322,58 @@ function columnas(
         return conDato.length === 0
           ? "—"
           : `${fmtNumero(Math.max(...conDato.map((f) => f.atrasoMax as number)))} d`;
+      })(),
+    },
+    {
+      titulo: "Mora prom.",
+      ayuda:
+        "QUÉ TAN VENCIDO SUELE ESTAR LO QUE DEBE, en días. Es el promedio de " +
+        "todas las fotos diarias en que el cliente apareció, así que mide su " +
+        "comportamiento y no su saldo de hoy: por eso también está en las " +
+        "filas que ya cancelaron, que es justo donde sirve. " +
+        "NO es 'días que tarda en pagar': Sigma nos da las facturas impagas, " +
+        "no la fecha en que se cobró cada una, así que vencimiento-contra-pago " +
+        "no se puede medir. Y promedia todas las facturas pendientes de cada " +
+        "día, vencidas y por vencer, así que da más bajo que el atraso máximo: " +
+        "quien tiene una factura vieja y diez nuevas queda en un número chico. " +
+        "El peor momento que se le vio está entre paréntesis.",
+      celda: (f) =>
+        !moraConfiable(f) ? (
+          <span
+            title={
+              f.moraPromedio == null
+                ? "Este cliente no aparece en la foto diaria."
+                : `Sólo ${f.diasMedidos} ${f.diasMedidos === 1 ? "día" : "días"} medido${f.diasMedidos === 1 ? "" : "s"}: muy poco para un promedio.`
+            }
+          >
+            —
+          </span>
+        ) : (
+          <span title={`${f.diasMedidos} días medidos`}>
+            {fmtNumero(f.moraPromedio)} d
+            {f.moraPeor != null && f.moraPeor > f.moraPromedio && (
+              <span className="text-muted ml-1 text-[10px]">
+                (peor {fmtNumero(f.moraPeor)})
+              </span>
+            )}
+          </span>
+        ),
+      numerica: true,
+      orden: (f) => f.moraPromedio,
+      // PROMEDIO SIMPLE ENTRE CLIENTES, no ponderado por deuda: la pregunta
+      // que contesta es "cómo paga la cartera", y ahí un cliente chico que
+      // deja vencer todo cuenta igual que uno grande. Ponderar por saldo daría
+      // otra cosa --cuántos días de vencido tiene cada peso a cobrar-- y
+      // además dejaría afuera a los que ya cancelaron, que no tienen saldo.
+      total: (() => {
+        const conDato = filas.filter(moraConfiable);
+        return conDato.length === 0
+          ? "—"
+          : `${fmtNumero(
+              Math.round(
+                sumar(conDato, (f) => f.moraPromedio) / conDato.length,
+              ),
+            )} d`;
       })(),
     },
   ];
@@ -798,11 +880,9 @@ export default function DashboardCuentasPage() {
                 // "¿por qué algunos no se desglosan?": no tienen comprobantes
                 // porque ya no deben nada, y su fila es de un día anterior.
                 (() => {
-                  const viejas = data.clientes.filter(
-                    (c) => data.fechaClientes && c.fecha && c.fecha !== data.fechaClientes,
-                  ).length;
-                  return viejas > 0
-                    ? `${viejas} con datos de días anteriores (en gris)`
+                  const canceladas = data.clientes.filter((c) => !c.vigente).length;
+                  return canceladas > 0
+                    ? `${canceladas} ya sin deuda (en gris, sin saldo)`
                     : null;
                 })(),
               ]
@@ -826,7 +906,7 @@ export default function DashboardCuentasPage() {
                 esconder la flecha. */}
             <Tabla
               filas={data.clientes}
-              columnas={columnas(data.clientes, data.fechaClientes)}
+              columnas={columnas(data.clientes)}
               clave={(f) => f.cuit || f.razonSocial}
               expandir={(f) => (
                 <DetalleComprobantes

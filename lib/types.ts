@@ -231,9 +231,52 @@ export type FilaCliente = {
   razonSocial: string;
   categoria: string | null;
   vendedor: string | null;
-  saldoTotal: number;
-  saldoVencido: number;
+  /**
+   * LO QUE DEBE HOY, o `null` si ya no debe nada.
+   *
+   * Es nulo justo en las filas que quedaron atrás. El número que tenían --el
+   * del día de su última captura-- ya se cobró, y mostrarlo en la columna de
+   * saldo hace llamar a quien ya pagó. Queda en `saldoAlCerrar`, que el
+   * desglose sí usa para decir cuánto era.
+   */
+  saldoTotal: number | null;
+  saldoVencido: number | null;
   atrasoMax: number | null;
+  /**
+   * Lo que debía en su última captura. SOLO las filas que quedaron atrás lo
+   * tienen; en las vigentes es nulo, porque ahí el saldo de hoy es `saldoTotal`.
+   */
+  saldoAlCerrar: number | null;
+  /**
+   * MORA PROMEDIO, en días: qué tan vencido suele estar lo que debe.
+   *
+   * Sale de `bronze.cuentas_corrientes_historial_diario`, que guarda una fila
+   * por cliente y por día: es el promedio de `atraso_prom_general` sobre todas
+   * las fotos diarias en que el cliente apareció.
+   *
+   * NO ES "DIAS QUE TARDA EN PAGAR", y la diferencia importa. Sigma nos da las
+   * facturas IMPAGAS, no la fecha en que se cobró cada una, así que no hay
+   * forma de medir vencimiento-contra-pago. Esto mide otra cosa, que sí se
+   * puede medir todos los días: cuántos días de vencido acumula en promedio lo
+   * que tiene pendiente. Un cliente que paga al día da 0; uno que deja vencer
+   * un mes antes de pagar da ~30.
+   *
+   * Y es un promedio sobre TODAS las facturas pendientes de cada día, las
+   * vencidas y las que todavía no vencieron, porque así lo calcula el Apps
+   * Script. Por eso da más bajo que `atrasoMax`: quien tiene una factura vieja
+   * y diez nuevas queda en un número chico. Para el peor momento está
+   * `moraPeor`.
+   */
+  moraPromedio: number | null;
+  /** El peor atraso que se le vio en cualquiera de las fotos diarias. */
+  moraPeor: number | null;
+  /** Sobre cuántas fotos diarias se calculó la mora. Pocas = poco confiable. */
+  diasMedidos: number;
+  /**
+   * Si la fila es de la captura más nueva del período. Falso = quedó atrás,
+   * el cliente dejó de aparecer en el scoring, casi siempre porque canceló.
+   */
+  vigente: boolean;
   /** La clave con la que se cuelgan los comprobantes del desglose. */
   cuit: string;
   /** El período de la foto de la que sale la fila (`YYYY-MM`). */
