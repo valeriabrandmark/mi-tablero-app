@@ -396,18 +396,61 @@ async function getKpis(f: FiltrosMeli, corteHora?: string): Promise<KpisMeli> {
 
 // --- Series y rankings -------------------------------------------------------
 
+/**
+ * La serie diaria, CON LOS DIAS SIN VENTAS.
+ *
+ * Antes salía un punto por día que tuviera ventas y nada más, así que la línea
+ * empezaba en la primera venta y terminaba en la última: filtrar un mes entero
+ * y un artículo que vendió dos días daba un gráfico de dos puntos, con el eje
+ * arrancando el 08/10 aunque el filtro dijera 16/09. Los días en cero --que
+ * para una serie de ventas son el dato, no un hueco-- no se veían, y la
+ * pendiente entre los dos únicos puntos se leía como una tendencia.
+ *
+ * Ahora el calendario se arma primero y las ventas se cuelgan de él.
+ *
+ * EL RANGO SE RECORTA CONTRA LO QUE HAY CARGADO, y eso no es una precaución
+ * de más: `desde` y `hasta` vienen de dos `input type="date"`, donde un dedo
+ * de más escribe el año 0202 sin que nada se queje. Sin el recorte eso serían
+ * seiscientas mil filas. Con él, el calendario nunca se sale de los días en
+ * que el canal tiene ventas: pedir hasta diciembre no inventa días en cero
+ * para un futuro del que no sabemos nada.
+ */
 async function getPorDia(f: FiltrosMeli): Promise<PuntoDiaMeli[]> {
   const w = whereBase(f);
+  const params = [...w.params, f.desde ?? null, f.hasta ?? null];
+  const iDesde = params.length - 1;
+  const iHasta = params.length;
 
   const filas = await query<Record<string, string>>(
-    `select to_char(fecha, 'YYYY-MM-DD')      as fecha,
-            coalesce(sum(${VENTA_CIVA}), 0)   as venta,
-            coalesce(sum(${RENTABILIDAD}), 0) as rentabilidad
-     from gold.fact_ventas
-     where ${w.sql} and fecha is not null
-     group by 1
-     order by 1`,
-    w.params,
+    `with ventas as (
+       select fecha,
+              coalesce(sum(${VENTA_CIVA}), 0)   as venta,
+              coalesce(sum(${RENTABILIDAD}), 0) as rentabilidad
+       from gold.fact_ventas
+       where ${w.sql} and fecha is not null
+       group by 1
+     ),
+     -- Hasta dónde llega lo cargado. $1 es el canal: lo pone whereBase.
+     cargado as (
+       select min(fecha) as primera, max(fecha) as ultima
+         from gold.fact_ventas where canal = $1 and fecha is not null
+     ),
+     rango as (
+       select greatest(coalesce($${iDesde}::date, primera), primera) as desde,
+              least(coalesce($${iHasta}::date, ultima), ultima)      as hasta
+         from cargado
+     ),
+     dias as (
+       select g::date as fecha
+         from rango r, generate_series(r.desde, r.hasta, interval '1 day') g
+     )
+     select to_char(d.fecha, 'YYYY-MM-DD')   as fecha,
+            coalesce(v.venta, 0)             as venta,
+            coalesce(v.rentabilidad, 0)      as rentabilidad
+       from dias d
+       left join ventas v on v.fecha = d.fecha
+      order by 1`,
+    params,
   );
 
   return filas.map((r) => ({

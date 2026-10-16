@@ -149,6 +149,58 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
  * Es el detalle de la tarjeta de "No disponible", que hasta ahora era un número
  * sin forma de abrirlo.
  */
+/**
+ * Los motivos que manda la API de Full, en castellano.
+ *
+ * Sondeado el 16/10/2026 sobre la cuenta: `withdrawal` 67 unidades,
+ * `lost` 15 e `internalProcess` 3. No está documentada la lista completa, así
+ * que lo que no esté acá sale con su nombre crudo: un motivo que no se
+ * reconoce igual es plata trabada, y esconderlo sería peor que mostrarlo en
+ * inglés.
+ */
+const MOTIVO_NO_DISPONIBLE: Record<string, string> = {
+  withdrawal: "en un retiro",
+  lost: "perdidas por ML",
+  internalProcess: "en proceso interno",
+  damaged: "dañadas",
+  notSupported: "no admitidas",
+};
+
+/** `withdrawal:2|lost:1` → `2 en un retiro · 1 perdidas por ML`. */
+function Motivos({ texto }: { texto: string | null }) {
+  if (!texto) return <span className="text-muted">—</span>;
+
+  const partes = texto.split("|").map((p) => {
+    const corte = p.lastIndexOf(":");
+    const clave = corte < 0 ? p : p.slice(0, corte);
+    const unidades = corte < 0 ? "" : p.slice(corte + 1);
+    return { clave, unidades, nombre: MOTIVO_NO_DISPONIBLE[clave] ?? clave };
+  });
+
+  return (
+    <span className="block max-w-[150px] truncate sm:max-w-[230px]">
+      {partes.map((p, i) => (
+        <span key={p.clave}>
+          {i > 0 && <span className="text-muted"> · </span>}
+          {p.unidades && <span className="tabular-nums">{p.unidades} </span>}
+          <span
+            className={p.clave === "lost" ? "" : "text-muted"}
+            style={p.clave === "lost" ? { color: TEMA.negativo } : undefined}
+            title={
+              // Se marca SOLO "perdidas": las otras son plata trabada pero
+              // recuperable --el retiro vuelve, la revisión termina--, y
+              // ésta es la única que hay que ir a reclamar.
+              p.clave === "lost" ? "Reclamables a Mercado Libre" : undefined
+            }
+          >
+            {p.nombre}
+          </span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function columnasNoDisponible(
   filas: FilaNoDisponible[],
 ): Columna<FilaNoDisponible>[] {
@@ -185,6 +237,19 @@ function columnasNoDisponible(
       numerica: true,
       orden: (f) => f.noDisponible,
       total: fmtNumero(sumar(filas, (f) => f.noDisponible)),
+    },
+    {
+      titulo: "Motivo",
+      ayuda:
+        "POR QUÉ Mercado Libre no las puede vender, según la API. " +
+        "«En un retiro» son las que pedimos que nos devuelvan: ya salieron del " +
+        "stock vendible, y por eso en Mercado Libre no se ven por ningún lado. " +
+        "«Perdidas por ML» son las que el depósito dio por perdidas, y son " +
+        "reclamables. «En proceso interno» están en revisión. " +
+        "Si aparece un nombre en inglés es un motivo nuevo que todavía no " +
+        "traducimos; el número de al lado igual es correcto.",
+      celda: (f) => <Motivos texto={f.motivos} />,
+      orden: (f) => f.motivos,
     },
     {
       titulo: "Disponible",

@@ -74,6 +74,11 @@ export const COLOR_CATEGORIA: Record<string, string> = {
   OBSERVACIÓN: "#fde047",
   RIESGOSO: "#fb923c",
   CRÍTICO: "#dc2626",
+  // A FAVOR NO ES EL ESCALON CERO DE LA ESCALA, ES OTRA COSA: ese cliente no
+  // debe nada, le debemos nosotros. Por eso un celeste y no un verde más
+  // verde: un sexto paso del degradé lo pondría a competir con BUENO por el
+  // lugar de "el mejor", cuando ni siquiera está en la misma pregunta.
+  "A FAVOR": "#38bdf8",
 };
 
 /**
@@ -95,6 +100,12 @@ export function colorCategoria(categoria: string | null | undefined): string {
  * mismo se lean como si dijeran cosas distintas.
  */
 export const COLOR_TRAMO_AGING: Record<string, string> = {
+  // Mismo celeste que la categoría A FAVOR, y por el mismo motivo: las notas
+  // de crédito tienen días de atraso pero no son deuda vencida de ninguna
+  // antigüedad. Antes caían en el tramo que les tocaba por edad y lo
+  // DESCONTABAN --tres de ellas en "+90 días"-- así que el tramo más caro de
+  // todos salía más chico de lo que es.
+  "A favor": "#38bdf8",
   "No vencido": "#15803d",
   "0-30 días": "#34d399",
   "31-60 días": "#fde047",

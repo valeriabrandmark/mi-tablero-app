@@ -93,6 +93,32 @@ stock as (
   where i.sku is not null
   group by i.sku
 ),
+motivos as (
+  -- POR QUE ML NO LAS PUEDE VENDER. La API lo dice en not_available_detail,
+  -- un JSON por inventario con un renglón por motivo. Lo veníamos guardando y
+  -- no lo mirábamos, así que la columna "no disponible" era un número sin
+  -- explicación -- y la pregunta obvia, "¿dónde están?", no tenía respuesta
+  -- en la pantalla.
+  --
+  -- Los tres motivos que trae la cuenta hoy: withdrawal (en un retiro que
+  -- pedimos: ya no son stock, por eso en Mercado Libre no se ven), lost
+  -- (ML las perdió) e internalProcess. Se agrega el texto crudo y la pantalla
+  -- lo traduce, así un motivo nuevo que aparezca mañana no se pierde: sale
+  -- con su nombre en inglés en vez de desaparecer.
+  select i.sku,
+         string_agg(m.motivo || ':' || m.unidades, '|' order by m.unidades desc, m.motivo) as motivos
+  from (
+    select f.inventory_id,
+           e->>'status'              as motivo,
+           sum((e->>'quantity')::int) as unidades
+    from bronze.ml_stock_full f
+    cross join lateral jsonb_array_elements(nullif(f.not_available_detail, '')::jsonb) e
+    group by 1, 2
+  ) m
+  join por_inv i on i.inventory_id = m.inventory_id
+  where i.sku is not null
+  group by i.sku
+),
 costo as (
   -- El costo NETO del último mes que lo tenga cargado: costo_real ya es el
   -- teórico con la oferta del proveedor descontada. Sale del mismo lugar que
@@ -133,10 +159,12 @@ base as (
          -- Lo TRABADO valorizado a costo. Sólo a costo: una unidad que ML no
          -- puede vender no tiene precio de venta que valga, y lo que interesa
          -- es cuánta plata nuestra está parada ahí.
-         s.no_disponible * coalesce(c.costo_real, 0)                     as valorizacion_costo_nd
+         s.no_disponible * coalesce(c.costo_real, 0)                     as valorizacion_costo_nd,
+         mo.motivos
   from stock s
   left join ventas v on v.sku = s.sku
   left join costo c on c.sku = s.sku
+  left join motivos mo on mo.sku = s.sku
   left join bronze.sigma_articulos a on trim(a.id::text) = trim(s.sku)
   where ${soloVendible ? "s.disponible > 0" : "s.disponible > 0 or s.no_disponible > 0"}
 )`;
@@ -291,7 +319,8 @@ async function getNoDisponible(
      select sku, producto, proveedor, marca,
             no_disponible::float8                as "noDisponible",
             disponible::float8                   as disponible,
-            valorizacion_costo_nd::float8        as "valorizacionCosto"
+            valorizacion_costo_nd::float8        as "valorizacionCosto",
+            motivos
      from base ${extra}
      order by valorizacion_costo_nd desc, no_disponible desc
      limit 300`,

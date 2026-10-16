@@ -37,6 +37,30 @@ import { agregarFiltro, vacio } from "@/lib/filtros";
 type Where = { sql: string; params: unknown[] };
 
 /**
+ * LA CATEGORIA, CON LOS SALDOS A FAVOR FUERA DE LA ESCALA DE RIESGO.
+ *
+ * El Apps Script clasifica por días de atraso y exposición sin mirar el SIGNO
+ * del saldo. Una nota de crédito vieja entra como "factura vencida": suma días
+ * de atraso, empuja `maxAtraso` y arrastra la categoría. Así hay tres clientes
+ * marcados RIESGOSO, con hasta 213 días de atraso, que no deben nada --les
+ * debemos nosotros $ 196.704.
+ *
+ * Un saldo negativo no es mora de ninguna clase, así que no va en la escala:
+ * sale como A FAVOR, que es su propia cosa. Arreglarlo acá y no en la planilla
+ * es a propósito: la planilla escribe la categoría en el historial, y cambiarla
+ * allá dejaría los meses viejos clasificados con un criterio y los nuevos con
+ * otro, sin forma de saber cuál es cuál mirando la tabla.
+ *
+ * La usan la tabla, los dos gráficos por categoría, el KPI de clientes en
+ * riesgo, el filtro y la lista de opciones, para que los cinco cuenten lo
+ * mismo. Si uno solo se olvidara, la torta y la tabla dirían números distintos.
+ */
+const A_FAVOR = "A FAVOR";
+const categoriaReal = (alias: string) =>
+  `case when coalesce(${alias}.saldo_total, 0) < 0 then '${A_FAVOR}' ` +
+  `else ${alias}.categoria end`;
+
+/**
  * Filtros sobre cualquier tabla que tenga `vendedor` y `empresa` propios.
  * `omitir` desactiva uno para una consulta puntual: los gráficos que desglosan
  * por categoría (o por vendedor) siguen mostrando el panorama completo aunque
@@ -74,10 +98,10 @@ function whereCuentas(
     params.push(f.categoria);
     clauses.push(
       conCategoria
-        ? `${alias}.categoria = any($${params.length}::text[])`
+        ? `${categoriaReal(alias)} = any($${params.length}::text[])`
         : // aging y cancelaciones no tienen categoría: se resuelve por cuit.
           `${alias}.cuit in (select s.cuit from bronze.cuentas_corrientes_scoring s
-                             where s.categoria = any($${params.length}::text[]))`,
+                             where ${categoriaReal("s")} = any($${params.length}::text[]))`,
     );
   }
 
@@ -102,7 +126,7 @@ async function getSaldos(f: FiltrosCuentas) {
     `select coalesce(sum(s.saldo_total), 0)::float8 as "deudaTotal",
             coalesce(sum(s.saldo_vencido), 0)::float8 as "deudaVencida",
             count(distinct s.razon_social) filter (
-              where s.categoria in ('CRÍTICO', 'RIESGOSO')
+              where ${categoriaReal("s")} in ('CRÍTICO', 'RIESGOSO')
             ) as "clientesEnRiesgo",
             count(distinct s.razon_social) as "clientesTotales"
      from bronze.cuentas_corrientes_scoring s
@@ -242,28 +266,46 @@ async function getClientes(f: FiltrosCuentas): Promise<FilaCliente[]> {
      -- mensual, así que el promedio se apoya en diez veces más mediciones.
      -- No se filtra por vendedor ni empresa a propósito: es el comportamiento
      -- del cliente a lo largo del tiempo, no un corte del tablero.
+     --
+     -- SOLO LOS DIAS EN QUE DEBIA ALGO (saldo_total > 0). Un día con saldo a
+     -- favor tiene días de atraso igual --son los de la nota de crédito-- y
+     -- promediarlos mide la antigüedad de lo que le debemos, no su mora: en
+     -- esos días el promedio da 122 contra 30 en los días normales. Son 97 de
+     -- 5.843 filas, de tres clientes, pero a esos tres les cambia todo.
+     --
+     -- Los días con saldo 0 tampoco entran: si no debía nada, no hay mora que
+     -- medir. Los días en que debía y estaba al día SI entran, valiendo 0, que
+     -- es lo que hace que "paga puntual" se distinga de "no lo medimos".
      mora as (
        select regexp_replace(cuit, '[^0-9A-Za-z]', '', 'g') as clave,
               round(avg(atraso_prom_general))::int as prom,
               max(atraso_max)::int                 as peor,
               count(*)::int                        as dias
          from bronze.cuentas_corrientes_historial_diario
+        where coalesce(saldo_total, 0) > 0
         group by 1
      )
      select h.razon_social as "razonSocial",
-            h.categoria,
+            -- Ver categoriaReal: un saldo negativo sale de la escala de
+            -- riesgo en vez de quedar RIESGOSO con 213 días de atraso.
+            ${categoriaReal("h")} as categoria,
             h.vendedor,
             h.cuit,
             h.periodo,
             h.fecha,
             h.vigente,
+            (coalesce(h.saldo_total, 0) < 0) as "aFavor",
             -- EL SALDO SOLO SI SIGUE DEBIENDO. El de una fila que quedó atrás
             -- es el del día que dice, y ya se cobró: mostrarlo como deuda de
             -- hoy hace llamar a quien ya pagó. Se guarda aparte, en
             -- "saldoAlCerrar", para que el desglose pueda decir cuánto era.
             case when h.vigente then coalesce(h.saldo_total, 0)::float8 end   as "saldoTotal",
             case when h.vigente then coalesce(h.saldo_vencido, 0)::float8 end as "saldoVencido",
-            case when h.vigente then h.atraso_max::float8 end                 as "atrasoMax",
+            -- EL ATRASO TAMPOCO, SI ESTA A FAVOR: esos 213 días son la edad de
+            -- una nota de crédito, no de una deuda. Mostrarlos en la columna de
+            -- atraso dice que hace siete meses que no paga, y no debe nada.
+            case when h.vigente and coalesce(h.saldo_total, 0) >= 0
+                 then h.atraso_max::float8 end                                as "atrasoMax",
             case when not h.vigente then coalesce(h.saldo_total, 0)::float8 end as "saldoAlCerrar",
             m.prom               as "moraPromedio",
             m.peor               as "moraPeor",
@@ -352,17 +394,17 @@ async function getPorCategoria(f: FiltrosCuentas) {
   const w = whereCuentas(f, "s", true, ["categoria"]);
   const [deuda, clientes] = await Promise.all([
     query<PuntoEtiqueta>(
-      `select coalesce(s.categoria, '—') as label,
+      `select coalesce(${categoriaReal("s")}, '—') as label,
               coalesce(sum(s.saldo_total), 0)::float8 as valor
        from bronze.cuentas_corrientes_scoring s
-       where ${w.sql} group by s.categoria order by valor desc nulls last`,
+       where ${w.sql} group by 1 order by valor desc nulls last`,
       w.params,
     ),
     query<PuntoEtiqueta>(
-      `select coalesce(s.categoria, '—') as label,
+      `select coalesce(${categoriaReal("s")}, '—') as label,
               count(distinct s.razon_social)::float8 as valor
        from bronze.cuentas_corrientes_scoring s
-       where ${w.sql} group by s.categoria order by valor desc nulls last`,
+       where ${w.sql} group by 1 order by valor desc nulls last`,
       w.params,
     ),
   ]);
@@ -373,7 +415,8 @@ async function getPorCategoria(f: FiltrosCuentas) {
 async function getAging(f: FiltrosCuentas): Promise<PuntoEtiqueta[]> {
   const w = whereCuentas(f, "a", false);
   return query<PuntoEtiqueta>(
-    `select case when a.atraso is null then 'Sin dato'
+    `select case when coalesce(a.pendiente, 0) < 0 then 'A favor'
+                 when a.atraso is null then 'Sin dato'
                  when a.atraso < 0 then 'No vencido'
                  when a.atraso <= 30 then '0-30 días'
                  when a.atraso <= 60 then '31-60 días'
@@ -383,12 +426,13 @@ async function getAging(f: FiltrosCuentas): Promise<PuntoEtiqueta[]> {
      from bronze.cuentas_corrientes_aging a
      where ${w.sql}
      group by 1
-     order by min(case when a.atraso is null then 5
-                       when a.atraso < 0 then 0
-                       when a.atraso <= 30 then 1
-                       when a.atraso <= 60 then 2
-                       when a.atraso <= 90 then 3
-                       else 4 end)`,
+     order by min(case when coalesce(a.pendiente, 0) < 0 then 0
+                       when a.atraso is null then 6
+                       when a.atraso < 0 then 1
+                       when a.atraso <= 30 then 2
+                       when a.atraso <= 60 then 3
+                       when a.atraso <= 90 then 4
+                       else 5 end)`,
     w.params,
   );
 }
@@ -592,7 +636,15 @@ async function getOpcionesCuentasDirecto(): Promise<OpcionesCuentas> {
   const [vendedores, empresas, categorias] = await Promise.all([
     columna("vendedor"),
     columna("empresa"),
-    columna("categoria"),
+    // La categoría NO sale de la columna: sale de la misma expresión que usa
+    // todo lo demás, o A FAVOR no estaría en la lista y filtrar por RIESGOSO
+    // seguiría trayendo a los tres que no deben nada.
+    query<{ valor: string }>(
+      `select distinct ${categoriaReal("s")} as valor
+         from bronze.cuentas_corrientes_scoring s
+        where ${categoriaReal("s")} is not null and ${categoriaReal("s")} <> ''
+        order by valor`,
+    ),
   ]);
 
   return {
