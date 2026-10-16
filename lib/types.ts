@@ -277,6 +277,14 @@ export type FilaCliente = {
    * el cliente dejó de aparecer en el scoring, casi siempre porque canceló.
    */
   vigente: boolean;
+  /**
+   * SALDO A FAVOR: le debemos nosotros a él.
+   *
+   * Cuando es verdadero la categoría dice A FAVOR y no una de la escala de
+   * riesgo, y el atraso va vacío: los días que traía son la edad de una nota
+   * de crédito, no de una deuda. Ver `categoriaReal` en queries-cuentas.ts.
+   */
+  aFavor: boolean;
   /** La clave con la que se cuelgan los comprobantes del desglose. */
   cuit: string;
   /** El período de la foto de la que sale la fila (`YYYY-MM`). */
@@ -1159,6 +1167,18 @@ export type FilaNoDisponible = {
   /** Las que SÍ se pueden vender. En 0 está el peor caso: nada vendible. */
   disponible: number;
   valorizacionCosto: number;
+  /**
+   * POR QUE ML NO LAS PUEDE VENDER, tal como lo dice la API.
+   *
+   * Formato `motivo:unidades|motivo:unidades`, de mayor a menor, con el nombre
+   * en inglés sin traducir: `withdrawal:5` o `withdrawal:2|internalProcess:1`.
+   * La traducción vive en la pantalla (`MOTIVO_NO_DISPONIBLE`) y no acá, para
+   * que un motivo nuevo que mande Mercado Libre salga con su nombre crudo en
+   * vez de desaparecer.
+   *
+   * Nulo si el inventario no trae detalle.
+   */
+  motivos: string | null;
 };
 
 export type TramoStockFull = {

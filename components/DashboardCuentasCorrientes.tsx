@@ -98,7 +98,7 @@ function DetalleComprobantes({
   // SIN COMPROBANTES NO ES UN HUECO: es una respuesta, y hay tres distintas.
   // Dejar el panel vacío obligaría a adivinar cuál de las tres.
   if (filas.length === 0) {
-    const aFavor = (cliente.saldoTotal ?? 0) < 0;
+    const aFavor = cliente.aFavor;
 
     return (
       <p className="text-muted px-3 py-2 text-[11px] leading-relaxed">
@@ -456,6 +456,8 @@ const TONO_ESTADO = {
   observacion: "border-yellow-300/40 bg-yellow-300/10 text-yellow-200",
   riesgoso: "border-orange-400/40 bg-orange-400/10 text-orange-300",
   critico: "border-red-600/50 bg-red-600/15 text-red-300",
+  // Fuera de la escala, por eso celeste. Ver COLOR_CATEGORIA en lib/paleta.ts.
+  afavor: "border-sky-400/40 bg-sky-400/10 text-sky-300",
 } as const;
 
 function LeyendaEstados() {
@@ -533,6 +535,22 @@ function LeyendaEstados() {
         vencida. Y ojo con los nombres: <strong>Bueno</strong> es el mejor
         estado — no debe nada vencido —, mientras que <strong>Al día</strong> sí
         debe, pero dentro de los 15 días de tolerancia.
+      </p>
+
+      {/* FUERA DE LA GRILLA A PROPOSITO. La grilla de arriba contesta "cuánto
+          riesgo"; un cliente con saldo a favor no está en esa pregunta, así que
+          ponerlo como un sexto casillero lo haría leer como "el mejor de los
+          seis" en vez de "otra cosa". */}
+      <p className="text-muted mt-2 text-[11px] leading-tight">
+        <span
+          className={`mr-1.5 inline-block rounded-lg border px-1.5 py-0.5 font-medium ${TONO_ESTADO.afavor}`}
+        >
+          A favor
+        </span>
+        queda afuera de la escala: es el cliente con saldo negativo, que no debe
+        nada — le debemos nosotros. Antes salían <strong>Riesgoso</strong> con
+        hasta 213 días de atraso, porque la planilla cuenta una nota de crédito
+        vieja como una factura vencida. Esas filas van sin atraso y sin mora.
       </p>
     </div>
   );
