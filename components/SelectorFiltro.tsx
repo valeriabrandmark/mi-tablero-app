@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { coincide, MINIMO_PARA_BUSCAR } from "@/lib/coincide";
+import { invertirSeleccion, resumenSeleccion } from "@/lib/seleccion";
 
 export const CLASE_SELECT =
   "border-line bg-panel-2 focus:border-c1 rounded-lg border px-3 py-1.5 text-sm outline-none";
@@ -94,6 +95,28 @@ export function SelectorFiltro({
  * más. Se borra al cerrar el desplegable, y lo que quedó tildado sigue
  * tildado aunque el término lo deje fuera de la vista --el resumen del botón
  * lo sigue contando.
+ *
+ * ---------------------------------------------------------------------------
+ * "TODAS MENOS": SELECCIONAR TODO Y DESPUES SACAR
+ *
+ * Hay filtros que se piensan al revés: no "quiero estas tres marcas" sino
+ * "quiero todas menos Braun". Con el desplegable de antes eso era imposible --
+ * la única forma era tildar las otras 349 a mano-- así que arriba hay un
+ * "Seleccionar todo" y desde ahí se va sacando, con el buscador para encontrar
+ * lo que se quiere sacar. Es como funciona el filtro de Excel.
+ *
+ * PASADA LA MITAD, EL PANEL SE DA VUELTA. Con 349 de 350 elegidas, la zona de
+ * chips de arriba serían 349 chips y la lista de abajo una sola opción: al
+ * revés de lo que hace falta. Entonces arriba pasan las EXCLUIDAS --con un +
+ * para devolverlas-- y abajo las elegidas, que son sobre las que se sigue
+ * sacando. Ver `invertirSeleccion`.
+ *
+ * LO ELEGIDO VIAJA ENTERO EN LA URL, un parámetro repetido por valor. Con las
+ * 350 marcas son ~5,9 kB, que entra holgado en el límite de Vercel (14 kB de
+ * encabezados) pero no es gratis: si algún día un filtro pasara las ~800
+ * opciones habría que mandar la EXCLUSION en vez de la selección --un solo
+ * valor-- y enseñarle a `agregarFiltro` a leerla. Hoy no hace falta y la
+ * selección tiene la ventaja de que ninguna consulta se entera del cambio.
  */
 export function SelectorMultiple({
   etiqueta,
@@ -127,20 +150,34 @@ export function SelectorMultiple({
   // distintas y cada una tiene su lugar.
   const sinElegir = pares.filter(([v]) => !elegidos.includes(v));
 
+  // EL PANEL SE DA VUELTA pasada la mitad: arriba lo que está afuera, abajo lo
+  // que está adentro. Ver `invertirSeleccion` y la nota del encabezado.
+  const invertido = invertirSeleccion(elegidos.length, pares.length);
+
+  // De qué lista sale cada zona. Es lo único que cambia entre los dos modos:
+  //   normal     arriba lo elegido (se saca), abajo lo que falta (se agrega)
+  //   invertido  arriba lo excluido (se devuelve), abajo lo elegido (se saca)
+  // En los dos casos el click es el mismo `alternarUno`, porque alternar ya
+  // hace lo correcto en las dos direcciones.
+  const abajo = invertido ? pares.filter(([v]) => elegidos.includes(v)) : sinElegir;
+
   // Sin `useMemo`: `opciones` y `formato` llegan nuevos en cada render de cada
   // tablero, así que memorizar esto no ahorraría una sola pasada --recalcularía
   // igual-- y a cambio escondería que son unos cientos de `includes`.
   const visibles = termino
-    ? sinElegir.filter(([v, txt]) => coincide(v, txt, termino))
-    : sinElegir;
+    ? abajo.filter(([v, txt]) => coincide(v, txt, termino))
+    : abajo;
 
-  // Lo elegido, con su texto, EN EL ORDEN EN QUE SE FUE ELIGIENDO y no en el
-  // alfabético: la última que se tocó queda al final, que es donde la vista la
-  // deja. Reordenarlas alfabéticamente haría saltar de lugar a las demás cada
-  // vez que se agrega una.
-  const fijados = elegidos.map(
-    (v) => [v, pares.find(([x]) => x === v)?.[1] ?? v] as [string, string],
-  );
+  // En el modo normal, lo elegido va EN EL ORDEN EN QUE SE FUE ELIGIENDO y no
+  // en el alfabético: la última que se tocó queda al final, que es donde la
+  // vista la deja. Reordenarlas alfabéticamente haría saltar de lugar a las
+  // demás cada vez que se agrega una. Invertido no aplica --lo de arriba son
+  // las excluidas, que nunca se "eligieron"-- y ahí manda el orden de la lista.
+  const fijados: [string, string][] = invertido
+    ? sinElegir
+    : elegidos.map(
+        (v) => [v, pares.find(([x]) => x === v)?.[1] ?? v] as [string, string],
+      );
 
   /** Cerrar deja el buscador limpio: reabrirlo tiene que mostrar todo de nuevo. */
   const cerrar = () => {
@@ -173,12 +210,19 @@ export function SelectorMultiple({
     onChange(nuevos.length > 0 ? nuevos : undefined);
   };
 
-  const resumen =
-    elegidos.length === 0
-      ? todos
-      : elegidos.length === 1
-        ? (pares.find(([v]) => v === elegidos[0])?.[1] ?? elegidos[0])
-        : `${elegidos.length} elegidos`;
+  // SIEMPRE TODAS, no sólo las que coinciden con el buscador. El buscador
+  // existe para encontrar lo que se quiere SACAR después; si este botón
+  // dependiera de él haría dos cosas distintas según si hay texto escrito, y
+  // habría que leer el campo antes de confiar en el botón.
+  const seleccionarTodo = () => onChange(pares.map(([v]) => v));
+
+  const resumen = resumenSeleccion({
+    elegidos,
+    excluidos: sinElegir.map(([v]) => v),
+    total: pares.length,
+    todos,
+    nombre: (v) => pares.find(([x]) => x === v)?.[1] ?? v,
+  });
 
   return (
     <div className="relative flex flex-col gap-1" ref={caja}>
@@ -241,20 +285,45 @@ export function SelectorMultiple({
                   alternarUno(visibles[0][0]);
                 }
               }}
-              placeholder={`Buscar en ${pares.length}…`}
+              // En modo invertido la lista de abajo son las ELEGIDAS, así que
+              // el buscador busca entre ésas: es el camino de "saqué todas, ahora
+              // busco la que quiero sacar".
+              placeholder={
+                invertido
+                  ? `Buscar entre las ${abajo.length} elegidas…`
+                  : `Buscar en ${pares.length}…`
+              }
               aria-label={`Buscar dentro de ${etiqueta}`}
               className="border-line bg-panel-2 text-ink placeholder:text-muted focus:border-c1 mb-1 rounded border px-2 py-1.5 text-xs outline-none"
             />
           )}
 
-          <button
-            type="button"
-            onClick={() => onChange(undefined)}
-            disabled={elegidos.length === 0}
-            className="hover:bg-panel-2 text-muted shrink-0 rounded px-2 py-1.5 text-left text-xs disabled:opacity-40"
-          >
-            {todos}
-          </button>
+          {/* LOS DOS ATAJOS, uno al lado del otro y nombrados por lo que
+              DEJAN, no por lo que hacen: "Todos" deja el filtro sin aplicar y
+              "Seleccionar todo" deja las N tildadas para ir sacando. Para la
+              consulta terminan en lo mismo --se ven todos los datos-- y por eso
+              el resumen del botón los distingue: "Todos" contra "Todos (350)".
+              Sin esa diferencia, destildar una desde el estado vacío no haría
+              nada y el desplegable parecería roto. */}
+          <div className="flex shrink-0 gap-1">
+            <button
+              type="button"
+              onClick={() => onChange(undefined)}
+              disabled={elegidos.length === 0}
+              className="hover:bg-panel-2 text-muted flex-1 rounded px-2 py-1.5 text-left text-xs disabled:opacity-40"
+            >
+              {todos}
+            </button>
+            <button
+              type="button"
+              onClick={seleccionarTodo}
+              disabled={elegidos.length === pares.length}
+              title={`Tilda las ${pares.length} para después sacar las que no quieras`}
+              className="hover:bg-panel-2 text-muted flex-1 rounded px-2 py-1.5 text-right text-xs disabled:opacity-40"
+            >
+              Seleccionar todo
+            </button>
+          </div>
 
           {/* LO ELEGIDO, FIJO ARRIBA Y CON SU X.
               Antes lo tildado quedaba desperdigado en una lista de cientos: para
@@ -268,17 +337,34 @@ export function SelectorMultiple({
           {fijados.length > 0 && (
             <>
               <div className="border-line my-1 shrink-0 border-t" />
+              {/* QUE SON ESOS CHIPS cambia según el modo, así que se dice. Sin
+                  el rótulo, los mismos chips significan "lo que entra" o "lo
+                  que no entra" según cuántos haya tildados, que es justo lo
+                  que nadie va a adivinar. */}
+              {invertido && (
+                <p className="text-muted shrink-0 px-1 pt-0.5 text-[10px]">
+                  Afuera del filtro:
+                </p>
+              )}
               <div className="flex max-h-28 shrink-0 flex-wrap gap-1 overflow-y-auto px-1 py-0.5">
                 {fijados.map(([v, txt]) => (
                   <span
                     key={v}
-                    className="border-c1/40 bg-c1/15 text-ink flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-xs"
+                    className={`flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-xs ${
+                      invertido
+                        ? "border-line bg-panel-2 text-muted"
+                        : "border-c1/40 bg-c1/15 text-ink"
+                    }`}
                   >
                     <span className="truncate">{txt}</span>
                     <button
                       type="button"
                       onClick={() => alternarUno(v)}
-                      aria-label={`Sacar ${txt} de ${etiqueta}`}
+                      aria-label={
+                        invertido
+                          ? `Volver a incluir ${txt} en ${etiqueta}`
+                          : `Sacar ${txt} de ${etiqueta}`
+                      }
                       className="text-muted hover:text-ink shrink-0 leading-none"
                     >
                       <svg
@@ -290,7 +376,8 @@ export function SelectorMultiple({
                         className="size-3"
                         aria-hidden="true"
                       >
-                        <path d="M6 6l12 12M18 6L6 18" />
+                        {/* Una cruz saca; un más devuelve. */}
+                        <path d={invertido ? "M12 6v12M6 12h12" : "M6 6l12 12M18 6L6 18"} />
                       </svg>
                     </button>
                   </span>
@@ -309,8 +396,10 @@ export function SelectorMultiple({
                  problema donde no lo hay. */
               <p className="text-muted px-2 py-3 text-center text-xs">
                 {termino
-                  ? `Ninguna de las ${sinElegir.length} que faltan coincide con «${termino}».`
-                  : "Ya están todas elegidas."}
+                  ? `Ninguna de las ${abajo.length} ${invertido ? "elegidas" : "que faltan"} coincide con «${termino}».`
+                  : invertido
+                    ? "No queda ninguna elegida."
+                    : "Ya están todas elegidas."}
               </p>
             ) : (
               visibles.map(([v, txt]) => {
