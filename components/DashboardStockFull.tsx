@@ -14,7 +14,7 @@ import {
   fmtPct,
 } from "@/lib/format";
 import { PALETA, TEMA } from "@/lib/paleta";
-import { TRAMOS, UMBRALES_TARJETAS, UMBRAL_PARADO } from "@/lib/stock-full";
+import { TRAMOS, tramoDe, UMBRALES_TARJETAS, UMBRAL_PARADO } from "@/lib/stock-full";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
   DashboardStockFull,
@@ -27,12 +27,39 @@ type Opciones = { proveedores: string[]; marcas: string[] };
 type Respuesta = DashboardStockFull & { opciones: Opciones | null };
 
 /** El color se pone más rojo cuanto más tiempo lleva parado. */
-function colorDias(dias: number | null): string {
-  if (dias == null) return TEMA.negativo;
+/**
+ * El color de la celda sale del TRAMO y no del número de días.
+ *
+ * Antes "nunca vendió" era rojo siempre, porque el número venía nulo y nulo
+ * era el peor caso. Con los tres grupos eso pasó a estar mal en el caso que
+ * más importa: un artículo que llegó a Full hace diez días y todavía no vendió
+ * no es una alarma, y pintarlo igual que uno parado hace cinco meses borra
+ * justo la diferencia que la pantalla viene a mostrar.
+ */
+function colorFila(f: FilaStockFull): string {
+  switch (tramoDe(f.diasSinVenta, f.diasEnFull, f.entradaExacta)) {
+    case "nunca-parado":
+      return TEMA.negativo;
+    // Todavía no es un problema: entró hace poco y puede vender mañana.
+    case "nunca-nuevo":
+      return PALETA[1];
+    // No sabemos hace cuánto está. Ni alarma ni tranquilidad: ámbar.
+    case "nunca-sindato":
+      return PALETA[2];
+    default:
+      break;
+  }
+  const dias = f.diasSinVenta ?? 0;
   if (dias > 30) return TEMA.negativo;
   if (dias > UMBRAL_PARADO) return PALETA[2];
   if (dias > 10) return PALETA[3];
   return PALETA[1];
+}
+
+/** "94 d en Full", o "≥ 59 d en Full" cuando la fecha es un piso. */
+function enFull(f: FilaStockFull): string | null {
+  if (f.diasEnFull == null) return null;
+  return `${f.entradaExacta ? "" : "≥ "}${fmtNumero(f.diasEnFull)} d en Full`;
 }
 
 function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
@@ -65,13 +92,25 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
     {
       titulo: "Días sin venta",
       ayuda:
-        "Cuántos días pasaron desde la última venta del artículo. Es lo que decide si conviene retirarlo de Full.",
+        "Cuántos días pasaron desde la última venta del artículo. " +
+        "Los que NUNCA vendieron dicen además hace cuánto están en Full, que " +
+        "es lo que los separa: uno que está hace meses hay que retirarlo, uno " +
+        "que llegó la semana pasada todavía puede vender. El «≥» marca los " +
+        "que ya estaban cuando empezamos a guardar la foto diaria: de ésos " +
+        "sabemos que están hace al menos esos días, pero no cuántos.",
       // "Nunca" y un número grande son cosas distintas y se escriben distinto:
       // un artículo que jamás rotó puede ser nuevo, y merece otra conversación
       // que uno que vendía y dejó de vender.
       celda: (f) => (
-        <span style={{ color: colorDias(f.diasSinVenta) }}>
+        <span style={{ color: colorFila(f) }}>
           {f.diasSinVenta == null ? "nunca vendió" : fmtNumero(f.diasSinVenta)}
+          {/* HACE CUANTO ESTA EN FULL, y sólo para los que nunca vendieron:
+              es el dato que decide si hay que retirarlo o darle tiempo, y en
+              los que sí vendieron no agrega nada --ahí manda el número de la
+              izquierda. */}
+          {f.diasSinVenta == null && enFull(f) && (
+            <span className="text-muted ml-1 text-[10px]">· {enFull(f)}</span>
+          )}
         </span>
       ),
       numerica: true,
@@ -478,14 +517,14 @@ export default function DashboardStockFullPage() {
         >
           <Panel
             titulo="Cuánto stock hay en cada tramo"
-            nota="Valorizado · por días desde la última venta · click para filtrar"
+            nota="Valorizado · por días desde la última venta, y los que nunca vendieron por hace cuánto están en Full · click para filtrar"
           >
             {/* El click filtra la pantalla entera por ese tramo. Los cortes
                 salen de `TRAMOS`, los mismos que dibujan la barra, así que lo
                 que se filtra es exactamente lo que se ve. */}
             <BarrasCategoria
               datos={TRAMOS.map((t) => ({
-                label: t.label,
+                label: t.corto,
                 valor: data.tramos
                   .filter((x) => x.tramo === t.clave)
                   .reduce((a, x) => a + x.valorizacion, 0),
@@ -497,11 +536,11 @@ export default function DashboardStockFullPage() {
               vacio="Sin stock en Full."
               seleccionados={
                 filtros.tramo
-                  ? [TRAMOS.find((t) => t.clave === filtros.tramo)?.label ?? ""]
+                  ? [TRAMOS.find((t) => t.clave === filtros.tramo)?.corto ?? ""]
                   : undefined
               }
               onSeleccionar={(label) => {
-                const t = TRAMOS.find((x) => x.label === label);
+                const t = TRAMOS.find((x) => x.corto === label);
                 if (!t) return;
                 cambiar({
                   ...filtros,

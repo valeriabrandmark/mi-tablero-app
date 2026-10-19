@@ -7,6 +7,7 @@ import { CANAL_MELI } from "@/lib/meli";
 import {
   UMBRAL_PARADO,
   UMBRALES_TARJETAS,
+  DIAS_PARA_PARADO,
   limitesDelTramo,
   tramoDe,
 } from "@/lib/stock-full";
@@ -93,6 +94,42 @@ stock as (
   where i.sku is not null
   group by i.sku
 ),
+-- ────────────────────────────────────────────────────────────────────────
+-- CUANTO HACE QUE EL ARTICULO ESTA EN FULL
+--
+-- Es el dato que faltaba para poder decir algo útil de los que nunca
+-- vendieron. Sale de dos fuentes, y se toma la más vieja de las dos:
+--
+--   ml_stock_full_historico  la foto diaria del stock en Full. Arrancó el
+--                            21/08/2026, así que ve 60 días hacia atrás y
+--                            nada más.
+--   digip_envios_full        los despachos que NOSOTROS mandamos a Full.
+--                            Llega hasta el 08/05, cinco meses, y es un
+--                            evento real: si lo despachamos ese día, ese día
+--                            entró.
+--
+-- Juntas fechan 166 de los 176 que nunca vendieron. Los 10 que quedan
+-- aparecen en la primera foto y nunca los vimos despachar: de ésos sabemos
+-- que están hace 59 días o más, pero no cuántos. Ver entrada_exacta.
+-- ────────────────────────────────────────────────────────────────────────
+visto_en_full as (
+  select i.sku, min(h.fecha) as dia
+  from bronze.ml_stock_full_historico h
+  join por_inv i on i.inventory_id = h.inventory_id
+  where h.available_quantity > 0 and i.sku is not null
+  group by i.sku
+),
+despachado_a_full as (
+  -- El patrón no es de más: fecha_estado es TEXTO, y un valor que no sea
+  -- una fecha haría tirar el cast y con él la pantalla entera. Hoy los 9.853
+  -- están bien, que es exactamente lo que se creía del CRM hasta que no.
+  select trim(sku) as sku, min(fecha_estado::date) as dia
+  from bronze.digip_envios_full
+  where sku is not null
+    and fecha_estado ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+  group by 1
+),
+arranque_foto as (select min(fecha) as dia from bronze.ml_stock_full_historico),
 motivos as (
   -- POR QUE ML NO LAS PUEDE VENDER. La API lo dice en not_available_detail,
   -- un JSON por inventario con un renglón por motivo. Lo veníamos guardando y
@@ -160,11 +197,24 @@ base as (
          -- puede vender no tiene precio de venta que valga, y lo que interesa
          -- es cuánta plata nuestra está parada ahí.
          s.no_disponible * coalesce(c.costo_real, 0)                     as valorizacion_costo_nd,
-         mo.motivos
+         mo.motivos,
+         -- DIAS EN FULL. least() ignora los nulos, así que basta con que una
+         -- de las dos fuentes sepa la fecha.
+         (current_date - least(vf.dia, df.dia))::int                     as dias_en_full,
+         -- SI LA FECHA ES UNA MEDICION O UN PISO. Es de verdad cuando lo
+         -- vimos despachar --un evento con fecha propia-- o cuando lo vimos
+         -- APARECER en la foto diaria, o sea que el primer día que lo vimos
+         -- no es el primer día que miramos. Si la única evidencia es que
+         -- estaba en la foto más vieja, lo único que sabemos es que está
+         -- desde al menos ese día.
+         (df.dia is not null
+          or coalesce(vf.dia > (select dia from arranque_foto), false))  as entrada_exacta
   from stock s
   left join ventas v on v.sku = s.sku
   left join costo c on c.sku = s.sku
   left join motivos mo on mo.sku = s.sku
+  left join visto_en_full vf on vf.sku = s.sku
+  left join despachado_a_full df on df.sku = s.sku
   left join bronze.sigma_articulos a on trim(a.id::text) = trim(s.sku)
   where ${soloVendible ? "s.disponible > 0" : "s.disponible > 0 or s.no_disponible > 0"}
 )`;
@@ -201,8 +251,12 @@ function where(f: FiltrosStockFull): Where {
   if (f.tramo) {
     const lim = limitesDelTramo(f.tramo);
     if (lim == null) {
-      // "Nunca vendió" no es un rango de días sino la ausencia de venta.
+      // Los tres "nunca vendió" no son rangos de días sino la ausencia de
+      // venta, y se separan entre sí por hace cuánto está el artículo en Full.
+      // Las condiciones viven acá y la clasificación en `tramoDe`: son los dos
+      // lados de la misma regla, así que el corte sale de la misma constante.
       clauses.push("dias_sin_venta is null");
+      clauses.push(CONDICION_NUNCA[f.tramo] ?? "true");
     } else {
       params.push(lim.desde);
       clauses.push(
@@ -221,7 +275,53 @@ function where(f: FiltrosStockFull): Where {
   };
 }
 
+/**
+ * Qué distingue a cada uno de los tres "nunca vendió", en SQL.
+ *
+ * Tiene que decir LO MISMO que `tramoDe`, que es quien los clasifica para el
+ * gráfico y la tabla. Si se separaran, hacer clic en una barra filtraría un
+ * conjunto distinto del que la barra cuenta -- y nada avisaría, porque las dos
+ * cosas siguen funcionando por separado.
+ */
+/**
+ * QUE CUENTA COMO PLATA PARADA, en SQL.
+ *
+ * Dos casos distintos y por eso dos condiciones:
+ *   - vendió alguna vez, pero hace más de `UMBRAL_PARADO` días;
+ *   - nunca vendió Y está en Full hace más de `DIAS_PARA_PARADO`.
+ *
+ * El segundo es conservador a propósito: deja afuera a los 10 artículos cuya
+ * fecha de ingreso es un piso y no una medición. Son 19 unidades, y el mismo
+ * criterio que usa el gráfico -- que la tarjeta y la barra cuenten distinto
+ * sería peor que contar 19 unidades de menos.
+ */
+const ES_PARADO =
+  `(dias_sin_venta > ${UMBRAL_PARADO}` +
+  ` or (dias_sin_venta is null and entrada_exacta` +
+  ` and dias_en_full >= ${DIAS_PARA_PARADO}))`;
+
+const CONDICION_NUNCA: Record<string, string> = {
+  "nunca-parado": `entrada_exacta and dias_en_full >= ${DIAS_PARA_PARADO}`,
+  "nunca-nuevo": `entrada_exacta and dias_en_full < ${DIAS_PARA_PARADO}`,
+  "nunca-sindato": "(not entrada_exacta or dias_en_full is null)",
+};
+
+/**
+ * Una fila como la devuelve el driver, que NO es toda de texto.
+ *
+ * `pg` convierte según el tipo de Postgres: `bool` llega como booleano e `int4`
+ * como número, mientras que `numeric` y `int8` llegan como texto para no perder
+ * precisión. Tipar todo como `string | null` --que es lo que había-- hacía que
+ * `entrada_exacta === true` no compilara, y la salida fácil, `Boolean(...)`,
+ * habría sido verdadera también para el texto "false" si algún día el tipo de
+ * la columna cambiara. Declararlo es más largo y no miente.
+ */
+type FilaCruda = Record<string, string | number | boolean | null>;
+
 const num = (v: unknown): number => Number(v ?? 0);
+
+/** Lo mismo para un booleano: sólo el booleano de verdad cuenta como sí. */
+const bool = (v: unknown): boolean => v === true;
 
 async function getKpis(f: FiltrosStockFull): Promise<KpisStockFull> {
   const w = where(f);
@@ -240,10 +340,14 @@ async function getKpis(f: FiltrosStockFull): Promise<KpisStockFull> {
             coalesce(sum(valorizacion), 0)                      as valorizacion,
             coalesce(sum(valorizacion_costo), 0)                as valorizacion_costo,
             coalesce(sum(valorizacion_costo_nd), 0)             as valorizacion_costo_nd,
-            count(*) filter (where dias_sin_venta is null
-                                or dias_sin_venta > ${UMBRAL_PARADO})  as skus_parados,
-            coalesce(sum(valorizacion) filter (where dias_sin_venta is null
-                                or dias_sin_venta > ${UMBRAL_PARADO}), 0) as valorizacion_parada,
+            -- PARADO YA NO ES "TODO EL QUE NUNCA VENDIO". Antes bastaba con
+            -- que dias_sin_venta fuera nulo, y eso metía en la tarjeta a los
+            -- que acababan de llegar a Full: 59 SKU por $ 2,1 M contados como
+            -- plata parada cuando lo único que les pasa es que son nuevos.
+            -- Ahora el que nunca vendió entra sólo si además está hace más de
+            -- DIAS_PARA_PARADO, con la misma condición que usa el gráfico.
+            count(*) filter (where ${ES_PARADO})                       as skus_parados,
+            coalesce(sum(valorizacion) filter (where ${ES_PARADO}), 0) as valorizacion_parada,
             coalesce(sum(uds30), 0)                             as uds30
      from base ${w.sql}`,
     w.params,
@@ -331,15 +435,20 @@ async function getNoDisponible(
 /** El desglose por tramo y proveedor, como la tabla del reporte. */
 async function getTramos(f: FiltrosStockFull): Promise<TramoStockFull[]> {
   const w = where(f);
-  const filas = await query<Record<string, string | null>>(
+  const filas = await query<FilaCruda>(
     `${BASE}
      select coalesce(proveedor, 'Sin dato') as proveedor,
             dias_sin_venta,
+            -- Los dos datos que separan a los "nunca vendió" entre sí. Se
+            -- agrupan en vez de agregarse porque el tramo se decide fila por
+            -- fila, igual que dias_sin_venta.
+            dias_en_full,
+            entrada_exacta,
             count(*)                        as skus,
             coalesce(sum(disponible), 0)    as disponible,
             coalesce(sum(valorizacion), 0)  as valorizacion
      from base ${w.sql}
-     group by 1, 2`,
+     group by 1, 2, 3, 4`,
     w.params,
   );
 
@@ -349,10 +458,12 @@ async function getTramos(f: FiltrosStockFull): Promise<TramoStockFull[]> {
   const mapa = new Map<string, TramoStockFull>();
   for (const r of filas) {
     const dias = r.dias_sin_venta == null ? null : num(r.dias_sin_venta);
-    const clave = `${r.proveedor}|${tramoDe(dias)}`;
+    const enFull = r.dias_en_full == null ? null : num(r.dias_en_full);
+    const tramo = tramoDe(dias, enFull, bool(r.entrada_exacta));
+    const clave = `${r.proveedor}|${tramo}`;
     const actual = mapa.get(clave) ?? {
-      proveedor: r.proveedor as string,
-      tramo: tramoDe(dias),
+      proveedor: String(r.proveedor ?? "Sin dato"),
+      tramo,
       skus: 0,
       disponible: 0,
       valorizacion: 0,
@@ -370,12 +481,13 @@ const TOPE = 500;
 
 async function getFilas(f: FiltrosStockFull): Promise<FilaStockFull[]> {
   const w = where(f);
-  const filas = await query<Record<string, string | null>>(
+  const filas = await query<FilaCruda>(
     `${BASE}
      select sku, producto, proveedor, marca,
             disponible, no_disponible,
             to_char(ultima_venta, 'YYYY-MM-DD') as ultima_venta,
-            dias_sin_venta, uds30, valorizacion
+            dias_sin_venta, uds30, valorizacion,
+            dias_en_full, entrada_exacta
      from base ${w.sql}
      -- Los que nunca vendieron van primero: son el caso más grave y con un
      -- orden numérico quedarían al final, donde nadie los mira.
@@ -385,15 +497,19 @@ async function getFilas(f: FiltrosStockFull): Promise<FilaStockFull[]> {
     w.params,
   );
 
+  const texto = (v: unknown): string | null => (typeof v === "string" ? v : null);
+
   return filas.map((r) => ({
-    sku: r.sku,
-    producto: r.producto,
-    proveedor: r.proveedor,
-    marca: r.marca,
+    sku: texto(r.sku),
+    producto: texto(r.producto),
+    proveedor: texto(r.proveedor),
+    marca: texto(r.marca),
     disponible: num(r.disponible),
     noDisponible: num(r.no_disponible),
-    ultimaVenta: r.ultima_venta,
+    ultimaVenta: texto(r.ultima_venta),
     diasSinVenta: r.dias_sin_venta == null ? null : num(r.dias_sin_venta),
+    diasEnFull: r.dias_en_full == null ? null : num(r.dias_en_full),
+    entradaExacta: bool(r.entrada_exacta),
     uds30: num(r.uds30),
     valorizacion: num(r.valorizacion),
   }));
