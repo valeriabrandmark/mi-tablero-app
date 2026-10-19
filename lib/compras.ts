@@ -227,6 +227,68 @@ export const RECORTES_COMPRAS = [
 export const RECORTES_POR_DEFECTO: RecorteCompras[] = ["sugerido"];
 
 /**
+ * QUE DE LA VISTA ACTUAL ESTA RECORTANDO LA ORDEN.
+ *
+ * La orden que se baja son LAS FILAS VISIBLES, no todo lo que se tocó. Mientras
+ * se arma eso está bien --se revisa marca por marca-- pero al bajar es una
+ * trampa: bajar con un filtro puesto no da ningún error, da una orden
+ * incompleta que parece correcta.
+ *
+ * Devuelve los nombres de lo que recorta, listos para enumerar en el aviso, o
+ * vacío si lo que se ve es la orden entera del proveedor.
+ *
+ * `proveedor` y `grupo` quedan afuera A PROPOSITO: la orden ES de un
+ * proveedor, elegirlo no la recorta. Los tres que sí recortan:
+ *
+ *   marca     el caso de todos los días: se revisa una y se olvida sacarla.
+ *   buscar    lo mismo, y encima el campo queda arriba y fuera de la vista.
+ *   recortes  el más silencioso. Un discontinuo NUNCA entra por "Hay que
+ *             comprar" --su sugerido es 0 a propósito-- así que lo que se
+ *             cargó a mano entrando por ese recorte desaparece de la orden al
+ *             volver al recorte de siempre.
+ */
+export function queRecortaLaOrden(
+  filtros: { marca?: string[]; buscar?: string },
+  recortes: readonly string[],
+): string[] {
+  const marcas = filtros.marca?.length ?? 0;
+  const buscar = filtros.buscar?.trim() ?? "";
+
+  return [
+    marcas > 0 && (marcas === 1 ? "la marca" : `${marcas} marcas`),
+    buscar !== "" && `el buscador («${buscar}»)`,
+    [...recortes].sort().join() !== [...RECORTES_POR_DEFECTO].sort().join() &&
+      "el selector Mostrar",
+  ].filter((x): x is string => typeof x === "string");
+}
+
+/**
+ * Cuántos renglones CON CANTIDAD que se editaron a mano quedan fuera de la
+ * vista. Es lo que convierte el aviso en algo accionable: no "puede que falte
+ * algo" sino "hay tres cosas que cargaste y no se van a mandar".
+ *
+ * SOLO LOS EDITADOS, porque son los únicos que se pueden contar sin
+ * preguntarle al servidor: el mapa de ediciones tiene todo lo que se tocó, se
+ * vea o no.
+ *
+ * LOS EDITADOS EN CERO NO CUENTAN. Sacar algo de la orden y que además no se
+ * vea dan el mismo resultado --no se pide-- así que avisar no agregaría nada y
+ * el número se llenaría de ruido justo cuando se trabaja marca por marca
+ * vaciando las que no van.
+ */
+export function contarEditadosFuera(
+  ediciones: ReadonlyMap<string, { cantidad: number }>,
+  skusVisibles: Iterable<string>,
+): number {
+  const visibles = new Set(skusVisibles);
+  let cuantos = 0;
+  for (const [sku, renglon] of ediciones) {
+    if (!visibles.has(sku) && renglon.cantidad > 0) cuantos += 1;
+  }
+  return cuantos;
+}
+
+/**
  * Los recortes válidos de una lista que puede venir de cualquier lado.
  *
  * Existe porque esto llega de una query string que se puede escribir a mano, y
