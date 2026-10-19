@@ -29,9 +29,11 @@ import {
   COBERTURA_COMPRA_MAXIMA,
   CAIDA_SELL_IN_PARA_AVISAR,
   coberturaValida,
+  DIAS_DE_VIDA_BORRADOR,
   RECORTES_COMPRAS,
-  contarEditadosFuera,
   queRecortaLaOrden,
+  queSeRecalculo,
+  totalesDeLaOrden,
   RECORTES_POR_DEFECTO,
   recortesValidos,
   opcionesCruzadas,
@@ -53,6 +55,8 @@ import {
   VENTANA_POR_DEFECTO,
 } from "@/lib/stock";
 import { useAvisoAlSalir } from "@/lib/useAvisoAlSalir";
+import { useBorradorOrden } from "@/lib/useBorradorOrden";
+import { useOrdenCompleta } from "@/lib/useOrdenCompleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import { RESUMEN_CABECERA, type OrdenSigma } from "@/lib/sigma-orden";
 import type { OrdenEnviada } from "@/lib/queries-ordenes";
@@ -112,6 +116,16 @@ type Respuesta = DashboardCompras & { opciones: Opciones | null };
 function sinCero(n: number | undefined): number | string {
   return n ? n : "";
 }
+
+/**
+ * Cuántos artículos recalculados se listan antes de resumir en "y N más".
+ *
+ * Doce entran en dos renglones y se leen de un vistazo. La lista viene ordenada
+ * por cuánto se movió cada uno, así que los doce primeros son los que pueden
+ * cambiar la orden; una lista de cuarenta no se lee y empuja los botones fuera
+ * de la pantalla.
+ */
+const RECALCULADOS_A_LA_VISTA = 12;
 
 const CLASE_CELDA_EDITABLE =
   "border-line bg-panel-2 text-ink focus:border-c1 w-16 rounded-md border px-1.5 py-1 text-right text-xs tabular-nums outline-none";
@@ -200,20 +214,6 @@ export default function DashboardComprasPage({
   const [ediciones, setEdiciones] = useState<Map<string, RenglonOrden>>(
     new Map(),
   );
-
-  /**
-   * AVISO ANTES DE PERDER LA ORDEN A MEDIO ARMAR.
-   *
-   * `ediciones` vacío es "no se tocó nada": ahí recargar no pierde nada, porque
-   * lo que se ve es el sugerido y se recalcula solo. Con una sola edición
-   * encima ya hay trabajo que no existe en ningún otro lado hasta que se baja
-   * el archivo.
-   *
-   * Tiene agujeros grandes --no cubre cerrar la notebook ni navegar por el
-   * menú-- y están listados en `useAvisoAlSalir`. Es una red para el accidente
-   * que pasó, no una garantía.
-   */
-  useAvisoAlSalir(ediciones.size > 0);
 
   /**
    * La nota que va en la carátula del Excel del proveedor ("Ofertas agosto").
@@ -310,6 +310,26 @@ export default function DashboardComprasPage({
 
   const filas = useMemo(() => data?.filas ?? [], [data]);
 
+  // LAS ÓRDENES SON POR PROVEEDOR. Con dos elegidos el archivo mezclaría
+  // proveedores en una sola orden, que es algo que no existe.
+  const proveedorUnico =
+    filtros.proveedor?.length === 1 ? filtros.proveedor[0] : null;
+
+  /**
+   * LA ORDEN ENTERA DEL PROVEEDOR, no la vista.
+   *
+   * La orden se arma mirando de a poco --una marca, lo que tiene oferta, lo
+   * discontinuado-- pero la que sale es una sola y lleva todo lo del proveedor.
+   * Esta segunda consulta es la que hace que eso sea cierto: trae la lista
+   * completa, sin marca, sin buscador y sin recortes. Ver lib/useOrdenCompleta.
+   */
+  const completa = useOrdenCompleta({
+    proveedor: proveedorUnico,
+    ventana: filtros.ventana ?? VENTANA_POR_DEFECTO,
+    cobertura: coberturaElegida,
+    mes: filtros.mes,
+  });
+
   // Los tres selectores se recortan entre sí. Se recalcula en el navegador
   // --son 380 combinaciones-- así que elegir un proveedor achica la lista de
   // marcas al instante, sin ir al servidor.
@@ -331,6 +351,26 @@ export default function DashboardComprasPage({
   );
 
   /**
+   * LOS ARTICULOS DE LOS QUE SALE LA ORDEN: la lista completa del proveedor.
+   *
+   * Es la unión de las dos consultas y no sólo la completa, por el rato en que
+   * la completa todavía no llegó: con la lista vacía, `orden` quedaría vacía y
+   * la tabla no tendría ni una cantidad que mostrar. Las filas visibles van
+   * primero por eso.
+   *
+   * No hay riesgo de que una fila entre dos veces con datos distintos: las dos
+   * consultas piden el mismo proveedor, la misma ventana, la misma cobertura y
+   * el mismo mes, así que para un SKU las dos devuelven lo mismo. Lo único que
+   * cambia entre ellas es CUALES filas vienen.
+   */
+  const filasOrden = useMemo(() => {
+    if (!proveedorUnico) return filas;
+    const porSku = new Map(filas.map((f) => [f.sku, f]));
+    for (const f of completa.filas) if (!porSku.has(f.sku)) porSku.set(f.sku, f);
+    return [...porSku.values()];
+  }, [filas, completa.filas, proveedorUnico]);
+
+  /**
    * La orden como está ahora: el sugerido de cada artículo, con lo editado
    * encima. Un artículo que nadie tocó arranca con la cantidad sugerida y con
    * la oferta del proveedor del mes elegido.
@@ -338,9 +378,120 @@ export default function DashboardComprasPage({
   const orden = useMemo(
     () =>
       new Map(
-        filas.map((f) => [f.sku, ediciones.get(f.sku) ?? renglonInicial(f)]),
+        filasOrden.map((f) => [f.sku, ediciones.get(f.sku) ?? renglonInicial(f)]),
       ),
-    [filas, ediciones],
+    [filasOrden, ediciones],
+  );
+
+  /**
+   * Si la orden entera ya está en el navegador.
+   *
+   * Es la condición para bajar el archivo y para guardar el borrador: con la
+   * lista a medias, lo primero sería una orden incompleta y lo segundo una foto
+   * de sugeridos incompleta.
+   */
+  const ordenCompletaLista =
+    proveedorUnico !== null && !completa.cargando && completa.error === null;
+
+  /** El sugerido de hoy de cada artículo del proveedor. Va al borrador. */
+  const sugeridosDeHoy = useMemo(
+    () => new Map(completa.filas.map((f) => [f.sku, f.sugerido])),
+    [completa.filas],
+  );
+
+  /**
+   * EL BORRADOR. Se guarda solo, se retoma solo y se puede descartar.
+   *
+   * Lo que originó todo esto: el encargado de compras le dio sin querer a
+   * recargar y perdió una orden a medio armar. Ver lib/useBorradorOrden.
+   */
+  const borrador = useBorradorOrden({
+    proveedor: proveedorUnico,
+    ediciones,
+    setEdiciones,
+    nota: comentario,
+    setNota: setComentario,
+    mes: data?.mes ?? null,
+    ventana: filtros.ventana ?? VENTANA_POR_DEFECTO,
+    cobertura: coberturaElegida,
+    sugeridosDeHoy,
+    listo: ordenCompletaLista,
+  });
+
+  /**
+   * LAS CANTIDADES QUE SE MOVIERON SOLAS desde que se guardó el borrador.
+   *
+   * Sólo tiene sentido con la lista completa: con la lista a medias, todo lo
+   * que no llegó todavía parecería haberse recalculado a cero.
+   */
+  const recalculados = useMemo(
+    () =>
+      ordenCompletaLista
+        ? queSeRecalculo(borrador.sugeridosGuardados, sugeridosDeHoy, ediciones)
+        : [],
+    [ordenCompletaLista, borrador.sugeridosGuardados, sugeridosDeHoy, ediciones],
+  );
+
+  /**
+   * DESCARTAR PIDE CONFIRMAR, y no por trámite: tira la orden a medio armar,
+   * que es exactamente lo que todo esto existe para no perder. Un click de más
+   * acá cuesta un segundo; un click de menos cuesta la tarde del encargado de
+   * compras.
+   */
+  const [confirmandoDescarte, setConfirmandoDescarte] = useState(false);
+
+  const descartarBorrador = () => {
+    borrador.descartar();
+    setConfirmandoDescarte(false);
+  };
+
+  /**
+   * "¿Se está guardando?", contestado en una línea.
+   *
+   * Vacío cuando no hay nada que decir --ningún borrador y nada tocado-- para
+   * que la barra no lleve una línea de texto permanente que nadie lee.
+   */
+  const estadoBorrador = ((): string => {
+    // "error" es tanto no haber podido LEER el borrador como no haber podido
+    // GUARDARLO, y el texto sirve para los dos: en los dos casos lo que hay en
+    // pantalla no está en ningún otro lado. Decir "no se pudo guardar" cuando
+    // lo que falló fue la lectura sería mandar a buscar el problema al lugar
+    // equivocado.
+    if (borrador.estado === "error")
+      return "El borrador no está disponible. Lo que cargues queda sólo en esta pantalla: no cierres la pestaña sin bajar el archivo.";
+    // Incluye lo que todavía no salió: ver `estado` en useBorradorOrden.
+    if (borrador.estado === "guardando") return "Guardando el borrador…";
+    if (borrador.retomadoDe)
+      return `Se retomó el borrador que dejaste el ${borrador.retomadoDe}.`;
+    if (borrador.estado === "guardado") return "Borrador guardado.";
+    return "";
+  })();
+
+  /**
+   * AVISO ANTES DE PERDER LA ORDEN A MEDIO ARMAR.
+   *
+   * SALTA SOLO SI HAY ALGO QUE PERDER DE VERDAD, y eso es nuevo: ahora que el
+   * borrador se guarda solo, lo normal es que recargar no pierda nada. Un
+   * cartel que pregunta "¿seguro?" cuando no hay nada en juego es el que
+   * ensaña a apretar Aceptar sin leer, y después no frena el que sí importa.
+   *
+   * Los tres casos en los que sí hay algo en juego:
+   *
+   *   - el guardado está pendiente (se tocó algo hace menos de un segundo y
+   *     medio, que es justo la ventana del F5 sin querer);
+   *   - el guardado falló y el borrador no tiene lo último;
+   *   - no hay un solo proveedor elegido, así que no hay borrador posible
+   *     --una orden es de un proveedor-- y las ediciones viven sólo acá.
+   *
+   * Tiene agujeros grandes --no cubre cerrar la notebook ni navegar por el
+   * menú-- y están listados en `useAvisoAlSalir`. Esos agujeros son los que
+   * tapa el borrador, que es la garantía de verdad.
+   */
+  useAvisoAlSalir(
+    ediciones.size > 0 &&
+      (proveedorUnico === null ||
+        borrador.sinGuardar ||
+        borrador.estado === "error"),
   );
 
   const cambiar = (f: FiltrosCompras) => {
@@ -362,8 +513,9 @@ export default function DashboardComprasPage({
   const empezarDeNuevo = () => {
     setResultado(null);
     setConfirmando(false);
-    setEdiciones(new Map());
-    setComentario("");
+    // `descartar` limpia las ediciones y la nota, y además borra el borrador de
+    // la base: la orden ya salió, guardarla a medio armar no tiene sentido.
+    borrador.descartar();
   };
 
   /** Saca un renglón de la orden. Cantidad 0 es "no lo pidas", no "pedí cero". */
@@ -423,48 +575,37 @@ export default function DashboardComprasPage({
     });
 
   // --- Los totales de la orden, que es lo que se está por comprar ----------
-  const resumen = useMemo(() => {
-    let renglones = 0;
-    let unidades = 0;
-    let bultos = 0;
-    let bruto = 0;
-    let neto = 0;
-    let recortados = 0;
-    // Renglones a los que el maestro no les tiene cargado el código con el que
-    // el proveedor los vende. No rompen nada —van al Excel con la celda
-    // vacía— pero el que recibe el mail no los va a poder identificar.
-    let sinCodigo = 0;
-    // Renglones cuya cantidad NO sale de una cuenta sino del mínimo de un
-    // bulto, porque el artículo no vendió nada en la ventana. Se cargan solos
-    // como los demás, así que sin contarlos no habría forma de saber cuánto de
-    // la orden es "esto hace falta" y cuánto es "esto habría que mirarlo".
-    let minimos = 0;
-    for (const f of filas) {
-      const r = orden.get(f.sku);
-      if (!r || !(r.cantidad > 0)) continue;
-      renglones += 1;
-      if (f.sugeridoMinimo) minimos += 1;
-      if (!f.codigoCompra) sinCodigo += 1;
-      const u = aUnidades(r.cantidad, r.unidad, f.unidadesPorBulto);
-      unidades += u;
-      if (r.unidad === "bulto") bultos += r.cantidad;
-      const lista = f.costoLista > 0 ? f.costoLista : f.costo;
-      if (r.descuento > DESCUENTO_MAXIMO || r.descuento2 > DESCUENTO_MAXIMO)
-        recortados += 1;
-      bruto += u * lista;
-      neto += u * lista * factorNeto(r.descuento, r.descuento2);
-    }
-    return {
-      renglones,
-      unidades,
-      bultos,
-      bruto,
-      neto,
-      recortados,
-      sinCodigo,
-      minimos,
-    };
-  }, [filas, orden]);
+  //
+  // SON DOS Y LA DIFERENCIA IMPORTA. `resumen` es la orden: el proveedor
+  // entero, que es lo que va a salir en el archivo. `resumenVista` es lo que
+  // se está mirando ahora, que mientras se revisa marca por marca es la cuenta
+  // que hace falta --el subtotal de esa marca-- y que de otro modo no habría
+  // forma de ver. La pantalla muestra los dos justamente para que nadie tenga
+  // que adivinar cuál de los dos está leyendo.
+  const resumen = useMemo(
+    () => totalesDeLaOrden(filasOrden, orden),
+    [filasOrden, orden],
+  );
+
+  const resumenVista = useMemo(
+    () => totalesDeLaOrden(filas, orden),
+    [filas, orden],
+  );
+
+  /** Si lo que se ve es menos que la orden, en renglones. */
+  const vistaEsRecorte = resumenVista.renglones !== resumen.renglones;
+
+  /**
+   * Si se puede bajar o mandar la orden.
+   *
+   * PIDE LA LISTA COMPLETA DEL PROVEEDOR, que es la condición nueva. Con la
+   * consulta a medio llegar el archivo saldría con los renglones que alcanzaron
+   * a venir -- justo el problema que la lista completa viene a resolver. Son un
+   * par de segundos y sólo la primera vez de cada proveedor en cada corrida:
+   * después la consulta está cacheada.
+   */
+  const puedeBajar =
+    proveedorUnico !== null && ordenCompletaLista && resumen.renglones > 0;
 
   /**
    * Los renglones que hoy tienen cantidad, con su nombre. Es lo que se manda, y
@@ -473,24 +614,33 @@ export default function DashboardComprasPage({
    */
   const renglonesDeLaOrden = useMemo(
     () =>
-      filas
+      filasOrden
         .map((f) => ({ fila: f, renglon: orden.get(f.sku) }))
         .filter((r) => (r.renglon?.cantidad ?? 0) > 0),
-    [filas, orden],
+    [filasOrden, orden],
   );
 
-  // LAS ÓRDENES SON POR PROVEEDOR. Con dos elegidos el archivo mezclaría
-  // proveedores en una sola orden, que es algo que no existe.
-  const proveedorUnico =
-    filtros.proveedor?.length === 1 ? filtros.proveedor[0] : null;
-
+  /**
+   * Baja la orden.
+   *
+   * SALE DE LA LISTA COMPLETA DEL PROVEEDOR, no de lo que se ve. Antes salía de
+   * las filas visibles, y bajar con un filtro puesto no daba ningún error: daba
+   * una orden incompleta que parecía correcta y que alguien le mandaba a un
+   * proveedor. Ahora el archivo lleva todo lo que el proveedor tiene con
+   * sugerido, más lo que se cargó a mano, menos lo que se sacó -- se haya
+   * hecho con los filtros que sea.
+   *
+   * `ordenCompletaLista` es la guarda: sin la lista entera no se baja nada. Es
+   * a propósito que no haya un camino de respaldo con las filas visibles --ese
+   * camino es exactamente el error que esto viene a sacar.
+   */
   const descargar = (formato: "txt" | "csv" | "xlsx") => {
-    if (!proveedorUnico) return;
+    if (!proveedorUnico || !ordenCompletaLista) return;
     if (formato === "xlsx") {
       // El Excel se arma de las FILAS y no de las líneas de Sigma: necesita el
       // costo, el EAN y el nombre del artículo, que a ese archivo no van.
       const libro = excelParaProveedor(
-        filas,
+        filasOrden,
         orden,
         proveedorUnico,
         comentario,
@@ -503,7 +653,7 @@ export default function DashboardComprasPage({
       );
       return;
     }
-    const lineas = lineasParaExportar(filas, orden);
+    const lineas = lineasParaExportar(filasOrden, orden);
     if (lineas.length === 0) return;
     if (formato === "txt") {
       bajar(
@@ -529,11 +679,13 @@ export default function DashboardComprasPage({
    * orden al precio que quiera.
    */
   const enviarASigma = async () => {
-    if (!proveedorUnico || resumen.renglones === 0) return;
+    if (!proveedorUnico || !ordenCompletaLista || resumen.renglones === 0)
+      return;
     setEnviando(true);
     setResultado(null);
     try {
-      const renglones = filas
+      // La orden entera del proveedor, igual que el archivo. Ver `descargar`.
+      const renglones = filasOrden
         .map((f) => ({ sku: f.sku, ...orden.get(f.sku) }))
         .filter((r) => (r.cantidad ?? 0) > 0);
 
@@ -582,21 +734,15 @@ export default function DashboardComprasPage({
   const sellInHayDatos = (data?.sellInCargado ?? 0) > 0;
 
   /**
-   * Si lo que se ve es la orden entera del proveedor, o un recorte de ella.
-   * Las dos cuentas viven en lib/compras.ts para poder probarlas: ver
-   * `queRecortaLaOrden` y `contarEditadosFuera`.
+   * Qué de la vista actual está mostrando menos que la orden. La cuenta vive en
+   * lib/compras.ts para poder probarla: ver `queRecortaLaOrden`.
    */
   const recortanLaOrden = useMemo(
     () => queRecortaLaOrden(filtros, recortes),
     [filtros, recortes],
   );
 
-  const editadosFuera = useMemo(
-    () => contarEditadosFuera(ediciones, filas.map((f) => f.sku)),
-    [ediciones, filas],
-  );
-
-  /** Saca lo que recorta la orden, dejando proveedor y grupo. */
+  /** Saca lo que recorta la vista, dejando proveedor y grupo. */
   const verOrdenCompleta = () =>
     cambiar({
       ...filtros,
@@ -1463,28 +1609,56 @@ export default function DashboardComprasPage({
             titulo="Renglones en la orden"
             valor={fmtNumero(resumen.renglones)}
             detalle={
-              // Cuántos de esos renglones son mínimos sin respaldo de ventas.
-              // Va acá y no en un aviso aparte porque es una propiedad DE LA
-              // ORDEN: el número de al lado se lee distinto si un tercio de él
-              // son artículos que nadie midió.
-              resumen.minimos > 0
-                ? `${fmtNumero(resumen.minimos)} sin ventas que lo respalden · de ${fmtNumero(filas.length)} a la vista`
-                : `de ${fmtNumero(filas.length)} artículos a la vista`
+              // LOS TRES KPI DE LA ORDEN CUENTAN LA ORDEN ENTERA, no la vista,
+              // porque son el archivo que se va a bajar. Y como la vista casi
+              // siempre es un recorte --se revisa marca por marca-- el detalle
+              // dice cuánto de eso es lo que se está mirando: sin eso, el
+              // número grande no coincidiría con la tabla de abajo y no habría
+              // forma de saber por qué.
+              [
+                completa.cargando ? "trayendo la orden completa…" : null,
+                // Cuántos de esos renglones son mínimos sin respaldo de ventas.
+                // Va acá y no en un aviso aparte porque es una propiedad DE LA
+                // ORDEN: el número de al lado se lee distinto si un tercio de
+                // él son artículos que nadie midió.
+                resumen.minimos > 0
+                  ? `${fmtNumero(resumen.minimos)} sin ventas que lo respalden`
+                  : null,
+                vistaEsRecorte
+                  ? `${fmtNumero(resumenVista.renglones)} en esta vista`
+                  : `de ${fmtNumero(filas.length)} artículos a la vista`,
+              ]
+                .filter(Boolean)
+                .join(" · ")
             }
           />
           <TarjetaKpi
             titulo="Unidades a pedir"
             valor={fmtNumero(resumen.unidades)}
             detalle={
-              resumen.bultos > 0
-                ? `${fmtNumero(resumen.bultos)} bultos`
-                : "todo por unidad"
+              [
+                resumen.bultos > 0
+                  ? `${fmtNumero(resumen.bultos)} bultos`
+                  : "todo por unidad",
+                vistaEsRecorte
+                  ? `${fmtNumero(resumenVista.unidades)} en esta vista`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")
             }
           />
           <TarjetaKpi
             titulo="A pagar con descuento, sin IVA"
             valor={fmtMoneda(resumen.neto)}
-            detalle={`Sin descuento serían ${fmtMoneda(resumen.bruto)}`}
+            detalle={
+              // EL SUBTOTAL DE LA VISTA ES LO QUE SE MIRA AL REVISAR MARCA POR
+              // MARCA: "¿cuánto estoy pidiendo de esta marca?". Es la única
+              // forma de verlo, porque el número de arriba es la orden entera.
+              vistaEsRecorte
+                ? `${fmtMoneda(resumenVista.neto)} en esta vista · sin descuento la orden sería ${fmtMoneda(resumen.bruto)}`
+                : `Sin descuento serían ${fmtMoneda(resumen.bruto)}`
+            }
             acento={resumen.neto > 0 ? PALETA[1] : undefined}
           />
           <TarjetaKpi
@@ -1515,42 +1689,118 @@ export default function DashboardComprasPage({
               descarga. Va arriba de la tabla porque es lo que se hace al final
               y tiene que estar a mano sin scrollear 500 filas. */}
           <div className="border-line bg-panel flex flex-wrap items-center gap-2 rounded-xl border p-3">
-            {/* EL AVISO VA PRIMERO Y ARRIBA DE LOS BOTONES, no al lado de la
-                descarga: lo que tiene que pasar es leerlo ANTES de bajar el
-                archivo, y abajo del botón se lee después. */}
-            {recortanLaOrden.length > 0 && (
-              <div className="border-c3/40 bg-c3/10 flex w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-3 py-2 text-[11px]">
-                <span className="text-c3 font-semibold">
-                  Lo que se baja es sólo lo que estás viendo.
+            {/* LOS AVISOS VAN PRIMERO Y ARRIBA DE LOS BOTONES, no al lado
+                de la descarga: lo que tiene que pasar es leerlos ANTES de
+                bajar el archivo, y abajo del botón se leen después. */}
+
+            {/* 1. LAS CANTIDADES SE MOVIERON SOLAS. Es el aviso más importante
+                   de los tres: cambia números, no sólo lo que se ve. */}
+            {recalculados.length > 0 && (
+              <div className="border-c3/40 bg-c3/10 w-full rounded-lg border px-3 py-2 text-[11px]">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="text-c3 font-semibold">
+                    Tener en cuenta que se recalcularon cantidades. Revisar.
+                  </span>
+                  <span className="text-muted">
+                    El borrador guarda lo que decidiste, no los números: el
+                    resto se volvió a calcular con las ventas de hoy.{" "}
+                    <strong className="text-ink">
+                      {fmtNumero(recalculados.length)}{" "}
+                      {recalculados.length === 1
+                        ? "artículo cambió"
+                        : "artículos cambiaron"}
+                    </strong>{" "}
+                    desde que lo guardaste.
+                  </span>
+                </div>
+                {/* CUALES, y no sólo cuántos: "revisar" sin la lista es una
+                    sensación, con la lista es una instrucción. Vienen ordenados
+                    por cuánto se movieron, así que los primeros son los que
+                    pueden cambiar la orden de verdad. */}
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {recalculados.slice(0, RECALCULADOS_A_LA_VISTA).map((r) => (
+                    <span
+                      key={r.sku}
+                      className="border-line bg-panel text-muted rounded-md border px-1.5 py-0.5 tabular-nums"
+                      title={`${r.sku}: el cálculo pedía ${r.antes} y ahora pide ${r.ahora}`}
+                    >
+                      <span className="text-ink font-medium">{r.sku}</span>{" "}
+                      {fmtNumero(r.antes)} → {fmtNumero(r.ahora)}
+                    </span>
+                  ))}
+                  {recalculados.length > RECALCULADOS_A_LA_VISTA && (
+                    <span className="text-muted px-1 py-0.5">
+                      y{" "}
+                      {fmtNumero(
+                        recalculados.length - RECALCULADOS_A_LA_VISTA,
+                      )}{" "}
+                      más
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 2. LA VISTA MUESTRA MENOS QUE LA ORDEN.
+                   Ya no es una advertencia: el archivo sale de la lista
+                   completa del proveedor, así que filtrar no recorta la orden.
+                   Lo que hace falta decir es lo contrario de antes -- que el
+                   archivo va a traer más de lo que hay en pantalla, para que
+                   nadie se sorprenda ni lo tome por un error. */}
+            {recortanLaOrden.length > 0 && vistaEsRecorte && (
+              <div className="border-line bg-panel-2 flex w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-3 py-2 text-[11px]">
+                <span className="text-ink font-semibold">
+                  Se baja la orden entera del proveedor, no sólo esta vista.
                 </span>
                 <span className="text-muted">
-                  {/* Se dice QUE recorta y no cuántos artículos quedan afuera:
-                      ese número no está en el navegador --haría falta otra
-                      consulta pesada-- y el botón de al lado resuelve el
-                      problema sin que haga falta interpretarlo. */}
-                  Tenés puesto {recortanLaOrden.join(" y ")}
-                  {editadosFuera > 0 && (
-                    <>
-                      , y{" "}
-                      <strong className="text-ink">
-                        {fmtNumero(editadosFuera)}{" "}
-                        {editadosFuera === 1 ? "renglón que cargaste queda" : "renglones que cargaste quedan"}
-                      </strong>{" "}
-                      fuera de esta vista
-                    </>
-                  )}
-                  .
+                  Tenés puesto {recortanLaOrden.join(" y ")}: acá ves{" "}
+                  <strong className="text-ink">
+                    {fmtNumero(resumenVista.renglones)}
+                  </strong>{" "}
+                  de los{" "}
+                  <strong className="text-ink">
+                    {fmtNumero(resumen.renglones)} renglones
+                  </strong>{" "}
+                  que van al archivo.
                 </span>
                 <button
                   type="button"
                   onClick={verOrdenCompleta}
-                  className="border-c3/50 text-c3 hover:bg-c3/20 ml-auto rounded-lg border px-2.5 py-1 text-[11px] font-medium"
+                  className="border-line text-muted hover:bg-panel hover:text-ink ml-auto rounded-lg border px-2.5 py-1 text-[11px] font-medium"
                 >
                   Ver la orden completa
                 </button>
               </div>
             )}
-            <span className="text-muted mr-1 text-[11px]">Toda la lista:</span>
+
+            {/* 3. LA ORDEN COMPLETA TODAVIA NO LLEGO, o no se pudo traer. Los
+                   botones de bajar y mandar están apagados mientras tanto: ver
+                   `puedeBajar`. */}
+            {proveedorUnico && completa.cargando && (
+              <div className="border-line bg-panel-2 text-muted w-full rounded-lg border px-3 py-2 text-[11px]">
+                Trayendo la orden completa de {proveedorUnico}…
+              </div>
+            )}
+            {proveedorUnico && completa.error && (
+              <div className="border-negativo/40 bg-negativo/10 w-full rounded-lg border px-3 py-2 text-[11px]">
+                <span className="text-negativo font-semibold">
+                  No se pudo traer la orden completa del proveedor.
+                </span>{" "}
+                <span className="text-muted">
+                  Hasta que se pueda, bajar o mandar la orden queda bloqueado:
+                  saldría incompleta. Probá el botón de actualizar.
+                </span>
+              </div>
+            )}
+
+            {/* ESTOS TRES BOTONES ACTUAN SOBRE LO QUE SE VE, no sobre la
+                orden entera, y por eso el rótulo lo dice. Es lo correcto para
+                trabajar marca por marca --vaciar la marca que no va-- pero
+                decírselo "toda la lista" ahora sería mentira: la lista de la
+                orden es el proveedor completo. */}
+            <span className="text-muted mr-1 text-[11px]">
+              Lo que estás viendo:
+            </span>
             {UNIDADES_COMPRA.map((u) => (
               <button
                 key={u.clave}
@@ -1595,7 +1845,7 @@ export default function DashboardComprasPage({
               <button
                 type="button"
                 onClick={() => descargar("txt")}
-                disabled={!proveedorUnico || resumen.renglones === 0}
+                disabled={!puedeBajar}
                 className="border-c1 bg-c1/15 text-c1 hover:bg-c1/25 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Bajar TXT para Sigma
@@ -1611,7 +1861,7 @@ export default function DashboardComprasPage({
                     setResultado(null);
                     setConfirmando((v) => !v);
                   }}
-                  disabled={!proveedorUnico || resumen.renglones === 0}
+                  disabled={!puedeBajar}
                   title="Carga la orden directamente en Sigma. Pide confirmar antes."
                   className="border-c1 bg-c1 text-panel hover:bg-c1/85 rounded-lg border px-3 py-1.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40"
                 >
@@ -1621,7 +1871,7 @@ export default function DashboardComprasPage({
               <button
                 type="button"
                 onClick={() => descargar("xlsx")}
-                disabled={!proveedorUnico || resumen.renglones === 0}
+                disabled={!puedeBajar}
                 title="Excel valorizado, con el código y el EAN del proveedor, para mandarle por mail"
                 className="border-c1 bg-c1/15 text-c1 hover:bg-c1/25 rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -1630,12 +1880,67 @@ export default function DashboardComprasPage({
               <button
                 type="button"
                 onClick={() => descargar("csv")}
-                disabled={!proveedorUnico || resumen.renglones === 0}
+                disabled={!puedeBajar}
                 className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Bajar CSV
               </button>
             </div>
+
+            {/* EL ESTADO DEL BORRADOR, abajo y en voz baja.
+                No es una acción ni un aviso: es la respuesta a "¿se está
+                guardando?", que es la pregunta que alguien se hace una vez y
+                después no vuelve a hacerse. Por eso va al pie, chico y sin
+                color -- salvo cuando falla, que ahí sí hay que mirarlo. */}
+            {proveedorUnico && estadoBorrador && (
+              <div className="border-line mt-1 flex w-full flex-wrap items-center gap-x-2 gap-y-1 border-t pt-2 text-[11px]">
+                <span
+                  className={
+                    borrador.estado === "error" ? "text-negativo" : "text-muted"
+                  }
+                >
+                  {estadoBorrador}
+                </span>
+                {/* DESCARTAR ESTA AL LADO DE "SE RETOMO" a propósito: retomar
+                    solo, sin preguntar, sólo es aceptable si deshacerlo está
+                    a un click de distancia. */}
+                {(borrador.retomadoDe !== null || ediciones.size > 0) &&
+                  (confirmandoDescarte ? (
+                    <>
+                      <span className="text-ink">
+                        Se pierden las {fmtNumero(ediciones.size)} cantidades
+                        que cargaste a mano. ¿Descartar?
+                      </span>
+                      <button
+                        type="button"
+                        onClick={descartarBorrador}
+                        className="border-negativo/50 text-negativo hover:bg-negativo/15 rounded-lg border px-2 py-0.5 text-[11px] font-medium"
+                      >
+                        Sí, descartar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmandoDescarte(false)}
+                        className="border-line text-muted hover:bg-panel-2 hover:text-ink rounded-lg border px-2 py-0.5 text-[11px]"
+                      >
+                        No
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmandoDescarte(true)}
+                      className="border-line text-muted hover:bg-panel-2 hover:text-ink rounded-lg border px-2 py-0.5 text-[11px]"
+                      title="Borra las cantidades que cargaste y el borrador guardado. La orden vuelve al sugerido de hoy."
+                    >
+                      Descartar el borrador
+                    </button>
+                  ))}
+                <span className="text-muted ml-auto">
+                  Los borradores se guardan {DIAS_DE_VIDA_BORRADOR} días.
+                </span>
+              </div>
+            )}
           </div>
 
           {/* LA CONFIRMACIÓN DEL ENVÍO.
@@ -1648,6 +1953,21 @@ export default function DashboardComprasPage({
                 Se va a cargar una orden de compra en Sigma. No se puede
                 deshacer desde acá: si sale mal, hay que anularla en Sigma.
               </p>
+              {/* EL MOMENTO DE NO VOLVER ATRAS merece decirlo con todas las
+                  letras: lo que se manda es la orden del proveedor, no la
+                  vista. Los números de abajo son de la orden entera. */}
+              {vistaEsRecorte && (
+                <p className="text-muted text-xs">
+                  Se manda la orden <strong>entera</strong> del proveedor
+                  —los{" "}
+                  <strong className="text-ink">
+                    {fmtNumero(resumen.renglones)} renglones
+                  </strong>{" "}
+                  de acá abajo—, no los{" "}
+                  {fmtNumero(resumenVista.renglones)} que se ven en la tabla con
+                  los filtros puestos.
+                </p>
+              )}
               {/* LA ULTIMA CHANCE DE VER LOS MINIMOS. Ahora se cargan solos,
                   así que pueden llegar hasta acá sin que nadie los haya
                   mirado: son cantidades que ninguna venta respalda, en una

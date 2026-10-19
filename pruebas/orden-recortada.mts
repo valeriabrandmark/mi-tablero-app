@@ -1,28 +1,37 @@
 /**
- * El aviso de "lo que se baja es sólo lo que estás viendo". Sin base ni
- * navegador.
+ * La diferencia entre LA VISTA y LA ORDEN, en Compras. Sin base ni navegador.
  *
  * ---------------------------------------------------------------------------
  * POR QUE EXISTE
  *
- * La orden de compra que se baja son LAS FILAS VISIBLES. Eso está bien
- * mientras se arma --se revisa marca por marca, se vacía lo que no va-- pero
- * en el momento de bajar es una trampa: bajar con un filtro puesto no da
- * ningún error, da una orden incompleta que parece correcta y que alguien
- * manda a un proveedor.
+ * La orden de compra es del proveedor ENTERO, pero se arma mirando de a poco:
+ * una marca, lo que tiene oferta, lo discontinuado. Son dos cosas distintas
+ * que viven en la misma pantalla, y confundirlas se paga afuera.
  *
- * Este aviso es lo único que avisa. Si dejara de dispararse, la pantalla
- * seguiría funcionando perfecto y el error aparecería recién cuando llegue la
- * mercadería -- o cuando no llegue.
+ * Antes la orden que se bajaba eran las filas visibles, y bajar con un filtro
+ * puesto no daba ningún error: daba una orden incompleta que parecía correcta
+ * y que alguien le mandaba a un proveedor. Eso se arregló en la raíz --el
+ * archivo sale de la lista completa-- y quedaron estas dos cuentas:
+ *
+ *   queRecortaLaOrden    qué está mostrando menos que la orden, para poder
+ *                        decir "el archivo trae más de lo que ves".
+ *   totalesDeLaOrden     los números, que la pantalla saca DOS VECES: con la
+ *                        orden entera y con las filas a la vista.
+ *
+ * Si una de las dos se desincroniza, el síntoma es que el total de la pantalla
+ * no coincida con el del archivo -- y eso se descubre cuando llega la
+ * mercadería, o cuando no llega.
  *
  *     node --experimental-strip-types --import ./pruebas/registrar.mjs pruebas/orden-recortada.mts
  */
 
 import {
-  contarEditadosFuera,
   queRecortaLaOrden,
   RECORTES_POR_DEFECTO,
+  totalesDeLaOrden,
+  type RenglonOrden,
 } from "@/lib/compras";
+import type { FilaCompra } from "@/lib/types";
 
 const FALLOS: string[] = [];
 
@@ -94,55 +103,153 @@ revisar(
   ["la marca", "el buscador («ger»)", "el selector Mostrar"],
 );
 
-// --- Cuántos renglones cargados quedan afuera ------------------------------
+// --- Los totales de la orden -----------------------------------------------
+//
+// La pantalla los saca dos veces: con la orden entera del proveedor --que es
+// lo que va al archivo-- y con las filas que se están viendo. Es la MISMA
+// función a propósito: dos copias de esta cuenta se desincronizan, y la forma
+// en que se notaría es que el total de la pantalla no coincida con el del
+// archivo.
 
-const edicion = (cantidad: number) => ({ cantidad });
+/** Una fila de Compras con lo que la cuenta mira, y el resto en cero. */
+function fila(p: Partial<FilaCompra> & { sku: string }): FilaCompra {
+  return {
+    costo: 0,
+    costoLista: 0,
+    unidadesPorBulto: 1,
+    sugerido: 0,
+    sugeridoMinimo: false,
+    codigoCompra: "COD",
+    ...p,
+  } as FilaCompra;
+}
+
+const renglon = (p: Partial<RenglonOrden>): RenglonOrden => ({
+  unidad: "unidad",
+  cantidad: 0,
+  descuento: 0,
+  descuento2: 0,
+  ...p,
+});
 
 revisar(
-  "sin ediciones no hay nada afuera",
-  contarEditadosFuera(new Map(), ["A", "B"]),
+  "sin filas no hay orden",
+  totalesDeLaOrden([], new Map()).renglones,
   0,
 );
+
+// CANTIDAD 0 ES "NO LO PIDAS", no "pedí cero": no es un renglón de la orden.
+// Es lo que hace que vaciar una marca la saque del archivo en vez de mandarla
+// con cero unidades.
 revisar(
-  "lo editado que se ve no cuenta",
-  contarEditadosFuera(new Map([["A", edicion(5)]]), ["A", "B"]),
+  "un renglón en cero no es un renglón",
+  totalesDeLaOrden(
+    [fila({ sku: "A", costoLista: 100 })],
+    new Map([["A", renglon({ cantidad: 0 })]]),
+  ).renglones,
   0,
 );
+
 revisar(
-  "lo editado que NO se ve, sí",
-  contarEditadosFuera(new Map([["Z", edicion(5)]]), ["A", "B"]),
+  "una fila sin renglón tampoco",
+  totalesDeLaOrden([fila({ sku: "A" })], new Map()).renglones,
+  0,
+);
+
+// UN BULTO SON VARIAS UNIDADES, y la plata sale de las unidades. Si esto se
+// equivocara, el total del Excel que recibe el proveedor estaría dividido por
+// las unidades que trae el bulto.
+revisar(
+  "pedido en bultos: 3 bultos de 12 son 36 unidades",
+  totalesDeLaOrden(
+    [fila({ sku: "A", costoLista: 100, unidadesPorBulto: 12 })],
+    new Map([["A", renglon({ unidad: "bulto", cantidad: 3 })]]),
+  ),
+  {
+    renglones: 1,
+    unidades: 36,
+    bultos: 3,
+    bruto: 3600,
+    neto: 3600,
+    recortados: 0,
+    sinCodigo: 0,
+    minimos: 0,
+  },
+);
+
+// LOS DOS DESCUENTOS VAN EN CASCADA, no sumados: 10 y 10 dan 19, no 20. Sigma
+// los aplica así, y un neto calculado de otra forma es una orden que no
+// coincide con la factura.
+revisar(
+  "los descuentos se aplican en cascada",
+  totalesDeLaOrden(
+    [fila({ sku: "A", costoLista: 1000 })],
+    new Map([["A", renglon({ cantidad: 1, descuento: 10, descuento2: 10 })]]),
+  ).neto,
+  810,
+);
+
+// SIN COSTO DE LISTA SE VALORIZA CON EL COSTO REAL, que es lo único que hay.
+// El mismo respaldo que usa el Excel; si difirieran, la pantalla y el archivo
+// mostrarían plata distinta.
+revisar(
+  "sin costo de lista usa el costo real",
+  totalesDeLaOrden(
+    [fila({ sku: "A", costo: 50, costoLista: 0 })],
+    new Map([["A", renglon({ cantidad: 2 })]]),
+  ).bruto,
+  100,
+);
+
+// Un descuento imposible se recorta a 100 al exportar (ver DESCUENTO_MAXIMO):
+// acá sólo se cuenta, para poder avisar cuáles se tocaron.
+revisar(
+  "cuenta los descuentos imposibles",
+  totalesDeLaOrden(
+    [fila({ sku: "A", costoLista: 10 })],
+    new Map([["A", renglon({ cantidad: 1, descuento: 973 })]]),
+  ).recortados,
   1,
 );
 
-// LOS CEROS NO CUENTAN, y es la mitad del diseño: trabajar marca por marca
-// vaciando las que no van deja decenas de ceros fuera de la vista. Si contaran,
-// el aviso diría "47 renglones quedan afuera" en el caso más normal de todos y
-// nadie lo volvería a leer.
 revisar(
-  "un cero afuera no es una pérdida",
-  contarEditadosFuera(new Map([["Z", edicion(0)]]), ["A"]),
-  0,
-);
-revisar(
-  "mezcla: sólo los que tienen cantidad",
-  contarEditadosFuera(
-    new Map([
-      ["A", edicion(10)], // visible
-      ["Z", edicion(3)], // afuera, con cantidad
-      ["Y", edicion(0)], // afuera, vaciado
-      ["X", edicion(7)], // afuera, con cantidad
-    ]),
-    ["A", "B"],
-  ),
-  2,
+  "cuenta los que no tienen código del proveedor y los mínimos",
+  (() => {
+    const t = totalesDeLaOrden(
+      [
+        fila({ sku: "A", costoLista: 10, codigoCompra: "" }),
+        fila({ sku: "B", costoLista: 10, sugeridoMinimo: true }),
+      ],
+      new Map([
+        ["A", renglon({ cantidad: 1 })],
+        ["B", renglon({ cantidad: 1 })],
+      ]),
+    );
+    return { sinCodigo: t.sinCodigo, minimos: t.minimos, renglones: t.renglones };
+  })(),
+  { sinCodigo: 1, minimos: 1, renglones: 2 },
 );
 
-// Sin nada visible --la marca filtrada no tiene artículos-- todo lo cargado
-// queda afuera. Es el caso extremo del aviso y tiene que contar bien.
+// EL CASO DE TODOS LOS DIAS: se revisa marca por marca y se baja la orden
+// entera. El mapa de la orden tiene las dos marcas; la vista, una sola. Los
+// dos totales salen de la misma función con listas distintas, y el de la orden
+// es el que va al archivo.
 revisar(
-  "con la vista vacía cuenta todo lo cargado",
-  contarEditadosFuera(new Map([["A", edicion(1)], ["B", edicion(2)]]), []),
-  2,
+  "la vista es un subtotal de la orden",
+  (() => {
+    const todas = [
+      fila({ sku: "A", costoLista: 100 }),
+      fila({ sku: "B", costoLista: 100 }),
+    ];
+    const orden = new Map([
+      ["A", renglon({ cantidad: 1 })],
+      ["B", renglon({ cantidad: 4 })],
+    ]);
+    const entera = totalesDeLaOrden(todas, orden);
+    const vista = totalesDeLaOrden([todas[0]!], orden);
+    return { orden: entera.unidades, vista: vista.unidades };
+  })(),
+  { orden: 5, vista: 1 },
 );
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
