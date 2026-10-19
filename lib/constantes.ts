@@ -67,6 +67,19 @@ export function slugVendedor(vendedor: string): string {
   return vendedor.toLowerCase();
 }
 
+/**
+ * `SILVIO` -> `Silvio`, para mostrarlo.
+ *
+ * La lista está en mayúsculas porque así vienen de Sigma, pero un nombre
+ * propio gritado en una pestaña se lee como un error. Vive acá y no en cada
+ * pantalla porque lo usan las pestañas de Objetivos y el título del tablero:
+ * escrito dos veces, el día que uno de los dos cambie van a decir distinto.
+ */
+export function nombrePropio(vendedor: string): string {
+  if (!vendedor) return "";
+  return vendedor.charAt(0).toUpperCase() + vendedor.slice(1).toLowerCase();
+}
+
 /** `silvio` -> `SILVIO`, o null si no es un vendedor con página propia. */
 export function vendedorDesdeSlug(slug: string): VendedorObjetivos | null {
   return VENDEDORES_OBJETIVOS.find((v) => slugVendedor(v) === slug.toLowerCase()) ?? null;

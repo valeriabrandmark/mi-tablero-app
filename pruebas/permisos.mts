@@ -15,6 +15,7 @@
 
 import { moduloDeRuta, moduloPermiteRuta } from "@/lib/modulos";
 import {
+  destinoObjetivos,
   enConstruccion,
   puedeEditar,
   puedeVer,
@@ -180,6 +181,68 @@ revisar(
   false,
 );
 revisar("sin sesión tampoco", puedeVerBorradores(null), false);
+
+// --- A DONDE VA QUIEN ENTRA POR /objetivos ---------------------------------
+//
+// La barra lateral tenía un link por vendedor y cada uno iba derecho al suyo;
+// ahora hay UNA entrada y entran todos por acá. Si esto mandara a todos al
+// primero de la lista, Pablo pediría la página de Silvio, `puedeVer` se la
+// negaría y el proxy lo rebotaría a su página inicial: el click en "Objetivos"
+// se vería como que no hace nada. No es un error que se note leyendo el código.
+
+for (const v of ["SILVIO", "GERMAN", "PABLO", "RICARDO"] as const) {
+  const permiso: Permiso = { rol: "vendedor", vendedor: v };
+  const destino = destinoObjetivos(permiso);
+  revisar(`${v} va a su propia página`, destino, `/objetivos/${v.toLowerCase()}`);
+  // Lo que importa de verdad: que el destino sea una página que SÍ puede abrir.
+  revisar(`y puede abrirla`, puedeVer(permiso, destino), true);
+}
+
+// Los que ven a los cuatro caen en el primero, que es lo que ya hacía.
+for (const permiso of [
+  { rol: "superadmin" },
+  { rol: "admin" },
+  { rol: "supervisor" },
+] as Permiso[]) {
+  revisar(`${permiso.rol} cae en el primero`, destinoObjetivos(permiso), "/objetivos/silvio");
+  revisar(`y lo puede abrir`, puedeVer(permiso, destinoObjetivos(permiso)), true);
+}
+
+// Sin sesión no hay a quién preguntarle: el destino existe igual y el proxy se
+// encarga del resto. Lo que no puede es romper.
+revisar("sin permiso devuelve una ruta válida", destinoObjetivos(null), "/objetivos/silvio");
+
+// --- QUE LA ENTRADA NUEVA DEL MENU SE PUEDA ABRIR ---------------------------
+//
+// El menú ahora apunta a `/objetivos` en vez de a cuatro rutas por vendedor.
+// Si esa ruta no estuviera permitida para alguno de los roles que ven
+// Objetivos, la entrada aparecería --`navPermitido` filtra por este mismo
+// `puedeVer`-- o peor, desaparecería sin que nadie entienda por qué.
+revisar("un vendedor puede entrar por /objetivos", puedeVer(vendedorSilvio, "/objetivos"), true);
+revisar("un supervisor también", puedeVer({ rol: "supervisor" }, "/objetivos"), true);
+revisar("un admin también", puedeVer({ rol: "admin" }, "/objetivos"), true);
+revisar(
+  "el responsable de Meli no",
+  puedeVer({ rol: "responsable_meli" }, "/objetivos"),
+  false,
+);
+revisar("el de Tienda Nube tampoco", puedeVer({ rol: "admin_tn" }, "/objetivos"), false);
+
+// --- RENTABILIDAD SIGUE SIENDO DE PRECIOS TN -------------------------------
+//
+// Dejó de ser una entrada del menú para ser una pestaña, y eso NO le cambia el
+// permiso: lo hereda por el prefijo /precios-tn/. Si se rompiera, la pestaña
+// se vería y al hacer click rebotaría.
+revisar(
+  "rentabilidad la ve admin_tn",
+  puedeVer({ rol: "admin_tn" }, "/precios-tn/rentabilidad"),
+  true,
+);
+revisar(
+  "y NO la ve un admin común, igual que el comparador",
+  puedeVer({ rol: "admin" }, "/precios-tn/rentabilidad"),
+  false,
+);
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);
