@@ -30,6 +30,8 @@ import {
   CAIDA_SELL_IN_PARA_AVISAR,
   coberturaValida,
   RECORTES_COMPRAS,
+  contarEditadosFuera,
+  queRecortaLaOrden,
   RECORTES_POR_DEFECTO,
   recortesValidos,
   opcionesCruzadas,
@@ -50,6 +52,7 @@ import {
   VENTANAS_RITMO,
   VENTANA_POR_DEFECTO,
 } from "@/lib/stock";
+import { useAvisoAlSalir } from "@/lib/useAvisoAlSalir";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import { RESUMEN_CABECERA, type OrdenSigma } from "@/lib/sigma-orden";
 import type { OrdenEnviada } from "@/lib/queries-ordenes";
@@ -197,6 +200,20 @@ export default function DashboardComprasPage({
   const [ediciones, setEdiciones] = useState<Map<string, RenglonOrden>>(
     new Map(),
   );
+
+  /**
+   * AVISO ANTES DE PERDER LA ORDEN A MEDIO ARMAR.
+   *
+   * `ediciones` vacío es "no se tocó nada": ahí recargar no pierde nada, porque
+   * lo que se ve es el sugerido y se recalcula solo. Con una sola edición
+   * encima ya hay trabajo que no existe en ningún otro lado hasta que se baja
+   * el archivo.
+   *
+   * Tiene agujeros grandes --no cubre cerrar la notebook ni navegar por el
+   * menú-- y están listados en `useAvisoAlSalir`. Es una red para el accidente
+   * que pasó, no una garantía.
+   */
+  useAvisoAlSalir(ediciones.size > 0);
 
   /**
    * La nota que va en la carátula del Excel del proveedor ("Ofertas agosto").
@@ -563,6 +580,30 @@ export default function DashboardComprasPage({
 
   // Hay sell in del proveedor cargado para ese mes, o todavía no.
   const sellInHayDatos = (data?.sellInCargado ?? 0) > 0;
+
+  /**
+   * Si lo que se ve es la orden entera del proveedor, o un recorte de ella.
+   * Las dos cuentas viven en lib/compras.ts para poder probarlas: ver
+   * `queRecortaLaOrden` y `contarEditadosFuera`.
+   */
+  const recortanLaOrden = useMemo(
+    () => queRecortaLaOrden(filtros, recortes),
+    [filtros, recortes],
+  );
+
+  const editadosFuera = useMemo(
+    () => contarEditadosFuera(ediciones, filas.map((f) => f.sku)),
+    [ediciones, filas],
+  );
+
+  /** Saca lo que recorta la orden, dejando proveedor y grupo. */
+  const verOrdenCompleta = () =>
+    cambiar({
+      ...filtros,
+      marca: undefined,
+      buscar: undefined,
+      recortes: RECORTES_POR_DEFECTO,
+    });
 
   const sinCambios =
     sinValores(filtros.grupo) &&
@@ -1474,6 +1515,41 @@ export default function DashboardComprasPage({
               descarga. Va arriba de la tabla porque es lo que se hace al final
               y tiene que estar a mano sin scrollear 500 filas. */}
           <div className="border-line bg-panel flex flex-wrap items-center gap-2 rounded-xl border p-3">
+            {/* EL AVISO VA PRIMERO Y ARRIBA DE LOS BOTONES, no al lado de la
+                descarga: lo que tiene que pasar es leerlo ANTES de bajar el
+                archivo, y abajo del botón se lee después. */}
+            {recortanLaOrden.length > 0 && (
+              <div className="border-c3/40 bg-c3/10 flex w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-3 py-2 text-[11px]">
+                <span className="text-c3 font-semibold">
+                  Lo que se baja es sólo lo que estás viendo.
+                </span>
+                <span className="text-muted">
+                  {/* Se dice QUE recorta y no cuántos artículos quedan afuera:
+                      ese número no está en el navegador --haría falta otra
+                      consulta pesada-- y el botón de al lado resuelve el
+                      problema sin que haga falta interpretarlo. */}
+                  Tenés puesto {recortanLaOrden.join(" y ")}
+                  {editadosFuera > 0 && (
+                    <>
+                      , y{" "}
+                      <strong className="text-ink">
+                        {fmtNumero(editadosFuera)}{" "}
+                        {editadosFuera === 1 ? "renglón que cargaste queda" : "renglones que cargaste quedan"}
+                      </strong>{" "}
+                      fuera de esta vista
+                    </>
+                  )}
+                  .
+                </span>
+                <button
+                  type="button"
+                  onClick={verOrdenCompleta}
+                  className="border-c3/50 text-c3 hover:bg-c3/20 ml-auto rounded-lg border px-2.5 py-1 text-[11px] font-medium"
+                >
+                  Ver la orden completa
+                </button>
+              </div>
+            )}
             <span className="text-muted mr-1 text-[11px]">Toda la lista:</span>
             {UNIDADES_COMPRA.map((u) => (
               <button
