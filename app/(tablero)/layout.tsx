@@ -1,5 +1,4 @@
 import BarraLateral, { type ItemNav } from "@/components/BarraLateral";
-import { slugVendedor, VENDEDORES_OBJETIVOS } from "@/lib/constantes";
 import { enConstruccion, permisoDelUsuario, puedeVer, type Rol } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
@@ -29,17 +28,21 @@ const NAV: ItemNav[] = [
       { href: "/ventas-mayoristas", label: "Tablero Brandmark", icono: "ventas" },
       { href: "/logistica", label: "Logística", icono: "logistica" },
       { href: "/cuentas-corrientes", label: "Cuentas Corrientes", icono: "cuentas" },
-      // Una entrada por vendedor: cada uno entra directo a su tablero.
-      ...VENDEDORES_OBJETIVOS.map((v) => ({
-        href: `/objetivos/${slugVendedor(v)}`,
-        label: `Objetivos ${v.charAt(0)}${v.slice(1).toLowerCase()}`,
-        icono: "objetivos" as const,
-      })),
+      // UNA ENTRADA, NO UNA POR VENDEDOR. Eran cuatro, y para los permisos
+      // Objetivos es un módulo solo: cuatro de las siete entradas de este
+      // grupo eran el mismo tablero con otro filtro, y con un quinto vendedor
+      // volvía a crecer. Los vendedores pasaron a ser pestañas adentro
+      // (app/(tablero)/objetivos/layout.tsx), que es lo que ya hacen Stock,
+      // Mercado Libre y Tienda Nube con sus vistas.
+      //
+      // `/objetivos` no tiene contenido: manda a la página del vendedor que
+      // corresponde según quién mire. Un `vendedor` cae en la suya.
+      { href: "/objetivos", label: "Objetivos", icono: "objetivos" },
     ],
   },
   {
     clave: "minoristas",
-    label: "Ventas minoristas",
+    label: "Ventas Minoristas",
     icono: "unibrandco",
     hijos: [
       // Mercado Libre sigue teniendo sus pestañas (Tablero, Alertas, Stock
@@ -71,16 +74,11 @@ const NAV: ItemNav[] = [
       // es DECIDIR a cuánto se vende. Son cosas distintas y las mira gente
       // distinta — de hecho es la única entrada del tablero que no ven todos
       // los administradores (ver `admin_tn` en lib/permisos.ts).
-      { href: "/precios-tn", label: "Precios TN — Comparador", icono: "precios" },
-      // La rentabilidad va al lado del comparador y no en otra rama: las dos
-      // salen de la MISMA corrida y se miran en la misma conversacion --a
-      // cuanto vender, y si a ese costo se puede--. Hereda el permiso del
-      // modulo por el prefijo /precios-tn/ (ver lib/permisos.ts).
-      {
-        href: "/precios-tn/rentabilidad",
-        label: "Rentabilidad por proveedor",
-        icono: "precios",
-      },
+      // "Precios TN" a secas: el comparador pasó a ser una pestaña adentro,
+      // junto con Rentabilidad por proveedor. Las dos salen de la MISMA
+      // corrida y comparten el permiso por prefijo, así que eran dos vistas de
+      // un módulo y no dos módulos. Ver app/(tablero)/precios-tn/layout.tsx.
+      { href: "/precios-tn", label: "Precios TN", icono: "precios" },
     ],
   },
 ];

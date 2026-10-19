@@ -359,6 +359,25 @@ const PAGINAS_EN_CONSTRUCCION = [
   "/venta-minorista/mercado-libre/posventa",
 ];
 
+/**
+ * A QUE PAGINA DE OBJETIVOS MANDAR a quien entra por `/objetivos`.
+ *
+ * Antes nadie entraba por ahí: la barra lateral tenía un link por vendedor y
+ * cada uno iba derecho al suyo. Con una sola entrada de Objetivos entran todos,
+ * y mandarlos a todos al primero de la lista le daría a Pablo la página de
+ * Silvio -- que `puedeVer` le niega, así que el proxy lo rebotaría a su página
+ * inicial y el click en "Objetivos" se vería como que no hace nada.
+ *
+ * Vive acá, al lado de la regla que decide el acceso, y es una función aparte
+ * para poder probarla: un redirect dentro de un componente de servidor no se
+ * puede llamar desde una prueba, y esto es justo lo que no puede fallar.
+ */
+export function destinoObjetivos(permiso: Permiso | null): string {
+  const vendedor =
+    permiso?.rol === "vendedor" ? permiso.vendedor : VENDEDORES_OBJETIVOS[0];
+  return `/objetivos/${slugVendedor(vendedor)}`;
+}
+
 /** `true` si la página todavía se está construyendo. */
 export function enConstruccion(pathname: string): boolean {
   return PAGINAS_EN_CONSTRUCCION.some(

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ListaAvance } from "@/components/BarraAvance";
 import LineaFacturacion from "@/components/charts/LineaFacturacion";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
+import { nombrePropio } from "@/lib/constantes";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import BotonActualizar from "@/components/BotonActualizar";
 import { columnasVencidos } from "@/components/columnasVencidos";
@@ -162,7 +163,10 @@ export default function DashboardObjetivosPage({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold tracking-tight">
-            Objetivos <span className="text-c1">{vendedor}</span>
+            {/* El mismo formato que la pestaña de arriba: la lista viene en
+                mayúsculas de Sigma y "Objetivos SILVIO" debajo de una pestaña
+                que dice "Silvio" se lee como dos cosas distintas. */}
+            Objetivos <span className="text-c1">{nombrePropio(vendedor)}</span>
           </h1>
           <p className="text-muted mt-1 text-xs">
             {data
