@@ -1,3 +1,23 @@
+"use client";
+
+// COMPONENTE DE CLIENTE, Y NO ES UN DETALLE DE ESTILO.
+//
+// Esta pantalla devolvia "This page couldn't load" entera, y esta linea es la
+// otra mitad del motivo. `Tabla` es de cliente y su API son FUNCIONES --celda,
+// orden, clave--; un componente de servidor no se las puede pasar, porque no
+// hay forma de serializar una funcion para mandarla al navegador. React corta
+// con "Functions cannot be passed directly to Client Components" y, como esto
+// pasa al renderizar del lado del servidor, se lleva puesta la pagina entera y
+// no solo la tabla.
+//
+// Todos los demas tableros que usan `Tabla` ya son de cliente; este era el
+// unico que no, y por eso era el unico roto. Las props que recibe de la pagina
+// son datos planos, asi que cruzan el limite sin problema: lo que no cruza son
+// las funciones que este archivo arma para la tabla.
+//
+// `pruebas/componentes-cliente.mts` deja esto clavado: cualquier archivo que
+// dibuje una <Tabla> y no empiece con "use client" hace fallar la prueba.
+
 import PreguntasPorPublicacion from "@/components/charts/PreguntasPorPublicacion";
 import ResultadoReclamos from "@/components/charts/ResultadoReclamos";
 import { Columna, Tabla } from "@/components/Tabla";
@@ -158,7 +178,10 @@ function columnasReclamos(cerrados: boolean): Columna<Reclamo>[] {
       {
         titulo: "Cubrió ML",
         ayuda: "Si Mercado Libre se hizo cargo del costo de la resolución.",
-        celda: (f) => (f.cobertura_ml ? "Sí" : f.cobertura_ml === false ? "No" : "—"),
+        // El cast a booleano se hace en la consulta: la columna de la base es
+        // TEXTO ('true' / 'false' / null) y el string "false" es truthy, asi
+        // que los 13 reclamos que Mercado Libre NO cubrio decian "Si".
+        celda: (f) => (f.cobertura_ml === true ? "Sí" : f.cobertura_ml === false ? "No" : "—"),
       },
       {
         titulo: "Cerrado",
