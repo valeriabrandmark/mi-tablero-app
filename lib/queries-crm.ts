@@ -82,15 +82,49 @@ export type ResumenCrm = {
  * segundo es lo que hace falta mirar: un reclamo de hace tres días sin
  * contestar es más urgente que uno de hace una hora.
  */
+/**
+ * DE DONDE SALE EL SITIO (MLA, MLU, MLM...), que es lo que elige el dominio de
+ * los links al panel de Mercado Libre.
+ *
+ * NO ESTA EN `ml_reclamos`. Las dos consultas de abajo pedian `r.sitio` y esa
+ * columna nunca existio: el extractor escribe `recurso` --"order" o
+ * "shipment"-- y nada parecido a un site_id. Postgres contesta
+ * "column r.sitio does not exist", la consulta tira, y como esto corre en un
+ * componente de servidor la pagina entera queda en "This page couldn't load".
+ * Estuvo asi desde el commit que la creo; no se noto porque la pantalla es
+ * solo para superadmin y nadie la habia abierto.
+ *
+ * SALE DE LA VENTA. El reclamo trae la orden y `ml_ventas` guarda el sitio de
+ * cada una: cruzan 52 de 53. El que falta es el unico con recurso "shipment",
+ * donde `orden` es un envio y no una orden; esa fila queda con sitio nulo y
+ * `dominio()` la manda a MLA, que es la unica cuenta que hay.
+ *
+ * EL CAST VA DEL LADO DEL RECLAMO Y NO DEL INDICE. `ml_ventas.id` es bigint y
+ * tiene indice unico; escribirlo `v.id::text = r.orden` lo inutiliza y obliga
+ * a leer las 94.362 ventas enteras --28.612 buffers y 88 ms para devolver 20
+ * filas-- sobre una instancia que ya tuvo problemas de Disk IO. Al reves usa
+ * el indice: 64 buffers y 0,7 ms.
+ *
+ * Y EL `case` NO ES DECORATIVO: `r.orden` es texto. Hoy son todos digitos,
+ * pero un valor que no lo sea --o uno de 25 cifras, que no entra en bigint--
+ * haria tirar el cast y volveriamos a tener la pagina caida por el mismo
+ * motivo. El patron deja pasar solo lo que seguro castea; el resto queda nulo
+ * y cae en MLA.
+ */
+const SITIO_DE_LA_VENTA = `
+  left join bronze.ml_ventas v
+    on v.id = (case when r.orden ~ '^[0-9]{1,18}$' then r.orden::bigint end)`;
+
 export async function getReclamosAbiertos(): Promise<Reclamo[]> {
   return query<Reclamo>(
-    `select r.id, r.orden, r.sitio, r.estado, r.etapa, r.tipo,
+    `select r.id, r.orden, v."context.site" as sitio, r.estado, r.etapa, r.tipo,
             r.nuestro_rol, r.quien_gano, r.cerrado_por, r.cobertura_ml,
             r.fecha_creado, r.fecha_resolucion,
             coalesce(m.cuantos, 0)::int as mensajes,
             m.ultimo as ultimo_mensaje,
             m.ultimo_de
        from bronze.ml_reclamos r
+       ${SITIO_DE_LA_VENTA}
        left join lateral (
          select count(*) as cuantos,
                 max(x.fecha) as ultimo,
@@ -115,12 +149,13 @@ export async function getReclamosCerrados(
   limite = 300,
 ): Promise<Reclamo[]> {
   return query<Reclamo>(
-    `select r.id, r.orden, r.sitio, r.estado, r.etapa, r.tipo,
+    `select r.id, r.orden, v."context.site" as sitio, r.estado, r.etapa, r.tipo,
             r.nuestro_rol, r.quien_gano, r.cerrado_por, r.cobertura_ml,
             r.fecha_creado, r.fecha_resolucion,
             0::int as mensajes, null::text as ultimo_mensaje,
             null::text as ultimo_de
        from bronze.ml_reclamos r
+       ${SITIO_DE_LA_VENTA}
       where r.estado = 'closed'
         and coalesce(r.fecha_resolucion, r.fecha_creado)::timestamptz
             between $1::timestamptz and ($2::timestamptz + interval '1 day')
