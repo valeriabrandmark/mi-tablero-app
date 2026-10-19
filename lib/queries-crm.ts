@@ -118,7 +118,12 @@ const SITIO_DE_LA_VENTA = `
 export async function getReclamosAbiertos(): Promise<Reclamo[]> {
   return query<Reclamo>(
     `select r.id, r.orden, v."context.site" as sitio, r.estado, r.etapa, r.tipo,
-            r.nuestro_rol, r.quien_gano, r.cerrado_por, r.cobertura_ml,
+            r.nuestro_rol, r.quien_gano, r.cerrado_por,
+            -- A BOOLEANO DE VERDAD. En la base es texto 'true'/'false', y el
+            -- tipo Reclamo ya decia boolean, y la pantalla preguntaba por el
+            -- valor a secas: el string "false" es truthy. Null sigue null,
+            -- que es "no sabemos" y se muestra como raya.
+            (r.cobertura_ml = 'true')                    as cobertura_ml,
             r.fecha_creado, r.fecha_resolucion,
             coalesce(m.cuantos, 0)::int as mensajes,
             m.ultimo as ultimo_mensaje,
@@ -150,7 +155,12 @@ export async function getReclamosCerrados(
 ): Promise<Reclamo[]> {
   return query<Reclamo>(
     `select r.id, r.orden, v."context.site" as sitio, r.estado, r.etapa, r.tipo,
-            r.nuestro_rol, r.quien_gano, r.cerrado_por, r.cobertura_ml,
+            r.nuestro_rol, r.quien_gano, r.cerrado_por,
+            -- A BOOLEANO DE VERDAD. En la base es texto 'true'/'false', y el
+            -- tipo Reclamo ya decia boolean, y la pantalla preguntaba por el
+            -- valor a secas: el string "false" es truthy. Null sigue null,
+            -- que es "no sabemos" y se muestra como raya.
+            (r.cobertura_ml = 'true')                    as cobertura_ml,
             r.fecha_creado, r.fecha_resolucion,
             0::int as mensajes, null::text as ultimo_mensaje,
             null::text as ultimo_de
