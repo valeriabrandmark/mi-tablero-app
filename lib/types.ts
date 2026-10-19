@@ -1199,6 +1199,22 @@ export type FilaStockFull = {
   ultimaVenta: string | null;
   /** Null = nunca vendió desde que hay datos (06/05), que no es "hace mucho". */
   diasSinVenta: number | null;
+  /**
+   * HACE CUANTO QUE EL ARTICULO ESTA EN FULL, en días.
+   *
+   * Es lo que separa al que nunca vendió y hay que retirar del que nunca
+   * vendió porque llegó la semana pasada. Sale de la foto diaria del stock y
+   * de los despachos que mandamos a Full, lo que sea más viejo.
+   */
+  diasEnFull: number | null;
+  /**
+   * Si `diasEnFull` es una medición o un piso.
+   *
+   * Falso cuando la única evidencia es que el artículo ya estaba en la foto
+   * más vieja que tenemos: de ésos sabemos que están hace al menos esos días,
+   * pero no cuántos. Son 10 al 19/10.
+   */
+  entradaExacta: boolean;
   uds30: number;
   valorizacion: number;
 };
