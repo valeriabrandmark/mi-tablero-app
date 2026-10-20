@@ -227,15 +227,22 @@ export const RECORTES_COMPRAS = [
 export const RECORTES_POR_DEFECTO: RecorteCompras[] = ["sugerido"];
 
 /**
- * QUE DE LA VISTA ACTUAL ESTA RECORTANDO LA ORDEN.
+ * QUE DE LA VISTA ACTUAL ESTA MOSTRANDO MENOS QUE LA ORDEN.
  *
- * La orden que se baja son LAS FILAS VISIBLES, no todo lo que se tocó. Mientras
- * se arma eso está bien --se revisa marca por marca-- pero al bajar es una
- * trampa: bajar con un filtro puesto no da ningún error, da una orden
- * incompleta que parece correcta.
+ * La orden ES del proveedor entero: se arma mirando de a poco --una marca, lo
+ * que tiene oferta, lo discontinuado-- pero sale una sola y lleva todo. Lo que
+ * esta función nombra es la diferencia entre las dos cosas, para poder decir
+ * "esta vista es un recorte, el archivo no lo es" y que nadie se sorprenda de
+ * que el Excel traiga trescientos renglones cuando en la pantalla hay doce.
  *
- * Devuelve los nombres de lo que recorta, listos para enumerar en el aviso, o
- * vacío si lo que se ve es la orden entera del proveedor.
+ * ANTES ESTO ERA UNA ADVERTENCIA Y AHORA ES UNA ACLARACION. Mientras lo que se
+ * bajaba eran las filas visibles, bajar con un filtro puesto daba una orden
+ * incompleta que parecía correcta, y esto servía para avisar del peligro. El
+ * peligro ya no está --se arregló en la raíz, la descarga sale de la lista
+ * completa-- pero sigue haciendo falta decir que lo que se ve no es todo.
+ *
+ * Devuelve los nombres de lo que recorta, listos para enumerar, o vacío si lo
+ * que se ve ya es la orden entera.
  *
  * `proveedor` y `grupo` quedan afuera A PROPOSITO: la orden ES de un
  * proveedor, elegirlo no la recorta. Los tres que sí recortan:
@@ -243,9 +250,8 @@ export const RECORTES_POR_DEFECTO: RecorteCompras[] = ["sugerido"];
  *   marca     el caso de todos los días: se revisa una y se olvida sacarla.
  *   buscar    lo mismo, y encima el campo queda arriba y fuera de la vista.
  *   recortes  el más silencioso. Un discontinuo NUNCA entra por "Hay que
- *             comprar" --su sugerido es 0 a propósito-- así que lo que se
- *             cargó a mano entrando por ese recorte desaparece de la orden al
- *             volver al recorte de siempre.
+ *             comprar" --su sugerido es 0 a propósito-- así que para verlo hay
+ *             que pedirlo, y la vista deja de ser la de siempre.
  */
 export function queRecortaLaOrden(
   filtros: { marca?: string[]; buscar?: string },
@@ -263,29 +269,118 @@ export function queRecortaLaOrden(
 }
 
 /**
- * Cuántos renglones CON CANTIDAD que se editaron a mano quedan fuera de la
- * vista. Es lo que convierte el aviso en algo accionable: no "puede que falte
- * algo" sino "hay tres cosas que cargaste y no se van a mandar".
+ * CUANTO VIVE UN BORRADOR DE ORDEN antes de dejar de ofrecerse.
  *
- * SOLO LOS EDITADOS, porque son los únicos que se pueden contar sin
- * preguntarle al servidor: el mapa de ediciones tiene todo lo que se tocó, se
- * vea o no.
+ * Un borrador es trabajo a medio hacer, no un documento: pasada una semana los
+ * sugeridos que tiene adentro ya no se parecen a los de hoy y retomarlo sería
+ * peor que empezar de nuevo. Que caduque solo evita además la otra cosa que
+ * pasa siempre -- que queden veinte borradores viejos y nadie sepa cuál vale.
  *
- * LOS EDITADOS EN CERO NO CUENTAN. Sacar algo de la orden y que además no se
- * vea dan el mismo resultado --no se pide-- así que avisar no agregaría nada y
- * el número se llenaría de ruido justo cuando se trabaja marca por marca
- * vaciando las que no van.
+ * Vive acá y no en lib/queries-borrador.ts porque la pantalla también lo dice
+ * en voz alta ("se guardan 3 días"), y ese archivo importa el driver de la
+ * base: leerlo desde el navegador arrastraría `pg` al bundle.
  */
-export function contarEditadosFuera(
-  ediciones: ReadonlyMap<string, { cantidad: number }>,
-  skusVisibles: Iterable<string>,
-): number {
-  const visibles = new Set(skusVisibles);
-  let cuantos = 0;
-  for (const [sku, renglon] of ediciones) {
-    if (!visibles.has(sku) && renglon.cantidad > 0) cuantos += 1;
+export const DIAS_DE_VIDA_BORRADOR = 3;
+
+/**
+ * LA FIRMA DE LAS DECISIONES DE UNA ORDEN: con esto se sabe si lo que hay en
+ * pantalla es lo mismo que la base tiene guardado.
+ *
+ * No hay una bandera de "hay cambios sin guardar": se comparan dos firmas. Una
+ * bandera se puede quedar encendida --o apagada-- cuando algo falla en el
+ * medio; la comparación no puede mentir, porque es la pregunta misma. De eso
+ * depende el cartel de "¿salir del sitio?", así que tiene que ser exacto.
+ *
+ * VIVE ACA Y NO EN EL HOOK porque se calcula en DOS lugares: con lo que hay en
+ * pantalla y con lo que vino de la base. Si las dos cuentas no fueran
+ * literalmente la misma, el síntoma sería un borrador guardándose en loop o un
+ * cartel de salir que nunca aparece.
+ *
+ * LO QUE ENTRA SON LAS DECISIONES Y NADA MAS. El mes, la ventana y la cobertura
+ * quedan afuera a propósito: se guardan junto al borrador porque sirven para
+ * saber con qué contexto se armó, pero cambiarlos no es editar la orden -- y si
+ * entraran, mover la cobertura un rato volvería a guardar todo sin que nadie
+ * haya tocado una cantidad.
+ */
+export function firmaDeLasDecisiones(
+  proveedor: string | null,
+  nota: string,
+  renglones: Iterable<readonly [string, RenglonOrden]>,
+): string {
+  return JSON.stringify([
+    proveedor,
+    nota,
+    // Ordenado por SKU: el orden de un Map es el orden en que se tocó cada
+    // artículo, y dos caminos distintos hasta las mismas decisiones tienen que
+    // dar la misma firma.
+    [...renglones]
+      .map(([sku, r]) => [
+        sku,
+        r.unidad,
+        r.cantidad,
+        r.descuento,
+        r.descuento2,
+      ])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  ]);
+}
+
+/** Un sugerido que se movió entre que se guardó el borrador y ahora. */
+export type Recalculado = {
+  sku: string;
+  /** Lo que el cálculo pedía cuando se guardó el borrador. */
+  antes: number;
+  /** Lo que pide hoy. */
+  ahora: number;
+};
+
+/**
+ * QUE CANTIDADES SE MOVIERON SOLAS DESDE QUE SE GUARDO EL BORRADOR.
+ *
+ * El borrador guarda decisiones, no la orden: todo lo que nadie tocó se
+ * recalcula al abrir. Es lo correcto --un borrador del viernes tiene que
+ * mostrar los números del lunes, no los del viernes-- pero tiene una
+ * consecuencia que hay que decir en voz alta: la orden puede cambiar sola
+ * entre que se guarda y se retoma, porque el pipeline corre cada hora y media
+ * y los sugeridos salen de las ventas.
+ *
+ * Sin esto, alguien retomaría un borrador de ayer, lo bajaría convencido de que
+ * es el que dejó, y serían otras cantidades.
+ *
+ * LO EDITADO NO SE INFORMA. Si la persona puso una cantidad a mano, el sugerido
+ * ya no decide nada en ese renglón: su decisión sigue intacta y avisar de un
+ * número que no se usa es ruido. Por eso el aviso dice exactamente lo que se
+ * movió sin pedir permiso.
+ *
+ * UN SKU QUE YA NO ESTA CUENTA COMO CERO, y es un caso real: si se quedó sin
+ * stock en los dos depósitos sale de la lista, y el renglón que estaba en la
+ * orden desaparece. Que desaparezca está bien; que desaparezca en silencio, no.
+ *
+ * Vienen ordenados por cuánto se movieron, de mayor a menor: si hay treinta
+ * cambios, los primeros son los que pueden cambiar la orden de verdad.
+ */
+export function queSeRecalculo(
+  guardados: Record<string, number>,
+  hoy: ReadonlyMap<string, number>,
+  ediciones: ReadonlyMap<string, unknown>,
+): Recalculado[] {
+  const cambios: Recalculado[] = [];
+
+  for (const [sku, crudo] of Object.entries(guardados)) {
+    if (ediciones.has(sku)) continue;
+    const antes = Number(crudo) || 0;
+    const ahora = hoy.get(sku) ?? 0;
+    if (antes === ahora) continue;
+    // Dos ceros no son un cambio ni cuando uno de los dos falta.
+    if (antes === 0 && ahora === 0) continue;
+    cambios.push({ sku, antes, ahora });
   }
-  return cuantos;
+
+  return cambios.sort(
+    (a, b) =>
+      Math.abs(b.ahora - b.antes) - Math.abs(a.ahora - a.antes) ||
+      a.sku.localeCompare(b.sku),
+  );
 }
 
 /**
@@ -485,6 +580,76 @@ export function renglonInicial(f: FilaCompra): RenglonOrden {
     // Vacío a propósito: ver RenglonOrden.
     descuento2: 0,
   };
+}
+
+/** Los totales de una orden: lo que se está por comprar, en números. */
+export type TotalesOrden = {
+  renglones: number;
+  unidades: number;
+  bultos: number;
+  bruto: number;
+  neto: number;
+  /** Renglón con un descuento imposible, recortado a 100. Ver DESCUENTO_MAXIMO. */
+  recortados: number;
+  /**
+   * Renglón al que el maestro no le tiene cargado el código con el que el
+   * proveedor lo vende. No rompe nada --va al Excel con la celda vacía-- pero
+   * el que recibe el mail no lo va a poder identificar.
+   */
+  sinCodigo: number;
+  /**
+   * Renglón cuya cantidad NO sale de una cuenta sino del mínimo de un bulto,
+   * porque el artículo no vendió nada en la ventana. Se cargan solos como los
+   * demás, así que sin contarlos no habría forma de saber cuánto de la orden es
+   * "esto hace falta" y cuánto es "esto habría que mirarlo".
+   */
+  minimos: number;
+};
+
+/**
+ * LOS TOTALES DE LA ORDEN, que es lo que se está por comprar.
+ *
+ * Vive acá y no adentro del componente porque la pantalla la usa DOS VECES con
+ * listas distintas: una con la orden entera del proveedor --que es la que se
+ * baja-- y otra con las filas que se están viendo. Son la misma cuenta y tienen
+ * que seguir siendo la misma cuenta: dos copias se desincronizan, y la forma en
+ * que se notaría es que el total de la pantalla no coincida con el del archivo.
+ */
+export function totalesDeLaOrden(
+  filas: readonly FilaCompra[],
+  orden: ReadonlyMap<string, RenglonOrden>,
+): TotalesOrden {
+  const t: TotalesOrden = {
+    renglones: 0,
+    unidades: 0,
+    bultos: 0,
+    bruto: 0,
+    neto: 0,
+    recortados: 0,
+    sinCodigo: 0,
+    minimos: 0,
+  };
+
+  for (const f of filas) {
+    const r = orden.get(f.sku);
+    // Cantidad 0 es "no lo pidas", no "pedí cero": no es un renglón.
+    if (!r || !(r.cantidad > 0)) continue;
+    t.renglones += 1;
+    if (f.sugeridoMinimo) t.minimos += 1;
+    if (!f.codigoCompra) t.sinCodigo += 1;
+    const u = aUnidades(r.cantidad, r.unidad, f.unidadesPorBulto);
+    t.unidades += u;
+    if (r.unidad === "bulto") t.bultos += r.cantidad;
+    // El mismo respaldo que usa el Excel: sin costo de lista cargado se
+    // valoriza con el costo real, que es lo único que hay.
+    const lista = f.costoLista > 0 ? f.costoLista : f.costo;
+    if (r.descuento > DESCUENTO_MAXIMO || r.descuento2 > DESCUENTO_MAXIMO)
+      t.recortados += 1;
+    t.bruto += u * lista;
+    t.neto += u * lista * factorNeto(r.descuento, r.descuento2);
+  }
+
+  return t;
 }
 
 /* -------------------------------------------------------------------------
