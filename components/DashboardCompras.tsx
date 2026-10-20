@@ -28,8 +28,12 @@ import {
   RENTABILIDAD_COMPRA_DISCRETA,
   COBERTURA_COMPRA_MAXIMA,
   CAIDA_SELL_IN_PARA_AVISAR,
+  alcanceDisponible,
+  type AlcanceOrden,
   coberturaValida,
   DIAS_DE_VIDA_BORRADOR,
+  entraEnLaOrden,
+  nombreDelAlcanceMarca,
   renglonesConCantidad,
   RECORTES_COMPRAS,
   queRecortaLaOrden,
@@ -352,40 +356,58 @@ export default function DashboardComprasPage({
     [combinaciones, filtros],
   );
 
+
+
   /**
-   * Qué de la vista actual está mostrando menos que la orden. La cuenta vive en
-   * lib/compras.ts para poder probarla: ver `queRecortaLaOrden`.
+   * HASTA DONDE LLEGA LA ORDEN: todo el proveedor, o sólo la marca elegida.
+   *
+   * ES UNA ELECCION Y NO UNA REGLA, y hubo que aprenderlo dos veces.
+   *
+   * Primero la orden era lo que se veía, y bajar con un filtro puesto daba una
+   * orden incompleta que parecía correcta. Después pasó a ser SIEMPRE el
+   * proveedor entero, y apareció el error opuesto: con la marca AVENT
+   * filtrada, los totales metían un CHICCO del mismo proveedor que no se veía
+   * por ningún lado.
+   *
+   * LOS DOS CASOS SON REALES Y CONVIVEN. Hay proveedores donde la OC va
+   * siempre por marca, y hay veces que se filtra una marca sólo para vaciarle
+   * cantidades y la OC igual va por todo el proveedor. Ninguna regla fija sirve
+   * para los dos, así que se elige, se ve cuál está elegida, y los números de
+   * arriba dicen a cuál de las dos se refieren.
+   *
+   * LA MARCA ES LO UNICO QUE PUEDE RECORTAR. El buscador y el selector Mostrar
+   * no: son la lupa con la que se mira, no un conjunto que alguien pueda
+   * nombrar. Ver `alcanceDisponible` en lib/compras.ts.
+   *
+   * Arranca en "proveedor" porque es el error más barato de los dos: comprar
+   * un bulto de más se ve en el archivo antes de mandarlo; olvidarse media
+   * orden no se ve hasta que no llega la mercadería.
    */
-  const recortanLaOrden = useMemo(
-    () => queRecortaLaOrden(filtros, recortes),
-    [filtros, recortes],
+  const [alcance, setAlcance] = useState<AlcanceOrden>("proveedor");
+
+  /** Si hay algo que elegir: una orden, y una marca que pueda recortarla. */
+  const sePuedeElegirAlcance =
+    proveedorUnico !== null && alcanceDisponible(filtros.marca);
+  const alcanceReal: AlcanceOrden = sePuedeElegirAlcance
+    ? alcance
+    : "proveedor";
+
+  /**
+   * QUE ESTA MOSTRANDO MENOS QUE LA ORDEN, sin recortarla.
+   *
+   * Se calcula con la MISMA función de siempre, sacándole la marca cuando la
+   * marca SÍ es el alcance: ahí deja de ser una lupa y pasa a ser la orden. Lo
+   * que queda --el buscador, el selector Mostrar, y la marca cuando la orden es
+   * del proveedor entero-- recorta lo que se ve y nada más.
+   */
+  const otroRecorte = useMemo(
+    () =>
+      queRecortaLaOrden(
+        alcanceReal === "marca" ? { ...filtros, marca: undefined } : filtros,
+        recortes,
+      ),
+    [filtros, recortes, alcanceReal],
   );
-
-  /**
-   * QUE ES LA ORDEN: todo el proveedor, o sólo lo que se está viendo.
-   *
-   * ES UNA ELECCION Y NO UNA REGLA, y hubo que aprenderlo. Al principio la
-   * orden era SIEMPRE el proveedor entero: eso arregló el problema de bajar
-   * una orden recortada sin darse cuenta, pero creó el opuesto. Con la marca
-   * AVENT filtrada, los totales y el archivo metían un CHICCO del mismo
-   * proveedor que no se veía por ningún lado -- y además dejaba sin forma de
-   * pedirle a un proveedor una sola marca, que es algo que se hace.
-   *
-   * Los dos errores son reales y opuestos: uno manda de menos y el otro de
-   * más. Ninguna regla fija los evita a los dos, así que se elige, se ve cuál
-   * está elegida y los números de arriba dicen a qué se refieren.
-   *
-   * Arranca en "proveedor" porque es lo que se hace casi siempre y porque es
-   * el error más barato de los dos: comprar un bulto de más se ve en el
-   * archivo antes de mandarlo; olvidarse media orden no se ve hasta que no
-   * llega la mercadería.
-   */
-  const [alcance, setAlcance] = useState<"proveedor" | "vista">("proveedor");
-
-  /** Si tiene sentido preguntarse por el alcance: hay orden y hay recorte. */
-  const laVistaRecorta = proveedorUnico !== null && recortanLaOrden.length > 0;
-  const alcanceReal: "proveedor" | "vista" =
-    laVistaRecorta ? alcance : "proveedor";
 
   /**
    * LOS ARTICULOS DE LOS QUE SALE LA ORDEN.
@@ -401,11 +423,17 @@ export default function DashboardComprasPage({
    * cambia entre ellas es CUALES filas vienen.
    */
   const filasOrden = useMemo(() => {
-    if (!proveedorUnico || alcanceReal === "vista") return filas;
+    if (!proveedorUnico) return filas;
     const porSku = new Map(filas.map((f) => [f.sku, f]));
-    for (const f of completa.filas) if (!porSku.has(f.sku)) porSku.set(f.sku, f);
+    for (const f of completa.filas) {
+      // Con alcance de marca se mira la MARCA del artículo y no si está a la
+      // vista: uno de la marca que el buscador dejó afuera entra igual, porque
+      // es parte de esa orden.
+      if (!entraEnLaOrden(f, alcanceReal, filtros.marca)) continue;
+      if (!porSku.has(f.sku)) porSku.set(f.sku, f);
+    }
     return [...porSku.values()];
-  }, [filas, completa.filas, proveedorUnico, alcanceReal]);
+  }, [filas, completa.filas, proveedorUnico, alcanceReal, filtros.marca]);
 
   /**
    * La orden como está ahora: el sugerido de cada artículo, con lo editado
@@ -495,13 +523,26 @@ export default function DashboardComprasPage({
    * Sólo tiene sentido con la lista completa: con la lista a medias, todo lo
    * que no llegó todavía parecería haberse recalculado a cero.
    */
-  const recalculados = useMemo(
-    () =>
-      ordenCompletaLista
-        ? queSeRecalculo(borrador.sugeridosGuardados, sugeridosDeHoy, ediciones)
-        : [],
-    [ordenCompletaLista, borrador.sugeridosGuardados, sugeridosDeHoy, ediciones],
-  );
+  const recalculados = useMemo(() => {
+    if (!ordenCompletaLista) return [];
+    const todos = queSeRecalculo(
+      borrador.sugeridosGuardados,
+      sugeridosDeHoy,
+      ediciones,
+    );
+    // SOLO LOS QUE ESTAN EN LA ORDEN. La foto que se guarda cubre al proveedor
+    // entero --tiene que servir sea cual sea el alcance la próxima vez-- pero
+    // avisar de un artículo que no va a salir en este archivo es ruido justo en
+    // el aviso que no puede ser ruido.
+    const enLaOrden = new Set(filasOrden.map((f) => f.sku));
+    return todos.filter((r) => enLaOrden.has(r.sku));
+  }, [
+    ordenCompletaLista,
+    borrador.sugeridosGuardados,
+    sugeridosDeHoy,
+    ediciones,
+    filasOrden,
+  ]);
 
   /**
    * DESCARTAR PIDE CONFIRMAR, y no por trámite: tira la orden a medio armar,
@@ -684,13 +725,11 @@ export default function DashboardComprasPage({
    * par de segundos y sólo la primera vez de cada proveedor en cada corrida:
    * después la consulta está cacheada.
    */
+  // LOS DOS ALCANCES SALEN DE LA LISTA COMPLETA, así que los dos la esperan.
+  // También el de marca: sus artículos son los de esa marca en TODO el
+  // proveedor, no los que el buscador dejó a la vista.
   const puedeBajar =
-    proveedorUnico !== null &&
-    resumen.renglones > 0 &&
-    // Con alcance "vista" la orden son las filas que ya están en pantalla, así
-    // que no hay nada que esperar. La lista completa sólo hace falta cuando la
-    // orden es la del proveedor entero.
-    (alcanceReal === "vista" || ordenCompletaLista);
+    proveedorUnico !== null && ordenCompletaLista && resumen.renglones > 0;
 
   /**
    * Los renglones que hoy tienen cantidad, con su nombre. Es lo que se manda, y
@@ -819,10 +858,17 @@ export default function DashboardComprasPage({
   const sellInHayDatos = (data?.sellInCargado ?? 0) > 0;
 
   /** Saca lo que recorta la vista, dejando proveedor y grupo. */
+  /**
+   * Saca la lupa: deja de recortar la VISTA, sin tocar lo que es la orden.
+   *
+   * LA MARCA SE RESPETA CUANDO ES EL ALCANCE. Si la orden es "sólo AVENT",
+   * borrar la marca la convertiría en la del proveedor entero -- un botón que
+   * dice "ver" no puede cambiar lo que se va a mandar.
+   */
   const verOrdenCompleta = () =>
     cambiar({
       ...filtros,
-      marca: undefined,
+      marca: alcanceReal === "marca" ? filtros.marca : undefined,
       buscar: undefined,
       recortes: RECORTES_POR_DEFECTO,
     });
@@ -1734,11 +1780,7 @@ export default function DashboardComprasPage({
             // del proveedor y a veces lo que se veía: dos cosas distintas con
             // la misma etiqueta, y sin forma de saber cuál se estaba leyendo.
             titulo={
-              proveedorUnico
-                ? alcanceReal === "vista"
-                  ? "Renglones en la orden (esta vista)"
-                  : "Renglones en la orden"
-                : "Renglones a la vista"
+              proveedorUnico ? "Renglones en la orden" : "Renglones a la vista"
             }
             valor={fmtNumero(resumen.renglones)}
             detalle={
@@ -1753,8 +1795,13 @@ export default function DashboardComprasPage({
                 // DE QUIEN ES LA ORDEN. Sin el nombre, el número grande no
                 // dice de qué conjunto habla -- que es justo lo que confundía
                 // con una marca filtrada.
-                proveedorUnico && alcanceReal === "proveedor" && vistaEsRecorte
-                  ? `toda la orden de ${proveedorUnico}`
+                // DE QUE ORDEN HABLA EL NUMERO GRANDE. Sin esto, con una
+                // marca filtrada no hay forma de saber si cuenta la marca o el
+                // proveedor entero -- que es lo que confundía.
+                proveedorUnico && vistaEsRecorte
+                  ? alcanceReal === "marca"
+                    ? `la orden de ${nombreDelAlcanceMarca(filtros.marca)}`
+                    : `toda la orden de ${proveedorUnico}`
                   : null,
                 // Cuántos de esos renglones son mínimos sin respaldo de ventas.
                 // Va acá y no en un aviso aparte porque es una propiedad DE LA
@@ -1884,14 +1931,12 @@ export default function DashboardComprasPage({
               </div>
             )}
 
-            {/* 2. QUE ES LA ORDEN, elegido a mano.
-                   Acá estaba el aviso de "se baja la orden entera": decía lo
-                   que pasaba pero no dejaba cambiarlo, y lo que pasaba no
-                   siempre era lo que hacía falta. Con AVENT filtrada, la
-                   orden metía un CHICCO del mismo proveedor que no se veía
-                   por ningún lado. Ahora se elige, y los KPI de arriba dicen
-                   a cuál de las dos se refieren. */}
-            {laVistaRecorta && (
+            {/* 2. HASTA DONDE LLEGA LA ORDEN, elegido a mano.
+                   Los dos casos son reales: hay proveedores donde la OC va
+                   siempre por marca, y hay veces que se filtra una marca sólo
+                   para vaciarle cantidades y la OC igual va por todo el
+                   proveedor. Acá se elige cuál de los dos es ésta. */}
+            {sePuedeElegirAlcance && (
               <div className="border-line bg-panel-2 flex w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-3 py-2 text-[11px]">
                 <span className="text-ink font-semibold">La orden es:</span>
                 <div className="flex flex-wrap gap-1">
@@ -1908,47 +1953,62 @@ export default function DashboardComprasPage({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAlcance("vista")}
+                    onClick={() => setAlcance("marca")}
                     className={`rounded-lg border px-2.5 py-1 text-[11px] ${
-                      alcanceReal === "vista"
+                      alcanceReal === "marca"
                         ? "border-c1 text-c1 font-medium"
                         : "border-line text-muted hover:text-ink"
                     }`}
                   >
-                    Sólo lo que estoy viendo
+                    Sólo {nombreDelAlcanceMarca(filtros.marca)}
                   </button>
                 </div>
                 <span className="text-muted">
                   {alcanceReal === "proveedor" ? (
                     <>
-                      Tenés puesto {recortanLaOrden.join(" y ")}, pero el
-                      archivo lleva{" "}
+                      El archivo lleva{" "}
                       <strong className="text-ink">
                         los {fmtNumero(resumen.renglones)} renglones
                       </strong>{" "}
-                      del proveedor — no sólo los{" "}
-                      {fmtNumero(resumenVista.renglones)} de esta vista.
+                      del proveedor, con las cantidades que hayas cargado
+                      filtrando marca por marca.
                     </>
                   ) : (
                     <>
-                      El archivo lleva sólo los{" "}
+                      El archivo lleva sólo{" "}
                       <strong className="text-ink">
-                        {fmtNumero(resumen.renglones)} renglones
+                        los {fmtNumero(resumen.renglones)} renglones
                       </strong>{" "}
-                      de esta vista. Lo que cargaste con otros filtros{" "}
+                      de {nombreDelAlcanceMarca(filtros.marca)}. Lo que cargaste
+                      en otras marcas de este proveedor{" "}
                       <strong className="text-ink">no va a salir</strong>.
                     </>
                   )}
                 </span>
-                {alcanceReal === "proveedor" && (
-                  <button
-                    type="button"
-                    onClick={verOrdenCompleta}
-                    className="border-line text-muted hover:bg-panel hover:text-ink ml-auto rounded-lg border px-2.5 py-1 text-[11px] font-medium"
-                  >
-                    Ver la orden completa
-                  </button>
-                )}
+              </div>
+            )}
+
+            {/* 2b. EL BUSCADOR Y EL SELECTOR MOSTRAR NO RECORTAN LA ORDEN, y
+                    conviene decirlo donde se están usando. Son la lupa con la
+                    que se mira, no un conjunto que alguien pueda nombrar: si
+                    recortaran, olvidarse una palabra tipeada mandaría media
+                    orden sin que nada avisara. */}
+            {proveedorUnico && (otroRecorte.length > 0) && (
+              <div className="border-line bg-panel-2 text-muted flex w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-3 py-2 text-[11px]">
+                <span>
+                  Tenés puesto {otroRecorte.join(" y ")}, pero eso{" "}
+                  <strong className="text-ink">no recorta la orden</strong>:
+                  sirve para mirar y para cargar cantidades. Acá ves{" "}
+                  {fmtNumero(resumenVista.renglones)} de los{" "}
+                  {fmtNumero(resumen.renglones)} renglones que van al archivo.
+                </span>
+                <button
+                  type="button"
+                  onClick={verOrdenCompleta}
+                  className="border-line text-muted hover:bg-panel hover:text-ink ml-auto rounded-lg border px-2.5 py-1 text-[11px] font-medium"
+                >
+                  Ver la orden completa
+                </button>
               </div>
             )}
 
@@ -2137,7 +2197,7 @@ export default function DashboardComprasPage({
               </p>
               {/* EL MOMENTO DE NO VOLVER ATRAS merece decir QUE se manda con
                   todas las letras, sea cual sea el alcance elegido. */}
-              {laVistaRecorta && (
+              {vistaEsRecorte && (
                 <p className="text-muted text-xs">
                   {alcanceReal === "proveedor" ? (
                     <>
@@ -2152,12 +2212,13 @@ export default function DashboardComprasPage({
                     </>
                   ) : (
                     <>
-                      Se manda <strong>sólo lo que estás viendo</strong>: los{" "}
+                      Se manda <strong>sólo {nombreDelAlcanceMarca(filtros.marca)}</strong>:
+                      los{" "}
                       <strong className="text-ink">
                         {fmtNumero(resumen.renglones)} renglones
                       </strong>{" "}
-                      que pasan {recortanLaOrden.join(" y ")}. Lo que hayas
-                      cargado con otros filtros <strong>no va a salir</strong>.
+                      de acá abajo. Lo que hayas cargado en otras marcas de{" "}
+                      {proveedorUnico} <strong>no va a salir</strong>.
                     </>
                   )}
                 </p>

@@ -227,6 +227,70 @@ export const RECORTES_COMPRAS = [
 export const RECORTES_POR_DEFECTO: RecorteCompras[] = ["sugerido"];
 
 /**
+ * HASTA DONDE LLEGA LA ORDEN.
+ *
+ * "proveedor" es todo lo que el proveedor tiene; "marca", sólo las marcas
+ * elegidas en el filtro.
+ */
+export type AlcanceOrden = "proveedor" | "marca";
+
+/**
+ * LO UNICO QUE PUEDE RECORTAR UNA ORDEN ES LA MARCA.
+ *
+ * Esta es la regla, y vale la pena decir por qué no son tres.
+ *
+ * Una OC existe en el mundo real: se le manda a un proveedor y, a veces, es de
+ * una marca sola --hay proveedores donde las órdenes van siempre así--. Esos
+ * son conjuntos con nombre, que alguien puede decir en voz alta y otro puede
+ * verificar.
+ *
+ * El buscador y el selector Mostrar NO son conjuntos con nombre: son la lupa
+ * con la que se mira. "Los artículos que dicen ger" no es una orden de compra,
+ * es lo que alguien tenía tipeado en ese momento. Si recortaran la orden,
+ * bastaría olvidarse una palabra en un campo para mandarle al proveedor la
+ * mitad de lo que se revisó -- y el archivo saldría sin ningún error.
+ *
+ * Por eso se puede mirar con los filtros que sea, cargar cantidades con los
+ * filtros que sea, y la orden sigue siendo la misma: el proveedor, o el
+ * proveedor y una marca.
+ */
+export function alcanceDisponible(marcas: string[] | undefined): boolean {
+  return (marcas?.length ?? 0) > 0;
+}
+
+/**
+ * Cómo se nombra el alcance de marca en un botón: "Sólo AVENT".
+ *
+ * CON UNA SE DICE CUAL. Es el caso de todos los días y el nombre entra holgado;
+ * "Sólo la marca elegida" obligaría a mirar el filtro de arriba para saber de
+ * qué orden se está hablando justo antes de mandarla.
+ */
+export function nombreDelAlcanceMarca(marcas: string[] | undefined): string {
+  const limpias = (marcas ?? []).filter((m) => m && m.trim() !== "");
+  if (limpias.length === 0) return "la marca elegida";
+  if (limpias.length === 1) return limpias[0]!;
+  return `las ${limpias.length} marcas elegidas`;
+}
+
+/**
+ * Si un artículo entra en la orden según el alcance.
+ *
+ * Con alcance de marca se compara contra la marca del artículo y NO contra lo
+ * que se esté viendo: un artículo de la marca que quedó fuera de la vista por
+ * el buscador entra igual, porque es parte de esa orden.
+ */
+export function entraEnLaOrden(
+  fila: { marca: string | null },
+  alcance: AlcanceOrden,
+  marcas: string[] | undefined,
+): boolean {
+  if (alcance === "proveedor") return true;
+  const elegidas = marcas ?? [];
+  if (elegidas.length === 0) return true;
+  return elegidas.includes(fila.marca ?? "");
+}
+
+/**
  * QUE DE LA VISTA ACTUAL ESTA MOSTRANDO MENOS QUE LA ORDEN.
  *
  * La orden ES del proveedor entero: se arma mirando de a poco --una marca, lo
