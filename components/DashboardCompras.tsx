@@ -30,6 +30,7 @@ import {
   CAIDA_SELL_IN_PARA_AVISAR,
   coberturaValida,
   DIAS_DE_VIDA_BORRADOR,
+  renglonesConCantidad,
   RECORTES_COMPRAS,
   queRecortaLaOrden,
   queSeRecalculo,
@@ -56,6 +57,7 @@ import {
 } from "@/lib/stock";
 import { useAvisoAlSalir } from "@/lib/useAvisoAlSalir";
 import { useBorradorOrden } from "@/lib/useBorradorOrden";
+import { useBorradoresVigentes } from "@/lib/useBorradoresVigentes";
 import { useOrdenCompleta } from "@/lib/useOrdenCompleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import { RESUMEN_CABECERA, type OrdenSigma } from "@/lib/sigma-orden";
@@ -417,6 +419,40 @@ export default function DashboardComprasPage({
     sugeridosDeHoy,
     listo: ordenCompletaLista,
   });
+
+  /**
+   * LA LISTA DE ORDENES A MEDIO ARMAR, para poder volver a una.
+   *
+   * El borrador se retoma solo, pero sólo cuando ya elegiste el proveedor --
+   * o sea, cuando ya te acordabas de que lo tenías. Sin esta lista no hay
+   * forma de enterarse de que hay trabajo guardado, y una función invisible es
+   * casi lo mismo que no tenerla.
+   */
+  const { borradores: guardados } = useBorradoresVigentes();
+
+  /**
+   * La lista que se muestra: los OTROS proveedores salen del servidor y el que
+   * se está mirando sale de la pantalla.
+   *
+   * SE DERIVA EN VEZ DE VOLVER A PEDIRLA, y no es una optimización: el
+   * borrador del proveedor actual cambia con cada tecla, así que mantenerlo al
+   * día desde el servidor sería pedir la lista entera dos veces por guardado.
+   * Y además quedaría siempre un instante atrasada justo donde se la está
+   * mirando.
+   */
+  const borradores = useMemo(() => {
+    const otros = guardados.filter((b) => b.proveedor !== proveedorUnico);
+    const cuantos = renglonesConCantidad(ediciones);
+    if (!proveedorUnico || cuantos === 0) return otros;
+    return [
+      {
+        proveedor: proveedorUnico,
+        renglones: cuantos,
+        actualizadoEn: "ahora",
+      },
+      ...otros,
+    ];
+  }, [guardados, proveedorUnico, ediciones]);
 
   /**
    * LAS CANTIDADES QUE SE MOVIERON SOLAS desde que se guardó el borrador.
@@ -1384,6 +1420,53 @@ export default function DashboardComprasPage({
           <BotonActualizar onDatosNuevos={recargar} conSellIn />
         </div>
       </div>
+
+      {/* LAS ORDENES A MEDIO ARMAR, arriba de todo.
+          Va antes que los filtros porque es lo primero que hay que saber al
+          entrar: que hay trabajo empezado y dónde está. Abajo de la tabla no
+          lo vería nadie, que es exactamente lo que pasaba hasta ahora. */}
+      {borradores.length > 0 && (
+        <div className="border-c1/40 bg-c1/5 flex flex-wrap items-center gap-2 rounded-xl border p-3">
+          <span className="text-ink text-xs font-medium">
+            {borradores.length === 1
+              ? "Tenés una orden a medio armar:"
+              : `Tenés ${fmtNumero(borradores.length)} órdenes a medio armar:`}
+          </span>
+          {borradores.map((b) => {
+            const actual = b.proveedor === proveedorUnico;
+            return (
+              <button
+                key={b.proveedor}
+                type="button"
+                // Elegir el proveedor es todo lo que hace falta: el borrador se
+                // retoma solo cuando la pantalla queda en ese proveedor.
+                onClick={() => cambiar({ ...filtros, proveedor: [b.proveedor] })}
+                disabled={actual}
+                title={`Último cambio: ${b.actualizadoEn}`}
+                className={`rounded-lg border px-2.5 py-1 text-[11px] ${
+                  actual
+                    ? "border-c1 text-c1 cursor-default"
+                    : "border-line text-muted hover:bg-panel-2 hover:text-ink"
+                }`}
+              >
+                <span className="font-medium">{b.proveedor}</span>
+                <span className="opacity-70">
+                  {" · "}
+                  {b.renglones === 1
+                    ? "1 renglón"
+                    : `${fmtNumero(b.renglones)} renglones`}
+                  {" · "}
+                  {b.actualizadoEn}
+                </span>
+                {actual && <span className="opacity-70">{" · estás acá"}</span>}
+              </button>
+            );
+          })}
+          <span className="text-muted ml-auto text-[11px]">
+            Se guardan {DIAS_DE_VIDA_BORRADOR} días y después se borran solos.
+          </span>
+        </div>
+      )}
 
       <div className="border-line bg-panel flex flex-col gap-3 rounded-xl border p-3">
         <div className="flex flex-wrap items-end gap-3">

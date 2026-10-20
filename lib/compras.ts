@@ -325,6 +325,27 @@ export function firmaDeLasDecisiones(
   ]);
 }
 
+/**
+ * CUANTOS RENGLONES DE UN BORRADOR CUENTAN COMO TRABAJO HECHO.
+ *
+ * Los que tienen cantidad. Un borrador donde sólo se vaciaron cosas no es una
+ * orden a medio armar: es una orden que se decidió no hacer, y anunciarla como
+ * pendiente mandaría a alguien a terminar algo que ya se terminó.
+ *
+ * TIENE QUE DAR LO MISMO QUE LA CONSULTA que arma la lista del servidor (ver
+ * `getBorradoresVigentes`, que filtra por (r.value->>'cantidad')::numeric > 0).
+ * La pantalla cuenta el borrador del proveedor que se está mirando y el
+ * servidor cuenta los otros: si las dos cuentas no coincidieran, el mismo
+ * borrador diría una cosa estando parado encima y otra al lado.
+ */
+export function renglonesConCantidad(
+  ediciones: ReadonlyMap<string, { cantidad: number }>,
+): number {
+  let cuantos = 0;
+  for (const r of ediciones.values()) if (r.cantidad > 0) cuantos += 1;
+  return cuantos;
+}
+
 /** Un sugerido que se movió entre que se guardó el borrador y ahora. */
 export type Recalculado = {
   sku: string;

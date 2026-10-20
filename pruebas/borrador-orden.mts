@@ -25,6 +25,7 @@
 import {
   firmaDeLasDecisiones,
   queSeRecalculo,
+  renglonesConCantidad,
   type RenglonOrden,
 } from "@/lib/compras";
 
@@ -268,6 +269,52 @@ revisar(
   "el proveedor entra en la firma",
   firmaDeLasDecisiones("COTY", "", new Map([["A", renglon()]])) !== base,
   true,
+);
+
+// --- Cuántos renglones cuentan como trabajo hecho --------------------------
+//
+// Es lo que dice la lista de "órdenes a medio armar". Tiene que dar lo MISMO
+// que la consulta del servidor, que filtra por cantidad > 0: la pantalla
+// cuenta el borrador del proveedor que se está mirando y el servidor cuenta
+// los otros. Si no coincidieran, el mismo borrador diría una cosa estando
+// parado encima y otra al lado.
+
+revisar("sin ediciones no hay nada empezado", renglonesConCantidad(new Map()), 0);
+revisar(
+  "dos con cantidad son dos",
+  renglonesConCantidad(
+    new Map([
+      ["A", { cantidad: 3 }],
+      ["B", { cantidad: 10 }],
+    ]),
+  ),
+  2,
+);
+
+// LOS CEROS NO CUENTAN, y es la mitad del sentido: un borrador donde sólo se
+// vaciaron cosas no es una orden a medio armar, es una orden que se decidió no
+// hacer. Anunciarla como pendiente mandaría a alguien a terminar algo que ya
+// se terminó.
+revisar(
+  "vaciar no es empezar",
+  renglonesConCantidad(
+    new Map([
+      ["A", { cantidad: 0 }],
+      ["B", { cantidad: 0 }],
+    ]),
+  ),
+  0,
+);
+revisar(
+  "mezcla: sólo los que tienen cantidad",
+  renglonesConCantidad(
+    new Map([
+      ["A", { cantidad: 5 }],
+      ["B", { cantidad: 0 }],
+      ["C", { cantidad: 1 }],
+    ]),
+  ),
+  2,
 );
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");

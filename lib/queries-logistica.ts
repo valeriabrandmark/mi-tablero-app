@@ -2,6 +2,7 @@ import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import type {
   DashboardLogistica,
+  FilaArticuloEnvio,
   FilaEnvio,
   FiltrosLogistica,
   OpcionesLogistica,
@@ -357,6 +358,87 @@ async function getTablaEnvios(f: FiltrosLogistica): Promise<FilaEnvio[]> {
      order by e.flete desc nulls last
      limit 100`,
     w.params,
+  );
+}
+
+/**
+ * LOS ARTICULOS DE UN ENVIO, o de uno de sus comprobantes.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE EXISTE
+ *
+ * La tabla de envíos contesta CUANTO costó el flete y cómo se repartió. Esto
+ * contesta la siguiente pregunta, que es la que importa: por qué ese
+ * comprobante dejó tan poco.
+ *
+ * Y la respuesta casi nunca es "en general": está en dos o tres renglones. En
+ * el envío 12750394 conviven una pala de pie con margen de +$7.445 y $34.936
+ * de flete --el flete se la comió-- y un perfume con margen de -$4.863 y $121
+ * de flete --se vendió por debajo del costo--. Los dos terminan en rojo y se
+ * arreglan de maneras opuestas. Ver `porQueElMargen` en lib/logistica.ts.
+ *
+ * ---------------------------------------------------------------------------
+ * NO LLEVA LOS FILTROS DE LA PAGINA, Y ES A PROPOSITO
+ *
+ * Se pide por preparación y comprobante, que ya identifican un conjunto
+ * cerrado. Si además se le aplicara el filtro de proveedor de arriba, alguien
+ * abriría un comprobante para ver por qué da mal y le faltarían renglones --
+ * justo los que explican el número. Un desglose que no desglosa todo no sirve.
+ *
+ * ---------------------------------------------------------------------------
+ * SE TRAE A DEMANDA
+ *
+ * Un envío puede tener 236 renglones y la tabla muestra 100 envíos: mandarlo
+ * todo siempre serían decenas de miles de filas para las tres que alguien va a
+ * abrir. Se pide al abrir y no se cachea con el resto de la página.
+ */
+export async function getArticulosDelEnvio(
+  preparacionId: number,
+  comprobante: string | null,
+): Promise<FilaArticuloEnvio[]> {
+  const params: unknown[] = [preparacionId];
+  let filtroComprobante = "";
+  if (comprobante) {
+    params.push(comprobante);
+    filtroComprobante = `and fv.comprobante = $${params.length}`;
+  }
+
+  return query<FilaArticuloEnvio>(
+    `with renglones as (
+       select fv.sku, fv.producto, fv.marca, fv.proveedor, fv.comprobante,
+              fv.cantidad,
+              fv.precio_neto, fv.costo_unitario, fv.margen_total,
+              fvf.tiene_flete_real,
+              -- La misma división que el resto de la página: el join a
+              -- fact_ventas repite la fila de flete cuando una línea se
+              -- facturó en dos comprobantes. Ver cteLineas.
+              (fvf.flete_prorrateado / coalesce(fvf.lineas_venta, 1)) as flete
+       from gold.fact_ventas_flete fvf
+       join gold.fact_ventas fv
+         on fv.nro_orden::text = fvf.nro_orden and fv.sku = fvf.sku
+       join gold.reporte_logistica rl on rl.clave_fila = fvf.clave_fila
+       where rl.preparacion_id = $1
+         ${filtroComprobante}
+     )
+     select sku, producto, marca, proveedor, comprobante,
+            coalesce(cantidad, 0)::float8                          as cantidad,
+            coalesce(precio_neto, 0)::float8                       as "precioNeto",
+            coalesce(costo_unitario, 0)::float8                    as "costoUnitario",
+            coalesce(precio_neto * cantidad, 0)::float8            as facturacion,
+            coalesce(margen_total, 0)::float8                      as margen,
+            coalesce(flete, 0)::float8                             as flete,
+            coalesce(margen_total - flete, 0)::float8              as "margenReal",
+            case when coalesce(precio_neto * cantidad, 0) = 0 then null
+                 else (margen_total - flete) / (precio_neto * cantidad)
+            end::float8                                            as "pctMargenReal",
+            coalesce(tiene_flete_real, false)                      as "fleteReal"
+     from renglones
+     -- PEOR PRIMERO: lo que hay que mirar está arriba. Ordenar por SKU
+     -- obligaría a recorrer 236 renglones para encontrar los tres que
+     -- explican el número.
+     order by (margen_total - flete) asc nulls last
+     limit 500`,
+    params,
   );
 }
 
