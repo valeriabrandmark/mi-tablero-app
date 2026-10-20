@@ -86,6 +86,38 @@ revisar(
   "Todos (3)",
 );
 
+// UNA SOLA OPCION ELEGIDA SE NOMBRA, aunque además sea la única que había.
+//
+// EL CASO QUE LO MOTIVO, con los nombres de verdad: filtrando por la marca
+// AVENT, el selector de Proveedor se recorta a uno solo --PARALLEL SA, que es
+// el único que la vende-- y elegirlo es a la vez "elegir todo" y "elegir ese".
+// El cartel decía "Todos (1)": una etiqueta que no dice nada justo cuando hay
+// algo importante para decir.
+//
+// Y no es cosmético: en Compras, tener UN proveedor elegido cambia qué es la
+// orden. "Todos (1)" esconde al responsable de que los números de arriba
+// pasen a hablar de PARALLEL SA entero en vez de la marca que se está viendo.
+revisar(
+  "con una sola opción, elegirla dice su nombre y no «Todos (1)»",
+  resumenSeleccion({ elegidos: ["br"], excluidos: [], total: 1, todos: "Todos", nombre }),
+  "Braun",
+);
+
+// Y sigue sin decir lo mismo que no elegir nada, que es el punto de arriba.
+revisar(
+  "con una sola opción, no elegir nada sigue siendo Todos",
+  resumenSeleccion({ elegidos: [], excluidos: ["br"], total: 1, todos: "Todos", nombre }),
+  "Todos",
+);
+
+// Con dos o más, elegir todas sigue diciendo "Todos (N)": ahí el nombre de una
+// sola mentiría y la lista entera no entra.
+revisar(
+  "con dos elegidas de dos, vuelve a ser Todos (2)",
+  resumenSeleccion({ elegidos: ["br", "gi"], excluidos: [], total: 2, todos: "Todos", nombre }),
+  "Todos (2)",
+);
+
 // Con una sola afuera se dice CUAL: es el caso de "seleccioné todo y saqué una"
 // y "Todos menos 1" obligaría a abrir el desplegable para saber cuál.
 revisar(
