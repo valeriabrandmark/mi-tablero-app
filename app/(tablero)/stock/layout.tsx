@@ -1,4 +1,5 @@
 import Pestanas, { type Pestana } from "@/components/Pestanas";
+import { enConstruccion } from "@/lib/permisos";
 
 /**
  * Las pestañas de Stock.
@@ -23,7 +24,12 @@ const PESTANAS: Pestana[] = [
 export default function StockLayout({ children }: LayoutProps<"/stock">) {
   return (
     <>
-      <Pestanas pestanas={PESTANAS} />
+      <Pestanas
+        pestanas={PESTANAS.map((p) => ({
+          ...p,
+          enConstruccion: enConstruccion(p.href),
+        }))}
+      />
       {children}
     </>
   );

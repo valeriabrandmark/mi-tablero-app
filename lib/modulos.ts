@@ -94,7 +94,9 @@ export const MODULOS: Modulo[] = [
     // El permiso de editar acá NO es un detalle: es mandar una orden a Sigma,
     // que no tiene deshacer. Ver `numeroDeSigma` en permisos.ts.
     queEdita: "mandar órdenes de compra al ERP",
-    rutas: ["/stock/compras", "/api/compras"],
+    // La carga de facturas es de Compras: cruza contra las órdenes que salen
+    // de acá y lee el mismo historial.
+    rutas: ["/stock/compras", "/api/compras", "/facturas-compra"],
   },
   {
     clave: "meli",
