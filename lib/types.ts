@@ -123,6 +123,14 @@ export type FiltrosLogistica = {
   /** 'real' | 'estimado' — espeja el slicer "Estado flete". */
   estadoFlete?: string[];
   /**
+   * Término libre: pega contra el cliente, su CUIT, el comprobante, el número
+   * de preparación y el de pedido.
+   *
+   * NO es una lista: es un término suelto, así que viaja aparte en la URL y no
+   * se puede "alternar" como los demás.
+   */
+  buscar?: string;
+  /**
    * NO es un filtro sino un modo de cálculo: elige qué flete se descuenta del
    * margen. Por eso sigue siendo de opción única.
    */
@@ -171,19 +179,58 @@ export type PuntoEtiqueta = {
   valor2?: number;
 };
 
-export type FilaComprobante = {
+/**
+ * UN COMPROBANTE DENTRO DE UN ENVIO.
+ *
+ * El flete se paga por ENVIO y se reparte entre los comprobantes que viajaron
+ * en él. Esta fila es una porción de ese reparto.
+ */
+export type FilaComprobanteEnvio = {
   comprobante: string | null;
   nroOrden: string | null;
-  cliente: string | null;
-  provincia: string | null;
-  fecha: string | null;
+  /** Quién facturó: un mismo envío puede llevar Quo y Noa a la vez. */
+  empresa: string | null;
   facturacion: number;
+  /** Lo que de ese envío le tocó a este comprobante. */
   flete: number;
+  /** El flete sobre lo que facturó este comprobante. */
   pctFlete: number | null;
   /** Renglones con la factura del transportista ya cargada. */
   lineasReales: string;
   /** Renglones del comprobante. Si no coincide con `lineasReales`, hay mezcla. */
   lineasTotales: string;
+};
+
+/**
+ * UN ENVIO: una preparación, el flete que costó y los comprobantes que
+ * viajaron adentro.
+ *
+ * ES EL GRANO EN EL QUE SE PAGA EL FLETE. Antes esta tabla iba por comprobante,
+ * que es el grano en el que se COBRA: con un envío partido en cinco facturas se
+ * veían cinco fletes sueltos y en ningún lado lo que salió el envío. Ahora el
+ * reparto entre comprobantes es el detalle de la fila, que es lo que era.
+ */
+export type FilaEnvio = {
+  preparacionId: string;
+  fecha: string | null;
+  cliente: string | null;
+  /** El documento del cliente, para poder buscarlo. `null` si no está cargado. */
+  documento: string | null;
+  provincia: string | null;
+  localidad: string | null;
+  transporte: string | null;
+  /** Las empresas que facturaron en este envío. */
+  empresas: string[];
+  kg: number | null;
+  bultos: number | null;
+  facturacion: number;
+  /** Lo que costó el envío: la suma de lo prorrateado a sus renglones. */
+  flete: number;
+  pctFlete: number | null;
+  lineasReales: string;
+  lineasTotales: string;
+  /** Cómo se repartió ese flete. Es el detalle que se abre. */
+  comprobantes: FilaComprobanteEnvio[];
 };
 
 export type OpcionesLogistica = {
@@ -202,7 +249,7 @@ export type DashboardLogistica = {
   /** Denominadores de las tortas: totales SIN el filtro cruzado de proveedor. */
   totalesProveedor: { unidades: number; flete: number };
   pctFletePorProvincia: PuntoEtiqueta[];
-  comprobantes: FilaComprobante[];
+  envios: FilaEnvio[];
   generadoEn: string;
 };
 

@@ -3,7 +3,7 @@ import {
   getDashboardLogistica,
   getOpcionesLogistica,
 } from "@/lib/queries-logistica";
-import { lista } from "@/lib/filtros";
+import { LARGO_MAX_BUSQUEDA, lista } from "@/lib/filtros";
 import type { FiltrosLogistica } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -19,6 +19,9 @@ export async function GET(request: NextRequest) {
     provincia: lista(sp, "provincia"),
     estadoFlete: lista(sp, "estadoFlete"),
     proveedor: lista(sp, "proveedor"),
+    // El término libre no es una lista: viaja solo y se recorta acá, que es
+    // donde entra lo que alguien pueda escribir a mano en la URL.
+    buscar: sp.get("buscar")?.trim().slice(0, LARGO_MAX_BUSQUEDA) || undefined,
   };
 
   try {
