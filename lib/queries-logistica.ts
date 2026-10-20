@@ -2,7 +2,7 @@ import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import type {
   DashboardLogistica,
-  FilaComprobante,
+  FilaEnvio,
   FiltrosLogistica,
   OpcionesLogistica,
   PuntoEtiqueta,
@@ -30,7 +30,7 @@ import { agregarFiltro, vacio } from "@/lib/filtros";
 
 type Where = { sql: string; params: unknown[] };
 
-type ClaveLista = Exclude<keyof FiltrosLogistica, "estadoFlete">;
+type ClaveLista = Exclude<keyof FiltrosLogistica, "estadoFlete" | "buscar">;
 
 const OPCIONALES: [ClaveLista, string][] = [
   ["vendedor", "fv.vendedor"],
@@ -55,6 +55,36 @@ function whereBase(
 
   for (const [key, columna] of OPCIONALES) {
     if (!omitir.includes(key)) agregarFiltro(clauses, params, columna, f[key]);
+  }
+
+  // EL BUSCADOR PEGA CONTRA LAS CINCO COSAS CON LAS QUE SE BUSCA UN ENVIO.
+  //
+  // Nadie llega a un envío por el mismo lado: desde una queja viene el nombre
+  // del cliente, desde contabilidad el comprobante o el CUIT, y desde depósito
+  // el número de preparación o de pedido. Un buscador que sólo mirara el
+  // nombre obligaría a saber de antemano dónde mirar.
+  //
+  // El CUIT entra sin guiones de los dos lados: en la base está "20-11111111-1"
+  // y nadie lo escribe así cuando lo está buscando. Va contra el maestro de
+  // clientes por código, que es lo único que tiene el documento.
+  const termino = f.buscar?.trim();
+  if (termino) {
+    params.push(`%${termino.toUpperCase()}%`);
+    const t = params.length;
+    params.push(`%${termino.replace(/[^0-9A-Za-z]/g, "")}%`);
+    const d = params.length;
+    clauses.push(
+      `(upper(rl.cliente) like $${t}
+        or upper(coalesce(fv.cliente, '')) like $${t}
+        or upper(coalesce(fv.comprobante, '')) like $${t}
+        or rl.preparacion_id::text like $${d}
+        or upper(coalesce(rl.pedidos, '')) like $${t}
+        or rl.cliente_codigo in (
+             select trim(c.id) from bronze.sigma_clientes c
+             where regexp_replace(coalesce(c."numeroDocumento", ''), '[^0-9A-Za-z]', '', 'g') like $${d}
+               and coalesce(c."numeroDocumento", '') <> ''
+           ))`,
+    );
   }
 
   // Estado de flete: con los dos tildados no hay nada que filtrar, igual que
@@ -90,8 +120,13 @@ function cteLineas(w: Where) {
            (fvf.flete_prorrateado / coalesce(fvf.lineas_venta, 1))::float8 as flete_prorrateado,
            fvf.tiene_flete_real,
            fv.proveedor, fv.cliente, fv.comprobante, fv.nro_orden, fv.fecha,
-           fv.precio_neto, fv.cantidad, fv.margen_total,
-           rl.provincia
+           fv.precio_neto, fv.cantidad, fv.margen_total, fv.empresa,
+           rl.provincia,
+           -- Lo del ENVIO. El cliente y la fecha van aliasados porque los de la
+           -- venta ya ocupan esos nombres, y no son lo mismo: la fecha del
+           -- envío es la del despacho, no la de la factura.
+           rl.preparacion_id, rl.transporte, rl.localidad, rl.cliente_codigo,
+           rl.cliente as cliente_envio, rl.fecha as fecha_envio
     from gold.fact_ventas_flete fvf
     join gold.fact_ventas fv
       on fv.nro_orden::text = fvf.nro_orden and fv.sku = fvf.sku
@@ -211,33 +246,115 @@ async function getGraficos(f: FiltrosLogistica) {
   };
 }
 
-/** Tabla "Comprobantes Asociados". */
-async function getComprobantes(
-  f: FiltrosLogistica,
-): Promise<FilaComprobante[]> {
+/**
+ * Tabla "Envíos": una fila por PREPARACION, con el reparto del flete adentro.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE POR PREPARACION Y NO POR COMPROBANTE
+ *
+ * El flete se PAGA por envío y se COBRA por comprobante. Esta tabla iba por
+ * comprobante, que es el grano equivocado para mirar un costo: un envío
+ * partido en cinco facturas se veía como cinco fletes sueltos, y lo que
+ * realmente salió ese envío no estaba en ningún lado. Peor todavía, un mismo
+ * envío puede llevar facturas de Quo y de Noa a la vez (ver `empresas`), así
+ * que ni sumando a ojo se llegaba al número.
+ *
+ * Ahora la fila es el envío y el reparto entre comprobantes es su detalle.
+ *
+ * ---------------------------------------------------------------------------
+ * EL REPARTO CIERRA, Y ESO ESTA MEDIDO
+ *
+ * La suma de lo prorrateado a los renglones de un envío da exactamente lo que
+ * facturó el transportista (bronze.fletes.neto_cobrado_transporte): de 453
+ * envíos con flete real, ninguno se aparta más de nueve centavos, que es
+ * redondeo. Por eso el detalle puede mostrar porcentajes del total del envío
+ * sin aclarar nada: suman 100.
+ *
+ * ---------------------------------------------------------------------------
+ * LOS KG Y LOS BULTOS VAN APARTE
+ *
+ * Viven a nivel ENVIO en reporte_logistica, así que sumarlos sobre las líneas
+ * los multiplicaría por la cantidad de renglones. Y una preparación puede
+ * tener DOS filas ahí --una por empresa, con el sufijo -Quo / -Noa en
+ * `clave_fila`-- así que se suman esas dos y no se toma una.
+ */
+async function getTablaEnvios(f: FiltrosLogistica): Promise<FilaEnvio[]> {
   const w = whereBase(f);
-  return query<FilaComprobante>(
-    `${cteLineas(w)}
-     select comprobante,
-            max(nro_orden::text) as "nroOrden",
-            max(cliente) as cliente,
-            max(provincia) as provincia,
-            to_char(max(fecha), 'YYYY-MM-DD') as fecha,
-            coalesce(sum(precio_neto * cantidad), 0)::float8 as facturacion,
-            coalesce(sum(flete_prorrateado), 0)::float8 as flete,
-            case when sum(precio_neto * cantidad) = 0 then null
-                 else sum(flete_prorrateado) / sum(precio_neto * cantidad)
-            end::float8 as "pctFlete",
-            -- Un comprobante puede mezclar: tiene varios SKUs y el flete se
-            -- resuelve por preparacion, asi que algunos renglones pueden tener
-            -- la factura del transportista cargada y otros no. Por eso van las
-            -- dos cuentas y no un booleano, que obligaria a elegir un lado.
-            count(*) filter (where tiene_flete_real) as "lineasReales",
-            count(*) as "lineasTotales"
-     from lineas
-     where comprobante is not null
-     group by comprobante
-     order by flete desc nulls last
+  return query<FilaEnvio>(
+    `${cteLineas(w)},
+     por_envio as (
+       select preparacion_id,
+              min(fecha_envio)                                   as fecha,
+              max(cliente_envio)                                 as cliente,
+              max(cliente_codigo)                                as cliente_codigo,
+              max(provincia)                                     as provincia,
+              max(localidad)                                     as localidad,
+              max(transporte)                                    as transporte,
+              coalesce(sum(flete_prorrateado), 0)::float8        as flete,
+              coalesce(sum(precio_neto * cantidad), 0)::float8   as facturacion,
+              count(*) filter (where tiene_flete_real)           as lineas_reales,
+              count(*)                                           as lineas_totales,
+              array_remove(array_agg(distinct empresa), null)    as empresas
+       from lineas
+       group by preparacion_id
+     ),
+     por_comprobante as (
+       select preparacion_id,
+              comprobante,
+              max(empresa)                                       as empresa,
+              max(nro_orden::text)                               as nro_orden,
+              coalesce(sum(flete_prorrateado), 0)::float8        as flete,
+              coalesce(sum(precio_neto * cantidad), 0)::float8   as facturacion,
+              count(*) filter (where tiene_flete_real)           as lineas_reales,
+              count(*)                                           as lineas_totales
+       from lineas
+       where comprobante is not null
+       group by preparacion_id, comprobante
+     ),
+     bultos as (
+       select rl.preparacion_id,
+              sum(rl.kg)::float8      as kg,
+              sum(rl.bultos)::float8  as bultos
+       from gold.reporte_logistica rl
+       where rl.preparacion_id in (select preparacion_id from por_envio)
+       group by rl.preparacion_id
+     )
+     select e.preparacion_id::text                      as "preparacionId",
+            to_char(e.fecha, 'YYYY-MM-DD')              as fecha,
+            e.cliente,
+            -- El documento sale del maestro por código. Queda null para los
+            -- clientes que no están cargados ahí (24 de 236 códigos), que es
+            -- mejor que inventar uno.
+            nullif(trim(c."numeroDocumento"), '')       as documento,
+            e.provincia, e.localidad, e.transporte,
+            e.empresas,
+            b.kg, b.bultos,
+            e.facturacion,
+            e.flete,
+            case when e.facturacion = 0 then null
+                 else e.flete / e.facturacion
+            end::float8                                 as "pctFlete",
+            e.lineas_reales                             as "lineasReales",
+            e.lineas_totales                            as "lineasTotales",
+            coalesce(
+              (select jsonb_agg(jsonb_build_object(
+                        'comprobante',   k.comprobante,
+                        'nroOrden',      k.nro_orden,
+                        'empresa',       k.empresa,
+                        'facturacion',   k.facturacion,
+                        'flete',         k.flete,
+                        'pctFlete',      case when k.facturacion = 0 then null
+                                              else k.flete / k.facturacion end,
+                        'lineasReales',  k.lineas_reales,
+                        'lineasTotales', k.lineas_totales)
+                      order by k.flete desc nulls last, k.comprobante)
+                 from por_comprobante k
+                where k.preparacion_id = e.preparacion_id),
+              '[]'::jsonb)                              as comprobantes
+     from por_envio e
+     left join bultos b on b.preparacion_id = e.preparacion_id
+     left join bronze.sigma_clientes c on trim(c.id) = trim(e.cliente_codigo)
+     order by e.flete desc nulls last
      limit 100`,
     w.params,
   );
@@ -292,11 +409,11 @@ async function getOpcionesLogisticaDirecto(): Promise<OpcionesLogistica> {
 async function getDashboardLogisticaDirecto(
   f: FiltrosLogistica,
 ): Promise<DashboardLogistica> {
-  const [totales, envios, graficos, comprobantes] = await Promise.all([
+  const [totales, envios, graficos, tablaEnvios] = await Promise.all([
     getTotales(f),
     getEnvios(f),
     getGraficos(f),
-    getComprobantes(f),
+    getTablaEnvios(f),
   ]);
 
   // EL MARGEN AJUSTADO DESCUENTA TODO EL FLETE, SIEMPRE.
@@ -336,7 +453,7 @@ async function getDashboardLogisticaDirecto(
     fletePorProveedor: graficos.flete,
     totalesProveedor: graficos.totales,
     pctFletePorProvincia: graficos.provincias,
-    comprobantes,
+    envios: tablaEnvios,
     generadoEn: new Date().toISOString(),
   };
 }

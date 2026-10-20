@@ -26,11 +26,17 @@ import {
   fmtNumero,
   fmtPct,
 } from "@/lib/format";
+import {
+  destino,
+  origenDelFlete,
+  repartoDelEnvio,
+  resumenEmpresas,
+} from "@/lib/logistica";
 import { PALETA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
   DashboardLogistica,
-  FilaComprobante,
+  FilaEnvio,
   FiltrosLogistica,
   OpcionesLogistica,
 } from "@/lib/types";
@@ -38,28 +44,11 @@ import type {
 type Respuesta = DashboardLogistica & { opciones: OpcionesLogistica | null };
 
 /**
- * De dónde sale el flete del comprobante.
- *
- * Son tres y no dos: el flete se resuelve por PREPARACIÓN, y un comprobante con
- * varios SKUs puede tener parte de sus renglones con la factura del
- * transportista cargada y parte sin ella. Decir "real" o "estimado" a secas en
- * ese caso sería mentir en la mitad del importe.
- *
- * `peso` ordena de menos a más confiable: arriba queda lo que falta cargar.
+ * Cuántos envíos trae la tabla. Tiene que ser el mismo número que el `limit`
+ * de `getTablaEnvios`: acá sólo decide qué dice la etiqueta del total, y si se
+ * desfasara diría "Total" sobre una tabla recortada -- o al revés.
  */
-function origen(f: FilaComprobante) {
-  const reales = Number(f.lineasReales);
-  const total = Number(f.lineasTotales);
-  if (total === 0 || reales === 0)
-    return { clave: "estimado" as const, texto: "Estimado 5%", peso: 0 };
-  if (reales === total)
-    return { clave: "real" as const, texto: "Real", peso: 2 };
-  return {
-    clave: "mixto" as const,
-    texto: `Mixto ${reales}/${total}`,
-    peso: 1,
-  };
-}
+const TOPE_ENVIOS = 100;
 
 const ESTILO_ORIGEN = {
   real: "border-emerald-500/40 text-emerald-300",
@@ -67,8 +56,12 @@ const ESTILO_ORIGEN = {
   estimado: "border-rose-500/40 text-rose-300",
 } as const;
 
-function ChipOrigen({ fila }: { fila: FilaComprobante }) {
-  const o = origen(fila);
+function ChipOrigen({
+  fila,
+}: {
+  fila: { lineasReales: string; lineasTotales: string };
+}) {
+  const o = origenDelFlete(fila);
   return (
     <span
       className={`rounded-full border px-2 py-0.5 text-[11px] whitespace-nowrap ${ESTILO_ORIGEN[o.clave]}`}
@@ -85,38 +78,143 @@ function ChipOrigen({ fila }: { fila: FilaComprobante }) {
   );
 }
 
-function columnas(filas: FilaComprobante[]): Columna<FilaComprobante>[] {
+/**
+ * EL REPARTO DEL FLETE DE UN ENVIO entre los comprobantes que viajaron en él.
+ *
+ * Es el detalle que se abre al clickear la flecha, y es lo que esta tabla venía
+ * a contestar: el transportista facturó UN número por la preparación, y acá
+ * está a dónde fue a parar cada peso de ese número.
+ */
+function RepartoDelFlete({ envio }: { envio: FilaEnvio }) {
+  const filas = repartoDelEnvio(envio);
+
+  if (filas.length === 0) {
+    return (
+      <p className="text-muted text-xs">
+        Este envío no tiene comprobantes asociados.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-muted text-[11px]">
+        Los <strong className="text-ink">{fmtMoneda(envio.flete)}</strong> de
+        flete de la preparación {envio.preparacionId}, repartidos entre{" "}
+        {filas.length === 1
+          ? "el comprobante que viajó en ella"
+          : `los ${fmtNumero(filas.length)} comprobantes que viajaron en ella`}
+        .
+      </p>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-muted text-left">
+            <th className="py-1 pr-3 font-medium">Comprobante</th>
+            <th className="py-1 pr-3 font-medium">Empresa</th>
+            <th className="py-1 pr-3 text-right font-medium">Facturación</th>
+            <th className="py-1 pr-3 text-right font-medium">Flete</th>
+            <th
+              className="py-1 pr-3 text-right font-medium"
+              title="Qué parte del flete de este envío se llevó el comprobante. Suman 100%."
+            >
+              % del envío
+            </th>
+            <th
+              className="py-1 text-right font-medium"
+              title="Cuánto pesa ese flete sobre lo que facturó el comprobante."
+            >
+              % s/ su facturación
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((c) => (
+            <tr key={c.comprobante ?? "—"} className="border-line border-t">
+              <td className="py-1 pr-3 font-mono">{c.comprobante ?? "—"}</td>
+              <td className="text-muted py-1 pr-3">{c.empresa ?? "—"}</td>
+              <td className="py-1 pr-3 text-right tabular-nums">
+                {fmtMoneda(c.facturacion)}
+              </td>
+              <td className="py-1 pr-3 text-right tabular-nums">
+                {fmtMoneda(c.flete)}
+              </td>
+              <td className="py-1 pr-3 text-right tabular-nums">
+                {fmtPct(c.reparto)}
+              </td>
+              <td className="py-1 text-right tabular-nums">
+                {fmtPct(c.pctFlete)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function columnas(filas: FilaEnvio[]): Columna<FilaEnvio>[] {
   return [
     {
-      titulo: "Comprobante",
-      celda: (f) => f.comprobante ?? "—",
-      orden: (f) => f.comprobante,
+      titulo: "Preparación",
+      ayuda:
+        "El número de preparación del envío. Es el grano en el que el transportista factura, y por eso la tabla va por acá y no por comprobante.",
+      celda: (f) => <span className="font-mono">{f.preparacionId}</span>,
+      orden: (f) => f.preparacionId,
     },
-    {
-      titulo: "N° orden",
-      ayuda: "Número de orden de Sigma asociado al comprobante.",
-      celda: (f) => f.nroOrden ?? "—",
-      orden: (f) => f.nroOrden,
-    },
+    { titulo: "Fecha", celda: (f) => f.fecha ?? "—", orden: (f) => f.fecha },
     {
       titulo: "Cliente",
+      ayuda:
+        "El cliente del envío. El buscador de arriba también pega contra su CUIT.",
       celda: (f) => (
-        <span className="block max-w-[100px] sm:max-w-[220px] truncate">
+        <span
+          className="block max-w-[140px] truncate sm:max-w-[240px]"
+          title={[f.cliente, f.documento].filter(Boolean).join(" · ")}
+        >
           {f.cliente ?? "—"}
         </span>
       ),
       orden: (f) => f.cliente,
     },
     {
-      titulo: "Provincia",
-      ayuda: "Provincia de destino del envío, tomada del reporte de logística.",
-      celda: (f) => f.provincia ?? "—",
+      titulo: "Destino",
+      celda: (f) => (
+        <span className="block max-w-[140px] truncate sm:max-w-[220px]">
+          {destino(f)}
+        </span>
+      ),
       orden: (f) => f.provincia,
     },
-    { titulo: "Fecha", celda: (f) => f.fecha ?? "—", orden: (f) => f.fecha },
+    {
+      titulo: "Transporte",
+      celda: (f) => (
+        <span className="block max-w-[120px] truncate sm:max-w-[180px]">
+          {f.transporte ?? "—"}
+        </span>
+      ),
+      orden: (f) => f.transporte,
+    },
+    {
+      titulo: "Empresa",
+      ayuda:
+        "Quién facturó. Un mismo envío puede llevar comprobantes de Quo y de Noa a la vez; cuáles son está en el detalle.",
+      celda: (f) => (
+        <span className="block max-w-[120px] truncate sm:max-w-[200px]">
+          {resumenEmpresas(f.empresas)}
+        </span>
+      ),
+      orden: (f) => resumenEmpresas(f.empresas),
+    },
+    {
+      titulo: "Comprobantes",
+      ayuda: "Cuántos comprobantes viajaron en este envío. Abrí la fila para verlos.",
+      celda: (f) => fmtNumero(f.comprobantes.length),
+      numerica: true,
+      orden: (f) => f.comprobantes.length,
+    },
     {
       titulo: "Facturación",
-      ayuda: "Venta neta del comprobante, sin IVA.",
+      ayuda: "Venta neta de todo lo que viajó en el envío, sin IVA.",
       celda: (f) => fmtMoneda(f.facturacion),
       numerica: true,
       orden: (f) => f.facturacion,
@@ -125,33 +223,20 @@ function columnas(filas: FilaComprobante[]): Columna<FilaComprobante>[] {
     {
       titulo: "Flete",
       ayuda:
-        "Costo del envío. Puede ser real (factura del transportista ya cargada) o estimado; lo dice la columna Origen.",
+        "Lo que costó el envío. Puede ser real (factura del transportista cargada) o estimado; lo dice la columna Origen.",
       celda: (f) => fmtMoneda(f.flete),
       numerica: true,
       orden: (f) => f.flete,
       total: fmtMoneda(sumar(filas, (f) => f.flete)),
     },
     {
-      titulo: "Origen",
-      ayuda:
-        "Si el flete es la factura real del transportista o una estimación. Un comprobante con renglones de los dos tipos aparece como mezcla.",
-      celda: (f) => <ChipOrigen fila={f} />,
-      // Ordena por qué tan cargado está: primero lo estimado, que es lo que
-      // hay que ir a buscar a la planilla de logística.
-      orden: (f) => origen(f).peso,
-      total: (() => {
-        const cuenta = filas.filter((f) => origen(f).clave !== "real").length;
-        return cuenta === 0 ? "todo real" : `${fmtNumero(cuenta)} sin factura`;
-      })(),
-    },
-    {
       titulo: "% Flete",
-      ayuda: "Cuánto pesa el flete sobre la facturación de ese comprobante.",
+      ayuda: "Cuánto pesa el flete sobre lo que se facturó en ese envío.",
       celda: (f) => fmtPct(f.pctFlete),
       numerica: true,
       orden: (f) => f.pctFlete,
       // Flete total sobre facturación total. El promedio simple de los
-      // porcentajes daría otro número: un comprobante chico con un flete caro
+      // porcentajes daría otro número: un envío chico con un flete caro
       // pesaría igual que uno de un millón.
       total: fmtPct(
         promedioPonderado(
@@ -161,11 +246,37 @@ function columnas(filas: FilaComprobante[]): Columna<FilaComprobante>[] {
         ),
       ),
     },
+    {
+      titulo: "Kg",
+      ayuda:
+        "Kilos del envío. Salen del reporte de logística, que los lleva a nivel preparación: por eso esta columna existe acá y no existía en la tabla por comprobante.",
+      celda: (f) => (f.kg == null ? "—" : fmtNumero(f.kg)),
+      numerica: true,
+      orden: (f) => f.kg,
+      total: fmtNumero(sumar(filas, (f) => f.kg ?? 0)),
+    },
+    {
+      titulo: "Origen",
+      ayuda:
+        "Si el flete es la factura real del transportista o una estimación al 5%. Un envío con renglones de los dos tipos aparece como mezcla.",
+      celda: (f) => <ChipOrigen fila={f} />,
+      // Ordena por qué tan cargado está: primero lo estimado, que es lo que
+      // hay que ir a buscar a la planilla de logística.
+      orden: (f) => origenDelFlete(f).peso,
+      total: (() => {
+        const cuenta = filas.filter(
+          (f) => origenDelFlete(f).clave !== "real",
+        ).length;
+        return cuenta === 0 ? "todo real" : `${fmtNumero(cuenta)} sin factura`;
+      })(),
+    },
   ];
 }
 
 export default function DashboardLogisticaPage() {
   const [filtros, setFiltros] = useState<FiltrosLogistica>({});
+  // Lo tipeado, que todavía no se confirmó. Ver el campo más abajo.
+  const [buscado, setBuscado] = useState("");
 
   const { data, cargando, error, recargar, empezarCarga } =
     useDatosTablero<Respuesta>(
@@ -195,7 +306,8 @@ export default function DashboardLogisticaPage() {
     sinValores(filtros.transporte) &&
     sinValores(filtros.provincia) &&
     sinValores(filtros.estadoFlete) &&
-    sinValores(filtros.proveedor);
+    sinValores(filtros.proveedor) &&
+    !filtros.buscar;
 
   return (
     <div className="space-y-4">
@@ -257,7 +369,40 @@ export default function DashboardLogisticaPage() {
           ]}
           onChange={(v) => cambiar({ ...filtros, estadoFlete: v })}
         />
-        <BotonLimpiar onClick={() => cambiar({})} deshabilitado={vacio} />
+        {/* EL BUSCADOR CONFIRMA AL SALIR DEL CAMPO, no en cada tecla: cada
+            cambio dispara el juego completo de consultas de la página, y
+            escribir "NETFARMA" serían ocho pasadas por la base para ver la
+            última. */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            cambiar({ ...filtros, buscar: buscado.trim() || undefined });
+          }}
+          className="flex flex-col gap-1"
+        >
+          <label className="text-muted text-[11px]" htmlFor="buscar-logistica">
+            Buscar
+          </label>
+          <input
+            id="buscar-logistica"
+            value={buscado}
+            onChange={(e) => setBuscado(e.target.value)}
+            onBlur={() =>
+              cambiar({ ...filtros, buscar: buscado.trim() || undefined })
+            }
+            placeholder="Cliente, CUIT, comprobante, preparación o pedido"
+            title="Pega contra el nombre del cliente, su CUIT (con o sin guiones), el comprobante, el número de preparación y el de pedido."
+            className="border-line bg-panel-2 text-ink placeholder:text-muted focus:border-c1 w-64 rounded-lg border px-2.5 py-1.5 text-xs outline-none"
+          />
+        </form>
+
+        <BotonLimpiar
+          onClick={() => {
+            setBuscado("");
+            cambiar({});
+          }}
+          deshabilitado={vacio}
+        />
 
         <span className="text-muted ml-auto max-w-sm text-[11px] leading-tight">
           Solo envíos con provincia cargada, igual que el filtro de página del
@@ -382,17 +527,33 @@ export default function DashboardLogisticaPage() {
           </div>
 
           <Panel
-            titulo="Comprobantes Asociados"
-            nota={`${data.comprobantes.length} de mayor flete`}
+            titulo="Envíos"
+            nota={
+              data.envios.length >= TOPE_ENVIOS
+                ? `${fmtNumero(TOPE_ENVIOS)} de mayor flete`
+                : `${fmtNumero(data.envios.length)} envíos`
+            }
           >
-            {/* Click en una fila filtra por su PROVINCIA, que es la dimensión
-                de esta tabla que ya existe como filtro y a la que responden los
-                KPIs y los gráficos de arriba. Filtrar por el comprobante suelto
-                dejaría el tablero entero mostrando una sola venta. */}
+            {/* LA TABLA VA POR ENVIO Y NO POR COMPROBANTE, que es el cambio.
+                El flete se PAGA por preparación y se COBRA por comprobante: con
+                una fila por comprobante, un envío partido en cinco facturas se
+                veía como cinco fletes sueltos y lo que salió el envío no estaba
+                en ningún lado. Ahora el reparto es el detalle de la fila. */}
             <Tabla
-              filas={data.comprobantes}
-              columnas={columnas(data.comprobantes)}
-              clave={(f, i) => `${f.comprobante}-${i}`}
+              filas={data.envios}
+              columnas={columnas(data.envios)}
+              clave={(f) => f.preparacionId}
+              fijas={1}
+              // La tabla trae los 100 de mayor flete. Cuando llegan menos
+              // de 100 no hay recorte, y decir "los 100" daría a entender que
+              // falta algo; cuando sí hay, callarlo daría a entender que ese es
+              // el total de todo.
+              etiquetaTotal={
+                data.envios.length >= TOPE_ENVIOS
+                  ? `Total de los ${fmtNumero(TOPE_ENVIOS)} de mayor flete`
+                  : "Total"
+              }
+              expandir={(f) => <RepartoDelFlete envio={f} />}
               onClickFila={(f) =>
                 f.provincia && alternar("provincia")(f.provincia)
               }
