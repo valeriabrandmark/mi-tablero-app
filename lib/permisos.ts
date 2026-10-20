@@ -243,6 +243,20 @@ function esDePreciosTn(pathname: string): boolean {
 }
 
 /**
+ * LA CARGA DE FACTURAS DE COMPRA ES SÓLO DEL `superadmin`, por pedido de Ani
+ * (20/10/2026). Vive en el módulo Compras (lib/modulos.ts), pero tener Compras
+ * --o ser `admin`-- no alcanza. Su API va con ella; el historial de órdenes
+ * (`/api/compras/ordenes`) no, porque lo usa también Compras.
+ */
+const RUTAS_SOLO_SUPERADMIN = ["/facturas-compra", "/api/compras/facturas"];
+
+function esSoloSuperadmin(pathname: string): boolean {
+  return RUTAS_SOLO_SUPERADMIN.some(
+    (r) => pathname === r || pathname.startsWith(`${r}/`),
+  );
+}
+
+/**
  * Las APIs del módulo, una por una y no con un prefijo genérico, por lo mismo
  * que en `APIS_MINORISTA`: una ruta nueva tiene que entrar acá a mano, en vez
  * de quedar abierta el día que alguien la agregue sin pensar en permisos.
@@ -280,6 +294,9 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   if (pathname === RUTA_ACTUALIZAR) {
     return permiso.rol !== "personalizado" || permiso.modulos.length > 0;
   }
+
+  // Antes que todo lo demás: ni el módulo Compras ni el rol `admin` la abren.
+  if (esSoloSuperadmin(pathname)) return permiso.rol === "superadmin";
 
   // EL PERSONALIZADO SE RESUELVE ENTERO ACÁ, Y VA PRIMERO. Lo suyo es la lista
   // de módulos y nada más: no comparte ninguna regla con los roles viejos, ni
