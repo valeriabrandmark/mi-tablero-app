@@ -1,10 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import {
-  enConstruccion,
-  permisoDelUsuario,
-  puedeVer,
-  puedeVerBorradores,
-} from "@/lib/permisos";
+import { permisoDelUsuario, puedeVer } from "@/lib/permisos";
 import { getMaestroParaFactura } from "@/lib/queries-facturas";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
@@ -27,12 +22,6 @@ export async function POST(request: NextRequest) {
     const permiso = permisoDelUsuario(await getUsuario());
     if (!puedeVer(permiso, "/api/compras")) {
       return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
-    }
-    if (
-      enConstruccion("/stock/compras/facturas") &&
-      !puedeVerBorradores(permiso)
-    ) {
-      return NextResponse.json({ error: "En construcción" }, { status: 403 });
     }
   }
 

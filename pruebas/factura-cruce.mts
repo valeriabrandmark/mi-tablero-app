@@ -10,7 +10,9 @@
 
 import {
   adivinarColumnas,
+  buscarArticulo,
   cruzar,
+  indexarMaestro,
   leerNumero,
   leerRenglones,
   leerTablaPegada,
@@ -187,6 +189,44 @@ revisar("PDF: adivina sin títulos", adivinarColumnas(pdf), [
   "precio",
   "importe",
 ]);
+
+// --- Carga a mano: cualquier código, y la unidad la dice la persona -----------
+
+const IDX = indexarMaestro(MAESTRO);
+const sku = (c: string[]) => {
+  const h = buscarArticulo(IDX, c);
+  return h == null ? null : "a" in h ? [h.a.sku, h.porBulto] : h.error;
+};
+revisar("a mano: SKU en minúscula", sku(["im04075"]), ["IM04075", false]);
+revisar("a mano: EAN de unidad", sku(["607869299967"]), ["IM04077", false]);
+revisar("a mano: EAN del bulto marca bultos", sku(["14008600398377"]), ["IM01034", true]);
+revisar("a mano: código de compra con otra puntuación", sku(["P03.033.07"]), ["IM07022", false]);
+revisar("a mano: dos códigos del mismo artículo", sku(["IM04075", "P04.033.26"]), ["IM04075", false]);
+revisar(
+  "a mano: códigos de artículos distintos",
+  sku(["IM04075", "P04.035.16"]),
+  "Los códigos no coinciden: IM04075 / IM04077",
+);
+revisar("a mano: código que no está", sku(["ZZ999"]), "No está en el maestro: ZZ999");
+revisar("a mano: sin código", sku(["", " "]), null);
+
+// 2 renglones del Byron (bulto de 6) facturados como 2 UNIDADES a mano: con
+// `unidadFija` el cruce no los toma por 2 bultos = 12, que es lo pedido.
+const fijo = cruzar(
+  [{ sku: "IM04077", cantidad: 12, precio: 9000, descuento1: 0, descuento2: 0 }],
+  [
+    {
+      fila: 1, codigo: "IM04077", ean: "", descripcion: "", cantidad: 2, precio: null,
+      descuento1: 0, descuento2: 0, importe: 18000, unidadFija: true,
+    },
+  ],
+  MAESTRO,
+);
+revisar(
+  "a mano: unidad fija no se convierte a bultos",
+  [fijo.lineas[0].estado, fijo.lineas[0].factura?.unidades, fijo.lineas[0].difUnidades],
+  ["cantidad", 2, -10],
+);
 
 if (FALLOS.length > 0) {
   console.error(`\n${FALLOS.length} prueba(s) fallaron.`);

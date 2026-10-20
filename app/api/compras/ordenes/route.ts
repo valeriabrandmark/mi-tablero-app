@@ -33,7 +33,7 @@ export async function GET() {
   }
 
   try {
-    return NextResponse.json({ ordenes: await getOrdenesEnviadas() });
+    return NextResponse.json({ ordenes: await getOrdenesEnviadas(200) });
   } catch (error) {
     const mensaje =
       error instanceof Error ? error.message : "Error desconocido";

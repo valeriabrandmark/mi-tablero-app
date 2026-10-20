@@ -1,23 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import {
-  adivinarColumnas,
+  buscarArticulo,
   cruzar,
+  indexarMaestro,
   leerNumero,
-  leerRenglones,
-  leerTablaPegada,
-  renglonesDeOCPegada,
   renglonesDeOrdenEnviada,
-  ROLES_COLUMNA,
   totalesComprobante,
   type ArticuloMaestro,
   type EstadoCruce,
   type LineaCruce,
+  type RenglonFactura,
   type RenglonOC,
-  type RolColumna,
-  type TablaPegada,
 } from "@/lib/factura-cruce";
 import { fmtMoneda, fmtNumero } from "@/lib/format";
 import type { OrdenEnviada } from "@/lib/queries-ordenes";
@@ -25,44 +21,57 @@ import type { OrdenEnviada } from "@/lib/queries-ordenes";
 /* -------------------------------------------------------------------------
    LO QUE SE GUARDA EN EL NAVEGADOR
 
-   Una factura de 200 renglones a medio revisar no se puede perder porque se
+   Una factura de 80 renglones a medio tipear no se puede perder porque se
    cerró la pestaña. Se guarda en este navegador y nada más: es un borrador de
    trabajo, no un registro. Si el navegador no deja guardar (ventana privada),
    la pantalla anda igual.
    ------------------------------------------------------------------------- */
 
-const CLAVE_BORRADOR = "carga-factura:borrador:v1";
+const CLAVE_BORRADOR = "carga-factura:borrador:v2";
+
+type Unidad = "U" | "B";
+
+/** Un renglón de la factura tal como se tipea. Todo texto: se lee al cruzar. */
+type LineaCarga = {
+  id: string;
+  /** SKU, EAN o código de compra del proveedor: cualquiera sirve. */
+  codigo: string;
+  cantidad: string;
+  unidad: Unidad;
+  /** Importe neto de la línea, sin IVA y con las bonificaciones del renglón. */
+  importe: string;
+};
 
 type Cabecera = {
-  tipo: "FACTURA" | "NOTA DE CREDITO";
   letra: "A" | "B" | "C" | "M";
   numero: string;
   fecha: string;
 };
 
 type Borrador = {
-  fuente: "tablero" | "pegada";
+  proveedor: string;
   ordenId: string;
-  textoOC: string;
-  rolesOC: RolColumna[] | null;
-  textoFactura: string;
-  rolesFactura: RolColumna[] | null;
-  manuales: Record<number, string>;
   cabecera: Cabecera;
+  lineas: LineaCarga[];
   descuentoPie: string;
   otrosImpuestos: string;
   totalImpreso: string;
 };
 
+let siguienteId = 0;
+const lineaVacia = (codigo = "", unidad: Unidad = "U"): LineaCarga => ({
+  id: `${Date.now().toString(36)}-${(siguienteId++).toString(36)}`,
+  codigo,
+  cantidad: "",
+  unidad,
+  importe: "",
+});
+
 const BORRADOR_VACIO: Borrador = {
-  fuente: "tablero",
+  proveedor: "",
   ordenId: "",
-  textoOC: "",
-  rolesOC: null,
-  textoFactura: "",
-  rolesFactura: null,
-  manuales: {},
-  cabecera: { tipo: "FACTURA", letra: "A", numero: "", fecha: "" },
+  cabecera: { letra: "A", numero: "", fecha: "" },
+  lineas: [],
   descuentoPie: "",
   otrosImpuestos: "",
   totalImpreso: "",
@@ -75,7 +84,7 @@ function leerBorrador(): Borrador {
   } catch {
     /* sin almacenamiento: se arranca de cero */
   }
-  return BORRADOR_VACIO;
+  return { ...BORRADOR_VACIO, lineas: [lineaVacia()] };
 }
 
 /* -------------------------------------------------------------------------
@@ -109,15 +118,33 @@ const ORDEN_ESTADO: EstadoCruce[] = [
   "ok",
 ];
 
-const COMO_TEXTO: Record<string, string> = {
-  codigo: "por SKU",
-  "codigo proveedor": "por código del proveedor",
-  ean: "por EAN",
-  "ean display": "por EAN del display",
-  "ean bulto": "por EAN del bulto",
-  descripcion: "por descripción: revisar",
-  manual: "asignado a mano",
+/** Cómo se dice cada diferencia en el mail al proveedor. */
+const MOTIVO_MAIL: Record<EstadoCruce, string> = {
+  ok: "OK",
+  cantidad: "Diferencia de cantidad",
+  precio: "Diferencia de costo",
+  "cantidad y precio": "Diferencia de cantidad y costo",
+  "falta en factura": "Pedido y no facturado",
+  "no está en la OC": "Facturado sin estar en la OC",
+  "sin identificar": "Artículo no identificado",
 };
+
+/* -------------------------------------------------------------------------
+   LAS CUENTAS DE CADA DIFERENCIA
+   ------------------------------------------------------------------------- */
+
+/**
+ * Lo que cuesta una línea del cruce, separado en sus dos causas.
+ *
+ * POR PRECIO es lo que ya calcula el cruce: (costo facturado − costo de la OC)
+ * × unidades facturadas. POR CANTIDAD son las unidades de más o de menos a
+ * costo de la OC; lo que vino sin estar en la OC va entero acá. Sumadas dan
+ * neto facturado − neto pedido de esa línea.
+ */
+function difPorCantidad(l: LineaCruce): number {
+  if (l.oc) return Math.round(l.difUnidades * l.oc.precioNeto * 100) / 100;
+  return l.factura?.neto ?? 0;
+}
 
 /* -------------------------------------------------------------------------
    LA PANTALLA
@@ -151,8 +178,19 @@ function Formulario() {
     error: string | null;
   }>({ clave: "", articulos: [], error: null });
   const [soloDiferencias, setSoloDiferencias] = useState(true);
+  const enfocar = useRef<string | null>(null);
 
   const cambiar = (parcial: Partial<Borrador>) => setB((x) => ({ ...x, ...parcial }));
+  const cambiarLinea = (id: string, parcial: Partial<LineaCarga>) =>
+    setB((x) => ({
+      ...x,
+      lineas: x.lineas.map((l) => (l.id === id ? { ...l, ...parcial } : l)),
+    }));
+  const agregarLinea = () => {
+    const nueva = lineaVacia();
+    enfocar.current = nueva.id;
+    setB((x) => ({ ...x, lineas: [...x.lineas, nueva] }));
+  };
 
   useEffect(() => {
     try {
@@ -161,6 +199,13 @@ function Formulario() {
       /* sin almacenamiento: no se guarda y listo */
     }
   }, [b]);
+
+  // Después de agregar un renglón, el cursor va al código del nuevo.
+  useEffect(() => {
+    if (!enfocar.current) return;
+    document.getElementById(`codigo-${enfocar.current}`)?.focus();
+    enfocar.current = null;
+  }, [b.lineas.length]);
 
   useEffect(() => {
     fetch("/api/compras/ordenes")
@@ -172,21 +217,29 @@ function Formulario() {
       .catch((e: Error) => setErrorOrdenes(e.message));
   }, []);
 
-  /* --- La OC ------------------------------------------------------------ */
+  /* --- El proveedor y la OC ---------------------------------------------- */
 
-  const tablaOC = useMemo(() => leerTablaPegada(b.textoOC), [b.textoOC]);
-  const rolesOC = useMemo(
-    () => rolesVigentes(b.rolesOC, tablaOC),
-    [b.rolesOC, tablaOC],
-  );
-
-  const ordenElegida = ordenes?.find((o) => o.id === b.ordenId) ?? null;
-  const renglonesOC: RenglonOC[] = useMemo(() => {
-    if (b.fuente === "tablero") {
-      return ordenElegida ? renglonesDeOrdenEnviada(ordenElegida.payload) : [];
+  const proveedores = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const o of ordenes ?? []) {
+      const clave = o.proveedorCodigo ?? o.proveedorNombre ?? "";
+      if (clave && !m.has(clave)) m.set(clave, o.proveedorNombre ?? clave);
     }
-    return renglonesDeOCPegada(tablaOC, rolesOC);
-  }, [b.fuente, ordenElegida, tablaOC, rolesOC]);
+    return [...m].sort((x, y) => x[1].localeCompare(y[1]));
+  }, [ordenes]);
+
+  const ordenesDelProveedor = useMemo(
+    () =>
+      (ordenes ?? []).filter(
+        (o) => (o.proveedorCodigo ?? o.proveedorNombre ?? "") === b.proveedor,
+      ),
+    [ordenes, b.proveedor],
+  );
+  const orden = ordenesDelProveedor.find((o) => o.id === b.ordenId) ?? null;
+  const renglonesOC: RenglonOC[] = useMemo(
+    () => (orden ? renglonesDeOrdenEnviada(orden.payload) : []),
+    [orden],
+  );
 
   // El maestro del proveedor, cada vez que cambia el juego de SKU de la OC.
   const claveSkus = useMemo(
@@ -221,24 +274,81 @@ function Formulario() {
     [maestroDe, claveSkus],
   );
   const errorMaestro = maestroDe.clave === claveSkus ? maestroDe.error : null;
+  const cargandoMaestro = !!claveSkus && maestroDe.clave !== claveSkus;
+  const indice = useMemo(() => indexarMaestro(maestro), [maestro]);
+  const skusOC = useMemo(() => new Set(renglonesOC.map((r) => r.sku)), [renglonesOC]);
 
-  /* --- La factura -------------------------------------------------------- */
+  /* --- La factura, renglón por renglón ----------------------------------- */
 
-  const tablaFactura = useMemo(() => leerTablaPegada(b.textoFactura), [b.textoFactura]);
-  const rolesFactura = useMemo(
-    () => rolesVigentes(b.rolesFactura, tablaFactura),
-    [b.rolesFactura, tablaFactura],
+  /**
+   * Cada renglón tipeado, ya resuelto: qué artículo es y cuántas UNIDADES son.
+   *
+   * La cantidad se pasa a unidades acá, con el bulto del maestro, y el renglón
+   * va al cruce con `unidadFija`: la persona ya dijo si eran bultos o
+   * unidades, así que el cruce no tiene que adivinarlo.
+   */
+  const leidas = useMemo(
+    () =>
+      b.lineas.map((l, i) => {
+        const encontrado = buscarArticulo(indice, [l.codigo]);
+        const a = encontrado && "a" in encontrado ? encontrado.a : null;
+        const cant = leerNumero(l.cantidad);
+        const importe = leerNumero(l.importe);
+        const porBulto = l.unidad === "B" ? (a?.unidadesPorBulto ?? 1) : 1;
+        const vacia = !l.codigo.trim() && cant == null && importe == null;
+        const renglon: RenglonFactura | null = vacia
+          ? null
+          : {
+              fila: i + 1,
+              codigo: a?.sku ?? "",
+              ean: "",
+              // Sin artículo, la descripción es el error: así el cruce no la
+              // empareja por parecido con nada de la OC y queda sin identificar.
+              descripcion: a
+                ? a.descripcion
+                : encontrado && "error" in encontrado
+                  ? encontrado.error
+                  : "Sin código",
+              cantidad: cant == null ? null : cant * porBulto,
+              precio: null,
+              descuento1: 0,
+              descuento2: 0,
+              importe,
+              unidadFija: true,
+            };
+        return {
+          l,
+          a,
+          error: encontrado && "error" in encontrado ? encontrado.error : null,
+          unidades: cant == null ? null : cant * porBulto,
+          sinBulto: l.unidad === "B" && !!a && a.unidadesPorBulto <= 1,
+          renglon,
+        };
+      }),
+    [b.lineas, indice],
   );
   const renglonesFactura = useMemo(
-    () => leerRenglones(tablaFactura, rolesFactura),
-    [tablaFactura, rolesFactura],
+    () => leidas.flatMap((x) => (x.renglon ? [x.renglon] : [])),
+    [leidas],
   );
+
+  /** Carga un renglón por artículo de la OC, para completar cantidad e importe. */
+  const traerArticulosDeLaOC = () => {
+    const yaEstan = new Set(leidas.map((x) => x.a?.sku).filter(Boolean));
+    const nuevas = renglonesOC
+      .filter((r) => !yaEstan.has(r.sku))
+      .map((r) => lineaVacia(r.sku));
+    setB((x) => ({
+      ...x,
+      lineas: [...x.lineas.filter((l) => l.codigo || l.cantidad || l.importe), ...nuevas],
+    }));
+  };
 
   /* --- El cruce ---------------------------------------------------------- */
 
   const resultado = useMemo(
-    () => cruzar(renglonesOC, renglonesFactura, maestro, b.manuales),
-    [renglonesOC, renglonesFactura, maestro, b.manuales],
+    () => cruzar(renglonesOC, renglonesFactura, maestro),
+    [renglonesOC, renglonesFactura, maestro],
   );
   const totales = useMemo(
     () =>
@@ -250,31 +360,47 @@ function Formulario() {
     [resultado, b.descuentoPie, b.otrosImpuestos, b.totalImpreso],
   );
 
-  const lineas = useMemo(() => {
+  const ordenadas = useMemo(() => {
     const orden = (l: LineaCruce) => ORDEN_ESTADO.indexOf(l.estado);
-    return [...resultado.lineas]
-      .filter((l) => !soloDiferencias || l.estado !== "ok")
-      .sort((x, y) => orden(x) - orden(y));
-  }, [resultado, soloDiferencias]);
-
-  const hayOC = renglonesOC.length > 0;
-  const hayFactura = renglonesFactura.length > 0;
-  const r = resultado.resumen;
+    return [...resultado.lineas].sort((x, y) => orden(x) - orden(y));
+  }, [resultado]);
+  const diferencias = ordenadas.filter((l) => l.estado !== "ok");
+  const lineasVisibles = soloDiferencias ? diferencias : ordenadas;
 
   const descripcionDe = useMemo(
     () => new Map(maestro.map((a) => [a.sku, a.descripcion])),
     [maestro],
   );
 
+  const hayOC = renglonesOC.length > 0;
+  const hayFactura = renglonesFactura.length > 0;
+  const r = resultado.resumen;
+  const difCantidadTotal = diferencias.reduce((s, l) => s + difPorCantidad(l), 0);
+
+  const datosMail: DatosMail = {
+    proveedor: orden?.proveedorNombre ?? orden?.proveedorCodigo ?? "",
+    oc: orden ? `OC enviada el ${orden.enviadaEn}` : "",
+    factura: [
+      `Factura ${b.cabecera.letra}`,
+      b.cabecera.numero,
+      b.cabecera.fecha ? `del ${b.cabecera.fecha.split("-").reverse().join("/")}` : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    lineas: diferencias,
+    descripcionDe,
+    totales,
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="text-xl font-semibold tracking-tight">Cargar factura de compra</h1>
+        <h1 className="text-xl font-semibold tracking-tight">Carga de Facturas de compra</h1>
         <button
           className={BOTON}
           onClick={() => {
             if (window.confirm("¿Empezar una factura nueva? Se borra lo cargado.")) {
-              setB({ ...BORRADOR_VACIO, fuente: b.fuente });
+              setB({ ...BORRADOR_VACIO, proveedor: b.proveedor, lineas: [lineaVacia()] });
             }
           }}
         >
@@ -283,64 +409,58 @@ function Formulario() {
       </div>
 
       {/* 1. LA OC ------------------------------------------------------- */}
-      <Panel titulo="1. Orden de compra" nota={hayOC ? `${renglonesOC.length} renglones` : undefined}>
-        <div className="mb-3 flex flex-wrap gap-2">
-          <button
-            className={b.fuente === "tablero" ? BOTON_ACTIVO : BOTON}
-            onClick={() => cambiar({ fuente: "tablero", manuales: {} })}
-          >
-            Una OC mandada desde el tablero
-          </button>
-          <button
-            className={b.fuente === "pegada" ? BOTON_ACTIVO : BOTON}
-            onClick={() => cambiar({ fuente: "pegada", manuales: {} })}
-          >
-            Pegar una OC de Sigma
-          </button>
-        </div>
-
-        {b.fuente === "tablero" ? (
-          errorOrdenes ? (
-            <Aviso>No se pudieron leer las órdenes: {errorOrdenes}</Aviso>
-          ) : (
-            <select
-              className={`${CAMPO} w-full max-w-2xl`}
-              value={b.ordenId}
-              onChange={(e) => cambiar({ ordenId: e.target.value, manuales: {} })}
-            >
-              <option value="">
-                {ordenes ? "Elegí la OC…" : "Cargando órdenes…"}
-              </option>
-              {ordenes?.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.enviadaEn} · {o.proveedorNombre ?? o.proveedorCodigo} · {o.renglones} renglones ·{" "}
-                  {fmtMoneda(o.totalBruto)}
-                  {o.resultado !== "ok" ? " · (resultado incierto)" : ""}
-                </option>
-              ))}
-            </select>
-          )
+      <Panel
+        titulo="1. Orden de compra"
+        nota={hayOC ? `${renglonesOC.length} artículos · ${fmtNumero(orden?.unidades)} unidades` : undefined}
+      >
+        {errorOrdenes ? (
+          <Aviso>No se pudieron leer las órdenes: {errorOrdenes}</Aviso>
         ) : (
-          <div className="space-y-3">
-            <p className="text-muted text-xs">
-              Copiá los renglones de la OC desde Sigma o desde un Excel (código, cantidad en
-              unidades, precio unitario de lista y bonificaciones) y pegalos acá.
-            </p>
-            <textarea
-              className={`${CAMPO} h-28 w-full font-mono text-xs`}
-              placeholder={"IM06003\t12\t38824,48\t0\nIM07003\t36\t31272,60\t5"}
-              value={b.textoOC}
-              onChange={(e) => cambiar({ textoOC: e.target.value, rolesOC: null, manuales: {} })}
-            />
-            {tablaOC.filas.length > 0 && (
-              <VistaPrevia
-                tabla={tablaOC}
-                roles={rolesOC}
-                onRoles={(roles) => cambiar({ rolesOC: roles })}
-              />
-            )}
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+            <label className="text-muted space-y-1 text-xs">
+              <span>Proveedor</span>
+              <select
+                className={`${CAMPO} w-full`}
+                value={b.proveedor}
+                onChange={(e) => cambiar({ proveedor: e.target.value, ordenId: "" })}
+              >
+                <option value="">{ordenes ? "Elegí el proveedor…" : "Cargando…"}</option>
+                {proveedores.map(([clave, nombre]) => (
+                  <option key={clave} value={clave}>
+                    {nombre}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-muted space-y-1 text-xs">
+              <span>Orden de compra</span>
+              <select
+                className={`${CAMPO} w-full`}
+                value={b.ordenId}
+                disabled={!b.proveedor}
+                onChange={(e) => cambiar({ ordenId: e.target.value })}
+              >
+                <option value="">
+                  {b.proveedor
+                    ? `Elegí la OC (${ordenesDelProveedor.length})…`
+                    : "Primero el proveedor"}
+                </option>
+                {ordenesDelProveedor.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.enviadaEn} · {o.renglones} artículos · {fmtNumero(o.unidades)} u. ·{" "}
+                    {fmtMoneda(o.totalBruto)}
+                    {o.usuario ? ` · ${o.usuario}` : ""}
+                    {o.nota ? ` · ${o.nota}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         )}
+        <p className="text-muted mt-2 text-xs">
+          Son las órdenes mandadas a Sigma desde Compras. Ya están en unidades y a costo de
+          lista, así que no hace falta cargarlas.
+        </p>
         {errorMaestro && (
           <div className="mt-3">
             <Aviso>No se pudo leer el maestro de Sigma: {errorMaestro}</Aviso>
@@ -349,83 +469,181 @@ function Formulario() {
       </Panel>
 
       {/* 2. LA FACTURA --------------------------------------------------- */}
-      <Panel
-        titulo="2. Factura del proveedor"
-        nota={hayFactura ? `${renglonesFactura.length} renglones leídos` : undefined}
-      >
-        <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <label className="text-muted space-y-1 text-xs">
-            <span>Tipo</span>
-            <select
-              className={`${CAMPO} w-full`}
-              value={b.cabecera.tipo}
-              onChange={(e) =>
-                cambiar({ cabecera: { ...b.cabecera, tipo: e.target.value as Cabecera["tipo"] } })
-              }
-            >
-              <option value="FACTURA">Factura</option>
-              <option value="NOTA DE CREDITO">Nota de crédito</option>
-            </select>
-          </label>
-          <label className="text-muted space-y-1 text-xs">
-            <span>Letra</span>
-            <select
-              className={`${CAMPO} w-full`}
-              value={b.cabecera.letra}
-              onChange={(e) =>
-                cambiar({ cabecera: { ...b.cabecera, letra: e.target.value as Cabecera["letra"] } })
-              }
-            >
-              {["A", "B", "C", "M"].map((l) => (
-                <option key={l}>{l}</option>
-              ))}
-            </select>
-          </label>
-          <label className="text-muted space-y-1 text-xs">
-            <span>Número</span>
-            <input
-              className={`${CAMPO} w-full`}
-              placeholder="00004-00000232"
-              value={b.cabecera.numero}
-              onChange={(e) => cambiar({ cabecera: { ...b.cabecera, numero: e.target.value } })}
-            />
-          </label>
-          <label className="text-muted space-y-1 text-xs">
-            <span>Fecha</span>
-            <input
-              type="date"
-              className={`${CAMPO} w-full`}
-              value={b.cabecera.fecha}
-              onChange={(e) => cambiar({ cabecera: { ...b.cabecera, fecha: e.target.value } })}
-            />
-          </label>
-        </div>
-
-        <p className="text-muted mb-2 text-xs">
-          Copiá la tabla de renglones de la factura (desde el Excel, el PDF o el mail del
-          proveedor) y pegala acá con Ctrl+V. No hace falta ordenarla ni limpiarla: el
-          subtotal y las filas sin cantidad se descartan solas.
-        </p>
-        <textarea
-          className={`${CAMPO} h-36 w-full font-mono text-xs`}
-          placeholder={"Código\tDescripción\tCant.\tP. Unit.\tBonif %\tImporte\nP04.033.26\tVASO HURON 473ML ROSA\t8\t10.500,00\t10\t75.600,00"}
-          value={b.textoFactura}
-          onChange={(e) =>
-            cambiar({ textoFactura: e.target.value, rolesFactura: null, manuales: {} })
-          }
-        />
-        {tablaFactura.filas.length > 0 && (
-          <div className="mt-3">
-            <VistaPrevia
-              tabla={tablaFactura}
-              roles={rolesFactura}
-              onRoles={(roles) => cambiar({ rolesFactura: roles })}
-            />
+      {hayOC && (
+        <Panel
+          titulo="2. Factura del proveedor"
+          nota={hayFactura ? `${renglonesFactura.length} renglones` : undefined}
+        >
+          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <label className="text-muted space-y-1 text-xs">
+              <span>Letra</span>
+              <select
+                className={`${CAMPO} w-full`}
+                value={b.cabecera.letra}
+                onChange={(e) =>
+                  cambiar({ cabecera: { ...b.cabecera, letra: e.target.value as Cabecera["letra"] } })
+                }
+              >
+                {["A", "B", "C", "M"].map((l) => (
+                  <option key={l}>{l}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-muted space-y-1 text-xs">
+              <span>Número</span>
+              <input
+                className={`${CAMPO} w-full`}
+                placeholder="00004-00000232"
+                value={b.cabecera.numero}
+                onChange={(e) => cambiar({ cabecera: { ...b.cabecera, numero: e.target.value } })}
+              />
+            </label>
+            <label className="text-muted space-y-1 text-xs">
+              <span>Fecha</span>
+              <input
+                type="date"
+                className={`${CAMPO} w-full`}
+                value={b.cabecera.fecha}
+                onChange={(e) => cambiar({ cabecera: { ...b.cabecera, fecha: e.target.value } })}
+              />
+            </label>
           </div>
-        )}
-      </Panel>
 
-      {/* 3. EL CRUCE ----------------------------------------------------- */}
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <button className={BOTON} onClick={traerArticulosDeLaOC} disabled={cargandoMaestro}>
+              Traer los artículos de la OC
+            </button>
+            <span className="text-muted text-xs">
+              En código va el SKU, el EAN o el código del proveedor. El importe es el total neto
+              de la línea, sin IVA.
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[820px] text-xs">
+              <thead>
+                <tr className="text-muted text-left">
+                  <th className="w-8 pb-2 font-normal">#</th>
+                  <th className="pr-2 pb-2 font-normal">Código</th>
+                  <th className="pr-2 pb-2 font-normal">Descripción</th>
+                  <th className="w-24 pr-2 pb-2 text-right font-normal">Cantidad</th>
+                  <th className="w-28 pr-2 pb-2 font-normal">Unidad</th>
+                  <th className="w-36 pr-2 pb-2 text-right font-normal">Importe línea</th>
+                  <th className="w-24 pr-2 pb-2 text-right font-normal">Unidades</th>
+                  <th className="w-6 pb-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {leidas.map((x, i) => (
+                  <tr key={x.l.id} className="border-line border-t align-top">
+                    <td className="text-muted py-1.5 pr-2">{i + 1}</td>
+                    <td className="py-1 pr-2">
+                      <input
+                        id={`codigo-${x.l.id}`}
+                        list="articulos-factura"
+                        className={`${CAMPO} w-40 py-1 font-mono text-xs`}
+                        value={x.l.codigo}
+                        onChange={(e) => {
+                          const codigo = e.target.value;
+                          // El EAN del bulto dice solo que viene en bultos.
+                          const h = buscarArticulo(indice, [codigo]);
+                          cambiarLinea(x.l.id, {
+                            codigo,
+                            ...(h && "a" in h && h.porBulto ? { unidad: "B" as Unidad } : {}),
+                          });
+                        }}
+                      />
+                    </td>
+                    <td className="py-1.5 pr-2">
+                      {x.a ? (
+                        <>
+                          <span className="block max-w-[320px] truncate" title={x.a.descripcion}>
+                            {x.a.descripcion}
+                          </span>
+                          <span className="text-muted">
+                            {x.a.sku}
+                            {x.a.unidadesPorBulto > 1 ? ` · bulto x ${x.a.unidadesPorBulto}` : ""}
+                            {skusOC.has(x.a.sku) ? "" : " · no está en la OC"}
+                          </span>
+                        </>
+                      ) : x.error ? (
+                        <span className="text-rose-300">{x.error}</span>
+                      ) : cargandoMaestro && x.l.codigo ? (
+                        <span className="text-muted">Buscando…</span>
+                      ) : null}
+                    </td>
+                    <td className="py-1 pr-2">
+                      <input
+                        className={`${CAMPO} w-full py-1 text-right text-xs`}
+                        inputMode="decimal"
+                        value={x.l.cantidad}
+                        onChange={(e) => cambiarLinea(x.l.id, { cantidad: e.target.value })}
+                      />
+                    </td>
+                    <td className="py-1 pr-2">
+                      <select
+                        className={`${CAMPO} w-full py-1 text-xs`}
+                        value={x.l.unidad}
+                        onChange={(e) => cambiarLinea(x.l.id, { unidad: e.target.value as Unidad })}
+                      >
+                        <option value="U">Unidades</option>
+                        <option value="B">Bultos</option>
+                      </select>
+                      {x.sinBulto && (
+                        <span className="mt-1 block text-amber-200">
+                          Sigma no tiene unidades por bulto: se cuenta 1
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-1 pr-2">
+                      <input
+                        className={`${CAMPO} w-full py-1 text-right text-xs`}
+                        inputMode="decimal"
+                        placeholder="0,00"
+                        value={x.l.importe}
+                        onChange={(e) => cambiarLinea(x.l.id, { importe: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && i === leidas.length - 1) agregarLinea();
+                        }}
+                      />
+                    </td>
+                    <td className="text-muted py-1.5 pr-2 text-right tabular-nums">
+                      {x.unidades == null ? "" : fmtNumero(x.unidades)}
+                    </td>
+                    <td className="py-1">
+                      <button
+                        className="text-muted hover:text-ink px-1"
+                        title="Quitar el renglón"
+                        onClick={() =>
+                          setB((s) => ({ ...s, lineas: s.lineas.filter((l) => l.id !== x.l.id) }))
+                        }
+                      >
+                        ×
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <datalist id="articulos-factura">
+              {[
+                ...maestro.filter((a) => skusOC.has(a.sku)),
+                ...maestro.filter((a) => !skusOC.has(a.sku)),
+              ].map((a) => (
+                <option key={a.sku} value={a.sku}>
+                  {a.descripcion}
+                  {skusOC.has(a.sku) ? " (en la OC)" : ""}
+                </option>
+              ))}
+            </datalist>
+          </div>
+          <button className={`${BOTON} mt-2`} onClick={agregarLinea}>
+            + Agregar renglón
+          </button>
+        </Panel>
+      )}
+
+      {/* 3. EL REPORTE DE DIFERENCIAS ------------------------------------ */}
       {hayOC && hayFactura && (
         <>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
@@ -449,22 +667,23 @@ function Formulario() {
               compacta
             />
             <TarjetaKpi
-              titulo="Sin identificar"
-              valor={fmtNumero(r.sinIdentificar)}
-              acento={r.sinIdentificar ? "#f43f5e" : undefined}
+              titulo="Dif. por costo"
+              valor={fmtMoneda(r.difPrecio)}
+              detalle="lo facturado de más (o de menos) contra el costo de la OC"
+              acento={Math.abs(r.difPrecio) > 1 ? "#f59e0b" : undefined}
               compacta
             />
             <TarjetaKpi
-              titulo="Diferencia por precio"
-              valor={fmtMoneda(r.difPrecio)}
-              detalle="lo facturado de más (o de menos) contra el precio de la OC"
-              acento={Math.abs(r.difPrecio) > 1 ? "#f59e0b" : undefined}
+              titulo="Dif. por cantidad"
+              valor={fmtMoneda(difCantidadTotal)}
+              detalle="unidades de más o de menos, a costo de la OC"
+              acento={Math.abs(difCantidadTotal) > 1 ? "#f59e0b" : undefined}
               compacta
             />
           </div>
 
           <Panel
-            titulo="3. Cruce renglón por renglón"
+            titulo="3. Reporte de diferencias"
             nota={`Neto OC ${fmtMoneda(r.netoOC)} · Neto factura ${fmtMoneda(r.netoFactura)}`}
           >
             <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -472,7 +691,7 @@ function Formulario() {
                 className={soloDiferencias ? BOTON_ACTIVO : BOTON}
                 onClick={() => setSoloDiferencias(true)}
               >
-                Sólo lo que hay que mirar
+                Sólo diferencias ({diferencias.length})
               </button>
               <button
                 className={!soloDiferencias ? BOTON_ACTIVO : BOTON}
@@ -480,51 +699,50 @@ function Formulario() {
               >
                 Todo ({resultado.lineas.length})
               </button>
-              <button className={BOTON} onClick={() => descargarCsv(resultado.lineas)}>
+              <button
+                className={BOTON}
+                onClick={() => descargarCsv(resultado.lineas, descripcionDe)}
+              >
                 Descargar cruce (CSV)
               </button>
             </div>
 
-            {lineas.length === 0 ? (
+            {lineasVisibles.length === 0 ? (
               <Aviso tono="info">
-                Todos los renglones coinciden con la OC en cantidad y precio.
+                Todos los artículos coinciden con la OC en cantidad y costo.
               </Aviso>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[960px] text-xs">
+                <table className="w-full min-w-[980px] text-xs">
                   <thead>
                     <tr className="border-line text-muted border-b text-left">
                       <th className="py-2 pr-2 font-normal">Estado</th>
-                      <th className="py-2 pr-2 font-normal">Artículo (Sigma)</th>
-                      <th className="py-2 pr-2 font-normal">Cómo vino en la factura</th>
-                      <th className="py-2 pr-2 text-right font-normal">Cant. OC</th>
-                      <th className="py-2 pr-2 text-right font-normal">Cant. factura</th>
-                      <th className="py-2 pr-2 text-right font-normal">Dif.</th>
-                      <th className="py-2 pr-2 text-right font-normal">P. neto OC</th>
-                      <th className="py-2 pr-2 text-right font-normal">P. neto factura</th>
-                      <th className="py-2 text-right font-normal">Dif. $</th>
+                      <th className="py-2 pr-2 font-normal">Artículo</th>
+                      <th className="py-2 pr-2 text-right font-normal">Unid. OC</th>
+                      <th className="py-2 pr-2 text-right font-normal">Unid. factura</th>
+                      <th className="py-2 pr-2 text-right font-normal">Dif. unid.</th>
+                      <th className="py-2 pr-2 text-right font-normal">Costo unit. OC</th>
+                      <th className="py-2 pr-2 text-right font-normal">Costo unit. factura</th>
+                      <th className="py-2 pr-2 text-right font-normal">Dif. $ costo</th>
+                      <th className="py-2 text-right font-normal">Dif. $ cantidad</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {lineas.map((l, i) => (
+                    {lineasVisibles.map((l, i) => (
                       <FilaCruce
                         key={`${l.sku ?? "x"}-${l.renglones[0]?.fila ?? i}`}
                         l={l}
-                        maestro={maestro}
-                        renglonesOC={renglonesOC}
                         descripcionDe={descripcionDe}
-                        onAsignar={(fila, sku) => {
-                          const manuales = { ...b.manuales };
-                          if (sku) manuales[fila] = sku;
-                          else delete manuales[fila];
-                          cambiar({ manuales });
-                        }}
                       />
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
+            <p className="text-muted mt-3 text-xs">
+              Todo en unidades y a costo neto por unidad, con las bonificaciones del renglón. El
+              costo se compara con media unidad de tolerancia (0,5 % o $0,50).
+            </p>
           </Panel>
 
           {/* 4. LOS TOTALES ---------------------------------------------- */}
@@ -606,30 +824,21 @@ function Formulario() {
             <p className="text-muted mt-3 text-xs">
               El IVA sale de la alícuota de cada artículo en Sigma. Si el total no cuadra por
               centavos es redondeo; si no cuadra por más, casi siempre falta una percepción o un
-              renglón sin identificar.
+              renglón.
             </p>
           </Panel>
 
-          {/* 5. SIGMA ----------------------------------------------------- */}
-          <Panel titulo="5. Cargar en Sigma">
-            <Aviso tono="alerta">
-              Todavía no se puede mandar sola: falta el endpoint de la API de Sigma para importar
-              comprobantes de compra. Apenas esté, este botón arma el comprobante con los renglones
-              de arriba (en unidades, con el precio y las bonificaciones de la factura) y lo carga
-              vinculado a la OC.
-            </Aviso>
-            <button className={`${BOTON} mt-3`} disabled>
-              Cargar comprobante en Sigma
-            </button>
-          </Panel>
+          {/* 5. LA TABLA PARA EL MAIL ------------------------------------ */}
+          <TablaParaMail datos={datosMail} />
         </>
       )}
 
-      {!hayOC && (
-        <Aviso tono="info">Elegí o pegá la OC para empezar.</Aviso>
-      )}
+      {!b.ordenId && <Aviso tono="info">Elegí el proveedor y la OC para empezar.</Aviso>}
       {hayOC && !hayFactura && (
-        <Aviso tono="info">Ahora pegá los renglones de la factura.</Aviso>
+        <Aviso tono="info">
+          Ahora cargá los renglones de la factura, o tocá “Traer los artículos de la OC” y
+          completá cantidades e importes.
+        </Aviso>
       )}
     </div>
   );
@@ -639,118 +848,17 @@ function Formulario() {
    PIEZAS
    ------------------------------------------------------------------------- */
 
-/**
- * Los roles que se están usando: los que eligió la persona si siguen
- * sirviendo para esta tabla, si no los adivinados. "Siguen sirviendo" quiere
- * decir que la tabla tiene la misma cantidad de columnas.
- */
-function rolesVigentes(elegidos: RolColumna[] | null, tabla: TablaPegada): RolColumna[] {
-  const ancho = tabla.filas[0]?.length ?? 0;
-  if (elegidos && elegidos.length === ancho) return elegidos;
-  return adivinarColumnas(tabla);
-}
-
-/**
- * Las primeras filas de lo pegado, con un desplegable arriba de cada columna.
- *
- * MUESTRA LOS NÚMEROS YA LEÍDOS, no el texto pegado. Es la única forma de ver
- * a tiempo que "1.234" se leyó como mil doscientos y no como uno coma dos.
- */
-function VistaPrevia({
-  tabla,
-  roles,
-  onRoles,
-}: {
-  tabla: TablaPegada;
-  roles: RolColumna[];
-  onRoles: (roles: RolColumna[]) => void;
-}) {
-  const numericos: RolColumna[] = ["cantidad", "precio", "descuento1", "descuento2", "importe"];
-  return (
-    <div className="overflow-x-auto">
-      <p className="text-muted mb-2 text-xs">
-        Revisá qué es cada columna (lo adiviné{tabla.encabezados ? " por los títulos" : " por el contenido"}
-        ). Si alguna está mal, cambiala en el desplegable.
-      </p>
-      <table className="w-full text-xs">
-        <thead>
-          <tr>
-            {roles.map((rol, i) => (
-              <th key={i} className="pr-2 pb-2 text-left font-normal">
-                <select
-                  className={`${CAMPO} w-full min-w-[110px] py-1 text-xs ${rol === "ignorar" ? "opacity-60" : ""}`}
-                  value={rol}
-                  onChange={(e) => {
-                    const nuevo = e.target.value as RolColumna;
-                    // Un rol en una sola columna: si ya estaba en otra, esa pasa a "no usar".
-                    onRoles(
-                      roles.map((r, j) =>
-                        j === i ? nuevo : r === nuevo && nuevo !== "ignorar" ? "ignorar" : r,
-                      ),
-                    );
-                  }}
-                >
-                  {ROLES_COLUMNA.map((o) => (
-                    <option key={o.clave} value={o.clave}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-                {tabla.encabezados && (
-                  <span className="text-muted mt-1 block truncate">{tabla.encabezados[i]}</span>
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {tabla.filas.slice(0, 5).map((f, i) => (
-            <tr key={i} className="border-line border-t">
-              {f.map((c, j) => {
-                const n = numericos.includes(roles[j]) ? leerNumero(c) : null;
-                return (
-                  <td
-                    key={j}
-                    className={`py-1 pr-2 ${roles[j] === "ignorar" ? "text-muted/50" : ""} ${
-                      numericos.includes(roles[j]) ? "text-right tabular-nums" : ""
-                    }`}
-                  >
-                    {numericos.includes(roles[j])
-                      ? n == null
-                        ? <span className="text-rose-300">{c || "—"}</span>
-                        : n.toLocaleString("es-AR", { maximumFractionDigits: 4 })
-                      : c}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {tabla.filas.length > 5 && (
-        <p className="text-muted mt-1 text-xs">… y {tabla.filas.length - 5} filas más.</p>
-      )}
-    </div>
-  );
-}
-
 function FilaCruce({
   l,
-  maestro,
-  renglonesOC,
   descripcionDe,
-  onAsignar,
 }: {
   l: LineaCruce;
-  maestro: ArticuloMaestro[];
-  renglonesOC: RenglonOC[];
   descripcionDe: Map<string, string>;
-  onAsignar: (fila: number, sku: string | null) => void;
 }) {
   const precio = (n: number | null | undefined) =>
     n == null ? "—" : fmtMoneda(Math.round(n * 100) / 100);
-  const dudosa = ["sin identificar", "no está en la OC"].includes(l.estado) || l.como === "descripcion";
-  const r0 = l.renglones[0];
+  const porCantidad = difPorCantidad(l);
+  const filas = l.renglones.map((x) => x.fila).join(", ");
 
   return (
     <tr className="border-line border-b align-top">
@@ -763,42 +871,14 @@ function FilaCruce({
         {l.sku ? (
           <>
             <span className="font-mono">{l.sku}</span>
-            <span className="text-muted block max-w-[280px] truncate" title={descripcionDe.get(l.sku)}>
+            <span className="text-muted block max-w-[320px] truncate" title={descripcionDe.get(l.sku)}>
               {descripcionDe.get(l.sku) ?? l.descripcion}
             </span>
           </>
         ) : (
-          <span className="text-muted">—</span>
+          <span className="text-rose-300">{l.descripcion}</span>
         )}
-      </td>
-      <td className="py-2 pr-2">
-        {l.renglones.length === 0 ? (
-          <span className="text-muted">no vino</span>
-        ) : (
-          <>
-            {l.renglones.map((x) => (
-              <span key={x.fila} className="block max-w-[300px] truncate" title={x.descripcion}>
-                <span className="text-muted">fila {x.fila} · </span>
-                {[x.codigo, x.ean].filter(Boolean).join(" / ")} {x.descripcion}
-              </span>
-            ))}
-            {l.como && (
-              <span className={`block ${l.como === "descripcion" ? "text-amber-200" : "text-muted"}`}>
-                {COMO_TEXTO[l.como]}
-                {l.factor > 1 ? ` · en bultos de ${l.factor}` : ""}
-              </span>
-            )}
-            {dudosa && r0 && (
-              <AsignarSku
-                fila={r0.fila}
-                actual={l.como === "manual" ? l.sku : null}
-                maestro={maestro}
-                renglonesOC={renglonesOC}
-                onAsignar={onAsignar}
-              />
-            )}
-          </>
-        )}
+        {filas && <span className="text-muted block">renglón {filas} de la factura</span>}
       </td>
       <td className="py-2 pr-2 text-right tabular-nums">{l.oc ? fmtNumero(l.oc.unidades) : "—"}</td>
       <td className="py-2 pr-2 text-right tabular-nums">
@@ -819,75 +899,13 @@ function FilaCruce({
       >
         {precio(l.factura?.precioNeto)}
       </td>
-      <td className="py-2 text-right tabular-nums">
+      <td className="py-2 pr-2 text-right tabular-nums">
         {l.difPrecio === 0 ? <span className="text-muted">—</span> : fmtMoneda(l.difPrecio)}
       </td>
+      <td className="py-2 text-right tabular-nums">
+        {porCantidad === 0 ? <span className="text-muted">—</span> : fmtMoneda(porCantidad)}
+      </td>
     </tr>
-  );
-}
-
-/**
- * Asignar a mano un renglón que el cruce no pudo (o no debería) decidir solo.
- *
- * PRIMERO LOS DE LA OC, porque es casi seguro que el renglón es uno de esos;
- * el resto del maestro del proveedor queda disponible escribiendo.
- */
-function AsignarSku({
-  fila,
-  actual,
-  maestro,
-  renglonesOC,
-  onAsignar,
-}: {
-  fila: number;
-  actual: string | null;
-  maestro: ArticuloMaestro[];
-  renglonesOC: RenglonOC[];
-  onAsignar: (fila: number, sku: string | null) => void;
-}) {
-  const [texto, setTexto] = useState(actual ?? "");
-  const id = `asignar-${fila}`;
-  const enOC = new Set(renglonesOC.map((r) => r.sku));
-  const opciones = [
-    ...maestro.filter((a) => enOC.has(a.sku)),
-    ...maestro.filter((a) => !enOC.has(a.sku)),
-  ];
-  const porSku = new Set(maestro.map((a) => a.sku));
-
-  return (
-    <span className="mt-1 flex items-center gap-1">
-      <input
-        list={id}
-        className={`${CAMPO} w-44 py-1 text-xs`}
-        placeholder="Asignar SKU…"
-        value={texto}
-        onChange={(e) => {
-          const v = e.target.value;
-          setTexto(v);
-          const sku = v.split(" — ")[0].trim();
-          if (porSku.has(sku)) onAsignar(fila, sku);
-        }}
-      />
-      <datalist id={id}>
-        {opciones.map((a) => (
-          <option key={a.sku} value={`${a.sku} — ${a.descripcion}`}>
-            {enOC.has(a.sku) ? "en la OC" : ""}
-          </option>
-        ))}
-      </datalist>
-      {actual && (
-        <button
-          className="text-muted hover:text-ink px-1"
-          title="Volver a lo que dedujo el cruce"
-          onClick={() => {
-            setTexto("");
-            onAsignar(fila, null);
-          }}
-        >
-          ×
-        </button>
-      )}
-    </span>
   );
 }
 
@@ -900,29 +918,179 @@ function FilaTotal({ label, valor, fuerte = false }: { label: string; valor: num
   );
 }
 
+/* -------------------------------------------------------------------------
+   LA TABLA PARA EL MAIL
+
+   Igual que "Para mail" en la planilla de sell in: una tabla con estilos en
+   línea, lista para pegar en Gmail u Outlook. Se copia como HTML (y como texto
+   con tabulaciones, por si se pega en un Excel), así que al pegarla en el
+   correo mantiene bordes y colores. Los estilos van escritos en cada celda
+   porque los correos ignoran las hojas de estilo.
+   ------------------------------------------------------------------------- */
+
+type DatosMail = {
+  proveedor: string;
+  oc: string;
+  factura: string;
+  lineas: LineaCruce[];
+  descripcionDe: Map<string, string>;
+  totales: ReturnType<typeof totalesComprobante>;
+};
+
+const n2 = (n: number) =>
+  n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pesos = (n: number) => `${n < 0 ? "-" : ""}$ ${n2(Math.abs(n))}`;
+const n0 = (n: number) => n.toLocaleString("es-AR", { maximumFractionDigits: 2 });
+const esc = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+const ENCABEZADOS_MAIL = [
+  "Motivo",
+  "SKU",
+  "Descripción",
+  "Unid. OC",
+  "Unid. facturadas",
+  "Dif. unid.",
+  "Costo unit. OC",
+  "Costo unit. facturado",
+  "Dif. $ costo",
+  "Dif. $ cantidad",
+];
+
+function celdasMail(l: LineaCruce, descripcionDe: Map<string, string>): string[] {
+  return [
+    MOTIVO_MAIL[l.estado],
+    l.sku ?? "",
+    (l.sku && descripcionDe.get(l.sku)) || l.descripcion,
+    l.oc ? n0(l.oc.unidades) : "—",
+    l.factura ? n0(l.factura.unidades) : "—",
+    l.difUnidades === 0 ? "—" : `${l.difUnidades > 0 ? "+" : ""}${n0(l.difUnidades)}`,
+    l.oc ? pesos(l.oc.precioNeto) : "—",
+    l.factura?.precioNeto != null ? pesos(l.factura.precioNeto) : "—",
+    l.difPrecio === 0 ? "—" : pesos(l.difPrecio),
+    difPorCantidad(l) === 0 ? "—" : pesos(difPorCantidad(l)),
+  ];
+}
+
+function htmlMail(d: DatosMail): string {
+  const th =
+    "border:1px solid #cbd5e1;background:#1e293b;color:#ffffff;padding:6px 8px;font-size:12px;text-align:left;";
+  const td = "border:1px solid #cbd5e1;padding:5px 8px;font-size:12px;";
+  const num = `${td}text-align:right;white-space:nowrap;`;
+  const fondo: Partial<Record<EstadoCruce, string>> = {
+    "falta en factura": "#fee2e2",
+    "sin identificar": "#fee2e2",
+    "no está en la OC": "#ede9fe",
+  };
+  const totalCosto = d.lineas.reduce((s, l) => s + l.difPrecio, 0);
+  const totalCantidad = d.lineas.reduce((s, l) => s + difPorCantidad(l), 0);
+  const titulo = [d.proveedor, d.factura, d.oc].filter(Boolean).map(esc).join(" · ");
+
+  const filas = d.lineas
+    .map((l) => {
+      const c = celdasMail(l, d.descripcionDe);
+      const bg = fondo[l.estado] ?? "#fef3c7";
+      return `<tr style="background:${bg};">${c
+        .map((v, i) => `<td style="${i >= 3 ? num : td}">${esc(v)}</td>`)
+        .join("")}</tr>`;
+    })
+    .join("");
+
+  return `<div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+<p style="font-size:13px;margin:0 0 8px;"><b>Diferencias factura vs. OC</b>${titulo ? ` — ${titulo}` : ""}</p>
+<table style="border-collapse:collapse;">
+<thead><tr>${ENCABEZADOS_MAIL.map((h) => `<th style="${th}">${esc(h)}</th>`).join("")}</tr></thead>
+<tbody>${filas}
+<tr style="background:#f1f5f9;font-weight:bold;"><td style="${td}" colspan="8">Total diferencias</td><td style="${num}">${pesos(totalCosto)}</td><td style="${num}">${pesos(totalCantidad)}</td></tr>
+</tbody></table>
+<p style="font-size:12px;margin:8px 0 0;">Total factura calculado: ${pesos(d.totales.total)}${
+    d.totales.diferencia != null && !d.totales.cuadra
+      ? ` · Total impreso: ${pesos(d.totales.total - d.totales.diferencia)}`
+      : ""
+  }</p>
+</div>`;
+}
+
+function textoMail(d: DatosMail): string {
+  return [
+    ENCABEZADOS_MAIL.join("\t"),
+    ...d.lineas.map((l) => celdasMail(l, d.descripcionDe).join("\t")),
+  ].join("\n");
+}
+
+function TablaParaMail({ datos }: { datos: DatosMail }) {
+  const [copiado, setCopiado] = useState<"ok" | "error" | null>(null);
+  const html = useMemo(() => htmlMail(datos), [datos]);
+
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([textoMail(datos)], { type: "text/plain" }),
+        }),
+      ]);
+      setCopiado("ok");
+    } catch {
+      setCopiado("error");
+    }
+  };
+
+  if (datos.lineas.length === 0) {
+    return (
+      <Panel titulo="5. Tabla para el mail">
+        <Aviso tono="info">No hay diferencias para mandarle al proveedor.</Aviso>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel titulo="5. Tabla para el mail" nota={`${datos.lineas.length} diferencias`}>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <button className={BOTON_ACTIVO} onClick={() => void copiar()}>
+          Copiar tabla para el mail
+        </button>
+        {copiado === "ok" && (
+          <span className="text-xs text-emerald-300">Copiada: pegala en el correo con Ctrl+V.</span>
+        )}
+        {copiado === "error" && (
+          <span className="text-xs text-rose-300">
+            El navegador no dejó copiar: seleccioná la tabla de abajo y copiala a mano.
+          </span>
+        )}
+      </div>
+      {/* Vista previa tal cual va a quedar en el correo, sobre fondo blanco. */}
+      <div
+        className="overflow-x-auto rounded-lg bg-white p-3"
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    </Panel>
+  );
+}
+
 /** El cruce entero en CSV, con punto y coma y coma decimal para que Excel lo abra bien. */
-function descargarCsv(lineas: LineaCruce[]) {
+function descargarCsv(lineas: LineaCruce[], descripcionDe: Map<string, string>) {
   const num = (n: number | null | undefined) =>
     n == null ? "" : String(Math.round(n * 100) / 100).replace(".", ",");
-  const esc = (s: string) => `"${s.replace(/"/g, '""')}"`;
+  const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
   const filas = [
     [
-      "Estado", "SKU", "Descripción Sigma", "Filas factura", "Cómo se identificó",
-      "Cant. OC", "Cant. factura", "Dif. cant.", "P. neto OC", "P. neto factura", "Dif. $",
+      "Estado", "SKU", "Descripción", "Renglones factura", "Unid. OC", "Unid. factura",
+      "Dif. unid.", "Costo unit. OC", "Costo unit. factura", "Dif. $ costo", "Dif. $ cantidad",
     ].join(";"),
     ...lineas.map((l) =>
       [
-        esc(l.estado),
-        esc(l.sku ?? ""),
-        esc(l.descripcion),
-        esc(l.renglones.map((r) => r.fila).join(", ")),
-        esc(l.como ? COMO_TEXTO[l.como] : ""),
+        q(l.estado),
+        q(l.sku ?? ""),
+        q((l.sku && descripcionDe.get(l.sku)) || l.descripcion),
+        q(l.renglones.map((r) => r.fila).join(", ")),
         num(l.oc?.unidades),
         num(l.factura?.unidades),
         num(l.difUnidades),
         num(l.oc?.precioNeto),
         num(l.factura?.precioNeto),
         num(l.difPrecio),
+        num(difPorCantidad(l)),
       ].join(";"),
     ),
   ];

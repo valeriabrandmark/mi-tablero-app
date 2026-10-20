@@ -320,6 +320,11 @@ export type RenglonFactura = {
   descuento2: number;
   /** El importe de la línea si la factura lo trae. Manda sobre precio × cantidad. */
   importe: number | null;
+  /**
+   * La persona dijo si eran bultos o unidades (y `cantidad` ya viene en
+   * unidades): el cruce no intenta adivinarlo.
+   */
+  unidadFija?: boolean;
 };
 
 /**
@@ -415,6 +420,55 @@ export function normalizarCodigo(c: string | null | undefined): string {
 /** Además sin ceros adelante: "00123" y "123" son el mismo código de proveedor. */
 function sinCeros(c: string): string {
   return c.replace(/^0+(?=.)/, "");
+}
+
+/** Lo que encontró `buscarArticulo` para un renglón cargado a mano. */
+export type ArticuloEncontrado =
+  | { a: ArticuloMaestro; porBulto: boolean }
+  | { error: string };
+
+/**
+ * El artículo de un renglón cargado a mano, con uno o más códigos tipeados.
+ *
+ * CADA CÓDIGO PUEDE SER CUALQUIER COSA: SKU, EAN (de unidad, display o bulto)
+ * o código de compra del proveedor, en mayúscula o minúscula. Se prueba en ese
+ * orden. Así la persona tipea lo que tiene a mano --lo que dice la factura,
+ * lo que lee la pistola-- y el cruce lo lleva al SKU de Sigma, que es lo que
+ * tiene la OC.
+ *
+ * Si se cargó más de uno y apuntan a artículos distintos, no se elige: es
+ * un error de carga y se avisa. `null` si no se cargó ningún código.
+ */
+export function buscarArticulo(
+  indice: IndiceMaestro,
+  codigos: string[],
+): ArticuloEncontrado | null {
+  const cargados = codigos.map((c) => (c ?? "").trim()).filter(Boolean);
+  if (cargados.length === 0) return null;
+
+  const hits = cargados.map((t) => {
+    const s = normalizarCodigo(t);
+    const porSku = indice.porCodigo.get(s);
+    if (porSku) return { a: porSku, porBulto: false };
+    const ean = indice.porEan.get(t.replace(/\D/g, ""));
+    if (ean && /^\d{8,14}$/.test(t.replace(/\s/g, ""))) {
+      return { a: ean.a, porBulto: ean.tipo === "bulto" };
+    }
+    const prov = indice.porCodigoProveedor.get(sinCeros(s)) ?? [];
+    if (prov.length === 1) return { a: prov[0], porBulto: false };
+    return { falla: prov.length > 1 ? `${t} (repetido en el maestro)` : t };
+  });
+
+  const buenos = hits.filter((h): h is { a: ArticuloMaestro; porBulto: boolean } => "a" in h);
+  if (buenos.length === 0) {
+    return {
+      error: `No está en el maestro: ${hits.map((h) => ("falla" in h ? h.falla : "")).join(", ")}`,
+    };
+  }
+  const skus = [...new Set(buenos.map((h) => h.a.sku))];
+  if (skus.length > 1) return { error: `Los códigos no coinciden: ${skus.join(" / ")}` };
+  // El EAN del bulto, si se cargó, dice que viene en bultos.
+  return { a: buenos[0].a, porBulto: buenos.some((h) => h.porBulto) };
 }
 
 /** Cómo se reconoció un renglón. Va a la pantalla tal cual. */
@@ -754,7 +808,8 @@ export function cruzar(
     // si ninguno, el que deja el precio más cerca. Un proveedor que factura 2
     // bultos de 6 contra una OC de 12 unidades NO tiene diferencia.
     let factor = g.id.factor;
-    if (factor === 1 && a && a.unidadesPorBulto > 1) {
+    const unidadFija = g.renglones.some((r) => r.unidadFija);
+    if (factor === 1 && !unidadFija && a && a.unidadesPorBulto > 1) {
       const porUnidad = ladoFactura(g.renglones, 1);
       const porBulto = ladoFactura(g.renglones, a.unidadesPorBulto);
       const cierraUnidad = porUnidad.unidades === o.cantidad;

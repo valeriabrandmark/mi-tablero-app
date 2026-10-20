@@ -69,6 +69,10 @@ const NAV: ItemNav[] = [
     icono: "operaciones",
     hijos: [
       { href: "/stock", label: "Stock", icono: "stock" },
+      // Lo que viene después de la orden: cuando llega la factura, cruzarla
+      // contra la OC que salió del tablero. Es de Compras (lib/modulos.ts)
+      // aunque viva en Operaciones: la ve quien ve las órdenes.
+      { href: "/facturas-compra", label: "Carga de Facturas de compra", icono: "factura" },
       // Precios TN va en Operaciones y no en Ventas minoristas -> Tienda Nube,
       // aunque hable de esa tienda: lo de allá es MIRAR lo que se vendió, esto
       // es DECIDIR a cuánto se vende. Son cosas distintas y las mira gente

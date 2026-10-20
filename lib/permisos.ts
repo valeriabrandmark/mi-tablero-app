@@ -357,9 +357,6 @@ const PAGINAS_EN_CONSTRUCCION = [
   // documenta. Publicarla antes de verificarlos sería ofrecer botones que
   // pueden llevar a una página en blanco.
   "/venta-minorista/mercado-libre/posventa",
-  // La carga de facturas cruza contra la OC pero todavía no puede mandar el
-  // comprobante a Sigma: falta el endpoint de importación de la API.
-  "/stock/compras/facturas",
 ];
 
 /**

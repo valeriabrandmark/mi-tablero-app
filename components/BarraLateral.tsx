@@ -33,7 +33,8 @@ export type ClaveIcono =
   | "tiendanube"
   | "stock"
   | "operaciones"
-  | "precios";
+  | "precios"
+  | "factura";
 
 /** Subpágina de un grupo. Lleva su propia marca porque es la que se mira. */
 export type ItemHijo = {
@@ -89,7 +90,8 @@ type ClaveTrazo =
   | "objetivos"
   | "stock"
   | "operaciones"
-  | "precios";
+  | "precios"
+  | "factura";
 
 const TRAZOS: Record<ClaveTrazo, ReactNode> = {
   ventas: (
@@ -144,6 +146,14 @@ const TRAZOS: Record<ClaveTrazo, ReactNode> = {
   ),
   // Cajas apiladas. No se repite el cubo de Logística: ése es el paquete que
   // viaja, éste es la mercadería que está quieta en el depósito.
+  // Una hoja con renglones y el tilde del control contra la OC.
+  factura: (
+    <>
+      <path d="M6 2h9l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z" />
+      <path d="M8 8h6M8 12h8" />
+      <path d="m9 17 2 2 4-4" stroke={NARANJA} />
+    </>
+  ),
   stock: (
     <>
       <rect x="3" y="13" width="8" height="8" rx="1" />
