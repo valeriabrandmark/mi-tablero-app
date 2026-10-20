@@ -1,7 +1,7 @@
 import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
-import { buscadorDeArticulo } from "@/lib/sql-ean";
+import { buscadorDeArticulo } from "@/lib/sql-codigos";
 import {
   COBERTURA_OBJETIVO_DIAS,
   DIAS_MINIMOS_DE_RITMO,

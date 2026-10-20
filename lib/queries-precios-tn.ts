@@ -1,5 +1,5 @@
 import { query, queryOne } from "@/lib/db";
-import { buscadorDeArticulo } from "@/lib/sql-ean";
+import { buscadorDeArticulo } from "@/lib/sql-codigos";
 import {
   DIFERENCIA_MINIMA_VISIBLE,
   GRUPOS_INFORMATIVOS,

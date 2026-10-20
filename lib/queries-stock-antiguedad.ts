@@ -1,7 +1,7 @@
 import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
-import { buscadorDeArticulo } from "@/lib/sql-ean";
+import { buscadorDeArticulo } from "@/lib/sql-codigos";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import {
