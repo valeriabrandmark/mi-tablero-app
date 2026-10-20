@@ -57,6 +57,20 @@ export function resumenSeleccion({
   nombre: (valor: string) => string;
 }): string {
   if (elegidos.length === 0) return todos;
+
+  // UNO ELEGIDO SE NOMBRA, aunque además sea el único que había.
+  //
+  // Va ANTES que el caso de "todos" a propósito. Cuando la lista quedó con una
+  // sola opción --pasa seguido, porque los selectores se recortan entre sí--
+  // elegirla es a la vez "elegir todo" y "elegir ese", y el cartel decía
+  // "Todos (1)": una etiqueta que no dice nada justo cuando hay algo para
+  // decir.
+  //
+  // Y no es cosmético. En Compras, tener UN proveedor elegido cambia qué es la
+  // orden: pasa a ser la de ese proveedor entero. Que el cartel diga su nombre
+  // es lo que explica por qué los números de arriba hablan de él.
+  if (elegidos.length === 1) return nombre(elegidos[0]);
+
   if (elegidos.length >= total) return `${todos} (${total})`;
 
   if (invertirSeleccion(elegidos.length, total)) {

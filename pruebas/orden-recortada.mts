@@ -26,6 +26,9 @@
  */
 
 import {
+  alcanceDisponible,
+  entraEnLaOrden,
+  nombreDelAlcanceMarca,
   queRecortaLaOrden,
   RECORTES_POR_DEFECTO,
   totalesDeLaOrden,
@@ -250,6 +253,82 @@ revisar(
     return { orden: entera.unidades, vista: vista.unidades };
   })(),
   { orden: 5, vista: 1 },
+);
+
+// --- Hasta dónde llega la orden -------------------------------------------
+//
+// Los dos casos son reales y conviven: hay proveedores donde la OC va siempre
+// por marca, y hay veces que se filtra una marca sólo para vaciarle cantidades
+// y la OC igual va por todo el proveedor. Por eso se elige.
+//
+// LO UNICO QUE PUEDE RECORTAR ES LA MARCA. El buscador y el selector Mostrar
+// no: son la lupa con la que se mira, no un conjunto que alguien pueda
+// nombrar. Si recortaran, olvidarse una palabra tipeada mandaría media orden
+// sin que nada avisara.
+
+revisar("sin marca elegida no hay nada que elegir", alcanceDisponible(undefined), false);
+revisar("ni con la lista vacía", alcanceDisponible([]), false);
+revisar("con una marca sí", alcanceDisponible(["AVENT"]), true);
+
+revisar("una marca se nombra", nombreDelAlcanceMarca(["AVENT"]), "AVENT");
+revisar(
+  "varias se cuentan",
+  nombreDelAlcanceMarca(["AVENT", "CHICCO", "DOVE"]),
+  "las 3 marcas elegidas",
+);
+revisar("sin marcas no inventa una", nombreDelAlcanceMarca([]), "la marca elegida");
+
+// Con alcance de proveedor entra TODO, incluso lo que no se está viendo: es el
+// caso de "filtro AVENT para vaciarle cantidades, pero la OC va completa".
+revisar(
+  "alcance de proveedor: entra un CHICCO aunque esté filtrada AVENT",
+  entraEnLaOrden({ marca: "CHICCO" }, "proveedor", ["AVENT"]),
+  true,
+);
+
+// Con alcance de marca, el CHICCO queda afuera. Es el caso de "a PARALLEL las
+// OC le van por marca".
+revisar(
+  "alcance de marca: el CHICCO queda afuera",
+  entraEnLaOrden({ marca: "CHICCO" }, "marca", ["AVENT"]),
+  false,
+);
+revisar(
+  "alcance de marca: el AVENT entra",
+  entraEnLaOrden({ marca: "AVENT" }, "marca", ["AVENT"]),
+  true,
+);
+revisar(
+  "con dos marcas elegidas entran las dos",
+  [
+    entraEnLaOrden({ marca: "AVENT" }, "marca", ["AVENT", "CHICCO"]),
+    entraEnLaOrden({ marca: "CHICCO" }, "marca", ["AVENT", "CHICCO"]),
+    entraEnLaOrden({ marca: "DOVE" }, "marca", ["AVENT", "CHICCO"]),
+  ],
+  [true, true, false],
+);
+
+// Un artículo SIN marca cargada no puede colarse en una orden de marca: nadie
+// lo revisó al mirar AVENT, así que mandarlo sería mandar algo que no se vio.
+revisar(
+  "sin marca cargada no entra en una orden de marca",
+  entraEnLaOrden({ marca: null }, "marca", ["AVENT"]),
+  false,
+);
+// Pero sí en la del proveedor, que es todo lo que tiene.
+revisar(
+  "sin marca cargada sí entra en la del proveedor",
+  entraEnLaOrden({ marca: null }, "proveedor", ["AVENT"]),
+  true,
+);
+
+// Sin marcas elegidas el alcance de marca no puede recortar nada: sería una
+// orden vacía. La pantalla ya no lo ofrece, pero la función no puede depender
+// de eso.
+revisar(
+  "alcance de marca sin marcas no vacía la orden",
+  entraEnLaOrden({ marca: "CHICCO" }, "marca", []),
+  true,
 );
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
