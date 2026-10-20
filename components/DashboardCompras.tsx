@@ -452,6 +452,15 @@ export default function DashboardComprasPage({
    * que la barra no lleve una línea de texto permanente que nadie lee.
    */
   const estadoBorrador = ((): string => {
+    // SIN UN PROVEEDOR ELEGIDO NO HAY BORRADOR, y hay que decirlo en vez de no
+    // mostrar nada: una orden es de un proveedor, así que no hay dónde guardar
+    // lo que se cargue. Callarse deja a alguien cargando cantidades que no se
+    // están guardando, convencido de que sí -- o buscando una función que
+    // parece no existir.
+    if (!proveedorUnico)
+      return ediciones.size > 0
+        ? "El borrador se guarda por proveedor: elegí uno y lo que cargues queda guardado solo."
+        : "";
     // "error" es tanto no haber podido LEER el borrador como no haber podido
     // GUARDARLO, y el texto sirve para los dos: en los dos casos lo que hay en
     // pantalla no está en ningún otro lado. Decir "no se pudo guardar" cuando
@@ -1892,7 +1901,7 @@ export default function DashboardComprasPage({
                 guardando?", que es la pregunta que alguien se hace una vez y
                 después no vuelve a hacerse. Por eso va al pie, chico y sin
                 color -- salvo cuando falla, que ahí sí hay que mirarlo. */}
-            {proveedorUnico && estadoBorrador && (
+            {estadoBorrador && (
               <div className="border-line mt-1 flex w-full flex-wrap items-center gap-x-2 gap-y-1 border-t pt-2 text-[11px]">
                 <span
                   className={
@@ -1904,7 +1913,8 @@ export default function DashboardComprasPage({
                 {/* DESCARTAR ESTA AL LADO DE "SE RETOMO" a propósito: retomar
                     solo, sin preguntar, sólo es aceptable si deshacerlo está
                     a un click de distancia. */}
-                {(borrador.retomadoDe !== null || ediciones.size > 0) &&
+                {proveedorUnico &&
+                  (borrador.retomadoDe !== null || ediciones.size > 0) &&
                   (confirmandoDescarte ? (
                     <>
                       <span className="text-ink">
@@ -1936,9 +1946,11 @@ export default function DashboardComprasPage({
                       Descartar el borrador
                     </button>
                   ))}
-                <span className="text-muted ml-auto">
-                  Los borradores se guardan {DIAS_DE_VIDA_BORRADOR} días.
-                </span>
+                {proveedorUnico && (
+                  <span className="text-muted ml-auto">
+                    Los borradores se guardan {DIAS_DE_VIDA_BORRADOR} días.
+                  </span>
+                )}
               </div>
             )}
           </div>
