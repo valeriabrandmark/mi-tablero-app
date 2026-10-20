@@ -2,7 +2,7 @@ import { cacheado } from "@/lib/cache";
 import { fmtMes } from "@/lib/format";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
-import { buscadorDeArticulo } from "@/lib/sql-ean";
+import { buscadorDeArticulo } from "@/lib/sql-codigos";
 import { COSTOS_VIGENTES_POR_MES, ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import {
   COBERTURA_MAXIMA_COMPRA_DIAS,

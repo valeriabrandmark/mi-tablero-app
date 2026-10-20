@@ -1,5 +1,5 @@
 import { cacheado } from "@/lib/cache";
-import { buscadorDeArticulo } from "@/lib/sql-ean";
+import { buscadorDeArticulo } from "@/lib/sql-codigos";
 import { query, queryOne } from "@/lib/db";
 import {
   CANAL_MAYORISTA,
