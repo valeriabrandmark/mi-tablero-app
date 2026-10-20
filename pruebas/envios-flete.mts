@@ -22,6 +22,7 @@
 import {
   destino,
   origenDelFlete,
+  porQueElMargen,
   repartoDelFlete,
   resumenEmpresas,
 } from "@/lib/logistica";
@@ -165,6 +166,56 @@ revisar(
   "METAN",
 );
 revisar("sin nada", destino({ localidad: null, provincia: null }), "—");
+
+// --- Por qué un renglón da lo que da -------------------------------------
+//
+// Un margen malo tiene DOS causas y se arreglan de maneras opuestas: o el
+// artículo se vendió por debajo del costo --hay que mirarle el precio-- o
+// ganaba plata y el flete se la comió --el precio está bien, lo caro es
+// mandarlo--. Los dos terminan en un número rojo, y mirando sólo ese número
+// los dos parecen el mismo problema.
+
+revisar("si deja plata después del flete, está bien", porQueElMargen(1000, 100), "ok");
+
+// LOS DOS CASOS DE VERDAD, del envío 12750394.
+// La pala de pie: ganaba $7.445 y el flete se llevó $34.936.
+revisar(
+  "una pala de pie: el flete se la comió",
+  porQueElMargen(7445.93, 34936.42),
+  "flete",
+);
+// El perfume: perdía $4.863 con $121 de flete. Con flete cero igual perdía.
+revisar(
+  "un perfume bajo costo: no es el flete",
+  porQueElMargen(-4863.94, 121.29),
+  "bajo_costo",
+);
+
+// SE MIRA PRIMERO EL MARGEN SIN FLETE. Si se mirara el resultado final, los
+// dos de arriba darían lo mismo y no habría forma de saber cuál arreglar.
+revisar(
+  "bajo costo manda aunque el flete sea enorme",
+  porQueElMargen(-10, 5000),
+  "bajo_costo",
+);
+
+// VENDER SIN GANAR NADA NO ES UN CASO APARTE. Tratarlo como "ok" dejaría
+// afuera justo la lista de precios desactualizada.
+revisar("margen cero es bajo costo", porQueElMargen(0, 10), "bajo_costo");
+
+// Justo en el límite: el flete se lleva exactamente lo que dejaba. No quedó
+// nada, así que es un problema, y es del flete.
+revisar("el flete se lleva exactamente el margen", porQueElMargen(100, 100), "flete");
+revisar("un peso menos de flete y está bien", porQueElMargen(100, 99), "ok");
+
+// Sin flete cargado la pregunta sigue teniendo respuesta: la del artículo.
+revisar("sin flete, decide el artículo", porQueElMargen(500, 0), "ok");
+revisar("sin flete y bajo costo igual", porQueElMargen(-500, 0), "bajo_costo");
+
+// Un número roto no puede inventar un diagnóstico ni pintar de rojo algo que
+// no se sabe.
+revisar("un margen roto no diagnostica", porQueElMargen(NaN, 100), "ok");
+revisar("un flete roto no cuenta como flete", porQueElMargen(100, NaN), "ok");
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);

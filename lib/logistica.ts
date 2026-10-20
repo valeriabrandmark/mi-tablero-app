@@ -105,6 +105,42 @@ export function destino(fila: {
   return `${l}, ${p}`;
 }
 
+/**
+ * POR QUE ESTE RENGLON DA LO QUE DA.
+ *
+ * Es la pregunta con la que se abre el desglose de artículos: un margen malo
+ * tiene DOS causas posibles y se arreglan de maneras opuestas.
+ *
+ *   bajo_costo   El artículo se vendió por debajo de lo que costó. El flete no
+ *                tiene nada que ver: con flete cero igual perdía. Se arregla
+ *                con el precio o con el costo.
+ *   flete        El artículo ganaba plata y el flete se la comió. El precio
+ *                está bien; lo que está mal es mandarlo así -- típico del
+ *                artículo voluminoso y barato.
+ *   ok           Después del flete sigue dando.
+ *
+ * MIRAR PRIMERO EL MARGEN SIN FLETE Y NO EL RESULTADO FINAL es toda la gracia.
+ * Los dos casos terminan en un número rojo, y si sólo se mirara ese número los
+ * dos parecerían el mismo problema. Un ejemplo real del envío 12750394: una
+ * pala de pie con margen de +$7.445 y $34.936 de flete, al lado de un perfume
+ * con margen de -$4.863 y $121 de flete. El primero hay que dejar de mandarlo;
+ * al segundo hay que cambiarle el precio.
+ *
+ * CERO CUENTA COMO BAJO COSTO: vender sin ganar nada no es un caso aparte, y
+ * tratarlo como "ok" dejaría afuera justo la lista de precios desactualizada.
+ */
+export type MotivoMargen = "bajo_costo" | "flete" | "ok";
+
+export function porQueElMargen(
+  margenSinFlete: number,
+  flete: number,
+): MotivoMargen {
+  if (!Number.isFinite(margenSinFlete)) return "ok";
+  if (margenSinFlete <= 0) return "bajo_costo";
+  const real = margenSinFlete - (Number.isFinite(flete) ? flete : 0);
+  return real <= 0 ? "flete" : "ok";
+}
+
 /** Los comprobantes de un envío, con su parte del flete ya calculada. */
 export function repartoDelEnvio(
   envio: FilaEnvio,

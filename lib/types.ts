@@ -202,6 +202,36 @@ export type FilaComprobanteEnvio = {
 };
 
 /**
+ * UN RENGLON DE UN ENVIO: el artículo, lo que dejó y lo que se llevó el flete.
+ *
+ * Es el grano más fino de la página y existe para una pregunta concreta: por
+ * qué un comprobante dio el margen que dio. La respuesta casi siempre está en
+ * dos o tres renglones, no en el promedio.
+ */
+export type FilaArticuloEnvio = {
+  sku: string | null;
+  producto: string | null;
+  marca: string | null;
+  proveedor: string | null;
+  comprobante: string | null;
+  cantidad: number;
+  /** Precio unitario neto, sin IVA. */
+  precioNeto: number;
+  costoUnitario: number;
+  facturacion: number;
+  /** El margen del renglón ANTES del flete: es el que dice si se vendió bien. */
+  margen: number;
+  /** Lo que de ese envío le tocó a este renglón. */
+  flete: number;
+  /** Margen menos flete: lo que de verdad quedó. */
+  margenReal: number;
+  /** El margen real sobre lo facturado. `null` si no facturó nada. */
+  pctMargenReal: number | null;
+  /** Si el flete de este renglón sale de la factura del transportista. */
+  fleteReal: boolean;
+};
+
+/**
  * UN ENVIO: una preparación, el flete que costó y los comprobantes que
  * viajaron adentro.
  *

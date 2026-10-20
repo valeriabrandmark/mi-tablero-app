@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import EncabezadoPagina from "@/components/EncabezadoPagina";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import TortaProveedores from "@/components/charts/TortaProveedores";
@@ -29,13 +29,16 @@ import {
 import {
   destino,
   origenDelFlete,
+  porQueElMargen,
   repartoDelEnvio,
   resumenEmpresas,
+  type MotivoMargen,
 } from "@/lib/logistica";
 import { PALETA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
   DashboardLogistica,
+  FilaArticuloEnvio,
   FilaEnvio,
   FiltrosLogistica,
   OpcionesLogistica,
@@ -88,6 +91,16 @@ function ChipOrigen({
 function RepartoDelFlete({ envio }: { envio: FilaEnvio }) {
   const filas = repartoDelEnvio(envio);
 
+  /**
+   * Qué comprobante se está mirando por dentro. `""` es el envío entero.
+   *
+   * ES UNA SELECCION Y NO UN SEGUNDO DESPLEGABLE: abrir tres comprobantes a la
+   * vez dentro de una fila que ya está abierta deja una pantalla donde no se
+   * entiende qué número pertenece a qué. Se mira uno por vez, y volver a
+   * clickearlo lo cierra.
+   */
+  const [mirando, setMirando] = useState<string | null>(null);
+
   if (filas.length === 0) {
     return (
       <p className="text-muted text-xs">
@@ -96,16 +109,35 @@ function RepartoDelFlete({ envio }: { envio: FilaEnvio }) {
     );
   }
 
+  const elegir = (clave: string) =>
+    setMirando((actual) => (actual === clave ? null : clave));
+
   return (
     <div className="space-y-2">
-      <p className="text-muted text-[11px]">
-        Los <strong className="text-ink">{fmtMoneda(envio.flete)}</strong> de
-        flete de la preparación {envio.preparacionId}, repartidos entre{" "}
-        {filas.length === 1
-          ? "el comprobante que viajó en ella"
-          : `los ${fmtNumero(filas.length)} comprobantes que viajaron en ella`}
-        .
-      </p>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <p className="text-muted text-[11px]">
+          Los <strong className="text-ink">{fmtMoneda(envio.flete)}</strong> de
+          flete de la preparación {envio.preparacionId}, repartidos entre{" "}
+          {filas.length === 1
+            ? "el comprobante que viajó en ella"
+            : `los ${fmtNumero(filas.length)} comprobantes que viajaron en ella`}
+          .
+        </p>
+        <button
+          type="button"
+          onClick={() => elegir("")}
+          className={`rounded-lg border px-2 py-0.5 text-[11px] ${
+            mirando === ""
+              ? "border-c1 text-c1"
+              : "border-line text-muted hover:text-ink"
+          }`}
+        >
+          {mirando === ""
+            ? "Ocultar los artículos"
+            : "Ver los artículos del envío"}
+        </button>
+      </div>
+
       <table className="w-full text-xs">
         <thead>
           <tr className="text-muted text-left">
@@ -120,34 +152,301 @@ function RepartoDelFlete({ envio }: { envio: FilaEnvio }) {
               % del envío
             </th>
             <th
-              className="py-1 text-right font-medium"
+              className="py-1 pr-3 text-right font-medium"
               title="Cuánto pesa ese flete sobre lo que facturó el comprobante."
             >
               % s/ su facturación
             </th>
+            <th className="py-1 font-medium"></th>
           </tr>
         </thead>
         <tbody>
-          {filas.map((c) => (
-            <tr key={c.comprobante ?? "—"} className="border-line border-t">
-              <td className="py-1 pr-3 font-mono">{c.comprobante ?? "—"}</td>
-              <td className="text-muted py-1 pr-3">{c.empresa ?? "—"}</td>
-              <td className="py-1 pr-3 text-right tabular-nums">
-                {fmtMoneda(c.facturacion)}
-              </td>
-              <td className="py-1 pr-3 text-right tabular-nums">
-                {fmtMoneda(c.flete)}
-              </td>
-              <td className="py-1 pr-3 text-right tabular-nums">
-                {fmtPct(c.reparto)}
-              </td>
-              <td className="py-1 text-right tabular-nums">
-                {fmtPct(c.pctFlete)}
-              </td>
-            </tr>
-          ))}
+          {filas.map((c) => {
+            const clave = c.comprobante ?? "—";
+            const abierto = mirando === clave;
+            return (
+              <tr
+                key={clave}
+                onClick={() => elegir(clave)}
+                className={`border-line cursor-pointer border-t ${
+                  abierto ? "bg-panel-2" : "hover:bg-panel-2/50"
+                }`}
+              >
+                <td className="py-1 pr-3 font-mono">{c.comprobante ?? "—"}</td>
+                <td className="text-muted py-1 pr-3">{c.empresa ?? "—"}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">
+                  {fmtMoneda(c.facturacion)}
+                </td>
+                <td className="py-1 pr-3 text-right tabular-nums">
+                  {fmtMoneda(c.flete)}
+                </td>
+                <td className="py-1 pr-3 text-right tabular-nums">
+                  {fmtPct(c.reparto)}
+                </td>
+                <td className="py-1 pr-3 text-right tabular-nums">
+                  {fmtPct(c.pctFlete)}
+                </td>
+                <td className="text-muted py-1 text-right text-[11px] whitespace-nowrap">
+                  {abierto ? "ocultar" : "ver artículos"}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+
+      {mirando !== null && (
+        <ArticulosDelEnvio
+          preparacionId={envio.preparacionId}
+          comprobante={mirando === "" ? null : mirando}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * POR QUE ESTE RENGLON DA LO QUE DA, en un chip.
+ *
+ * SOLO APARECE CUANDO HAY ALGO QUE DECIR. Un chip verde en los doscientos
+ * renglones que están bien tapa los tres que no, que son los únicos que alguien
+ * vino a buscar.
+ */
+const ESTILO_MOTIVO: Record<Exclude<MotivoMargen, "ok">, string> = {
+  bajo_costo: "border-rose-500/40 text-rose-300",
+  flete: "border-amber-500/40 text-amber-300",
+};
+
+const TEXTO_MOTIVO: Record<Exclude<MotivoMargen, "ok">, string> = {
+  bajo_costo: "Bajo costo",
+  flete: "Se lo comió el flete",
+};
+
+function ChipMotivo({ fila }: { fila: FilaArticuloEnvio }) {
+  const motivo = porQueElMargen(fila.margen, fila.flete);
+  if (motivo === "ok") return null;
+  return (
+    <span
+      className={`rounded-full border px-2 py-0.5 text-[11px] whitespace-nowrap ${ESTILO_MOTIVO[motivo]}`}
+      title={
+        motivo === "bajo_costo"
+          ? `Se vendió por debajo del costo: ${fmtMoneda(fila.precioNeto)} contra ${fmtMoneda(fila.costoUnitario)} por unidad. Con flete cero igual perdía.`
+          : `Ganaba ${fmtMoneda(fila.margen)} y el flete se llevó ${fmtMoneda(fila.flete)}. El precio está bien; lo caro es mandarlo.`
+      }
+    >
+      {TEXTO_MOTIVO[motivo]}
+    </span>
+  );
+}
+
+function columnasArticulos(
+  filas: FilaArticuloEnvio[],
+): Columna<FilaArticuloEnvio>[] {
+  return [
+    {
+      titulo: "SKU",
+      celda: (f) => <span className="font-mono">{f.sku ?? "-"}</span>,
+      orden: (f) => f.sku,
+    },
+    {
+      titulo: "Artículo",
+      celda: (f) => (
+        <span
+          className="block max-w-[180px] truncate sm:max-w-[300px]"
+          title={f.producto ?? undefined}
+        >
+          {f.producto ?? "-"}
+        </span>
+      ),
+      orden: (f) => f.producto,
+    },
+    {
+      titulo: "Marca",
+      celda: (f) => (
+        <span className="block max-w-[100px] truncate">{f.marca ?? "-"}</span>
+      ),
+      orden: (f) => f.marca,
+    },
+    {
+      titulo: "Cant.",
+      celda: (f) => fmtNumero(f.cantidad),
+      numerica: true,
+      orden: (f) => f.cantidad,
+      total: fmtNumero(sumar(filas, (f) => f.cantidad)),
+    },
+    {
+      titulo: "Precio",
+      ayuda: "Precio unitario neto, sin IVA.",
+      celda: (f) => fmtMoneda(f.precioNeto),
+      numerica: true,
+      orden: (f) => f.precioNeto,
+    },
+    {
+      titulo: "Costo",
+      ayuda: "Costo unitario del artículo.",
+      celda: (f) => (
+        <span className={f.costoUnitario > f.precioNeto ? "text-negativo" : ""}>
+          {fmtMoneda(f.costoUnitario)}
+        </span>
+      ),
+      numerica: true,
+      orden: (f) => f.costoUnitario,
+    },
+    {
+      titulo: "Facturación",
+      celda: (f) => fmtMoneda(f.facturacion),
+      numerica: true,
+      orden: (f) => f.facturacion,
+      total: fmtMoneda(sumar(filas, (f) => f.facturacion)),
+    },
+    {
+      titulo: "Margen",
+      ayuda:
+        "El margen ANTES del flete. Es el que dice si el artículo se vendió bien: si éste ya es negativo, el flete no tiene nada que ver.",
+      celda: (f) => (
+        <span className={f.margen < 0 ? "text-negativo" : ""}>
+          {fmtMoneda(f.margen)}
+        </span>
+      ),
+      numerica: true,
+      orden: (f) => f.margen,
+      total: fmtMoneda(sumar(filas, (f) => f.margen)),
+    },
+    {
+      titulo: "Flete",
+      ayuda:
+        "Lo que de este envío le tocó a este renglón, prorrateado. Un artículo voluminoso y barato se lleva mucho más de lo que deja.",
+      celda: (f) => fmtMoneda(f.flete),
+      numerica: true,
+      orden: (f) => f.flete,
+      total: fmtMoneda(sumar(filas, (f) => f.flete)),
+    },
+    {
+      titulo: "Margen real",
+      ayuda: "Margen menos flete: lo que de verdad quedó de este renglón.",
+      celda: (f) => (
+        <span className={f.margenReal < 0 ? "text-negativo font-medium" : ""}>
+          {fmtMoneda(f.margenReal)}
+        </span>
+      ),
+      numerica: true,
+      orden: (f) => f.margenReal,
+      total: fmtMoneda(sumar(filas, (f) => f.margenReal)),
+    },
+    {
+      titulo: "%",
+      ayuda: "El margen real sobre lo que facturó el renglón.",
+      celda: (f) => fmtPct(f.pctMargenReal),
+      numerica: true,
+      orden: (f) => f.pctMargenReal,
+      total: fmtPct(
+        promedioPonderado(
+          filas,
+          (f) => f.margenReal,
+          (f) => f.facturacion,
+        ),
+      ),
+    },
+    {
+      titulo: "Motivo",
+      ayuda:
+        "Por qué el renglón da lo que da. En rojo, el artículo se vendió por debajo del costo y hay que mirarle el precio. En ámbar, ganaba plata y el flete se la comió: el precio está bien, lo caro es mandarlo así.",
+      celda: (f) => <ChipMotivo fila={f} />,
+      orden: (f) => porQueElMargen(f.margen, f.flete),
+      total: (() => {
+        const bajo = filas.filter(
+          (f) => porQueElMargen(f.margen, f.flete) === "bajo_costo",
+        ).length;
+        const flete = filas.filter(
+          (f) => porQueElMargen(f.margen, f.flete) === "flete",
+        ).length;
+        if (bajo === 0 && flete === 0) return "todo en verde";
+        return [
+          bajo > 0 ? `${fmtNumero(bajo)} bajo costo` : null,
+          flete > 0 ? `${fmtNumero(flete)} por flete` : null,
+        ]
+          .filter(Boolean)
+          .join(" | ");
+      })(),
+    },
+  ];
+}
+
+/**
+ * EL DESGLOSE DE ARTICULOS de un envío, o de uno de sus comprobantes.
+ *
+ * SE PIDE AL ABRIR. Un envío puede tener 236 renglones y la tabla muestra 100
+ * envíos: traerlo todo con el resto de la página serían decenas de miles de
+ * filas para las tres que alguien va a abrir.
+ */
+function ArticulosDelEnvio({
+  preparacionId,
+  comprobante,
+}: {
+  preparacionId: string;
+  comprobante: string | null;
+}) {
+  const [articulos, setArticulos] = useState<FilaArticuloEnvio[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    const sp = new URLSearchParams({ preparacion: preparacionId });
+    if (comprobante) sp.set("comprobante", comprobante);
+
+    fetch(`/api/logistica/articulos?${sp.toString()}`, {
+      signal: ac.signal,
+      cache: "no-store",
+    })
+      .then(async (res) => {
+        const cuerpo = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(cuerpo?.error ?? `Error ${res.status}`);
+        return cuerpo as { articulos?: FilaArticuloEnvio[] };
+      })
+      .then((d) => setArticulos(d.articulos ?? []))
+      .catch((e: unknown) => {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        setError(e instanceof Error ? e.message : "Error desconocido");
+      });
+
+    return () => ac.abort();
+  }, [preparacionId, comprobante]);
+
+  if (error) {
+    return (
+      <p className="text-negativo mt-2 text-xs">
+        No se pudieron leer los artículos: {error}
+      </p>
+    );
+  }
+
+  if (articulos === null) {
+    return <p className="text-muted mt-2 text-xs">Trayendo los artículos…</p>;
+  }
+
+  return (
+    <div className="mt-3">
+      <p className="text-muted mb-1 text-[11px]">
+        {comprobante ? (
+          <>
+            Los {fmtNumero(articulos.length)} renglones de{" "}
+            <span className="text-ink font-mono">{comprobante}</span>, del peor
+            al mejor margen real.
+          </>
+        ) : (
+          <>
+            Los {fmtNumero(articulos.length)} renglones del envío, del peor al
+            mejor margen real.
+          </>
+        )}
+      </p>
+      <Tabla
+        filas={articulos}
+        columnas={columnasArticulos(articulos)}
+        clave={(f, i) => `${f.comprobante}-${f.sku}-${i}`}
+        fijas={1}
+        vacio="Este comprobante no tiene renglones con flete asociado."
+      />
     </div>
   );
 }
