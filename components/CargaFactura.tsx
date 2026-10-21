@@ -207,6 +207,22 @@ function Formulario() {
     enfocar.current = null;
   }, [b.lineas.length]);
 
+  // TODOS los proveedores del maestro, no sólo los que tienen OC en el
+  // tablero. Ver el GET de /api/compras/facturas.
+  const [todosLosProveedores, setTodosLosProveedores] = useState<
+    { codigo: string; nombre: string }[] | null
+  >(null);
+  useEffect(() => {
+    fetch("/api/compras/facturas")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((j: { proveedores?: { codigo: string; nombre: string }[] }) =>
+        setTodosLosProveedores(j.proveedores ?? []),
+      )
+      // Si falla, la lista cae a los proveedores de las órdenes: menos, pero
+      // la pantalla sigue andando.
+      .catch(() => setTodosLosProveedores([]));
+  }, []);
+
   useEffect(() => {
     fetch("/api/compras/ordenes")
       .then(async (r) => {
@@ -219,13 +235,38 @@ function Formulario() {
 
   /* --- El proveedor y la OC ---------------------------------------------- */
 
+  /**
+   * LOS PROVEEDORES QUE SE PUEDEN ELEGIR: los del maestro.
+   *
+   * Antes salían de las órdenes mandadas desde el tablero, y eso dejaba 12
+   * sobre 46: la factura de un proveedor al que la OC se le pasó por teléfono
+   * no se podía cargar. La OC sirve para CRUZAR la factura, no para que la
+   * factura exista.
+   *
+   * Los de las órdenes se suman igual, por si alguno no tuviera artículos en
+   * el maestro: la lista no puede perder un proveedor al que ya se le mandó
+   * una OC.
+   */
   const proveedores = useMemo(() => {
     const m = new Map<string, string>();
+    for (const p of todosLosProveedores ?? []) {
+      if (p.codigo) m.set(p.codigo, p.nombre || p.codigo);
+    }
     for (const o of ordenes ?? []) {
       const clave = o.proveedorCodigo ?? o.proveedorNombre ?? "";
       if (clave && !m.has(clave)) m.set(clave, o.proveedorNombre ?? clave);
     }
     return [...m].sort((x, y) => x[1].localeCompare(y[1]));
+  }, [todosLosProveedores, ordenes]);
+
+  /** Cuántos de esos tienen al menos una OC mandada desde el tablero. */
+  const conOrden = useMemo(() => {
+    const c = new Set<string>();
+    for (const o of ordenes ?? []) {
+      const clave = o.proveedorCodigo ?? o.proveedorNombre ?? "";
+      if (clave) c.add(clave);
+    }
+    return c;
   }, [ordenes]);
 
   const ordenesDelProveedor = useMemo(
@@ -241,40 +282,56 @@ function Formulario() {
     [orden],
   );
 
-  // El maestro del proveedor, cada vez que cambia el juego de SKU de la OC.
+  /**
+   * CON QUE SE PIDE EL MAESTRO.
+   *
+   * Con OC, por sus SKU --así sirve igual para una OC pegada desde Sigma--.
+   * Sin OC, por el proveedor: no hay SKU de los que partir, pero el maestro
+   * que hace falta es el mismo.
+   */
   const claveSkus = useMemo(
     () => [...new Set(renglonesOC.map((r) => r.sku))].sort().join("|"),
     [renglonesOC],
   );
+  const claveMaestro = claveSkus
+    ? `sku:${claveSkus}`
+    : b.proveedor
+      ? `prov:${b.proveedor}`
+      : "";
+
   useEffect(() => {
-    if (!claveSkus) return;
+    if (!claveMaestro) return;
     let vigente = true;
     fetch("/api/compras/facturas", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ skus: claveSkus.split("|") }),
+      body: JSON.stringify(
+        claveMaestro.startsWith("sku:")
+          ? { skus: claveMaestro.slice(4).split("|") }
+          : { proveedor: claveMaestro.slice(5) },
+      ),
     })
       .then(async (r) => {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error ?? `Error ${r.status}`);
         if (vigente) {
-          setMaestroDe({ clave: claveSkus, articulos: j.articulos as ArticuloMaestro[], error: null });
+          setMaestroDe({ clave: claveMaestro, articulos: j.articulos as ArticuloMaestro[], error: null });
         }
       })
       .catch(
         (e: Error) =>
-          vigente && setMaestroDe({ clave: claveSkus, articulos: [], error: e.message }),
+          vigente && setMaestroDe({ clave: claveMaestro, articulos: [], error: e.message }),
       );
     return () => {
       vigente = false;
     };
-  }, [claveSkus]);
+  }, [claveMaestro]);
   const maestro = useMemo(
-    () => (maestroDe.clave === claveSkus ? maestroDe.articulos : []),
-    [maestroDe, claveSkus],
+    () => (maestroDe.clave === claveMaestro ? maestroDe.articulos : []),
+    [maestroDe, claveMaestro],
   );
-  const errorMaestro = maestroDe.clave === claveSkus ? maestroDe.error : null;
-  const cargandoMaestro = !!claveSkus && maestroDe.clave !== claveSkus;
+  const errorMaestro = maestroDe.clave === claveMaestro ? maestroDe.error : null;
+  const cargandoMaestro = !!claveMaestro && maestroDe.clave !== claveMaestro;
   const indice = useMemo(() => indexarMaestro(maestro), [maestro]);
   const skusOC = useMemo(() => new Set(renglonesOC.map((r) => r.sku)), [renglonesOC]);
 
@@ -421,6 +478,15 @@ function Formulario() {
   );
 
   const hayOC = renglonesOC.length > 0;
+  /**
+   * LA PANTALLA SE ABRE CON EL PROVEEDOR, no con la OC.
+   *
+   * Es el cambio que deja cargar la factura de una OC que no se mandó desde el
+   * tablero. Con el proveedor alcanza para tener el maestro, que es lo único
+   * que hace falta para reconocer los renglones; la OC agrega el cruce, que es
+   * valioso pero no imprescindible.
+   */
+  const hayProveedor = !!b.proveedor;
   const hayFactura = renglonesFactura.length > 0;
   const r = resultado.resumen;
   const difCantidadTotal = diferencias.reduce((s, l) => s + difPorCantidad(l), 0);
@@ -489,9 +555,11 @@ function Formulario() {
                 onChange={(e) => cambiar({ ordenId: e.target.value })}
               >
                 <option value="">
-                  {b.proveedor
-                    ? `Elegí la OC (${ordenesDelProveedor.length})…`
-                    : "Primero el proveedor"}
+                  {!b.proveedor
+                    ? "Primero el proveedor"
+                    : ordenesDelProveedor.length === 0
+                      ? "Sin OC en el tablero — cargala igual"
+                      : `Sin OC · o elegí una de las ${ordenesDelProveedor.length}…`}
                 </option>
                 {ordenesDelProveedor.map((o) => (
                   <option key={o.id} value={o.id}>
@@ -514,14 +582,22 @@ function Formulario() {
             desplegable sólo puede ofrecer proveedores a los que se les mandó
             una. Sin decirlo, la lista parece incompleta --y la pregunta que
             genera es "¿se rompió algo?" en vez de "falta mandar esa OC". */}
-        {ordenes && proveedores.length > 0 && (
+        {proveedores.length > 0 && (
           <p className="text-muted mt-1 text-xs">
-            En el desplegable están los{" "}
+            Están los{" "}
             <strong className="text-ink">
               {fmtNumero(proveedores.length)} proveedores
             </strong>{" "}
-            a los que se les mandó una OC desde el tablero. Una factura se carga
-            contra su OC, así que un proveedor sin ninguna todavía no aparece.
+            del maestro
+            {conOrden.size > 0 && (
+              <>
+                {" "}
+                —{fmtNumero(conOrden.size)} con OC mandada desde el tablero—
+              </>
+            )}
+            . La OC sirve para <strong className="text-ink">cruzar</strong> la
+            factura: sin ella se puede cargar igual, sólo que no hay contra qué
+            compararla.
           </p>
         )}
         {errorMaestro && (
@@ -532,7 +608,7 @@ function Formulario() {
       </Panel>
 
       {/* 2. LA FACTURA --------------------------------------------------- */}
-      {hayOC && (
+      {hayProveedor && (
         <Panel
           titulo="2. Factura del proveedor"
           nota={hayFactura ? `${renglonesFactura.length} renglones` : undefined}
@@ -573,9 +649,11 @@ function Formulario() {
           </div>
 
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <button className={BOTON} onClick={traerArticulosDeLaOC} disabled={cargandoMaestro}>
-              Traer los artículos de la OC
-            </button>
+            {hayOC && (
+              <button className={BOTON} onClick={traerArticulosDeLaOC} disabled={cargandoMaestro}>
+                Traer los artículos de la OC
+              </button>
+            )}
             {/* DESHACER, que antes no existía: traídos los 43 artículos no había
                 forma de volver atrás salvo borrarlos de a uno. Dice dos cosas
                 distintas seguún el momento porque son dos gestos distintos --
@@ -609,6 +687,22 @@ function Formulario() {
                   <th className="w-8 pb-2 font-normal">#</th>
                   <th className="pr-2 pb-2 font-normal">Código</th>
                   <th className="pr-2 pb-2 font-normal">Descripción</th>
+                  {/* LOS CODIGOS DEL PROVEEDOR, que son con los que viene
+                      escrita SU factura. En "Código" se tipea cualquiera de
+                      los tres; acá se ven los otros dos, que es lo que deja
+                      confirmar que el renglón es el que parece. */}
+                  <th
+                    className="w-32 pr-2 pb-2 font-normal"
+                    title="El código con el que el proveedor vende el artículo, como figura en su factura."
+                  >
+                    Cód. proveedor
+                  </th>
+                  <th
+                    className="w-36 pr-2 pb-2 font-normal"
+                    title="El EAN de la unidad. Si el artículo se cargó por el EAN del bulto, abajo se ve ese."
+                  >
+                    EAN
+                  </th>
                   <th className="w-24 pr-2 pb-2 text-right font-normal">Cantidad</th>
                   <th className="w-28 pr-2 pb-2 font-normal">Unidad</th>
                   <th className="w-36 pr-2 pb-2 text-right font-normal">Importe línea</th>
@@ -646,7 +740,7 @@ function Formulario() {
                           <span className="text-muted">
                             {x.a.sku}
                             {x.a.unidadesPorBulto > 1 ? ` · bulto x ${x.a.unidadesPorBulto}` : ""}
-                            {skusOC.has(x.a.sku) ? "" : " · no está en la OC"}
+                            {!hayOC || skusOC.has(x.a.sku) ? "" : " · no está en la OC"}
                           </span>
                         </>
                       ) : x.error ? (
@@ -654,6 +748,26 @@ function Formulario() {
                       ) : cargandoMaestro && x.l.codigo ? (
                         <span className="text-muted">Buscando…</span>
                       ) : null}
+                    </td>
+                    {/* Se llenan solos desde el maestro, en cuanto el código
+                        resuelve. No se escriben: son identificación, no datos
+                        de la factura. */}
+                    <td className="text-muted py-1.5 pr-2 font-mono">
+                      {x.a?.codigoCompra ?? ""}
+                    </td>
+                    <td className="text-muted py-1.5 pr-2 font-mono">
+                      {x.a ? (
+                        <>
+                          <span className="block">{x.a.eanUnidad ?? ""}</span>
+                          {x.a.eanBulto && x.a.eanBulto !== x.a.eanUnidad && (
+                            <span className="block opacity-70">
+                              bulto {x.a.eanBulto}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        ""
+                      )}
                     </td>
                     <td className="py-1 pr-2">
                       <input
@@ -727,7 +841,7 @@ function Formulario() {
       )}
 
       {/* 3. EL REPORTE DE DIFERENCIAS ------------------------------------ */}
-      {hayOC && hayFactura && (
+      {hayProveedor && hayFactura && (
         <>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
             <TarjetaKpi titulo="Coinciden" valor={fmtNumero(r.ok)} acento="#22c55e" compacta />
@@ -816,6 +930,7 @@ function Formulario() {
                         key={`${l.sku ?? "x"}-${l.renglones[0]?.fila ?? i}`}
                         l={l}
                         descripcionDe={descripcionDe}
+                        hayOC={hayOC}
                       />
                     ))}
                   </tbody>
@@ -916,11 +1031,17 @@ function Formulario() {
         </>
       )}
 
-      {!b.ordenId && <Aviso tono="info">Elegí el proveedor y la OC para empezar.</Aviso>}
-      {hayOC && !hayFactura && (
+      {!b.proveedor && (
         <Aviso tono="info">
-          Ahora cargá los renglones de la factura, o tocá “Traer los artículos de la OC” y
-          completá cantidades e importes.
+          Elegí el proveedor para empezar. Si la OC se mandó desde el tablero,
+          elegíla también y la factura se cruza contra ella.
+        </Aviso>
+      )}
+      {hayProveedor && !hayFactura && (
+        <Aviso tono="info">
+          {hayOC
+            ? "Ahora cargá los renglones de la factura, o tocá “Traer los artículos de la OC” y completá cantidades e importes."
+            : "Ahora cargá los renglones de la factura. En código entra el SKU, el EAN o el código del proveedor."}
         </Aviso>
       )}
     </div>
@@ -934,9 +1055,12 @@ function Formulario() {
 function FilaCruce({
   l,
   descripcionDe,
+  hayOC,
 }: {
   l: LineaCruce;
   descripcionDe: Map<string, string>;
+  /** Sin OC, "no está en la OC" no es una diferencia: es que no hay con qué. */
+  hayOC: boolean;
 }) {
   const precio = (n: number | null | undefined) =>
     n == null ? "—" : fmtMoneda(Math.round(n * 100) / 100);
@@ -947,7 +1071,10 @@ function FilaCruce({
     <tr className="border-line border-b align-top">
       <td className="py-2 pr-2">
         <span className={`inline-block rounded-full border px-2 py-0.5 whitespace-nowrap ${COLOR_ESTADO[l.estado]}`}>
-          {l.estado}
+          {/* SIN OC NO SE PUEDE DECIR "no está en la OC": sería señalar una
+              diferencia contra algo que no existe, y en una pantalla de
+              diferencias eso se lee como un problema. */}
+          {!hayOC && l.estado === "no está en la OC" ? "sin OC" : l.estado}
         </span>
       </td>
       <td className="py-2 pr-2">
