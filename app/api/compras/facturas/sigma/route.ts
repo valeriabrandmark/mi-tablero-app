@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
 
   // LAS CUENTAS SALEN DE LA BASE. Ver arriba.
   const imputacion = await getImputacionContable();
-  const { cuerpo, problemas } = armarImportCompras(
+  const { cuerpo, problemas, advertencias } = armarImportCompras(
     cruce,
     totales,
     datos,
@@ -136,6 +136,10 @@ export async function POST(request: NextRequest) {
   if (problemas.length > 0) {
     // 422 y no 400: el pedido está bien formado, lo que falta son datos de la
     // factura o cuentas sin configurar. La pantalla los lista uno por uno.
+    //
+    // LAS ADVERTENCIAS NO ENTRAN ACA. Un total que no cuadra se avisa en la
+    // pantalla y se manda igual: la factura entra pendiente y se corrige en
+    // Sigma, así que frenarla de este lado no protegía nada.
     return NextResponse.json(
       { error: "La factura todavía no se puede mandar.", problemas, cuerpo },
       { status: 422 },
@@ -200,10 +204,13 @@ export async function POST(request: NextRequest) {
       cuerpo,
       proveedorNombre: cuerpoPedido.proveedorNombre ?? null,
       resultado: "ok",
-      respuesta: texto,
+      // QUEDA ESCRITO QUE SE MANDO DESCUADRADA. Si después hay que revisar
+      // por qué una factura entró con un total que no cerraba, el registro lo
+      // dice en vez de haber que reconstruirlo.
+      respuesta: [texto, ...advertencias].filter(Boolean).join(" · "),
     });
 
-    return NextResponse.json({ ok: true, respuesta: texto, cuerpo });
+    return NextResponse.json({ ok: true, respuesta: texto, advertencias, cuerpo });
   } catch (error) {
     const mensaje =
       error instanceof Error ? error.message : "Error desconocido";

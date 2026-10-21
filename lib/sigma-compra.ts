@@ -66,6 +66,20 @@ export const SUBCUENTAS_IIBB: readonly (readonly [string, string])[] = [
   ["924", "Tucumán"],
 ] as const;
 
+/**
+ * Un importe como se lee en la pantalla, para los avisos de esta pantalla.
+ *
+ * Va acá y no en un helper compartido porque este archivo lo importa el
+ * servidor, el navegador y las pruebas: tiene que seguir sin dependencias.
+ */
+function pesos(n: number): string {
+  const abs = Math.abs(n).toLocaleString("es-AR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${n < 0 ? "-" : ""}$ ${abs}`;
+}
+
 /** Cómo se escribe una alícuota en el nombre del concepto: 10.5 -> "10,5". */
 export function alicuotaTexto(a: number): string {
   return String(a).replace(".", ",");
@@ -232,18 +246,31 @@ export const MAX_NUMERO_COMPROBANTE = 20;
 /**
  * Arma el cuerpo de `ImportCompras` y, sobre todo, la lista de lo que falta.
  *
- * DEVUELVE LOS DOS SIEMPRE. El cuerpo sirve para mostrarlo antes de mandar
+ * DEVUELVE LOS TRES SIEMPRE. El cuerpo sirve para mostrarlo antes de mandar
  * --en una operación que escribe en la contabilidad, ver qué se va a mandar
- * vale más que el mensaje de éxito-- y los problemas son los que impiden
- * mandarlo. Con un solo problema no se manda nada.
+ * vale más que el mensaje de éxito--, los PROBLEMAS son los que impiden
+ * mandarlo, y las ADVERTENCIAS son las que no.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE HAY DOS LISTAS Y NO UNA
+ *
+ * Un problema es algo que Sigma va a rechazar o que va a dejar un asiento
+ * equivocado: una factura sin cuenta contable, sin empresa, con renglones sin
+ * identificar. Frenar ahí evita el daño.
+ *
+ * Que el total calculado no dé igual al impreso NO es eso. La factura entra
+ * igual y en Sigma se edita hasta que procesa, así que frenarla de este lado
+ * no protege nada: sólo obliga a encontrar el centavo antes de poder cargar
+ * algo que después se corrige del otro lado. Se avisa y se deja mandar.
  */
 export function armarImportCompras(
   cruce: ResultadoCruce,
   totales: TotalesComprobante,
   datos: DatosFactura,
   imputacion: Record<string, Imputacion>,
-): { cuerpo: CuerpoImportCompras; problemas: string[] } {
+): { cuerpo: CuerpoImportCompras; problemas: string[]; advertencias: string[] } {
   const problemas: string[] = [];
+  const advertencias: string[] = [];
 
   // --- Lo que impide mandar, antes que nada ------------------------------
   if (cruce.resumen.sinIdentificar > 0) {
@@ -251,11 +278,21 @@ export function armarImportCompras(
       `Hay ${cruce.resumen.sinIdentificar} renglones sin identificar: asignales un SKU antes de mandar.`,
     );
   }
+
+  // EL TOTAL AVISA, NO FRENA. Ver arriba. Lo que viaja en `total` sigue
+  // siendo el IMPRESO cuando está cargado: es lo que cobró el proveedor, y es
+  // contra ese número que se revisa la factura en Sigma.
   if (totales.cuadra === null) {
-    problemas.push("Falta el total impreso de la factura.");
+    advertencias.push(
+      `Falta el total impreso: se manda el calculado, ${pesos(totales.total)}.`,
+    );
   } else if (!totales.cuadra) {
-    problemas.push(
-      `El total calculado no cuadra con el impreso: difiere en ${totales.diferencia}.`,
+    const dif = totales.diferencia ?? 0;
+    advertencias.push(
+      `El total calculado no cuadra con el impreso: da ${pesos(Math.abs(dif))}` +
+        ` ${dif > 0 ? "más" : "menos"} (calculado ${pesos(totales.total)},` +
+        ` impreso ${pesos(datos.totalImpreso ?? 0)}). Se manda el impreso:` +
+        " en Sigma queda pendiente y se corrige ahí.",
     );
   }
   if (!datos.codigoComprobante) {
@@ -327,31 +364,51 @@ export function armarImportCompras(
     contable.push(linea);
   };
 
-  // El neto facturado, partido por alícuota de IVA.
-  const bases: Record<number, number> = {};
-  for (const l of cruce.lineas) {
-    if (l.factura?.neto) bases[l.iva] = (bases[l.iva] ?? 0) + l.factura.neto;
-  }
-  const alicuotas = Object.keys(bases).map(Number).sort((a, b) => b - a);
-  const netos = alicuotas.map((a) => centavos((bases[a] ?? 0) * factorPie));
+  // --- EL NETO LO IMPUTA SIGMA, NO NOSOTROS -----------------------------
+  //
+  // Esto se aprendió mirando una factura ya cargada: el registro contable
+  // tenía MERCADERIAS DE REVENTA (20000) DOS VECES por el mismo importe, y el
+  // subtotal daba el doble del neto facturado.
+  //
+  // El motivo es que cada artículo del maestro de Sigma trae su propia cuenta
+  // contable --en la ficha del artículo se lee "Cta.Contable 20000"-- y Sigma
+  // genera el asiento del neto a partir de las MERCADERIAS que le mandamos.
+  // Mandarle además una línea contable con el neto es contarlo dos veces.
+  //
+  // Así que lo que viaja en `contable` es sólo lo que NO sale de los
+  // artículos: el IVA y las percepciones. El neto se manda únicamente cuando
+  // no hay mercaderías --una factura que no mueve stock-- porque ahí no hay
+  // de dónde más sacarlo.
+  //
+  // Las cuentas de "Neto gravado %" quedan configuradas igual: son las de ese
+  // caso, y borrarlas sería perder el dato para cuando haga falta.
+  if (mercaderias.length === 0) {
+    // El neto facturado, partido por alícuota de IVA.
+    const bases: Record<number, number> = {};
+    for (const l of cruce.lineas) {
+      if (l.factura?.neto) bases[l.iva] = (bases[l.iva] ?? 0) + l.factura.neto;
+    }
+    const alicuotas = Object.keys(bases).map(Number).sort((a, b) => b - a);
+    const netos = alicuotas.map((a) => centavos((bases[a] ?? 0) * factorPie));
 
-  // EL REDONDEO POR ALICUOTA NO PUEDE MOVER EL NETO GRAVADO. Partir el neto
-  // en dos o tres pedazos y redondear cada uno deja un centavo suelto, y ese
-  // centavo hace que el total no cuadre con el impreso -- que es justo lo que
-  // frena el envío. Va a la base más grande, donde pesa menos.
-  if (netos.length > 0) {
-    const suma = netos.reduce((s, n) => s + n, 0);
-    const ajuste = centavos(totales.netoGravado - suma);
-    const mayor = netos.indexOf(Math.max(...netos));
-    netos[mayor] = centavos((netos[mayor] ?? 0) + ajuste);
-  }
+    // EL REDONDEO POR ALICUOTA NO PUEDE MOVER EL NETO GRAVADO. Partir el neto
+    // en dos o tres pedazos y redondear cada uno deja un centavo suelto, y ese
+    // centavo descuadra el comprobante. Va a la base más grande, donde pesa
+    // menos.
+    if (netos.length > 0) {
+      const suma = netos.reduce((s, n) => s + n, 0);
+      const ajuste = centavos(totales.netoGravado - suma);
+      const mayor = netos.indexOf(Math.max(...netos));
+      netos[mayor] = centavos((netos[mayor] ?? 0) + ajuste);
+    }
 
-  alicuotas.forEach((a, i) => {
-    imputar(
-      a === 0 ? "Neto exento / no gravado" : `Neto gravado ${alicuotaTexto(a)} %`,
-      netos[i] ?? 0,
-    );
-  });
+    alicuotas.forEach((a, i) => {
+      imputar(
+        a === 0 ? "Neto exento / no gravado" : `Neto gravado ${alicuotaTexto(a)} %`,
+        netos[i] ?? 0,
+      );
+    });
+  }
 
   for (const i of totales.iva) {
     if (i.alicuota) imputar(`IVA ${alicuotaTexto(i.alicuota)} %`, i.importe);
@@ -376,7 +433,11 @@ export function armarImportCompras(
   // subcuenta: Sigma las registra por separado en vez de sumarlas.
   for (const p of datos.percepciones) imputar(p.concepto, p.monto, p.concepto);
 
-  if (contable.length === 0) {
+  // SIN MERCADERIAS Y SIN IMPUTACION NO HAY COMPROBANTE. Con mercaderías sí
+  // lo hay, aunque `contable` vaya vacío: el asiento del neto lo arma Sigma
+  // con la cuenta de cada artículo (ver arriba). Eso pasa sólo en una factura
+  // sin IVA ni percepciones.
+  if (contable.length === 0 && mercaderias.length === 0) {
     problemas.push("No hay ninguna imputación contable: Sigma no acepta el comprobante sin al menos una.");
   }
 
@@ -398,7 +459,7 @@ export function armarImportCompras(
   if (datos.sucursal) cuerpo.sucursal = datos.sucursal;
   if (datos.categoria) cuerpo.categoria = datos.categoria;
 
-  return { cuerpo, problemas };
+  return { cuerpo, problemas, advertencias };
 }
 
 /**
