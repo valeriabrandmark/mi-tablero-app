@@ -140,17 +140,20 @@ export const EMPRESAS_SIGMA: readonly { codigo: string; nombre: string }[] = [
 ];
 
 /**
- * OJO: 0001 ES BRANDMARK Y 0002 ES NOA, confirmado por ANA.
+ * Las sucursales. 0002 es Brandmark y 0003 es Noa, confirmado por ANA.
  *
- * `CODIGO_SUCURSAL` en lib/sigma-orden.ts vale "0002" con un comentario que
- * dice "0002 = BRANDMARK". Una de las dos cosas está mal, y no es un detalle:
- * es la sucursal a la que se le mandan TODAS las órdenes de compra. Está
- * anotado para revisarlo; acá van los nombres que ANA confirmó.
+ * Coincide con `CODIGO_SUCURSAL` de lib/sigma-orden.ts, que vale "0002" para
+ * las órdenes de compra: la mercadería se recibe en Brandmark.
+ *
+ * La 0001 queda con su código a secas porque no sabemos cómo se llama, y es
+ * la que más facturas tiene cargadas (1.069 de 2026). Inventarle un nombre
+ * sería peor que no ponerle ninguno: en este desplegable se elige dónde queda
+ * asentada una factura.
  */
 export const SUCURSALES_SIGMA: readonly { codigo: string; nombre: string }[] = [
-  { codigo: "0001", nombre: "0001 · Brandmark" },
-  { codigo: "0002", nombre: "0002 · Noa" },
-  { codigo: "0003", nombre: "0003" },
+  { codigo: "0001", nombre: "0001" },
+  { codigo: "0002", nombre: "0002 · Brandmark" },
+  { codigo: "0003", nombre: "0003 · Noa" },
 ];
 
 /* -------------------------------------------------------------------------
