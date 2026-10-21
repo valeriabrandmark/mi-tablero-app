@@ -181,13 +181,19 @@ const CUENTAS: Record<string, Imputacion> = {
     ["U", "U"],
   );
 
+  // EL NETO NO VA EN EL CONTABLE CUANDO HAY MERCADERIAS. Sigma lo arma solo,
+  // con la cuenta contable de cada artículo. Mandarlo además es contarlo dos
+  // veces, y así entró una factura de verdad: MERCADERIAS DE REVENTA dos
+  // veces por el mismo importe, con el subtotal al doble.
   revisar(
-    "el contable lleva el neto y el IVA",
+    "el contable lleva SOLO el IVA",
     cuerpo.contable,
-    [
-      { monto: 1000, cuenta: "20000", tipoImpuesto: "G21" },
-      { monto: 210, cuenta: "8008", tipoImpuesto: "I21" },
-    ],
+    [{ monto: 210, cuenta: "8008", tipoImpuesto: "I21" }],
+  );
+  revisar(
+    "no hay ninguna línea a la cuenta de mercaderías",
+    cuerpo.contable.filter((c) => c.cuenta === "20000").length,
+    0,
   );
   revisar("el total es el impreso", cuerpo.total, 1210);
   revisar("y la cabecera", [cuerpo.empresa, cuerpo.sucursal, cuerpo.proveedorId], ["0001", "0002", "00007"]);
@@ -210,7 +216,21 @@ const CUENTAS: Record<string, Imputacion> = {
     CUENTAS,
   );
   revisar("con 10% al pie el precio baja a 90", cuerpo.mercaderias[0]!.precio, 90);
-  revisar("y el neto imputado también", cuerpo.contable[0]!.monto, 900);
+}
+
+// Y cuando el neto SI se imputa --una factura que no mueve stock-- el pie
+// también lo baja.
+{
+  const cruce = cruceDe([
+    linea({ sku: null, unidades: 10, precioNeto: 100, neto: 1000, iva: 21 }),
+  ]);
+  const { cuerpo } = armarImportCompras(
+    cruce,
+    totalesDe({ netoGravado: 900, iva: [{ alicuota: 21, importe: 189 }] }),
+    { ...DATOS, descuentoPie: 10, totalImpreso: 1089 },
+    CUENTAS,
+  );
+  revisar("sin mercaderías el neto va al contable, ya con el pie", cuerpo.contable[0]!.monto, 900);
 }
 
 // --- EL CENTAVO QUE SE PIERDE AL PARTIR POR ALICUOTA ----------------------
@@ -220,9 +240,11 @@ const CUENTAS: Record<string, Imputacion> = {
 // que frena el envío. Tiene que ir a la base más grande.
 
 {
+  // Sin SKU: es el caso en el que el neto viaja en el contable, que es donde
+  // el centavo se puede perder.
   const cruce = cruceDe([
-    linea({ sku: "A", unidades: 1, precioNeto: 33.335, neto: 33.335, iva: 21 }),
-    linea({ sku: "B", unidades: 1, precioNeto: 33.335, neto: 33.335, iva: 10.5 }),
+    linea({ sku: null, unidades: 1, precioNeto: 33.335, neto: 33.335, iva: 21 }),
+    linea({ sku: null, unidades: 1, precioNeto: 33.335, neto: 33.335, iva: 10.5 }),
   ]);
   const { cuerpo } = armarImportCompras(
     cruce,
@@ -250,8 +272,8 @@ const CUENTAS: Record<string, Imputacion> = {
 // factura, y el que usa la planilla.
 {
   const cruce = cruceDe([
-    linea({ sku: "A", unidades: 1, precioNeto: 100, neto: 100, iva: 10.5 }),
-    linea({ sku: "B", unidades: 1, precioNeto: 200, neto: 200, iva: 21 }),
+    linea({ sku: null, unidades: 1, precioNeto: 100, neto: 100, iva: 10.5 }),
+    linea({ sku: null, unidades: 1, precioNeto: 200, neto: 200, iva: 21 }),
   ]);
   const { cuerpo } = armarImportCompras(
     cruce,
@@ -377,26 +399,42 @@ const CUENTAS: Record<string, Imputacion> = {
   );
 }
 
+// --- EL TOTAL AVISA, NO FRENA --------------------------------------------
+//
+// Que el calculado no dé igual al impreso no rompe nada del otro lado: la
+// factura entra pendiente y en Sigma se edita hasta que procesa. Frenarla acá
+// obligaba a cazar el centavo antes de poder cargar algo que después se
+// corrige igual.
+
 {
   const cruce = cruceDe([linea({ sku: "A", unidades: 1, precioNeto: 100, neto: 100, iva: 21 })]);
-  const { problemas } = armarImportCompras(
+  const { problemas, advertencias } = armarImportCompras(
     cruce,
     totalesDe({ netoGravado: 100, iva: [{ alicuota: 21, importe: 21 }], cuadra: null }),
     { ...DATOS, totalImpreso: null },
     CUENTAS,
   );
-  revisar("sin total impreso no se manda", problemas.some((p) => p.includes("total impreso")), true);
+  revisar("sin total impreso se manda igual", problemas, []);
+  revisar(
+    "pero se avisa",
+    advertencias.some((a) => a.includes("total impreso")),
+    true,
+  );
 }
 
 {
   const cruce = cruceDe([linea({ sku: "A", unidades: 1, precioNeto: 100, neto: 100, iva: 21 })]);
-  const { problemas } = armarImportCompras(
+  const { cuerpo, problemas, advertencias } = armarImportCompras(
     cruce,
     totalesDe({ netoGravado: 100, iva: [{ alicuota: 21, importe: 21 }], cuadra: false }),
-    DATOS,
+    { ...DATOS, totalImpreso: 1000 },
     CUENTAS,
   );
-  revisar("un total que no cuadra tampoco", problemas.some((p) => p.includes("no cuadra")), true);
+  revisar("un total que no cuadra tampoco frena", problemas, []);
+  revisar("pero también se avisa", advertencias.some((a) => a.includes("no cuadra")), true);
+  // LO QUE VIAJA ES EL IMPRESO. Es lo que cobró el proveedor, y es contra ese
+  // número que se revisa la factura del otro lado.
+  revisar("y lo que viaja es el total impreso", cuerpo.total, 1000);
 }
 
 // SIN LA CUENTA NO SE MANDA. Es la regla que protege la contabilidad: antes
@@ -410,13 +448,32 @@ const CUENTAS: Record<string, Imputacion> = {
     imputacionDeFabrica(), // sólo las de IIBB: falta el neto y el IVA
   );
   revisar(
-    "sin la cuenta del neto no se manda",
-    problemas.some((p) => p.includes('"Neto gravado 21 %"')),
+    "sin la cuenta del IVA no se manda",
+    problemas.some((p) => p.includes('"IVA 21 %"')),
     true,
   );
+  // LA DEL NETO YA NO HACE FALTA CUANDO HAY MERCADERIAS: esa línea no se
+  // manda, la arma Sigma con la cuenta del artículo. Pedirla sería pedir una
+  // cuenta para algo que no viaja.
   revisar(
-    "ni sin la del IVA",
-    problemas.some((p) => p.includes('"IVA 21 %"')),
+    "la del neto no se pide si hay mercaderías",
+    problemas.some((p) => p.includes('"Neto gravado 21 %"')),
+    false,
+  );
+}
+
+// Pero sin mercaderías sí: ahí el neto es lo único que se imputa.
+{
+  const cruce = cruceDe([linea({ sku: null, unidades: 1, precioNeto: 100, neto: 100, iva: 21 })]);
+  const { problemas } = armarImportCompras(
+    cruce,
+    totalesDe({ netoGravado: 100, iva: [{ alicuota: 21, importe: 21 }] }),
+    DATOS,
+    imputacionDeFabrica(),
+  );
+  revisar(
+    "sin mercaderías, sin la cuenta del neto no se manda",
+    problemas.some((p) => p.includes('"Neto gravado 21 %"')),
     true,
   );
 }
