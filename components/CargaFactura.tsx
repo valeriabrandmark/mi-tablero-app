@@ -332,6 +332,54 @@ function Formulario() {
     [leidas],
   );
 
+  /**
+   * LAS LINEAS QUE VINIERON DE LA OC Y SIGUEN SIN CARGAR NADA.
+   *
+   * "Sin cargar" es sin cantidad Y sin importe. El código no cuenta: lo puso
+   * el botón, no la persona.
+   *
+   * IMPORTA MAS DE LO QUE PARECE. Una línea con código y sin cantidad NO es
+   * una línea vacía para el cruce --entra como un renglón de la factura con
+   * cantidad nula, ver `leidas`-- así que traer los 43 artículos de la OC
+   * cuando la factura tiene 12 no deja 31 casilleros en blanco: deja 31
+   * renglones afirmando que la factura los trae.
+   */
+  const vaciasDeLaOC = useMemo(() => {
+    const deLaOC = new Set(renglonesOC.map((r) => r.sku));
+    return b.lineas.filter(
+      (l) =>
+        deLaOC.has(l.codigo.trim()) &&
+        leerNumero(l.cantidad) == null &&
+        leerNumero(l.importe) == null,
+    );
+  }, [b.lineas, renglonesOC]);
+
+  /** Si alguna de las traídas ya tiene algo cargado. Cambia lo que dice el botón. */
+  const hayCargadasDeLaOC = useMemo(() => {
+    const deLaOC = new Set(renglonesOC.map((r) => r.sku));
+    return b.lineas.some(
+      (l) =>
+        deLaOC.has(l.codigo.trim()) &&
+        (leerNumero(l.cantidad) != null || leerNumero(l.importe) != null),
+    );
+  }, [b.lineas, renglonesOC]);
+
+  /**
+   * Saca las que vinieron de la OC y siguen sin cargar.
+   *
+   * NO PUEDE BORRAR TRABAJO: una línea con cantidad o con importe no entra en
+   * `vaciasDeLaOC`, y una con un código tipeado a mano tampoco --el código
+   * tiene que ser uno de los SKU de la OC--. Por eso no pregunta nada.
+   */
+  const sacarVaciasDeLaOC = () => {
+    const fuera = new Set(vaciasDeLaOC.map((l) => l.id));
+    setB((x) => {
+      const quedan = x.lineas.filter((l) => !fuera.has(l.id));
+      // Nunca dejar la tabla sin una fila donde escribir.
+      return { ...x, lineas: quedan.length > 0 ? quedan : [lineaVacia()] };
+    });
+  };
+
   /** Carga un renglón por artículo de la OC, para completar cantidad e importe. */
   const traerArticulosDeLaOC = () => {
     const yaEstan = new Set(leidas.map((x) => x.a?.sku).filter(Boolean));
@@ -461,6 +509,21 @@ function Formulario() {
           Son las órdenes mandadas a Sigma desde Compras. Ya están en unidades y a costo de
           lista, así que no hace falta cargarlas.
         </p>
+        {/* POR QUE LA LISTA DE PROVEEDORES ES CORTA.
+            Esta pantalla cruza la factura CONTRA una OC, así que el
+            desplegable sólo puede ofrecer proveedores a los que se les mandó
+            una. Sin decirlo, la lista parece incompleta --y la pregunta que
+            genera es "¿se rompió algo?" en vez de "falta mandar esa OC". */}
+        {ordenes && proveedores.length > 0 && (
+          <p className="text-muted mt-1 text-xs">
+            En el desplegable están los{" "}
+            <strong className="text-ink">
+              {fmtNumero(proveedores.length)} proveedores
+            </strong>{" "}
+            a los que se les mandó una OC desde el tablero. Una factura se carga
+            contra su OC, así que un proveedor sin ninguna todavía no aparece.
+          </p>
+        )}
         {errorMaestro && (
           <div className="mt-3">
             <Aviso>No se pudo leer el maestro de Sigma: {errorMaestro}</Aviso>
@@ -513,6 +576,26 @@ function Formulario() {
             <button className={BOTON} onClick={traerArticulosDeLaOC} disabled={cargandoMaestro}>
               Traer los artículos de la OC
             </button>
+            {/* DESHACER, que antes no existía: traídos los 43 artículos no había
+                forma de volver atrás salvo borrarlos de a uno. Dice dos cosas
+                distintas seguún el momento porque son dos gestos distintos --
+                arrepentirse, o limpiar lo que sobró-- y los dos son seguros:
+                una línea con cantidad o importe nunca se toca. */}
+            {vaciasDeLaOC.length > 0 && (
+              <button
+                className={BOTON}
+                onClick={sacarVaciasDeLaOC}
+                title={
+                  hayCargadasDeLaOC
+                    ? "Saca los renglónes que trajiste de la OC y quedaron sin cantidad ni importe. Los que cargaste no se tocan."
+                    : "Saca los artículos que trajiste de la OC. Como no cargaste ninguno, no se pierde nada."
+                }
+              >
+                {hayCargadasDeLaOC
+                  ? `Sacar los ${fmtNumero(vaciasDeLaOC.length)} sin cargar`
+                  : "Deshacer"}
+              </button>
+            )}
             <span className="text-muted text-xs">
               En código va el SKU, el EAN o el código del proveedor. El importe es el total neto
               de la línea, sin IVA.
