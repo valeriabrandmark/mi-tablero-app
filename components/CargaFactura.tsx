@@ -14,7 +14,17 @@ import {
   type LineaCruce,
   type RenglonFactura,
   type RenglonOC,
+  type ResultadoCruce,
+  type TotalesComprobante,
 } from "@/lib/factura-cruce";
+import {
+  armarImportCompras,
+  CONCEPTOS_PERCEPCION,
+  EMPRESAS_SIGMA,
+  SUCURSALES_SIGMA,
+  type DatosFactura,
+  type Imputacion,
+} from "@/lib/sigma-compra";
 import { fmtMoneda, fmtNumero } from "@/lib/format";
 import type { OrdenEnviada } from "@/lib/queries-ordenes";
 
@@ -43,10 +53,24 @@ type LineaCarga = {
 };
 
 type Cabecera = {
+  /**
+   * QUE COMPROBANTE ES. 'F' factura, 'C' nota de crédito, 'D' nota de débito.
+   *
+   * No es un detalle de presentación: viaja a Sigma como `tipoComprobante` y
+   * decide el SIGNO del asiento. Una nota de crédito cargada como factura es
+   * plata sumada donde había que restarla.
+   */
+  tipo: "F" | "C" | "D";
   letra: "A" | "B" | "C" | "M";
   numero: string;
   fecha: string;
 };
+
+const TIPOS_COMPROBANTE: { valor: Cabecera["tipo"]; label: string }[] = [
+  { valor: "F", label: "Factura" },
+  { valor: "C", label: "Nota de crédito" },
+  { valor: "D", label: "Nota de débito" },
+];
 
 type Borrador = {
   proveedor: string;
@@ -56,6 +80,22 @@ type Borrador = {
   descuentoPie: string;
   otrosImpuestos: string;
   totalImpreso: string;
+  /**
+   * A QUE EMPRESA Y SUCURSAL SE CARGA, que es una decisión por factura y no
+   * una constante.
+   *
+   * En la planilla de Google estaban fijas en la configuración, y eso no
+   * alcanza: las facturas de compra que ya están en la base usan CUATRO
+   * empresas y TRES sucursales, en siete combinaciones distintas. Cargar una
+   * factura en la empresa equivocada es un asiento en los libros de otra
+   * sociedad.
+   */
+  empresa: string;
+  sucursal: string;
+  /** El código del comprobante EN SIGMA. Factura A es "FA". */
+  codigoComprobante: string;
+  /** Las percepciones, para poder imputarlas una por una. */
+  percepciones: { concepto: string; monto: string }[];
 };
 
 let siguienteId = 0;
@@ -70,11 +110,17 @@ const lineaVacia = (codigo = "", unidad: Unidad = "U"): LineaCarga => ({
 const BORRADOR_VACIO: Borrador = {
   proveedor: "",
   ordenId: "",
-  cabecera: { letra: "A", numero: "", fecha: "" },
+  cabecera: { tipo: "F", letra: "A", numero: "", fecha: "" },
   lineas: [],
   descuentoPie: "",
   otrosImpuestos: "",
   totalImpreso: "",
+  empresa: "",
+  sucursal: "",
+  // "FA" es el único código confirmado: se aprendió mandando una factura de
+  // verdad, después de que Sigma contestara "codigoComprobante inexistente".
+  codigoComprobante: "FA",
+  percepciones: [],
 };
 
 function leerBorrador(): Borrador {
@@ -478,6 +524,9 @@ function Formulario() {
   );
 
   const hayOC = renglonesOC.length > 0;
+  /** El nombre del proveedor elegido, para la constancia del envío. */
+  const nombreDelProveedor =
+    proveedores.find(([clave]) => clave === b.proveedor)?.[1] ?? null;
   /**
    * LA PANTALLA SE ABRE CON EL PROVEEDOR, no con la OC.
    *
@@ -614,6 +663,28 @@ function Formulario() {
           nota={hayFactura ? `${renglonesFactura.length} renglones` : undefined}
         >
           <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <label className="text-muted space-y-1 text-xs">
+              <span>Tipo</span>
+              <select
+                className={`${CAMPO} w-full`}
+                value={b.cabecera.tipo}
+                onChange={(e) =>
+                  cambiar({
+                    cabecera: {
+                      ...b.cabecera,
+                      tipo: e.target.value as Cabecera["tipo"],
+                    },
+                  })
+                }
+                title="Decide el signo del asiento en Sigma. Una nota de crédito cargada como factura suma donde había que restar."
+              >
+                {TIPOS_COMPROBANTE.map((t) => (
+                  <option key={t.valor} value={t.valor}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="text-muted space-y-1 text-xs">
               <span>Letra</span>
               <select
@@ -1028,6 +1099,15 @@ function Formulario() {
 
           {/* 5. LA TABLA PARA EL MAIL ------------------------------------ */}
           <TablaParaMail datos={datosMail} />
+
+          {/* 6. CARGAR EN SIGMA ----------------------------------------- */}
+          <CargarEnSigma
+            b={b}
+            cambiar={cambiar}
+            cruce={resultado}
+            totales={totales}
+            proveedorNombre={nombreDelProveedor}
+          />
         </>
       )}
 
@@ -1310,4 +1390,439 @@ function descargarCsv(lineas: LineaCruce[], descripcionDe: Map<string, string>) 
   a.download = "cruce-factura-oc.csv";
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+/* -------------------------------------------------------------------------
+   6. CARGAR EN SIGMA
+
+   Lo que sale de acá queda cargado en la CONTABILIDAD de la empresa, así que
+   la pantalla tiene una sola obligación: que nadie apriete el botón sin saber
+   qué se va a mandar y a dónde.
+
+   Por eso el panel muestra los problemas ANTES de apretar nada --el mismo
+   `armarImportCompras` que usa el servidor corre acá para eso-- y el botón
+   recién se habilita cuando no queda ninguno. El servidor vuelve a validar
+   igual: lo de acá es para la persona, no para el ERP.
+   ------------------------------------------------------------------------- */
+
+/** Lo que contesta el servidor cuando algo sale mal. */
+type ResultadoEnvio =
+  | { ok: true; respuesta: string }
+  | { ok: false; error: string; mandado?: boolean; yaEnviada?: { enviadaEn: string } };
+
+function CargarEnSigma({
+  b,
+  cambiar,
+  cruce,
+  totales,
+  proveedorNombre,
+}: {
+  b: Borrador;
+  cambiar: (parche: Partial<Borrador>) => void;
+  cruce: ResultadoCruce;
+  totales: TotalesComprobante;
+  proveedorNombre: string | null;
+}) {
+  const [imputacion, setImputacion] = useState<Record<string, Imputacion> | null>(null);
+  const [enviando, setEnviando] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
+  const [resultado, setResultado] = useState<ResultadoEnvio | null>(null);
+
+  useEffect(() => {
+    fetch("/api/compras/facturas/imputacion")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((j: { imputacion?: Record<string, Imputacion> }) =>
+        setImputacion(j.imputacion ?? {}),
+      )
+      // Sin las cuentas no se puede mandar, pero la pantalla tiene que decirlo
+      // en vez de romperse: queda el panel con el problema a la vista.
+      .catch(() => setImputacion({}));
+  }, []);
+
+  const datos: DatosFactura = useMemo(
+    () => ({
+      tipo: b.cabecera.tipo,
+      codigoComprobante: b.codigoComprobante.trim(),
+      numeroComprobante: b.cabecera.numero.trim(),
+      fechaFactura: b.cabecera.fecha,
+      proveedorId: b.proveedor,
+      empresa: b.empresa,
+      sucursal: b.sucursal,
+      categoria: null,
+      descuentoPie: leerNumero(b.descuentoPie) ?? 0,
+      otrosImpuestos: leerNumero(b.otrosImpuestos) ?? 0,
+      totalImpreso: leerNumero(b.totalImpreso),
+      percepciones: b.percepciones
+        .map((p) => ({ concepto: p.concepto, monto: leerNumero(p.monto) ?? 0 }))
+        .filter((p) => p.concepto && p.monto),
+    }),
+    [b],
+  );
+
+  const armado = useMemo(
+    () =>
+      imputacion
+        ? armarImportCompras(cruce, totales, datos, imputacion)
+        : { cuerpo: null, problemas: ["Trayendo las cuentas contables…"] },
+    [cruce, totales, datos, imputacion],
+  );
+
+  /** Los conceptos a los que les falta la cuenta, para poder cargarla acá. */
+  const cuentasQueFaltan = useMemo(() => {
+    const m = /Falta la cuenta o el tipo de impuesto de "(.+)"/;
+    return armado.problemas
+      .map((p) => m.exec(p)?.[1])
+      .filter((x): x is string => !!x);
+  }, [armado.problemas]);
+
+  const listo = armado.problemas.length === 0 && !!armado.cuerpo;
+
+  const mandar = async () => {
+    setEnviando(true);
+    setResultado(null);
+    try {
+      const r = await fetch("/api/compras/facturas/sigma", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cruce, totales, datos, proveedorNombre }),
+      });
+      const j = await r.json();
+      setResultado(
+        r.ok
+          ? { ok: true, respuesta: String(j.respuesta ?? "") }
+          : {
+              ok: false,
+              error: String(j.error ?? `Error ${r.status}`),
+              mandado: j.mandado !== false,
+              yaEnviada: j.yaEnviada,
+            },
+      );
+      if (r.ok) setConfirmando(false);
+    } catch (e) {
+      setResultado({
+        ok: false,
+        error: e instanceof Error ? e.message : "Error de red",
+        mandado: true,
+      });
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  const campo = "text-muted space-y-1 text-xs";
+
+  return (
+    <Panel
+      titulo="6. Cargar en Sigma"
+      nota={armado.cuerpo ? `${armado.cuerpo.mercaderias.length} renglones` : undefined}
+    >
+      {/* A QUE EMPRESA Y A QUE SUCURSAL. Es lo primero porque es lo que no se
+          puede deshacer: una factura en la empresa equivocada es un asiento en
+          los libros de otra sociedad. */}
+      <div className="mb-3 grid gap-2 sm:grid-cols-3">
+        <label className={campo}>
+          <span>Empresa</span>
+          <select
+            className={`${CAMPO} w-full`}
+            value={b.empresa}
+            onChange={(e) => cambiar({ empresa: e.target.value })}
+          >
+            <option value="">Elegí la empresa…</option>
+            {EMPRESAS_SIGMA.map((e) => (
+              <option key={e.codigo} value={e.codigo}>
+                {e.nombre}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={campo}>
+          <span>Sucursal</span>
+          <select
+            className={`${CAMPO} w-full`}
+            value={b.sucursal}
+            onChange={(e) => cambiar({ sucursal: e.target.value })}
+          >
+            <option value="">Elegí la sucursal…</option>
+            {SUCURSALES_SIGMA.map((x) => (
+              <option key={x.codigo} value={x.codigo}>
+                {x.nombre}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={campo}>
+          <span>Código del comprobante en Sigma</span>
+          <input
+            className={`${CAMPO} w-full font-mono`}
+            value={b.codigoComprobante}
+            onChange={(e) => cambiar({ codigoComprobante: e.target.value })}
+            title="Factura A es FA. Es el único confirmado: se aprendió después de que Sigma contestara «codigoComprobante inexistente»."
+          />
+        </label>
+      </div>
+
+      {/* LAS PERCEPCIONES SE DETALLAN O NO SE MANDAN. Sigma necesita saber a
+          qué cuenta va cada una; un monto suelto no se puede imputar. */}
+      <div className="mb-3">
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          <span className="text-muted text-xs">
+            Percepciones y otros impuestos
+            {datos.otrosImpuestos
+              ? ` · tienen que sumar ${fmtMoneda(datos.otrosImpuestos)}`
+              : ""}
+          </span>
+          <button
+            className={BOTON}
+            onClick={() =>
+              cambiar({ percepciones: [...b.percepciones, { concepto: "", monto: "" }] })
+            }
+          >
+            + Agregar percepción
+          </button>
+        </div>
+        {b.percepciones.map((p, i) => (
+          <div key={i} className="mb-1 flex flex-wrap items-center gap-2">
+            <select
+              className={`${CAMPO} w-64 text-xs`}
+              value={p.concepto}
+              onChange={(e) => {
+                const copia = [...b.percepciones];
+                copia[i] = { ...copia[i]!, concepto: e.target.value };
+                cambiar({ percepciones: copia });
+              }}
+            >
+              <option value="">Elegí el concepto…</option>
+              {CONCEPTOS_PERCEPCION.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <input
+              className={`${CAMPO} w-32 text-right text-xs`}
+              inputMode="decimal"
+              value={p.monto}
+              placeholder="0,00"
+              onChange={(e) => {
+                const copia = [...b.percepciones];
+                copia[i] = { ...copia[i]!, monto: e.target.value };
+                cambiar({ percepciones: copia });
+              }}
+            />
+            <button
+              className="text-muted hover:text-rose-300 text-xs"
+              onClick={() =>
+                cambiar({ percepciones: b.percepciones.filter((_, j) => j !== i) })
+              }
+              aria-label="Sacar la percepción"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* LO QUE FALTA, antes de ofrecer el botón. */}
+      {armado.problemas.length > 0 && (
+        <Aviso>
+          <p className="font-medium">
+            Todavía no se puede mandar. Falta{armado.problemas.length > 1 ? "n" : ""}{" "}
+            {armado.problemas.length === 1 ? "una cosa" : `${armado.problemas.length} cosas`}:
+          </p>
+          <ul className="mt-1 list-disc pl-5 text-xs">
+            {armado.problemas.map((p, i) => (
+              <li key={i}>{p}</li>
+            ))}
+          </ul>
+        </Aviso>
+      )}
+
+      {/* LAS CUENTAS SE CARGAN ACA MISMO, y sólo las que esta factura
+          necesita. Un formulario con los 31 conceptos obliga a decidir
+          treinta cosas para mandar una factura; así se carga la que falta, en
+          el momento en que hace falta, y queda para las próximas. */}
+      {cuentasQueFaltan.length > 0 && imputacion && (
+        <CuentasQueFaltan
+          conceptos={cuentasQueFaltan}
+          onGuardada={(nueva) => setImputacion(nueva)}
+        />
+      )}
+
+      {/* QUE SE VA A MANDAR. En una operación que escribe en la contabilidad,
+          poder mirar el cuerpo antes vale más que el mensaje de éxito. */}
+      {armado.cuerpo && (
+        <details className="mt-3">
+          <summary className="text-muted cursor-pointer text-xs">
+            Ver lo que se va a mandar
+          </summary>
+          <pre className="bg-panel-2 mt-2 max-h-64 overflow-auto rounded-lg p-3 text-[11px]">
+            {JSON.stringify(armado.cuerpo, null, 2)}
+          </pre>
+        </details>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {!confirmando ? (
+          <button
+            className={listo ? BOTON_ACTIVO : BOTON}
+            disabled={!listo}
+            onClick={() => {
+              setResultado(null);
+              setConfirmando(true);
+            }}
+          >
+            Cargar la factura en Sigma
+          </button>
+        ) : (
+          <>
+            <span className="text-ink text-xs">
+              Se va a cargar en la empresa <strong>{b.empresa}</strong>, sucursal{" "}
+              <strong>{b.sucursal}</strong>, por{" "}
+              <strong>{fmtMoneda(armado.cuerpo?.total ?? 0)}</strong>. No se
+              puede deshacer desde acá.
+            </span>
+            <button className={BOTON_ACTIVO} onClick={() => void mandar()} disabled={enviando}>
+              {enviando ? "Mandando…" : "Confirmo, cargarla"}
+            </button>
+            <button className={BOTON} onClick={() => setConfirmando(false)} disabled={enviando}>
+              Cancelar
+            </button>
+          </>
+        )}
+      </div>
+
+      {resultado && (
+        <div className="mt-3">
+          {resultado.ok ? (
+            <Aviso tono="info">
+              <p className="font-medium">La factura se cargó en Sigma.</p>
+              <p className="mt-1 text-xs">
+                {resultado.respuesta || "Entra pendiente y se procesa del otro lado."}
+              </p>
+            </Aviso>
+          ) : (
+            <Aviso tono={resultado.mandado ? "alerta" : "error"}>
+              <p className="font-medium">
+                {resultado.yaEnviada
+                  ? "Esta factura ya se había cargado."
+                  : resultado.mandado
+                    ? "No sabemos si entró."
+                    : "No se cargó."}
+              </p>
+              <p className="mt-1 text-xs">{resultado.error}</p>
+              {!resultado.mandado && !resultado.yaEnviada && (
+                <p className="text-muted mt-1 text-xs">
+                  Sigma la rechazó antes de guardarla, así que se puede corregir
+                  y volver a mandar sin riesgo de duplicarla.
+                </p>
+              )}
+            </Aviso>
+          )}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+/**
+ * Carga las cuentas que esta factura necesita y todavía no están.
+ *
+ * NO INVENTA NINGUNA. Una cuenta equivocada manda plata al lugar equivocado en
+ * la contabilidad y no se nota en ninguna pantalla: se descubre cerrando el
+ * mes. Por eso los campos arrancan vacíos y no se puede mandar la factura
+ * hasta que estén.
+ */
+function CuentasQueFaltan({
+  conceptos,
+  onGuardada,
+}: {
+  conceptos: string[];
+  onGuardada: (imputacion: Record<string, Imputacion>) => void;
+}) {
+  const [filas, setFilas] = useState<Record<string, Imputacion>>({});
+  const [guardando, setGuardando] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const guardar = async (concepto: string) => {
+    const f = filas[concepto];
+    if (!f?.cuenta || !f?.tipoImpuesto) return;
+    setGuardando(concepto);
+    setError(null);
+    try {
+      const r = await fetch("/api/compras/facturas/imputacion", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fila: { concepto, ...f } }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error ?? `Error ${r.status}`);
+      onGuardada(j.imputacion as Record<string, Imputacion>);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar.");
+    } finally {
+      setGuardando(null);
+    }
+  };
+
+  const editar = (concepto: string, parche: Partial<Imputacion>) =>
+    setFilas((x) => ({
+      ...x,
+      // El orden importa: los vacíos son el piso, lo guardado va encima y el
+      // parche último. Al revés, escribir un campo borraría los otros.
+      [concepto]: {
+        ...{ cuenta: "", tipoImpuesto: "" },
+        ...x[concepto],
+        ...parche,
+      },
+    }));
+
+  return (
+    <div className="border-line mt-3 rounded-lg border p-3">
+      <p className="text-ink text-xs font-medium">
+        Cargá las cuentas que faltan. Quedan guardadas para las próximas facturas.
+      </p>
+      <p className="text-muted mt-1 mb-2 text-[11px]">
+        Son las de tu plan de cuentas: la misma cuenta y el mismo tipo de
+        impuesto que usa la planilla. Las 24 percepciones de IIBB ya vienen
+        cargadas (cuenta 8013, tipo PIB, subcuenta por provincia).
+      </p>
+      {conceptos.map((c) => (
+        <div key={c} className="mb-2 flex flex-wrap items-end gap-2">
+          <span className="text-ink w-48 text-xs">{c}</span>
+          <input
+            className={`${CAMPO} w-28 text-xs`}
+            placeholder="Cuenta"
+            value={filas[c]?.cuenta ?? ""}
+            onChange={(e) => editar(c, { cuenta: e.target.value })}
+          />
+          <input
+            className={`${CAMPO} w-24 text-xs`}
+            placeholder="Subcuenta"
+            value={filas[c]?.subcuenta ?? ""}
+            onChange={(e) => editar(c, { subcuenta: e.target.value })}
+          />
+          <input
+            className={`${CAMPO} w-28 text-xs`}
+            placeholder="Centro de costo"
+            value={filas[c]?.centroCosto ?? ""}
+            onChange={(e) => editar(c, { centroCosto: e.target.value })}
+          />
+          <input
+            className={`${CAMPO} w-24 text-xs`}
+            placeholder="Tipo imp."
+            value={filas[c]?.tipoImpuesto ?? ""}
+            onChange={(e) => editar(c, { tipoImpuesto: e.target.value })}
+          />
+          <button
+            className={BOTON}
+            onClick={() => void guardar(c)}
+            disabled={guardando === c || !filas[c]?.cuenta || !filas[c]?.tipoImpuesto}
+          >
+            {guardando === c ? "Guardando…" : "Guardar"}
+          </button>
+        </div>
+      ))}
+      {error && <p className="text-negativo mt-1 text-xs">{error}</p>}
+    </div>
+  );
 }

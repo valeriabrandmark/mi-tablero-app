@@ -1,5 +1,6 @@
-import { query } from "@/lib/db";
+import { query, queryOne } from "@/lib/db";
 import type { ArticuloMaestro } from "@/lib/factura-cruce";
+import type { CuerpoImportCompras, Imputacion } from "@/lib/sigma-compra";
 
 /**
  * El maestro de Sigma que hace falta para reconocer los renglones de una
@@ -106,4 +107,159 @@ export async function getMaestroDelProveedor(
     [codigo],
   );
   return filas.map(aArticulo);
+}
+
+/* -------------------------------------------------------------------------
+   LA IMPUTACION CONTABLE
+
+   Las cuentas con las que se arma `contable[]` de ImportCompras. Viven en la
+   base y no en el código porque son el plan de cuentas de la empresa: una
+   cuenta inventada manda plata al lugar equivocado en la contabilidad, y eso
+   no se nota en ninguna pantalla.
+   ------------------------------------------------------------------------- */
+
+export type FilaImputacion = {
+  concepto: string;
+  cuenta: string;
+  subcuenta: string | null;
+  centroCosto: string | null;
+  tipoImpuesto: string;
+};
+
+/** Todas las cuentas cargadas, por concepto. */
+export async function getImputacionContable(): Promise<
+  Record<string, Imputacion>
+> {
+  const filas = await query<{
+    concepto: string;
+    cuenta: string;
+    subcuenta: string | null;
+    centro_costo: string | null;
+    tipo_impuesto: string;
+  }>(
+    `select concepto, cuenta, subcuenta, centro_costo, tipo_impuesto
+       from app.sigma_imputacion_contable
+      order by concepto`,
+  );
+
+  const m: Record<string, Imputacion> = {};
+  for (const f of filas) {
+    m[f.concepto] = {
+      cuenta: f.cuenta,
+      subcuenta: f.subcuenta,
+      centroCosto: f.centro_costo,
+      tipoImpuesto: f.tipo_impuesto,
+    };
+  }
+  return m;
+}
+
+/**
+ * Guarda o pisa la cuenta de un concepto.
+ *
+ * SIN CUENTA O SIN TIPO DE IMPUESTO SE BORRA la fila en vez de guardarla a
+ * medias: `armarImportCompras` trata una imputación incompleta como faltante,
+ * así que una fila con la cuenta vacía sería una forma silenciosa de decir lo
+ * mismo con un registro de más.
+ */
+export async function guardarImputacion(
+  fila: FilaImputacion,
+  usuario: string | null,
+): Promise<void> {
+  const cuenta = fila.cuenta.trim();
+  const tipo = fila.tipoImpuesto.trim();
+
+  if (!cuenta || !tipo) {
+    await query(
+      `delete from app.sigma_imputacion_contable where concepto = $1`,
+      [fila.concepto],
+    );
+    return;
+  }
+
+  await query(
+    `insert into app.sigma_imputacion_contable
+       (concepto, cuenta, subcuenta, centro_costo, tipo_impuesto, actualizado_por)
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (concepto) do update
+        set cuenta          = excluded.cuenta,
+            subcuenta       = excluded.subcuenta,
+            centro_costo    = excluded.centro_costo,
+            tipo_impuesto   = excluded.tipo_impuesto,
+            actualizado_en  = now(),
+            actualizado_por = excluded.actualizado_por`,
+    [
+      fila.concepto,
+      cuenta,
+      fila.subcuenta?.trim() || null,
+      fila.centroCosto?.trim() || null,
+      tipo,
+      usuario,
+    ],
+  );
+}
+
+/* -------------------------------------------------------------------------
+   EL REGISTRO DE LO QUE SE MANDO
+   ------------------------------------------------------------------------- */
+
+/**
+ * Deja constancia de la factura que se mandó a Sigma.
+ *
+ * NO TIRA SI FALLA, igual que la de las órdenes: la factura ya está cargada
+ * del otro lado, así que un error al guardar la constancia no puede convertir
+ * un éxito en un error en la pantalla.
+ */
+export async function guardarFacturaEnviada(datos: {
+  usuario: string | null;
+  cuerpo: CuerpoImportCompras;
+  proveedorNombre: string | null;
+  resultado: "ok" | "rechazada" | "incierto";
+  respuesta: string;
+}): Promise<void> {
+  try {
+    await query(
+      `insert into app.facturas_compra_enviadas
+         (usuario, id_sigma, proveedor_id, proveedor_nombre, empresa, sucursal,
+          numero_comprobante, tipo_comprobante, fecha_factura, total,
+          renglones, resultado, respuesta, payload)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11, $12, $13,
+               $14::jsonb)`,
+      [
+        datos.usuario,
+        datos.cuerpo.id,
+        datos.cuerpo.proveedorId,
+        datos.proveedorNombre,
+        datos.cuerpo.empresa,
+        datos.cuerpo.sucursal ?? null,
+        datos.cuerpo.numeroComprobante,
+        datos.cuerpo.tipoComprobante,
+        datos.cuerpo.fechaFactura,
+        datos.cuerpo.total,
+        datos.cuerpo.mercaderias.length,
+        datos.resultado,
+        datos.respuesta.slice(0, 2000),
+        JSON.stringify(datos.cuerpo),
+      ],
+    );
+  } catch (error) {
+    console.error("[facturas] no se pudo guardar la constancia:", error);
+  }
+}
+
+/** Si una factura ya se mandó: se busca por el mismo id que usa Sigma. */
+export async function facturaYaEnviada(
+  idSigma: string,
+): Promise<{ enviadaEn: string; resultado: string } | null> {
+  const fila = await queryOne<{ enviada_en: string; resultado: string }>(
+    `select to_char(enviada_en at time zone 'America/Argentina/Buenos_Aires',
+                    'DD/MM/YYYY HH24:MI') as enviada_en,
+            resultado
+       from app.facturas_compra_enviadas
+      where id_sigma = $1 and resultado = 'ok'
+      order by enviada_en desc
+      limit 1`,
+    [idSigma],
+  );
+  return fila ? { enviadaEn: fila.enviada_en, resultado: fila.resultado } : null;
 }
