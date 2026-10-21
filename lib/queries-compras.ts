@@ -31,6 +31,7 @@ import {
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import type { ArticuloParaOrden } from "@/lib/sigma-orden";
 import type {
+  ArticuloSinFicha,
   OpcionSellIn,
   DashboardCompras,
   FilaCompra,
@@ -723,6 +724,8 @@ type Listado = {
   filas: FilaCompra[];
   /** Ver `articulosDelFiltro` en `DashboardCompras` (lib/types.ts). */
   articulosDelFiltro: number;
+  /** Ver `sinFichaDeStock` en `DashboardCompras` (lib/types.ts). */
+  sinFichaDeStock: ArticuloSinFicha[];
 };
 
 /**
@@ -737,6 +740,66 @@ type Listado = {
  * únicamente en la pantalla vacía --donde no hay nada más que mostrar y este
  * número es lo único que se puede decir-- y nunca en el camino normal.
  */
+/**
+ * ARTICULOS QUE EXISTEN EN SIGMA PERO QUE ESTA PANTALLA NO PUEDE MOSTRAR.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE EXISTE
+ *
+ * Compras arma su lista desde el STOCK: el `from` de la consulta es la unión
+ * de Tucumán y Full, y el maestro de artículos entra después con un left join.
+ * Un artículo sin ficha de stock en Digip no existe para esta pantalla por más
+ * que esté dado de alta en el ERP.
+ *
+ * Buscarlo devuelve una tabla vacía, y una tabla vacía se lee como "ese
+ * artículo no existe". Es exactamente al revés: casi siempre recién se creó y
+ * lo que falta es cargarlo en Digip.
+ *
+ * El caso que lo motivó: C03041, CK ONE NIGHT ESSENCE 200ML de COTY, dado de
+ * alta en Sigma el 19/10 y buscado el 21.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE NO SE ARREGLA MOSTRANDOLOS Y YA
+ *
+ * Porque un artículo sin ventas y sin stock recibe "mínimo de un bulto" como
+ * sugerido (ver el `case` del sugerido), así que meterlos a todos en la lista
+ * no los hace visibles: los hace APARECER EN LAS ORDENES. Son 36 artículos, de
+ * los cuales 21 son discontinuos y 5 tienen costo 0 --esos quedarían en cero
+ * igual-- pero los otros 10 pedirían un bulto cada uno: $468.570 que nadie
+ * pidió, repartidos en órdenes de cuatro proveedores.
+ *
+ * Y además sería mentir sobre el estado real: un artículo que el depósito no
+ * sabe que existe tampoco se puede recibir. El lugar donde se arregla es
+ * Digip; acá lo único que corresponde es decirlo en vez de mostrar la nada.
+ *
+ * ---------------------------------------------------------------------------
+ * SE PAGA SOLO EN LA PANTALLA VACIA
+ *
+ * Igual que `contarDelFiltro`: sólo corre con cero filas y con algo escrito en
+ * el buscador, que es cuando no hay nada más que mostrar. Es una consulta a una
+ * sola tabla de ~8.300 filas.
+ */
+async function getSinFichaDeStock(
+  termino: string,
+): Promise<ArticuloSinFicha[]> {
+  return query<ArticuloSinFicha>(
+    `${BASE}
+     select trim(a.id)                            as sku,
+            a.descripcion                         as producto,
+            a."proveedorNombre"                   as proveedor,
+            to_char(a."fechaAlta"::date, 'YYYY-MM-DD') as alta
+     from bronze.sigma_articulos a
+     where trim(a.id) not in (select sku from stock)
+       and (trim(a.id) ilike $1
+            or a.descripcion ilike $1
+            or nullif(trim(a."codigoCompra"), '') ilike $1
+            or nullif(trim(a."eanUnidad"), '') ilike $1)
+     order by a."fechaAlta"::date desc nulls last
+     limit 5`,
+    [`%${termino}%`],
+  );
+}
+
 async function contarDelFiltro(w: Where): Promise<number> {
   const fila = await queryOne<{ v: string }>(
     `${BASE} select count(*) as v from calculada ${w.sqlEstructural}`,
@@ -793,6 +856,11 @@ async function getFilas(
   const articulosDelFiltro =
     filas.length === 0 && w.recortes.length > 0 ? await contarDelFiltro(w) : 0;
 
+  // Y si además se estaba buscando algo, puede que el artículo exista en Sigma
+  // y lo que falte sea su ficha de stock. Ver `getSinFichaDeStock`.
+  const sinFichaDeStock =
+    filas.length === 0 && f.buscar ? await getSinFichaDeStock(f.buscar) : [];
+
   const mapeadas = filas.map((r) => ({
     sku: r.sku as string,
     producto: (r.producto as string | null) ?? null,
@@ -845,7 +913,7 @@ async function getFilas(
     ultimaCompra: (r.ultima_compra as string | null) ?? null,
   }));
 
-  return { filas: mapeadas, articulosDelFiltro };
+  return { filas: mapeadas, articulosDelFiltro, sinFichaDeStock };
 }
 
 /**
@@ -1029,6 +1097,7 @@ async function getDashboardComprasDirecto(
   return {
     filas: listado.filas,
     articulosDelFiltro: listado.articulosDelFiltro,
+    sinFichaDeStock: listado.sinFichaDeStock,
     mesPasado,
     ventana: f.ventana ?? VENTANA_POR_DEFECTO,
     cobertura: coberturaValida(f.cobertura),

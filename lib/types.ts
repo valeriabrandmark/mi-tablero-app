@@ -2004,6 +2004,15 @@ export type FilaCompra = {
   ultimaCompra: string | null;
 };
 
+/** Un artículo del maestro de Sigma que todavía no tiene ficha de stock. */
+export type ArticuloSinFicha = {
+  sku: string;
+  producto: string | null;
+  proveedor: string | null;
+  /** Cuándo se dio de alta en Sigma, para que se note si es de recién. */
+  alta: string | null;
+};
+
 export type DashboardCompras = {
   filas: FilaCompra[];
   ventana: number;
@@ -2065,6 +2074,18 @@ export type DashboardCompras = {
    * si la marca no existiera.
    */
   articulosDelFiltro: number;
+  /**
+   * ARTICULOS QUE EXISTEN EN SIGMA PERO QUE ESTA PANTALLA NO PUEDE MOSTRAR.
+   *
+   * Compras arma su lista desde el STOCK de los dos depósitos, así que un
+   * artículo sin ficha en Digip no existe acá por más que esté dado de alta en
+   * el ERP. Buscarlo devuelve una tabla vacía, que se lee como "ese artículo no
+   * existe" -- y es exactamente al revés: recién se creó y falta cargarlo.
+   *
+   * Sólo se llena con la tabla vacía y con algo escrito en el buscador. Ver
+   * `getSinFichaDeStock`.
+   */
+  sinFichaDeStock: ArticuloSinFicha[];
   comprasHasta: string | null;
   generadoEn: string;
 };
