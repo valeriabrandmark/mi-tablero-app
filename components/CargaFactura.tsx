@@ -1496,13 +1496,19 @@ function CargarEnSigma({
     [cruce, totales, datos, imputacion],
   );
 
-  /** Los conceptos a los que les falta la cuenta, para poder cargarla acá. */
+  /**
+   * Los conceptos a los que les falta la cuenta, para poder cargarla acá.
+   *
+   * MIRA LAS DOS LISTAS. La del IVA frena y la de una percepción no, pero las
+   * dos se cargan igual desde el mismo formulario: que una no frene no
+   * significa que no se quiera cargar.
+   */
   const cuentasQueFaltan = useMemo(() => {
-    const m = /Falta la cuenta o el tipo de impuesto de "(.+)"/;
-    return armado.problemas
+    const m = /Falta la cuenta o el tipo de impuesto de "(.+?)"/;
+    return [...armado.problemas, ...armado.advertencias]
       .map((p) => m.exec(p)?.[1])
       .filter((x): x is string => !!x);
-  }, [armado.problemas]);
+  }, [armado.problemas, armado.advertencias]);
 
   const listo = hayFactura && armado.problemas.length === 0 && !!armado.cuerpo;
 
@@ -1594,15 +1600,17 @@ function CargarEnSigma({
         </label>
       </div>
 
-      {/* LAS PERCEPCIONES SE DETALLAN O NO SE MANDAN. Sigma necesita saber a
-          qué cuenta va cada una; un monto suelto no se puede imputar. */}
+      {/* LAS PERCEPCIONES SON OPCIONALES. Detallarlas las manda imputadas;
+          dejarlas vacías las deja para cargar en Sigma, donde se las ve junto
+          al resto del asiento. Lo que no se puede es mandarlas sin concepto:
+          un monto suelto no se puede imputar a ninguna cuenta. */}
       <div className="mb-3">
         <div className="mb-1 flex flex-wrap items-center gap-2">
           <span className="text-muted text-xs">
             Percepciones y otros impuestos
             {datos.otrosImpuestos
-              ? ` · tienen que sumar ${fmtMoneda(datos.otrosImpuestos)}`
-              : ""}
+              ? ` · hay ${fmtMoneda(datos.otrosImpuestos)} en el total. Detallalas acá o cargalas en Sigma`
+              : " · opcional"}
           </span>
           <button
             className={BOTON}

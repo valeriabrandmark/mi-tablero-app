@@ -340,28 +340,40 @@ const CUENTAS: Record<string, Imputacion> = {
   );
 }
 
-// Un monto de otros impuestos sin detallar no se puede imputar: mandarlo a una
-// cuenta cualquiera es peor que no mandarlo.
+// --- LAS PERCEPCIONES NO FRENAN ------------------------------------------
+//
+// Se cargan en Sigma sobre el comprobante pendiente, donde se las ve junto al
+// resto del asiento. Lo que sí se avisa es que el total las incluye y el
+// detalle no: esa diferencia es lo que hay que cargar del otro lado.
 {
   const cruce = cruceDe([linea({ sku: "A", unidades: 1, precioNeto: 100, neto: 100, iva: 21 })]);
-  const { problemas } = armarImportCompras(
+  const { cuerpo, problemas, advertencias } = armarImportCompras(
     cruce,
     totalesDe({ netoGravado: 100, iva: [{ alicuota: 21, importe: 21 }], otrosImpuestos: 50 }),
     { ...DATOS, otrosImpuestos: 50, totalImpreso: 171 },
     CUENTAS,
   );
+  revisar("otros impuestos sin detallar no frena", problemas, []);
   revisar(
-    "otros impuestos sin detallar frena el envío",
-    problemas.some((p) => p.includes("Detallá las percepciones")),
+    "pero se avisa que quedan para Sigma",
+    advertencias.some((a) => a.includes("no se mandan detalladas")),
     true,
+  );
+  // EL TOTAL SIGUE SIENDO EL IMPRESO, con las percepciones adentro. Es contra
+  // ese número que se revisa la factura del otro lado.
+  revisar("el total las incluye igual", cuerpo.total, 171);
+  revisar(
+    "y no viaja ninguna línea de percepción",
+    cuerpo.contable.filter((c) => c.observacion).length,
+    0,
   );
 }
 
-// Y si el detalle no suma lo cargado, tampoco: la diferencia terminaría en el
-// total y el comprobante entraría descuadrado.
+// Un detalle que no suma tampoco frena: se manda lo detallado y se avisa por
+// cuánto falta.
 {
   const cruce = cruceDe([linea({ sku: "A", unidades: 1, precioNeto: 100, neto: 100, iva: 21 })]);
-  const { problemas } = armarImportCompras(
+  const { problemas, advertencias } = armarImportCompras(
     cruce,
     totalesDe({ netoGravado: 100, iva: [{ alicuota: 21, importe: 21 }], otrosImpuestos: 50 }),
     {
@@ -372,11 +384,33 @@ const CUENTAS: Record<string, Imputacion> = {
     },
     CUENTAS,
   );
+  revisar("un detalle que no suma tampoco frena", problemas, []);
+  revisar("y dice cuánto falta", advertencias.some((a) => a.includes("20,00")), true);
+}
+
+// LA CUENTA DE UNA PERCEPCION QUE FALTA TAMPOCO FRENA, y es la diferencia con
+// la del IVA: esa percepción no se manda y se carga en Sigma.
+{
+  const cruce = cruceDe([linea({ sku: "A", unidades: 1, precioNeto: 100, neto: 100, iva: 21 })]);
+  const { cuerpo, problemas, advertencias } = armarImportCompras(
+    cruce,
+    totalesDe({ netoGravado: 100, iva: [{ alicuota: 21, importe: 21 }], otrosImpuestos: 50 }),
+    {
+      ...DATOS,
+      otrosImpuestos: 50,
+      totalImpreso: 171,
+      percepciones: [{ concepto: "Percepción IVA", monto: 50 }],
+    },
+    // Las de IIBB y la del IVA de la factura, pero NO la de "Percepción IVA".
+    { ...imputacionDeFabrica(), "IVA 21 %": { cuenta: "8008", tipoImpuesto: "I21" } },
+  );
+  revisar("sin la cuenta de la percepción no frena", problemas, []);
   revisar(
-    "un detalle que no suma frena el envío",
-    problemas.some((p) => p.includes("no suma")),
+    "se avisa y queda para Sigma",
+    advertencias.some((a) => a.includes('"Percepción IVA"')),
     true,
   );
+  revisar("el IVA sí viaja", cuerpo.contable.length, 1);
 }
 
 // --- Lo que falta -------------------------------------------------------
