@@ -13,6 +13,7 @@ import { getArticulosParaOrden } from "@/lib/queries-compras";
 import { guardarOrdenEnviada } from "@/lib/queries-ordenes";
 import {
   armarOrdenSigma,
+  numeroDeOrdenSigma,
   problemasDeLaOrden,
   type ArticuloParaOrden,
 } from "@/lib/sigma-orden";
@@ -284,6 +285,16 @@ export async function POST(request: NextRequest) {
 
     const texto = (await respuesta.text()).trim();
 
+    // LOS HEADERS TAMBIEN. El número de OC que Sigma dice devolver desde el
+    // 09/09 no aparece en el cuerpo de nuestras órdenes; si viene en un header,
+    // está acá. Y si no viene en ninguno de los dos, queda la constancia de qué
+    // contestó de verdad, sin tener que mandar una orden de prueba al ERP.
+    const headers: Record<string, string> = {};
+    respuesta.headers.forEach((valor, clave) => {
+      headers[clave] = valor;
+    });
+    const numeroSigma = numeroDeOrdenSigma(texto, headers);
+
     if (!respuesta.ok) {
       // El mensaje de Sigma va tal cual a la pantalla: está en castellano y
       // dice qué campo falta mejor de lo que podríamos resumirlo.
@@ -294,6 +305,8 @@ export async function POST(request: NextRequest) {
         payload,
         resultado: "incierto",
         respuesta: texto,
+        numeroSigma,
+        headers,
         proveedorNombre: nombreDelProveedor(articulos, payload.proveedorId),
       });
       return NextResponse.json(
@@ -317,12 +330,17 @@ export async function POST(request: NextRequest) {
       payload,
       resultado: "ok",
       respuesta: texto,
+      numeroSigma,
+      headers,
       proveedorNombre: nombreDelProveedor(articulos, payload.proveedorId),
     });
 
     return NextResponse.json({
       ok: true,
       respuesta: texto,
+      // El número con el que la orden existe en Sigma, para poder nombrarla
+      // igual de los dos lados. `null` mientras su API no lo devuelva.
+      numeroSigma,
       // Se devuelve lo que se mandó para que la pantalla pueda mostrarlo: es la
       // única constancia de qué se cargó, y en una operación sin `undo` eso
       // vale más que el mensaje de éxito.

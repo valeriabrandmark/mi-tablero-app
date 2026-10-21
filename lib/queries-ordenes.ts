@@ -34,6 +34,8 @@ export type OrdenEnviada = {
   totalBruto: number;
   resultado: "ok" | "incierto";
   respuesta: string | null;
+  /** El número con el que la orden existe en Sigma. `null` si no lo devolvió. */
+  numeroSigma: string | null;
   payload: OrdenSigma;
 };
 
@@ -53,6 +55,17 @@ export async function guardarOrdenEnviada(datos: {
   resultado: "ok" | "incierto";
   respuesta: string;
   proveedorNombre: string | null;
+  /** El "OC Nro" que devuelve Sigma, si vino. Ver `numeroDeOrdenSigma`. */
+  numeroSigma?: string | null;
+  /**
+   * Los headers de la respuesta.
+   *
+   * ES DIAGNOSTICO Y SE PUEDE SACAR. Sigma dice devolver el número de orden
+   * desde el 09/09/2026 y nuestras órdenes vuelven con el cuerpo vacío: esto
+   * deja ver si viaja en un header, sin tener que mandar una orden de prueba
+   * al ERP para averiguarlo.
+   */
+  headers?: Record<string, string>;
 }): Promise<void> {
   const items = datos.payload.items ?? [];
   const unidades = items.reduce((s, i) => s + (Number(i.cantidad) || 0), 0);
@@ -65,8 +78,10 @@ export async function guardarOrdenEnviada(datos: {
     await query(
       `insert into app.ordenes_compra_enviadas
          (usuario, proveedor_codigo, proveedor_nombre, empresa, mes, nota,
-          renglones, unidades, total_bruto, resultado, respuesta, payload)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)`,
+          renglones, unidades, total_bruto, resultado, respuesta, payload,
+          numero_sigma, respuesta_headers)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb,
+               $13, $14::jsonb)`,
       [
         datos.usuario,
         datos.payload.proveedorId ?? null,
@@ -82,6 +97,8 @@ export async function guardarOrdenEnviada(datos: {
         // puede venir con una página de HTML entera.
         datos.respuesta.slice(0, 2000),
         JSON.stringify(datos.payload),
+        datos.numeroSigma ?? null,
+        datos.headers ? JSON.stringify(datos.headers) : null,
       ],
     );
   } catch (error) {
@@ -96,7 +113,8 @@ export async function getOrdenesEnviadas(limite = 50): Promise<OrdenEnviada[]> {
             to_char(enviada_en at time zone 'America/Argentina/Buenos_Aires',
                     'YYYY-MM-DD HH24:MI')        as enviada_en,
             usuario, proveedor_codigo, proveedor_nombre, empresa, mes, nota,
-            renglones, unidades, total_bruto, resultado, respuesta, payload
+            renglones, unidades, total_bruto, resultado, respuesta, payload,
+            numero_sigma
      from app.ordenes_compra_enviadas
      -- Por id y no por enviada_en. OJO CON LOS BACKTICKS ACÁ ADENTRO: esto es
      -- un template literal y uno solo parte la cadena (misma trampa que avisa
@@ -126,6 +144,7 @@ export async function getOrdenesEnviadas(limite = 50): Promise<OrdenEnviada[]> {
     totalBruto: Number(r.total_bruto ?? 0),
     resultado: r.resultado === "ok" ? "ok" : "incierto",
     respuesta: (r.respuesta as string | null) ?? null,
+    numeroSigma: (r.numero_sigma as string | null) ?? null,
     payload: r.payload as OrdenSigma,
   }));
 }
