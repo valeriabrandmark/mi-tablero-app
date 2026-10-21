@@ -244,7 +244,7 @@ export default function DashboardComprasPage({
   const [confirmando, setConfirmando] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState<
-    | { ok: true; enviado: OrdenSigma }
+    | { ok: true; enviado: OrdenSigma; numeroSigma: string | null }
     // `mandado` parte el fracaso en dos casos que NO se tratan igual: uno se
     // reintenta, el otro se revisa en Sigma antes de tocar nada.
     | {
@@ -824,7 +824,13 @@ export default function DashboardComprasPage({
       if (historial !== null) void traerHistorial();
 
       if (r.ok) {
-        setResultado({ ok: true, enviado: json.enviado as OrdenSigma });
+        setResultado({
+          ok: true,
+          enviado: json.enviado as OrdenSigma,
+          // El número con el que la orden existe en Sigma. Puede venir null:
+          // ver `numeroDeOrdenSigma`.
+          numeroSigma: (json.numeroSigma as string | null) ?? null,
+        });
         setConfirmando(false);
       } else {
         setResultado({
@@ -2310,13 +2316,29 @@ export default function DashboardComprasPage({
             >
               {resultado.ok ? (
                 <>
-                  <p className="font-medium">La orden se cargó en Sigma.</p>
+                  <p className="font-medium">
+                    La orden se cargó en Sigma
+                    {resultado.numeroSigma ? (
+                      <>
+                        {" "}
+                        con el número{" "}
+                        <strong className="font-mono">
+                          {resultado.numeroSigma}
+                        </strong>
+                      </>
+                    ) : (
+                      ""
+                    )}
+                    .
+                  </p>
                   <p className="mt-1">
                     Proveedor <strong>{resultado.enviado.proveedorId}</strong> ·
                     empresa <strong>{resultado.enviado.empresa}</strong> ·{" "}
                     {fmtNumero(resultado.enviado.items.length)} renglones ·
-                    estado <strong>Pendiente</strong>. Buscala en Sigma para
-                    aprobarla.
+                    estado <strong>Pendiente</strong>.{" "}
+                    {resultado.numeroSigma
+                      ? "Buscá ese número en Sigma para aprobarla."
+                      : "Buscála en Sigma para aprobarla."}
                   </p>
                   {/* Se muestra lo que se mandó, y no un "listo" a secas: en una
                       operación sin deshacer, la constancia de qué se cargó vale
@@ -2544,6 +2566,15 @@ export default function DashboardComprasPage({
                       <strong>
                         {o.proveedorNombre ?? o.proveedorCodigo ?? "—"}
                       </strong>
+                      {/* EL NUMERO DE SIGMA, que es con el que la orden se
+                          busca del otro lado. Las viejas no lo tienen: su API
+                          no lo devolvía cuando se mandaron. */}
+                      {o.numeroSigma && (
+                        <>
+                          {" · "}
+                          <span className="font-mono">OC {o.numeroSigma}</span>
+                        </>
+                      )}
                       {" · "}
                       {fmtNumero(o.renglones)} renglones ·{" "}
                       {fmtNumero(o.unidades)} unidades

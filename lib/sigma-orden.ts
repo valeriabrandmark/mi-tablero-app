@@ -437,6 +437,58 @@ export function armarOrdenSigma(
  * tienen que estar a la vista antes de apretar, con el código Y el nombre —
  * "13" no se puede comparar contra nada, "13 · RECEPCIÓN" sí.
  */
+/**
+ * EL NUMERO DE ORDEN QUE DEVUELVE SIGMA, si es que viene.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE EXISTE
+ *
+ * Hasta ahora la orden vivía con dos identidades que no se conocían entre sí:
+ * un número en Sigma que nosotros no veíamos, y un id en el tablero que Sigma
+ * no veía. Con esto se puede nombrar la misma orden de los dos lados.
+ *
+ * ---------------------------------------------------------------------------
+ * BUSCA EN EL CUERPO Y TAMBIEN EN LOS HEADERS, y no es por las dudas
+ *
+ * El changelog de Sigma del 09/09/2026 dice que `ImportOrdenDeCompra` pasó a
+ * devolver 200 con "Orden de compra importada correctamente. OC Nro: <n>", y
+ * la doc del endpoint lo repite. Pero las órdenes que mandamos después de esa
+ * fecha --incluidas las del 19 y 20 de octubre-- vuelven con el cuerpo VACIO.
+ *
+ * O no está desplegado en la instancia de Quo, o el número viaja en un header:
+ * la doc lo llama `RESPONSE_TEXT`, que es el nombre de una variable de su
+ * procedimiento y no necesariamente el cuerpo HTTP. Mirar en los dos lados
+ * cuesta nada y evita tener que mandar una orden de prueba al ERP para
+ * averiguarlo.
+ *
+ * ---------------------------------------------------------------------------
+ * EL CUERPO PUEDE SER TEXTO PLANO O JSON
+ *
+ * La API convive con dos formatos --los endpoints viejos contestan texto, los
+ * nuevos `{"message": "..."}`-- y este endpoint ya cambió de forma una vez. Se
+ * busca el patrón en el texto crudo, que funciona con los dos: un JSON también
+ * es texto, y el número está adentro igual.
+ */
+export function numeroDeOrdenSigma(
+  cuerpo: string,
+  headers: Record<string, string> = {},
+): string | null {
+  const encontrar = (texto: string): string | null => {
+    // "OC Nro: 1234", "OC Nro 1234", "OC Nro.: 1234".
+    const m = /OC\s*Nro\.?\s*:?\s*([0-9]+)/i.exec(texto);
+    return m ? m[1]! : null;
+  };
+
+  const delCuerpo = encontrar(cuerpo ?? "");
+  if (delCuerpo) return delCuerpo;
+
+  for (const valor of Object.values(headers)) {
+    const h = encontrar(String(valor ?? ""));
+    if (h) return h;
+  }
+  return null;
+}
+
 export const RESUMEN_CABECERA: { campo: string; valor: string }[] = [
   {
     campo: "Depósito de recepción",
