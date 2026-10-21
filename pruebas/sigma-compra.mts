@@ -131,13 +131,23 @@ const DATOS: DatosFactura = {
   percepciones: [],
 };
 
-/** Las cuentas completas: las de fábrica más las que se configuran a mano. */
+/**
+ * Las cuentas completas, con LOS VALORES DE VERDAD.
+ *
+ * Salen de la pestaña SIGMA de la planilla que ya carga facturas. Están acá y
+ * no inventados para que esta prueba sirva también de documentación de qué se
+ * manda: el neto gravado va todo a 20000 y lo que cambia es el tipo de
+ * impuesto; el IVA, todo a 8008.
+ */
 const CUENTAS: Record<string, Imputacion> = {
   ...imputacionDeFabrica(),
-  "Neto gravado 21 %": { cuenta: "36004", tipoImpuesto: "I21" },
-  "Neto gravado 10,5 %": { cuenta: "36005", tipoImpuesto: "I105" },
-  "IVA 21 %": { cuenta: "1126001", tipoImpuesto: "I21" },
-  "IVA 10,5 %": { cuenta: "1126002", tipoImpuesto: "I105" },
+  "Neto gravado 21 %": { cuenta: "20000", tipoImpuesto: "G21" },
+  "Neto gravado 10,5 %": { cuenta: "20000", tipoImpuesto: "G10" },
+  "Neto gravado 27 %": { cuenta: "20000", tipoImpuesto: "G27" },
+  "Neto exento / no gravado": { cuenta: "20000", tipoImpuesto: "Exe" },
+  "IVA 21 %": { cuenta: "8008", tipoImpuesto: "I21" },
+  "IVA 10,5 %": { cuenta: "8008", tipoImpuesto: "I10" },
+  "IVA 27 %": { cuenta: "8008", tipoImpuesto: "I27" },
   "Percepción IVA": { cuenta: "8007", tipoImpuesto: "PIV" },
   "Otros impuestos": { cuenta: "8099", tipoImpuesto: "OTR" },
 };
@@ -175,8 +185,8 @@ const CUENTAS: Record<string, Imputacion> = {
     "el contable lleva el neto y el IVA",
     cuerpo.contable,
     [
-      { monto: 1000, cuenta: "36004", tipoImpuesto: "I21" },
-      { monto: 210, cuenta: "1126001", tipoImpuesto: "I21" },
+      { monto: 1000, cuenta: "20000", tipoImpuesto: "G21" },
+      { monto: 210, cuenta: "8008", tipoImpuesto: "I21" },
     ],
   );
   revisar("el total es el impreso", cuerpo.total, 1210);
@@ -227,7 +237,7 @@ const CUENTAS: Record<string, Imputacion> = {
     CUENTAS,
   );
   const netos = cuerpo.contable
-    .filter((c) => c.cuenta === "36004" || c.cuenta === "36005")
+    .filter((c) => c.cuenta === "20000")
     .map((c) => c.monto);
   revisar(
     "los netos por alícuota suman exactamente el neto gravado",

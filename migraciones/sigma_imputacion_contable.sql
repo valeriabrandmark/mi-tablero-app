@@ -105,3 +105,29 @@ create table if not exists app.facturas_compra_enviadas (
 
 create index if not exists facturas_compra_enviadas_id_sigma
   on app.facturas_compra_enviadas (id_sigma);
+
+-- ---------------------------------------------------------------------------
+-- LAS CUENTAS QUE FALTABAN · 21/10/2026
+--
+-- Salen de la pestaña SIGMA de la planilla que ya carga facturas, que ANA
+-- mandó. Son las que estaban vacías a propósito en la siembra de arriba: no
+-- las sabía, y una cuenta inventada manda plata al lugar equivocado.
+--
+-- El neto gravado va todo a la misma cuenta (20000) y lo que cambia es el tipo
+-- de impuesto; el IVA, todo a 8008. "Exe" va tal cual está escrito en la
+-- planilla: los tipos de impuesto de Sigma no son todos en mayúscula.
+insert into app.sigma_imputacion_contable (concepto, cuenta, tipo_impuesto)
+values
+  ('Neto gravado 21 %',        '20000', 'G21'),
+  ('Neto gravado 10,5 %',      '20000', 'G10'),
+  ('Neto gravado 27 %',        '20000', 'G27'),
+  ('Neto exento / no gravado', '20000', 'Exe'),
+  ('IVA 21 %',                 '8008',  'I21'),
+  ('IVA 10,5 %',               '8008',  'I10'),
+  ('IVA 27 %',                 '8008',  'I27'),
+  ('Percepción IVA',           '8007',  'PIV')
+on conflict (concepto) do nothing;
+
+-- "Otros impuestos" queda sin cargar: en la planilla está más abajo de lo que
+-- se alcanza a ver. La pantalla la va a pedir la primera vez que una factura
+-- la necesite.

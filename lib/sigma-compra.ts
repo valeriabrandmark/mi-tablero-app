@@ -128,21 +128,28 @@ export function imputacionDeFabrica(): Record<string, Imputacion> {
  * un caso; acá se eligen por factura, porque cargarla en la empresa
  * equivocada es un asiento en los libros de otra sociedad.
  *
- * Los nombres son los que conocemos por `EMPRESA_POR_GRUPO` y por la sucursal
- * con la que se mandan las órdenes. Las que no, van con su código y la
- * cantidad de facturas que tienen cargadas, que es lo único cierto que
- * podemos decir de ellas.
+ * Los nombres los confirmó ANA. Dos de ellos --0003 y 0004-- aparecen también
+ * en `fact_ventas.empresa` como "Presupuesto QUO" y "Presupuesto Noa", que es
+ * de dónde salen los comprobantes de presupuesto de un mismo envío.
  */
 export const EMPRESAS_SIGMA: readonly { codigo: string; nombre: string }[] = [
-  { codigo: "0001", nombre: "0001 · QUO MKT" },
-  { codigo: "0002", nombre: "0002 · NOA COMERCIAL" },
-  { codigo: "0003", nombre: "0003" },
-  { codigo: "0004", nombre: "0004" },
+  { codigo: "0001", nombre: "0001 · Quo MKT" },
+  { codigo: "0002", nombre: "0002 · Noa Comercial" },
+  { codigo: "0003", nombre: "0003 · Presupuesto Quo" },
+  { codigo: "0004", nombre: "0004 · Presupuesto Noa" },
 ];
 
+/**
+ * OJO: 0001 ES BRANDMARK Y 0002 ES NOA, confirmado por ANA.
+ *
+ * `CODIGO_SUCURSAL` en lib/sigma-orden.ts vale "0002" con un comentario que
+ * dice "0002 = BRANDMARK". Una de las dos cosas está mal, y no es un detalle:
+ * es la sucursal a la que se le mandan TODAS las órdenes de compra. Está
+ * anotado para revisarlo; acá van los nombres que ANA confirmó.
+ */
 export const SUCURSALES_SIGMA: readonly { codigo: string; nombre: string }[] = [
-  { codigo: "0001", nombre: "0001" },
-  { codigo: "0002", nombre: "0002 · BRANDMARK" },
+  { codigo: "0001", nombre: "0001 · Brandmark" },
+  { codigo: "0002", nombre: "0002 · Noa" },
   { codigo: "0003", nombre: "0003" },
 ];
 
