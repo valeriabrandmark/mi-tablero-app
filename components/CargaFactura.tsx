@@ -656,10 +656,28 @@ function Formulario() {
         )}
       </Panel>
 
-      {/* 2. LA FACTURA --------------------------------------------------- */}
+      {/* 2. CARGAR EN SIGMA ----------------------------------------------
+          VA ACA ARRIBA Y NO AL FINAL. Empresa y sucursal son las decisiones
+          que no se pueden deshacer --una factura en la empresa equivocada es
+          un asiento en los libros de otra sociedad-- y al final de la
+          pantalla se eligen después de haber cargado todo, cuando ya se está
+          apurado. Acá se eligen antes de empezar, y el botón queda a mano sin
+          tener que bajar por la tabla entera. */}
+      {hayProveedor && (
+        <CargarEnSigma
+          b={b}
+          cambiar={cambiar}
+          cruce={resultado}
+          totales={totales}
+          proveedorNombre={nombreDelProveedor}
+          hayFactura={hayFactura}
+        />
+      )}
+
+      {/* 3. LA FACTURA --------------------------------------------------- */}
       {hayProveedor && (
         <Panel
-          titulo="2. Factura del proveedor"
+          titulo="3. Factura del proveedor"
           nota={hayFactura ? `${renglonesFactura.length} renglones` : undefined}
         >
           <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -911,7 +929,7 @@ function Formulario() {
         </Panel>
       )}
 
-      {/* 3. EL REPORTE DE DIFERENCIAS ------------------------------------ */}
+      {/* 4. EL REPORTE DE DIFERENCIAS ------------------------------------ */}
       {hayProveedor && hayFactura && (
         <>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
@@ -951,7 +969,7 @@ function Formulario() {
           </div>
 
           <Panel
-            titulo="3. Reporte de diferencias"
+            titulo="4. Reporte de diferencias"
             nota={`Neto OC ${fmtMoneda(r.netoOC)} · Neto factura ${fmtMoneda(r.netoFactura)}`}
           >
             <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -1014,8 +1032,8 @@ function Formulario() {
             </p>
           </Panel>
 
-          {/* 4. LOS TOTALES ---------------------------------------------- */}
-          <Panel titulo="4. Totales del comprobante">
+          {/* 5. LOS TOTALES ---------------------------------------------- */}
+          <Panel titulo="5. Totales del comprobante">
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <label className="text-muted space-y-1 text-xs">
@@ -1097,17 +1115,8 @@ function Formulario() {
             </p>
           </Panel>
 
-          {/* 5. LA TABLA PARA EL MAIL ------------------------------------ */}
+          {/* 6. LA TABLA PARA EL MAIL ------------------------------------ */}
           <TablaParaMail datos={datosMail} />
-
-          {/* 6. CARGAR EN SIGMA ----------------------------------------- */}
-          <CargarEnSigma
-            b={b}
-            cambiar={cambiar}
-            cruce={resultado}
-            totales={totales}
-            proveedorNombre={nombreDelProveedor}
-          />
         </>
       )}
 
@@ -1328,14 +1337,14 @@ function TablaParaMail({ datos }: { datos: DatosMail }) {
 
   if (datos.lineas.length === 0) {
     return (
-      <Panel titulo="5. Tabla para el mail">
+      <Panel titulo="6. Tabla para el mail">
         <Aviso tono="info">No hay diferencias para mandarle al proveedor.</Aviso>
       </Panel>
     );
   }
 
   return (
-    <Panel titulo="5. Tabla para el mail" nota={`${datos.lineas.length} diferencias`}>
+    <Panel titulo="6. Tabla para el mail" nota={`${datos.lineas.length} diferencias`}>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <button className={BOTON_ACTIVO} onClick={() => void copiar()}>
           Copiar tabla para el mail
@@ -1393,7 +1402,7 @@ function descargarCsv(lineas: LineaCruce[], descripcionDe: Map<string, string>) 
 }
 
 /* -------------------------------------------------------------------------
-   6. CARGAR EN SIGMA
+   2. CARGAR EN SIGMA
 
    Lo que sale de acá queda cargado en la CONTABILIDAD de la empresa, así que
    la pantalla tiene una sola obligación: que nadie apriete el botón sin saber
@@ -1403,7 +1412,20 @@ function descargarCsv(lineas: LineaCruce[], descripcionDe: Map<string, string>) 
    `armarImportCompras` que usa el servidor corre acá para eso-- y el botón
    recién se habilita cuando no queda ninguno. El servidor vuelve a validar
    igual: lo de acá es para la persona, no para el ERP.
+
+   PROBLEMAS Y ADVERTENCIAS NO SON LO MISMO. Un problema es algo que Sigma va
+   a rechazar o que deja un asiento equivocado, y frena. Que el total no
+   cuadre por unos pesos no: la factura entra pendiente y se corrige del otro
+   lado, así que se avisa en amarillo y se manda igual.
    ------------------------------------------------------------------------- */
+
+/** El nombre con el que se eligió la empresa, para repetirlo al confirmar. */
+const nombreDeEmpresa = (codigo: string) =>
+  EMPRESAS_SIGMA.find((e) => e.codigo === codigo)?.nombre ?? codigo;
+
+/** Lo mismo para la sucursal. */
+const nombreDeSucursal = (codigo: string) =>
+  SUCURSALES_SIGMA.find((x) => x.codigo === codigo)?.nombre ?? codigo;
 
 /** Lo que contesta el servidor cuando algo sale mal. */
 type ResultadoEnvio =
@@ -1416,12 +1438,15 @@ function CargarEnSigma({
   cruce,
   totales,
   proveedorNombre,
+  hayFactura,
 }: {
   b: Borrador;
   cambiar: (parche: Partial<Borrador>) => void;
   cruce: ResultadoCruce;
   totales: TotalesComprobante;
   proveedorNombre: string | null;
+  /** Si ya hay renglones cargados. Sin ellos no hay nada que validar todavía. */
+  hayFactura: boolean;
 }) {
   const [imputacion, setImputacion] = useState<Record<string, Imputacion> | null>(null);
   const [enviando, setEnviando] = useState(false);
@@ -1463,7 +1488,11 @@ function CargarEnSigma({
     () =>
       imputacion
         ? armarImportCompras(cruce, totales, datos, imputacion)
-        : { cuerpo: null, problemas: ["Trayendo las cuentas contables…"] },
+        : {
+            cuerpo: null,
+            problemas: ["Trayendo las cuentas contables…"],
+            advertencias: [] as string[],
+          },
     [cruce, totales, datos, imputacion],
   );
 
@@ -1475,7 +1504,7 @@ function CargarEnSigma({
       .filter((x): x is string => !!x);
   }, [armado.problemas]);
 
-  const listo = armado.problemas.length === 0 && !!armado.cuerpo;
+  const listo = hayFactura && armado.problemas.length === 0 && !!armado.cuerpo;
 
   const mandar = async () => {
     setEnviando(true);
@@ -1513,8 +1542,12 @@ function CargarEnSigma({
 
   return (
     <Panel
-      titulo="6. Cargar en Sigma"
-      nota={armado.cuerpo ? `${armado.cuerpo.mercaderias.length} renglones` : undefined}
+      titulo="2. Cargar en Sigma"
+      nota={
+        armado.cuerpo && hayFactura
+          ? `${armado.cuerpo.mercaderias.length} renglones`
+          : undefined
+      }
     >
       {/* A QUE EMPRESA Y A QUE SUCURSAL. Es lo primero porque es lo que no se
           puede deshacer: una factura en la empresa equivocada es un asiento en
@@ -1622,8 +1655,19 @@ function CargarEnSigma({
         ))}
       </div>
 
+      {/* TODAVIA NO HAY QUE VALIDAR NADA. Con la factura vacía, la lista de
+          problemas sería la lista de todo lo que falta cargar: ruido rojo
+          arriba de la pantalla, en el momento en que la persona recién está
+          eligiendo dónde va. */}
+      {!hayFactura && (
+        <p className="text-muted text-xs">
+          Elegí acá dónde se carga la factura. El botón aparece cuando haya
+          renglones cargados más abajo.
+        </p>
+      )}
+
       {/* LO QUE FALTA, antes de ofrecer el botón. */}
-      {armado.problemas.length > 0 && (
+      {hayFactura && armado.problemas.length > 0 && (
         <Aviso>
           <p className="font-medium">
             Todavía no se puede mandar. Falta{armado.problemas.length > 1 ? "n" : ""}{" "}
@@ -1637,11 +1681,28 @@ function CargarEnSigma({
         </Aviso>
       )}
 
+      {/* LO QUE NO FRENA. Se avisa y se manda igual: la factura entra
+          pendiente y en Sigma se corrige hasta que procesa. */}
+      {hayFactura && armado.advertencias.length > 0 && (
+        <div className={armado.problemas.length > 0 ? "mt-2" : ""}>
+          <Aviso tono="alerta">
+            <p className="font-medium">
+              Se puede mandar igual, pero mirá esto:
+            </p>
+            <ul className="mt-1 list-disc pl-5 text-xs">
+              {armado.advertencias.map((a, i) => (
+                <li key={i}>{a}</li>
+              ))}
+            </ul>
+          </Aviso>
+        </div>
+      )}
+
       {/* LAS CUENTAS SE CARGAN ACA MISMO, y sólo las que esta factura
           necesita. Un formulario con los 31 conceptos obliga a decidir
           treinta cosas para mandar una factura; así se carga la que falta, en
           el momento en que hace falta, y queda para las próximas. */}
-      {cuentasQueFaltan.length > 0 && imputacion && (
+      {hayFactura && cuentasQueFaltan.length > 0 && imputacion && (
         <CuentasQueFaltan
           conceptos={cuentasQueFaltan}
           onGuardada={(nueva) => setImputacion(nueva)}
@@ -1650,7 +1711,7 @@ function CargarEnSigma({
 
       {/* QUE SE VA A MANDAR. En una operación que escribe en la contabilidad,
           poder mirar el cuerpo antes vale más que el mensaje de éxito. */}
-      {armado.cuerpo && (
+      {hayFactura && armado.cuerpo && (
         <details className="mt-3">
           <summary className="text-muted cursor-pointer text-xs">
             Ver lo que se va a mandar
@@ -1661,35 +1722,40 @@ function CargarEnSigma({
         </details>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {!confirmando ? (
-          <button
-            className={listo ? BOTON_ACTIVO : BOTON}
-            disabled={!listo}
-            onClick={() => {
-              setResultado(null);
-              setConfirmando(true);
-            }}
-          >
-            Cargar la factura en Sigma
-          </button>
-        ) : (
-          <>
-            <span className="text-ink text-xs">
-              Se va a cargar en la empresa <strong>{b.empresa}</strong>, sucursal{" "}
-              <strong>{b.sucursal}</strong>, por{" "}
-              <strong>{fmtMoneda(armado.cuerpo?.total ?? 0)}</strong>. No se
-              puede deshacer desde acá.
-            </span>
-            <button className={BOTON_ACTIVO} onClick={() => void mandar()} disabled={enviando}>
-              {enviando ? "Mandando…" : "Confirmo, cargarla"}
+      {hayFactura && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {!confirmando ? (
+            <button
+              className={listo ? BOTON_ACTIVO : BOTON}
+              disabled={!listo}
+              onClick={() => {
+                setResultado(null);
+                setConfirmando(true);
+              }}
+            >
+              Cargar la factura en Sigma
             </button>
-            <button className={BOTON} onClick={() => setConfirmando(false)} disabled={enviando}>
-              Cancelar
-            </button>
-          </>
-        )}
-      </div>
+          ) : (
+            <>
+              {/* CON NOMBRE Y NO CON CODIGO. "0001" no se lee; "Quo MKT" sí,
+                  y es lo último que se mira antes de escribir en los libros
+                  de esa sociedad. */}
+              <span className="text-ink text-xs">
+                Se va a cargar en <strong>{nombreDeEmpresa(b.empresa)}</strong>,
+                sucursal <strong>{nombreDeSucursal(b.sucursal)}</strong>, por{" "}
+                <strong>{fmtMoneda(armado.cuerpo?.total ?? 0)}</strong>. No se
+                puede deshacer desde acá.
+              </span>
+              <button className={BOTON_ACTIVO} onClick={() => void mandar()} disabled={enviando}>
+                {enviando ? "Mandando…" : "Confirmo, cargarla"}
+              </button>
+              <button className={BOTON} onClick={() => setConfirmando(false)} disabled={enviando}>
+                Cancelar
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {resultado && (
         <div className="mt-3">
