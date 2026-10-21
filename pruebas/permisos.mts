@@ -92,6 +92,21 @@ revisar("y ninguno manda órdenes", puedeEditar(tiendaNube, "compras"), false);
 revisar("admin NO ve Precios TN", puedeVer({ rol: "admin" }, "/precios-tn"), false);
 revisar("admin ve el resto", puedeVer({ rol: "admin" }, "/ventas-mayoristas"), true);
 revisar("superadmin ve Precios TN", puedeVer({ rol: "superadmin" }, "/precios-tn"), true);
+
+// Carga de Facturas de compra: sólo el superadmin, aunque sea de Compras.
+const conCompras: Permiso = {
+  rol: "personalizado",
+  modulos: ["compras"],
+  editar: [],
+  sigma: null,
+  nombreSigma: null,
+};
+revisar("superadmin ve facturas de compra", puedeVer({ rol: "superadmin" }, "/facturas-compra"), true);
+revisar("admin NO ve facturas de compra", puedeVer({ rol: "admin" }, "/facturas-compra"), false);
+revisar("admin NO usa su api", puedeVer({ rol: "admin" }, "/api/compras/facturas"), false);
+revisar("con Compras NO ve facturas de compra", puedeVer(conCompras, "/facturas-compra"), false);
+revisar("con Compras sigue viendo Compras", puedeVer(conCompras, "/stock/compras"), true);
+revisar("admin sigue viendo el historial de órdenes", puedeVer({ rol: "admin" }, "/api/compras/ordenes"), true);
 revisar("admin_tn ve Precios TN", puedeVer({ rol: "admin_tn" }, "/precios-tn"), true);
 revisar("admin_tn no ve nada más", puedeVer({ rol: "admin_tn" }, "/ventas-mayoristas"), false);
 revisar("meli ve lo suyo",
