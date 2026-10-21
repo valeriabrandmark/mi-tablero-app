@@ -2784,6 +2784,58 @@ function VacioCompras({
   cambiar: (f: FiltrosCompras) => void;
 }) {
   const hay = data.articulosDelFiltro;
+  const sinFicha = data.sinFichaDeStock ?? [];
+
+  /**
+   * EXISTE EN SIGMA PERO NO TIENE FICHA DE STOCK.
+   *
+   * Va primero porque contesta la pregunta que la persona se está haciendo
+   * --"¿por qué no aparece si yo lo veo en Sigma?"-- y porque la salida no es
+   * tocar un filtro de esta pantalla sino cargarlo en Digip. Un cartel que
+   * ofrece sacar recortes cuando el problema es otro manda a buscar donde no
+   * está.
+   */
+  if (sinFicha.length > 0) {
+    return (
+      <div className="mx-auto flex max-w-xl flex-col items-center gap-2">
+        <p>
+          {sinFicha.length === 1 ? (
+            <>
+              <strong className="text-ink">{sinFicha[0]!.sku}</strong> existe en
+              Sigma, pero todavía no tiene ficha de stock en Digip.
+            </>
+          ) : (
+            <>
+              Hay{" "}
+              <strong className="text-ink">
+                {fmtNumero(sinFicha.length)} artículos
+              </strong>{" "}
+              que existen en Sigma pero todavía no tienen ficha de stock en
+              Digip.
+            </>
+          )}
+        </p>
+        <ul className="text-muted space-y-0.5 text-xs">
+          {sinFicha.map((a) => (
+            <li key={a.sku}>
+              <span className="font-mono">{a.sku}</span>
+              {a.producto ? ` · ${a.producto}` : ""}
+              {a.proveedor ? ` · ${a.proveedor}` : ""}
+              {a.alta ? ` · alta ${fmtFechaCortaConAnio(a.alta)}` : ""}
+            </li>
+          ))}
+        </ul>
+        {/* QUE HACER, que es lo único que falta. Esta pantalla arma la lista
+            desde el stock de los dos depósitos: sin ficha no hay fila, y no
+            hay filtro acá que lo destrabe. */}
+        <p className="text-muted text-xs">
+          Compras arma la lista desde el stock de los dos depósitos, así que
+          hasta que no esté cargado en Digip —aunque sea en cero— no puede
+          aparecer. En cuanto lo esté, entra solo en la próxima corrida.
+        </p>
+      </div>
+    );
+  }
 
   // Sin recortes no hay a quién culpar: cero filas es cero artículos.
   if (hay === 0) {
