@@ -262,6 +262,9 @@ export const MAX_NUMERO_COMPROBANTE = 20;
  * igual y en Sigma se edita hasta que procesa, así que frenarla de este lado
  * no protege nada: sólo obliga a encontrar el centavo antes de poder cargar
  * algo que después se corrige del otro lado. Se avisa y se deja mandar.
+ *
+ * Lo mismo con las percepciones sin detallar. Lo que se manda es lo que no se
+ * discute --las mercaderías y el IVA-- y lo demás se termina del otro lado.
  */
 export function armarImportCompras(
   cruce: ResultadoCruce,
@@ -344,12 +347,22 @@ export function armarImportCompras(
 
   // --- Contable: neto por alícuota, IVA por alícuota y percepciones ------
   const contable: LineaContable[] = [];
-  const imputar = (concepto: string, monto: number, observacion?: string) => {
+  const imputar = (
+    concepto: string,
+    monto: number,
+    observacion?: string,
+    // SE PUEDE MANDAR SIN ESTA LINEA. Las percepciones sí: en Sigma se agregan
+    // a mano sobre el comprobante pendiente. El IVA no: es el asiento mismo.
+    opcional = false,
+  ) => {
     if (!monto) return;
     const cta = imputacion[concepto];
     if (!cta || !cta.cuenta || !cta.tipoImpuesto) {
-      problemas.push(
-        `Falta la cuenta o el tipo de impuesto de "${concepto}". Se configura una vez.`,
+      (opcional ? advertencias : problemas).push(
+        `Falta la cuenta o el tipo de impuesto de "${concepto}"` +
+          (opcional
+            ? `: esos ${pesos(monto)} no se mandan y quedan para cargar en Sigma.`
+            : ". Se configura una vez."),
       );
       return;
     }
@@ -414,24 +427,43 @@ export function armarImportCompras(
     if (i.alicuota) imputar(`IVA ${alicuotaTexto(i.alicuota)} %`, i.importe);
   }
 
-  // LAS PERCEPCIONES SE DETALLAN O NO SE MANDAN. Sigma necesita saber a qué
-  // cuenta va cada una: un monto suelto en "otros impuestos" no se puede
-  // imputar, y mandarlo a una cuenta cualquiera es peor que no mandarlo.
+  // --- LAS PERCEPCIONES SE DETALLAN O SE CARGAN EN SIGMA ----------------
+  //
+  // Antes el detalle era obligatorio: con un monto en "otros impuestos" y
+  // ningún concepto elegido, la factura no salía. La idea era buena --Sigma
+  // necesita saber a qué cuenta va cada una, y un monto suelto no se puede
+  // imputar-- pero el precio lo pagaba la factura entera: para cargar una
+  // compra había que resolver primero la percepción.
+  //
+  // No hace falta. El comprobante entra pendiente y las percepciones se
+  // agregan ahí, que es donde se las ve con el resto del asiento. Así que
+  // mandamos lo que no se discute --las mercaderías y el IVA-- y de las
+  // percepciones mandamos sólo las que estén detalladas.
+  //
+  // LO QUE SE AVISA, PORQUE NO ES GRATIS: si no se detallan, el `total` sigue
+  // siendo el impreso --que las incluye-- y el detalle no. En Sigma el
+  // comprobante queda con esa diferencia a la vista, que es justamente lo que
+  // hay que cargar a mano.
   const sumaPercepciones = centavos(
     datos.percepciones.reduce((s, p) => s + p.monto, 0),
   );
   if (datos.otrosImpuestos && datos.percepciones.length === 0) {
-    problemas.push(
-      `Detallá las percepciones (${datos.otrosImpuestos}): elegí cada concepto y su monto.`,
+    advertencias.push(
+      `Las percepciones (${pesos(datos.otrosImpuestos)}) no se mandan detalladas.` +
+        " Están en el total, así que en Sigma el comprobante queda con esa" +
+        " diferencia para cargarlas a mano.",
     );
   } else if (Math.abs(sumaPercepciones - datos.otrosImpuestos) > 0.01) {
-    problemas.push(
-      `El detalle de percepciones (${sumaPercepciones}) no suma lo cargado como otros impuestos (${datos.otrosImpuestos}).`,
+    advertencias.push(
+      `El detalle de percepciones (${pesos(sumaPercepciones)}) no suma lo` +
+        ` cargado como otros impuestos (${pesos(datos.otrosImpuestos)}):` +
+        ` la diferencia de ${pesos(Math.abs(datos.otrosImpuestos - sumaPercepciones))}` +
+        " queda para cargar en Sigma.",
     );
   }
   // La observación las distingue cuando dos caen en la misma cuenta y
   // subcuenta: Sigma las registra por separado en vez de sumarlas.
-  for (const p of datos.percepciones) imputar(p.concepto, p.monto, p.concepto);
+  for (const p of datos.percepciones) imputar(p.concepto, p.monto, p.concepto, true);
 
   // SIN MERCADERIAS Y SIN IMPUTACION NO HAY COMPROBANTE. Con mercaderías sí
   // lo hay, aunque `contable` vaya vacío: el asiento del neto lo arma Sigma
