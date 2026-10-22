@@ -13,7 +13,11 @@
  *     node --experimental-strip-types --import ./pruebas/registrar.mjs pruebas/permisos.mts
  */
 
-import { moduloDeRuta, moduloPermiteRuta } from "@/lib/modulos";
+import {
+  moduloDeRuta,
+  moduloPermiteRuta,
+  necesitaUsuarioSigma,
+} from "@/lib/modulos";
 import {
   destinoObjetivos,
   enConstruccion,
@@ -170,6 +174,38 @@ revisar(
   puedeCargarFacturas({ rol: "superadmin" }, "a.maldonado@brandmark.com.ar"),
   true,
 );
+
+// --- EL PANEL TIENE QUE PEDIR EL NUMERO DE SIGMA --------------------------
+//
+// Esto no es cosmética. El campo estaba atado a Compras, así que al separar la
+// carga de facturas el primer usuario que se creó con facturas y sin Compras
+// NO TUVO DONDE cargarle el número: se iba con la pantalla abierta y el botón
+// muerto, que no se lee como "falta un dato" sino como "esto está roto".
+revisar("Compras pide número de Sigma", necesitaUsuarioSigma(["compras"]), true);
+revisar("la carga de facturas también", necesitaUsuarioSigma(["facturas_compra"]), true);
+revisar("las dos juntas, igual", necesitaUsuarioSigma(["compras", "facturas_compra"]), true);
+revisar("Precios TN no lo necesita", necesitaUsuarioSigma(["precios_tn"]), false);
+revisar("y sin nada para editar, tampoco", necesitaUsuarioSigma([]), false);
+
+// --- USUARIOS ES UNA PAGINA APARTE DE "MI CUENTA" -------------------------
+//
+// Estaba adentro de /cuenta, escondida con un `if` del lado del servidor. Al
+// salir a su propia ruta hay que asegurarse de las dos mitades: que la vea
+// quien reparte permisos, y que NO se haya colado en las páginas de cuenta,
+// que las ve cualquiera sin importar el rol.
+revisar("el superadmin ve Usuarios", puedeVer({ rol: "superadmin" }, "/usuarios"), true);
+revisar("un admin NO", puedeVer({ rol: "admin" }, "/usuarios"), false);
+revisar("un vendedor tampoco", puedeVer({ rol: "vendedor", vendedor: "SILVIO" }, "/usuarios"), false);
+revisar(
+  "ni un personalizado con todos los módulos",
+  puedeVer(
+    { rol: "personalizado", modulos: ["compras", "facturas_compra", "stock"], editar: [], sigma: null, nombreSigma: null },
+    "/usuarios",
+  ),
+  false,
+);
+// Mi cuenta sigue siendo de todos: es la contraseña de uno.
+revisar("Mi cuenta la ve cualquiera", puedeVer({ rol: "vendedor", vendedor: "SILVIO" }, "/cuenta"), true);
 revisar("admin sigue viendo el historial de órdenes", puedeVer({ rol: "admin" }, "/api/compras/ordenes"), true);
 revisar("admin_tn ve Precios TN", puedeVer({ rol: "admin_tn" }, "/precios-tn"), true);
 revisar("admin_tn no ve nada más", puedeVer({ rol: "admin_tn" }, "/ventas-mayoristas"), false);

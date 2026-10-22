@@ -310,6 +310,7 @@ function Contenido({
   rol,
   nombre,
   authConfigurada,
+  puedeVerUsuarios,
   alNavegar,
 }: {
   nav: ItemNav[];
@@ -317,6 +318,8 @@ function Contenido({
   nombre: string | null;
   rol: string | null;
   authConfigurada: boolean;
+  /** Lo decide el servidor (ver el layout): acá sólo se pinta o no. */
+  puedeVerUsuarios: boolean;
   alNavegar?: () => void;
 }) {
   const pathname = usePathname();
@@ -386,6 +389,41 @@ function Contenido({
           </div>
         )}
 
+        {/* USUARIOS VA ACA Y NO EN EL NAV DE ARRIBA, por lo mismo que la
+            cuenta: no es una página del negocio. Pero es lo contrario en
+            quién la ve --una sola persona-- así que aparece sólo cuando
+            corresponde. Estaba adentro de "Mi cuenta" y para repartir
+            permisos había que entrar a la pantalla de la propia contraseña. */}
+        {authConfigurada && puedeVerUsuarios && (
+          <Link
+            href="/usuarios"
+            onClick={alNavegar}
+            aria-current={pathname === "/usuarios" ? "page" : undefined}
+            className={`mb-2 flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs transition-colors ${
+              pathname === "/usuarios"
+                ? "bg-panel-2 text-ink"
+                : "text-muted hover:bg-panel-2/60 hover:text-ink"
+            }`}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="size-4 shrink-0"
+              aria-hidden="true"
+            >
+              <circle cx="9" cy="8" r="3.2" />
+              <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+              <path d="M16 5.2a3.2 3.2 0 0 1 0 5.6" />
+              <path d="M17.5 14.2A6.5 6.5 0 0 1 21.5 20" />
+            </svg>
+            Usuarios
+          </Link>
+        )}
+
         {/* La cuenta va acá abajo y no en el nav de arriba: no es una página del
             negocio, y la ve cualquiera sin importar el rol. */}
         {authConfigurada && (
@@ -428,6 +466,7 @@ export default function BarraLateral(props: {
   nombre: string | null;
   rol: string | null;
   authConfigurada: boolean;
+  puedeVerUsuarios: boolean;
 }) {
   const [abierta, setAbierta] = useState(false);
 

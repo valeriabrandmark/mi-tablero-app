@@ -49,6 +49,21 @@ export type Modulo = {
   nombre: string;
   /** Qué hace alguien que además tiene permiso de editar. `null` = no se edita. */
   queEdita: string | null;
+  /**
+   * SI LO QUE EDITA SE FIRMA CON UN USUARIO DE SIGMA.
+   *
+   * Lo que sale de estos módulos queda cargado en el ERP a nombre de alguien,
+   * así que además del permiso hace falta el número. Es lo que hace que el
+   * panel de Usuarios pida el número: marcar la casilla sin cargarlo deja a la
+   * persona con la pantalla abierta y el botón muerto.
+   *
+   * Vive acá y no en una lista suelta del panel porque ya pasó al revés: la
+   * carga de facturas se separó de Compras y el campo quedó atado a Compras,
+   * así que al primer usuario que se le dio sólo facturas no hubo dónde
+   * cargarle el número. Declarado en el módulo, un módulo nuevo que escriba en
+   * el ERP trae el campo puesto.
+   */
+  firmaEnSigma?: true;
   /** Prefijos de página y de API. Una ruta es de este módulo si empieza con alguno. */
   rutas: string[];
 };
@@ -95,6 +110,7 @@ export const MODULOS: Modulo[] = [
     // El permiso de editar acá NO es un detalle: es mandar una orden a Sigma,
     // que no tiene deshacer. Ver `numeroDeSigma` en permisos.ts.
     queEdita: "mandar órdenes de compra al ERP",
+    firmaEnSigma: true,
     rutas: ["/stock/compras", "/api/compras"],
   },
   {
@@ -103,6 +119,7 @@ export const MODULOS: Modulo[] = [
     // Mismo peso que mandar una orden, y más: una orden mal cargada se anula,
     // una factura toca cuenta corriente, stock e IVA.
     queEdita: "cargar facturas de compra en el ERP",
+    firmaEnSigma: true,
     /**
      * MODULO APARTE Y NO PARTE DE COMPRAS, aunque cruce contra las órdenes que
      * salen de ahí. Son dos trabajos distintos y los puede hacer gente
@@ -146,6 +163,16 @@ export const MODULOS: Modulo[] = [
 
 /** Los módulos que tienen algo para editar, para las casillas del panel. */
 export const MODULOS_EDITABLES = MODULOS.filter((m) => m.queEdita !== null);
+
+/**
+ * `true` si con estos módulos marcados para editar hace falta un número de
+ * usuario de Sigma. Es lo que decide si el panel de Usuarios pide el campo.
+ */
+export function necesitaUsuarioSigma(
+  editar: readonly ClaveModulo[],
+): boolean {
+  return MODULOS.some((m) => m.firmaEnSigma && editar.includes(m.clave));
+}
 
 /**
  * La portada de Venta minorista no es de nadie: es el índice de las dos

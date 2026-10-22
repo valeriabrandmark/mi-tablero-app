@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { CLASE_INPUT, Mensaje } from "@/components/CamposContrasena";
 import { Aviso } from "@/components/ui";
-import { MODULOS, nombreModulo, type ClaveModulo } from "@/lib/modulos";
+import {
+  MODULOS,
+  necesitaUsuarioSigma,
+  nombreModulo,
+  type ClaveModulo,
+} from "@/lib/modulos";
 
 /**
  * Alta de usuarios y reparto de permisos. Sólo lo ve el `superadmin`.
@@ -173,6 +178,44 @@ function FilaUsuario({
   const [enlace, setEnlace] = useState<string | null>(null);
   const [pidiendo, setPidiendo] = useState(false);
   const [fallo, setFallo] = useState<string | null>(null);
+  const [borrando, setBorrando] = useState(false);
+
+  /**
+   * Borrar la cuenta. NO TIENE DESHACER, y por eso pregunta con el mail a la
+   * vista: en una lista de nombres parecidos, "¿seguro?" a secas no dice a
+   * quién se está por borrar.
+   *
+   * SACARLE EL ACCESO ES OTRA COSA y está primero en el texto a propósito: se
+   * destildan los módulos, la persona no entra a nada y la cuenta sigue
+   * existiendo para el día que vuelva.
+   */
+  async function borrar() {
+    const seguro = window.confirm(
+      `¿Borrar la cuenta de ${usuario.email}?\n\n` +
+        "No se puede deshacer: pierde su contraseña y el mail queda libre.\n\n" +
+        "Si sólo querés que no entre más, cerrá esto y destildale los módulos " +
+        "en Permisos: la cuenta queda sin acceso y se puede devolver cuando haga falta.",
+    );
+    if (!seguro) return;
+
+    setBorrando(true);
+    setFallo(null);
+    try {
+      const r = await fetch("/api/usuarios", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        // EL MAIL VIAJA ADEMAS DEL ID: el servidor compara los dos y no borra
+        // si la lista que se vio ya no es la que hay.
+        body: JSON.stringify({ id: usuario.id, email: usuario.email }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error ?? `Error ${r.status}`);
+      onGuardado(true);
+    } catch (e) {
+      setFallo(e instanceof Error ? e.message : "No se pudo borrar");
+      setBorrando(false);
+    }
+  }
 
   async function pedirEnlace() {
     setPidiendo(true);
@@ -238,6 +281,17 @@ function FilaUsuario({
             className="border-line rounded-lg border px-3 py-1.5 text-xs"
           >
             {abierto ? "Cerrar" : "Permisos"}
+          </button>
+          {/* EL BORRADO VA ULTIMO Y EN ROJO. Es el único botón de esta
+              pantalla que no se puede deshacer, y está al lado de dos que sí:
+              que se note cuál es. */}
+          <button
+            type="button"
+            onClick={() => void borrar()}
+            disabled={borrando}
+            className="rounded-lg border border-rose-500/40 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-500/10 disabled:opacity-60"
+          >
+            {borrando ? "Borrando…" : "Borrar"}
           </button>
         </div>
       </div>
@@ -454,7 +508,11 @@ function FormularioPermisos({
         })}
       </div>
 
-      {edita.includes("compras") && (
+      {/* LO PIDE CUALQUIER MODULO QUE FIRME EN SIGMA, no sólo Compras. Estuvo
+          atado a Compras y el día que se separó la carga de facturas quedó sin
+          dónde cargar el número: la persona se iba con la pantalla abierta y
+          el botón muerto. Ahora lo declara el módulo (ver `firmaEnSigma`). */}
+      {necesitaUsuarioSigma(edita) && (
         <label className="block text-xs">
           Número de usuario de Sigma
           <input
@@ -464,11 +522,22 @@ function FormularioPermisos({
             onChange={(e) => setSigma(e.target.value)}
             className={CLASE_INPUT}
           />
-          {/* No se puede deducir: sale de Sigma y la orden queda firmada con él. */}
+          {/* No se puede deducir: sale de Sigma y lo que se manda queda
+              firmado con él. */}
           <span className="text-muted mt-1 block">
-            Sale de Sigma. La orden de compra queda firmada con ese número, así
-            que sin él no se puede mandar.
+            Sale de Sigma. Lo que se manda al ERP —la orden de compra, la
+            factura— queda firmado con ese número, así que sin él la pantalla
+            se abre pero no se puede mandar nada.
           </span>
+          {/* EL PERMISO A MEDIAS ES EL PEOR DE LOS TRES ESTADOS: la persona
+              entra, arma todo, y el botón no anda. Nadie lo lee como "me
+              falta un número" -- lo lee como "esto está roto". */}
+          {sigma.trim() === "" && (
+            <span className="mt-1 block text-amber-300">
+              Sin el número puede entrar y armar todo, pero el botón de mandar
+              al ERP le va a quedar deshabilitado.
+            </span>
+          )}
         </label>
       )}
 
