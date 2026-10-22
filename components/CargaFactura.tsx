@@ -572,6 +572,24 @@ function Formulario() {
   // El armado del envío, para las dos mitades: el destino (panel 2) y el
   // botón (abajo de los totales). Ver `useArmadoDeFactura`.
   const sigma = useArmadoDeFactura(b, resultado, totales);
+
+  /**
+   * LA ULTIMA QUE ENTRO EN SIGMA, para poder vaciar la pantalla sin que la
+   * persona se quede sin saber qué pasó.
+   *
+   * Vive ACA ARRIBA y no en el panel del envío a propósito: cuando la factura
+   * entra, la pantalla se vacía entera y ese panel se va con ella. El cartel
+   * tiene que sobrevivir al vaciado, así que no puede vivir adentro de lo que
+   * se vacía.
+   */
+  const [cargada, setCargada] = useState<{
+    proveedor: string;
+    numero: string;
+    total: number;
+    empresa: string;
+    sucursal: string;
+    respuesta: string;
+  } | null>(null);
   const r = resultado.resumen;
   const difCantidadTotal = diferencias.reduce((s, l) => s + difPorCantidad(l), 0);
 
@@ -610,6 +628,38 @@ function Formulario() {
           Empezar otra
         </button>
       </div>
+
+      {/* LA QUE ACABA DE ENTRAR. Es lo único que queda en pantalla después de
+          vaciarla, así que dice todo lo que hace falta para no tener que
+          buscarlo: qué factura, a qué empresa y sucursal, y por cuánto. */}
+      {cargada && (
+        <Aviso tono="info">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="font-medium">
+                La factura {cargada.numero} de {cargada.proveedor} se cargó en
+                Sigma.
+              </p>
+              <p className="mt-1 text-xs">
+                {cargada.empresa} · sucursal {cargada.sucursal} ·{" "}
+                {fmtMoneda(cargada.total)}
+                {cargada.respuesta ? ` — ${cargada.respuesta}` : ""}
+              </p>
+              <p className="text-muted mt-1 text-xs">
+                La pantalla quedó limpia para la próxima. Lo que se mandó queda
+                en <strong>Enviadas a Sigma</strong>, con sus diferencias.
+              </p>
+            </div>
+            <button
+              className={BOTON}
+              onClick={() => setCargada(null)}
+              aria-label="Cerrar el aviso"
+            >
+              Cerrar
+            </button>
+          </div>
+        </Aviso>
+      )}
 
       {/* QUE ESTO ES UN REENVIO, Y QUE DEPENDE DE ALGO QUE PASA AFUERA.
           Sigma no deja cargar dos veces la misma factura, así que esto sólo
@@ -1072,6 +1122,23 @@ function Formulario() {
               datos={sigma.datos}
               proveedorNombre={nombreDelProveedor}
               hayFactura={hayFactura}
+              onCargada={(comoEntro) => {
+                // LA FOTO SE SACA ANTES DE VACIAR. Después de `setB` no queda
+                // nada de la factura para contar qué se cargó.
+                setCargada({
+                  proveedor: nombreDelProveedor ?? b.proveedor,
+                  numero: `${b.cabecera.letra} ${b.cabecera.numero}`.trim(),
+                  total: sigma.armado.cuerpo?.total ?? totales.total,
+                  empresa: nombreDeEmpresa(b.empresa),
+                  sucursal: nombreDeSucursal(b.sucursal),
+                  respuesta: comoEntro,
+                });
+                // LA PANTALLA QUEDA LIMPIA PARA LA PROXIMA. El efecto que
+                // guarda el borrador corre con esto y deja el navegador
+                // vacío también: si no, al volver a entrar aparecía la
+                // factura que ya se había mandado.
+                setB({ ...BORRADOR_VACIO, lineas: [lineaVacia()] });
+              }}
             />
           </Panel>
 
@@ -1729,7 +1796,17 @@ const nombreDeEmpresa = (codigo: string) =>
 const nombreDeSucursal = (codigo: string) =>
   SUCURSALES_SIGMA.find((x) => x.codigo === codigo)?.nombre ?? codigo;
 
-/** Lo que contesta el servidor cuando algo sale mal. */
+/**
+ * Lo que contesta el servidor cuando algo sale mal.
+ *
+ * SOLO EL ERROR. El éxito no se guarda en el panel: cuando la factura entra,
+ * la pantalla se vacía para la próxima y el panel se va con ella, así que un
+ * estado de "salió bien" ahí adentro no lo vería nadie. Ese cartel lo pone la
+ * pantalla, arriba de todo, donde sobrevive al vaciado.
+ *
+ * El `ok: true` queda en el tipo porque es lo que contesta el servidor y es
+ * donde se lee el contrato, aunque esta pantalla no lo use para mostrar nada.
+ */
 type ResultadoEnvio =
   | { ok: true; respuesta: string }
   | { ok: false; error: string; mandado?: boolean; yaEnviada?: { enviadaEn: string } };
@@ -1963,6 +2040,7 @@ function EnviarASigma({
   datos,
   proveedorNombre,
   hayFactura,
+  onCargada,
 }: {
   b: Borrador;
   armado: ArmadoFactura;
@@ -1974,6 +2052,12 @@ function EnviarASigma({
   proveedorNombre: string | null;
   /** Si ya hay renglones cargados. Sin ellos no hay nada que validar todavía. */
   hayFactura: boolean;
+  /**
+   * SE AVISA PARA ARRIBA CUANDO LA FACTURA ENTRO, porque lo que sigue --dejar
+   * la pantalla limpia para la próxima-- no es asunto de este panel: es la
+   * pantalla entera la que se vacía, y este panel desaparece con ella.
+   */
+  onCargada: (comoEntro: string) => void;
 }) {
   const [enviando, setEnviando] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
@@ -2007,17 +2091,21 @@ function EnviarASigma({
         body: JSON.stringify({ cruce, totales, datos, proveedorNombre, borrador: b }),
       });
       const j = await r.json();
-      setResultado(
-        r.ok
-          ? { ok: true, respuesta: String(j.respuesta ?? "") }
-          : {
-              ok: false,
-              error: String(j.error ?? `Error ${r.status}`),
-              mandado: j.mandado !== false,
-              yaEnviada: j.yaEnviada,
-            },
-      );
-      if (r.ok) setConfirmando(false);
+      // EL EXITO NO SE GUARDA ACA. `resultado` ya se puso en null al empezar,
+      // así que cuando entra no queda nada que mostrar -- que es lo correcto:
+      // la pantalla se vacía y este panel se va con ella. El cartel de que
+      // entró lo pone la pantalla, arriba de todo.
+      if (r.ok) {
+        setConfirmando(false);
+        onCargada(String(j.respuesta ?? ""));
+      } else {
+        setResultado({
+          ok: false,
+          error: String(j.error ?? `Error ${r.status}`),
+          mandado: j.mandado !== false,
+          yaEnviada: j.yaEnviada,
+        });
+      }
     } catch (e) {
       setResultado({
         ok: false,
@@ -2127,17 +2215,13 @@ function EnviarASigma({
         )}
       </div>
 
-      {resultado && (
+      {/* EL EXITO NO SE MUESTRA ACA. Cuando la factura entra, la pantalla se
+          vacía para la próxima y este panel se va con ella: el cartel vive
+          arriba, donde sobrevive al vaciado. Lo que SI vive acá es el error,
+          porque ahí no se vacía nada y hay que poder corregir y reintentar. */}
+      {resultado && !resultado.ok && (
         <div className="mt-3">
-          {resultado.ok ? (
-            <Aviso tono="info">
-              <p className="font-medium">La factura se cargó en Sigma.</p>
-              <p className="mt-1 text-xs">
-                {resultado.respuesta || "Entra pendiente y se procesa del otro lado."}
-              </p>
-            </Aviso>
-          ) : (
-            <Aviso tono={resultado.mandado ? "alerta" : "error"}>
+          <Aviso tono={resultado.mandado ? "alerta" : "error"}>
               <p className="font-medium">
                 {resultado.yaEnviada
                   ? "Esta factura ya se había cargado."
@@ -2146,14 +2230,13 @@ function EnviarASigma({
                     : "No se cargó."}
               </p>
               <p className="mt-1 text-xs">{resultado.error}</p>
-              {!resultado.mandado && !resultado.yaEnviada && (
-                <p className="text-muted mt-1 text-xs">
-                  Sigma la rechazó antes de guardarla, así que se puede corregir
-                  y volver a mandar sin riesgo de duplicarla.
-                </p>
-              )}
-            </Aviso>
-          )}
+            {!resultado.mandado && !resultado.yaEnviada && (
+              <p className="text-muted mt-1 text-xs">
+                Sigma la rechazó antes de guardarla, así que se puede corregir
+                y volver a mandar sin riesgo de duplicarla.
+              </p>
+            )}
+          </Aviso>
         </div>
       )}
     </div>
