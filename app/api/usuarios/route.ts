@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { esModulo, type ClaveModulo } from "@/lib/modulos";
+import {
+  esModulo,
+  necesitaUsuarioSigma,
+  type ClaveModulo,
+} from "@/lib/modulos";
 import {
   exigirSuperadmin,
   rutaParaPonerContrasena,
@@ -150,12 +154,13 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
-  if (permisos.editar.includes("compras") && permisos.sigma == null) {
+  // Lo mismo que en el PATCH: cualquier módulo que firme en Sigma.
+  if (necesitaUsuarioSigma(permisos.editar) && permisos.sigma == null) {
     return NextResponse.json(
       {
         error:
-          "Para mandar órdenes al ERP hace falta el número de usuario de Sigma: " +
-          "la orden se firma con él y no se puede deducir de nada nuestro.",
+          "Para escribir en el ERP hace falta el número de usuario de Sigma: " +
+          "lo que se manda se firma con él y no se puede deducir de nada nuestro.",
       },
       { status: 400 },
     );
@@ -217,11 +222,14 @@ export async function PATCH(request: NextRequest) {
   }
 
   const permisos = claim(cuerpo);
-  if (permisos.editar.includes("compras") && permisos.sigma == null) {
+  // CUALQUIER MODULO QUE FIRME EN SIGMA, no sólo Compras. Miraba `compras` a
+  // secas, así que al separar la carga de facturas se podía guardar a alguien
+  // con permiso de cargar facturas y sin número: entraba y el botón no andaba.
+  if (necesitaUsuarioSigma(permisos.editar) && permisos.sigma == null) {
     return NextResponse.json(
       {
         error:
-          "Para mandar órdenes al ERP hace falta el número de usuario de Sigma.",
+          "Para escribir en el ERP hace falta el número de usuario de Sigma.",
       },
       { status: 400 },
     );
@@ -234,11 +242,81 @@ export async function PATCH(request: NextRequest) {
   if (fallo)
     return NextResponse.json({ error: fallo.message }, { status: 400 });
 
-  // Sin módulos = sin acceso. No se borra al usuario: si mañana vuelve, se le
-  // marcan las casillas otra vez y no hay que crearlo de nuevo ni perder de
-  // vista que existió.
+  // Sin módulos = sin acceso, y sigue existiendo. Es la forma REVERSIBLE de
+  // sacar a alguien: si mañana vuelve, se le marcan las casillas otra vez. El
+  // DELETE de abajo es la otra, la que no tiene vuelta.
   return NextResponse.json({
     ok: true,
     sinAcceso: permisos.modulos.length === 0,
   });
+}
+
+/**
+ * Borrar un usuario. NO TIENE DESHACER.
+ *
+ * ---------------------------------------------------------------------------
+ * ESTO NO ES "SACARLE EL ACCESO"
+ *
+ * Para eso están las casillas: un usuario sin módulos no entra a ninguna
+ * pantalla y sigue existiendo, así que el día que vuelve se le marcan otra vez
+ * y listo. Borrarlo saca la fila de `auth.users` y con ella la cuenta: el mail
+ * queda libre, la persona pierde su contraseña, y lo que haya quedado firmado
+ * con su nombre en otras tablas pasa a apuntar a un usuario que ya no está.
+ *
+ * Por eso existen las dos, y por eso la pantalla ofrece primero la otra.
+ *
+ * ---------------------------------------------------------------------------
+ * LOS DOS SEGUROS
+ *
+ * 1. NO A UNO MISMO. Es la única forma de quedarse afuera para siempre, y acá
+ *    es peor que en el PATCH: ahí te sacabas el rol, acá te borrás la cuenta.
+ *
+ * 2. EL MAIL TIENE QUE COINCIDIR. El navegador manda el id y además el mail
+ *    que mostró al confirmar. Si no son el mismo usuario, la lista que vio la
+ *    persona ya no es la que hay, y lo que iba a borrar no es lo que creía.
+ *    Cuesta una consulta y evita el error que no se puede deshacer.
+ */
+export async function DELETE(request: NextRequest) {
+  const { error, cliente, yo } = await exigirSuperadmin();
+  if (error) return error;
+
+  const cuerpo = ((await request.json().catch(() => null)) ?? {}) as Cuerpo;
+  const id = texto(cuerpo.id);
+  const email = texto(cuerpo.email)?.toLowerCase() ?? null;
+  if (!id || !email)
+    return NextResponse.json(
+      { error: "Falta el usuario o su mail" },
+      { status: 400 },
+    );
+
+  if (id === yo) {
+    return NextResponse.json(
+      { error: "No podés borrar tu propia cuenta." },
+      { status: 400 },
+    );
+  }
+
+  const { data, error: fallaLeer } = await cliente.auth.admin.getUserById(id);
+  if (fallaLeer || !data?.user) {
+    return NextResponse.json(
+      { error: "Ese usuario ya no existe." },
+      { status: 404 },
+    );
+  }
+  if ((data.user.email ?? "").toLowerCase() !== email) {
+    return NextResponse.json(
+      {
+        error:
+          "El usuario no coincide con el que estabas viendo. Actualizá la " +
+          "lista y fijate de nuevo: no se borró nada.",
+      },
+      { status: 409 },
+    );
+  }
+
+  const { error: fallo } = await cliente.auth.admin.deleteUser(id);
+  if (fallo)
+    return NextResponse.json({ error: fallo.message }, { status: 400 });
+
+  return NextResponse.json({ ok: true, borrado: data.user.email ?? "" });
 }

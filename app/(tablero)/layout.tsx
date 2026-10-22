@@ -151,6 +151,9 @@ export default async function TableroLayout({ children }: LayoutProps<"/">) {
         nombre={nombreDelUsuario(usuario)}
         rol={permiso ? NOMBRE_ROL[permiso.rol] : null}
         authConfigurada={authConfigurada}
+        // La decide la misma regla que cierra la ruta y la API, no un `rol ===`
+        // suelto: si mañana cambia quién reparte permisos, cambia en un lugar.
+        puedeVerUsuarios={puedeVer(permiso, "/usuarios")}
       />
 
       {/* `min-w-0` para que las tablas anchas scrolleen dentro de su panel en

@@ -185,6 +185,17 @@ const PAGINAS_OBJETIVOS = VENDEDORES_OBJETIVOS.map(
  */
 const PAGINAS_DE_CUENTA = ["/cuenta", "/nueva-contrasena"];
 
+/**
+ * La pantalla que reparte el acceso al tablero.
+ *
+ * NO ES UNA PAGINA DE CUENTA aunque viva al lado en la barra: "Mi cuenta" es
+ * la contraseña de uno y la ve cualquiera, esto decide quién entra a todo lo
+ * demás. Hasta que se separó estaba adentro de /cuenta, escondida con un `if`
+ * del lado del servidor; ahora es una ruta y tiene su propia regla, que es la
+ * misma que pide `/api/usuarios` antes de tocar la llave de servicio.
+ */
+const PAGINA_USUARIOS = "/usuarios";
+
 
 /** Raíz de la sección Venta minorista: la ven los admins y el responsable de Meli. */
 const RAIZ_MINORISTA = "/venta-minorista";
@@ -288,6 +299,7 @@ function esApiPreciosTn(pathname: string): boolean {
 export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   if (!permiso) return false;
   if (PAGINAS_DE_CUENTA.includes(pathname)) return true;
+  if (pathname === PAGINA_USUARIOS) return permiso.rol === "superadmin";
 
   // "ACTUALIZAR AHORA" NO ES DE NINGUN MODULO: le sirve a todas las pantallas
   // por igual, como `/api/filtros`. Va acá arriba y no en `RUTAS_COMUNES`
