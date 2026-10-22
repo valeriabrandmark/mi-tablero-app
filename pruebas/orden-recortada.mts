@@ -38,7 +38,10 @@ import {
   totalesDeLaOrden,
   type RenglonOrden,
 } from "@/lib/compras";
-import { empresaSugerida } from "@/lib/sigma-orden";
+import {
+  EMPRESAS_QUE_COMPRAN,
+  esEmpresaQueCompra,
+} from "@/lib/sigma-orden";
 import type { FilaCompra } from "@/lib/types";
 
 const FALLOS: string[] = [];
@@ -386,21 +389,30 @@ revisar("un espacio al borde no lo pierde", desc2DelProveedor("  ROFINA S A I C 
 
 /* --- A QUE EMPRESA VA LA ORDEN ------------------------------------------
 
-   `bronze.proveedores_grupo` es una lista corta y a mano --siete proveedores,
-   todos de NOA-- y el resto cae en Quo POR DESCARTE. Eso es una sugerencia y
-   no una regla, y la diferencia costó una orden: DEPIMIEL figuraba en la
-   lista como NOA, ya había pasado a Quo, y la orden salió a la empresa
-   equivocada sin que hubiera dónde corregirlo.
+   Antes salía del grupo del proveedor: `bronze.proveedores_grupo`, una lista
+   corta y a mano con los siete que compran por NOA, y el resto por descarte
+   en Quo. Una orden de DEPIMIEL salió a NOA cuando el proveedor ya era de
+   Quo -- la lista se entera cuando alguien se acuerda de avisarle.
 
-   Lo que se prueba acá es la sugerencia, que sigue siendo el valor con el que
-   arranca el desplegable. Que se pueda cambiar es de la pantalla.
+   Ahora se elige siempre y no hay default. Lo que queda por probar es que la
+   lista que se ofrece sean las que COMPRAN: las otras dos del maestro son de
+   presupuesto, y una orden cargada ahí es una orden que no existe.
    ------------------------------------------------------------------------ */
 
-revisar("NOA COMERCIAL propone la 0002", empresaSugerida("NOA COMERCIAL"), "0002");
-revisar("QUO MKT propone la 0001", empresaSugerida("QUO MKT"), "0001");
-// SIN GRUPO ES QUO, por descarte: la lista sólo tiene los de NOA.
-revisar("sin grupo, Quo", empresaSugerida(null), "0001");
-revisar("con un grupo que no existe, Quo también", empresaSugerida("LO QUE SEA"), "0001");
+revisar(
+  "se ofrecen las dos que compran",
+  EMPRESAS_QUE_COMPRAN.map((e) => e.codigo),
+  ["0001", "0002"],
+);
+revisar("Quo compra", esEmpresaQueCompra("0001"), true);
+revisar("Noa compra", esEmpresaQueCompra("0002"), true);
+// Las de presupuesto NO: no emiten órdenes de compra.
+revisar("la 0003 no", esEmpresaQueCompra("0003"), false);
+revisar("la 0004 tampoco", esEmpresaQueCompra("0004"), false);
+// Y nada que venga del navegador pasa por ser parecido.
+revisar("un código inventado no", esEmpresaQueCompra("0009"), false);
+revisar("vacío tampoco", esEmpresaQueCompra(""), false);
+revisar("ni undefined", esEmpresaQueCompra(undefined), false);
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);

@@ -67,9 +67,6 @@ export const TIPO_ORDEN = "01";
 /** Condición de pago. 04 = 30 DÍAS. */
 export const CONDICION_PAGO = "04";
 
-/** Sucursal. 0002 = BRANDMARK. */
-export const CODIGO_SUCURSAL = "0002";
-
 /** Moneda. 1 = PESO. Es el CÓDIGO: `sigma_compras` guarda el nombre ("PESO"). */
 export const MONEDA = "1";
 
@@ -91,33 +88,32 @@ export const ESTADO_PENDIENTE = "P";
 export const FUSUARI_SIGMA = 0;
 
 /**
- * Qué empresa compra, según el grupo del proveedor.
+ * LAS EMPRESAS QUE COMPRAN.
  *
- * Son los mismos códigos que `lib/constantes.ts` usa para mostrar nombres, y
- * los que trae `sigma_compras.empresa`. Las otras dos empresas del maestro
- * ('0003' y '0004') son de presupuesto y no compran.
+ * Son dos. Las otras dos del maestro --'0003' y '0004'-- son de presupuesto y
+ * no emiten órdenes de compra, así que no se ofrecen: un desplegable que
+ * muestra cuatro opciones de las cuales dos están mal es un error esperando a
+ * que alguien tenga apuro.
+ *
+ * ---------------------------------------------------------------------------
+ * NO HAY VALOR POR DEFECTO, Y ESO ES LO QUE CAMBIO
+ *
+ * Antes la empresa salía del grupo del proveedor (`bronze.proveedores_grupo`,
+ * una lista corta y a mano) y no se podía cambiar. Eso cargó una orden de
+ * DEPIMIEL en NOA cuando el proveedor ya había pasado a Quo: la lista se
+ * entera cuando alguien se acuerda de avisarle, y mientras tanto la orden sale
+ * a nombre de la sociedad equivocada sin que nadie lo decida.
+ *
+ * Ahora se elige SIEMPRE, sea quien sea el proveedor. Un default que acierta
+ * casi siempre es peor que ninguno: el que acierta casi siempre no se mira.
  */
-export const EMPRESA_POR_GRUPO: Record<string, string> = {
-  "QUO MKT": "0001",
-  "NOA COMERCIAL": "0002",
-};
+export const EMPRESAS_QUE_COMPRAN: readonly { codigo: string; nombre: string }[] = [
+  { codigo: "0001", nombre: "0001 · Quo MKT" },
+  { codigo: "0002", nombre: "0002 · Noa Comercial" },
+];
 
-/**
- * LA EMPRESA QUE SE PROPONE, que no es lo mismo que la que se manda.
- *
- * `bronze.proveedores_grupo` es una lista corta y a mano --hoy siete
- * proveedores, todos de NOA-- y el resto cae en Quo por descarte. Eso alcanza
- * como SUGERENCIA y no como regla: un proveedor que cambia de empresa lo hace
- * de un día para el otro y la lista se entera después, si alguien se acuerda.
- *
- * Pasó con DEPIMIEL: la lista decía NOA --y su historial de compras le daba la
- * razón hasta abril-- pero había pasado a Quo. La orden salió a la empresa
- * equivocada sin que nadie pudiera decir otra cosa, porque no había dónde.
- *
- * Por eso ahora esto propone y la pantalla decide.
- */
-export function empresaSugerida(grupo: string | null | undefined): string {
-  return EMPRESA_POR_GRUPO[grupo ?? ""] ?? EMPRESA_POR_GRUPO["QUO MKT"]!;
+export function esEmpresaQueCompra(codigo: unknown): codigo is string {
+  return EMPRESAS_QUE_COMPRAN.some((e) => e.codigo === codigo);
 }
 
 /* -------------------------------------------------------------------------
@@ -352,14 +348,16 @@ export function armarOrdenSigma(
    */
   usuarioSigma: number,
   /**
-   * A QUE EMPRESA Y SUCURSAL VA LA ORDEN, cuando se eligió en la pantalla.
+   * A QUE EMPRESA Y SUCURSAL VA LA ORDEN.
    *
-   * Sin esto se cae en lo de siempre: la empresa del grupo del proveedor
-   * (`empresaSugerida`) y Brandmark. Es opcional para que una llamada vieja
-   * siga dando lo mismo, no porque dé igual: cargar una orden en la empresa
-   * equivocada es pedirle mercadería a nombre de otra sociedad.
+   * NO TIENE VALOR POR DEFECTO, igual que `usuarioSigma` y por el mismo
+   * motivo: cargar una orden en la empresa equivocada es pedirle mercadería a
+   * nombre de otra sociedad, y un default lo hace sin que nadie lo decida.
+   * Antes salía del grupo del proveedor y así salió mal una de DEPIMIEL.
+   *
+   * El compilador no deja olvidarlo.
    */
-  destino?: { empresa?: string; sucursal?: string },
+  destino: { empresa: string; sucursal: string },
 ): OrdenSigma {
   const items: ItemSigma[] = [];
   let proveedorId = "";
@@ -433,9 +431,9 @@ export function armarOrdenSigma(
      */
     vencimiento: fecha,
     observacionInterna: "",
-    codigoSucursal: destino?.sucursal || CODIGO_SUCURSAL,
+    codigoSucursal: destino.sucursal,
     moneda: MONEDA,
-    empresa: destino?.empresa || empresaSugerida(grupo),
+    empresa: destino.empresa,
     cotizacion: COTIZACION,
     /*
      * `frecdia` VA COMO FECHA, contra lo que dice la documentación.
@@ -516,6 +514,13 @@ export function numeroDeOrdenSigma(
   return null;
 }
 
+/**
+ * LO QUE VA FIJO EN LA CABECERA, para mostrarlo al confirmar.
+ *
+ * Son los campos que NO se eligen. La sucursal salió de esta lista el día que
+ * pasó a elegirse: tenerla acá con un valor fijo al lado de un desplegable que
+ * dice otra cosa es la forma más rápida de que nadie crea ninguno de los dos.
+ */
 export const RESUMEN_CABECERA: { campo: string; valor: string }[] = [
   {
     campo: "Depósito de recepción",
@@ -523,7 +528,6 @@ export const RESUMEN_CABECERA: { campo: string; valor: string }[] = [
   },
   { campo: "Tipo de orden", valor: `${TIPO_ORDEN} · Regular` },
   { campo: "Condición de pago", valor: `${CONDICION_PAGO} · 30 días` },
-  { campo: "Sucursal", valor: `${CODIGO_SUCURSAL} · BRANDMARK` },
   { campo: "Moneda", valor: `${MONEDA} · PESO` },
   { campo: "Estado", valor: `${ESTADO_PENDIENTE} · Pendiente` },
 ];

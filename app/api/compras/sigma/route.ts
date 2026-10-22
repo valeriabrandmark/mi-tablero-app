@@ -11,9 +11,10 @@ import {
 } from "@/lib/permisos";
 import { getArticulosParaOrden } from "@/lib/queries-compras";
 import { guardarOrdenEnviada } from "@/lib/queries-ordenes";
-import { EMPRESAS_SIGMA, SUCURSALES_SIGMA } from "@/lib/sigma-compra";
+import { SUCURSALES_SIGMA } from "@/lib/sigma-compra";
 import {
   armarOrdenSigma,
+  esEmpresaQueCompra,
   numeroDeOrdenSigma,
   problemasDeLaOrden,
   type ArticuloParaOrden,
@@ -247,7 +248,25 @@ export async function POST(request: NextRequest) {
       ]),
     );
 
+    /*
+     * A QUE EMPRESA Y A QUE SUCURSAL, elegidas en la pantalla.
+     *
+     * SE EXIGEN Y SE VALIDAN. Son dos strings que vienen del navegador y
+     * terminan en la cabecera de un comprobante del ERP: un código inventado
+     * cargaría la orden a nombre de una sociedad que no existe, y eso no lo
+     * arregla nadie desde acá.
+     *
+     * Y NO HAY DEFAULT. Antes la empresa salía del grupo del proveedor, y así
+     * salió una orden de DEPIMIEL a NOA cuando el proveedor ya era de Quo.
+     * Entran en la lista de problemas como cualquier otra cosa que falta.
+     */
     const problemas = problemasDeLaOrden(articulos, orden);
+    if (!esEmpresaQueCompra(cuerpo.empresa)) {
+      problemas.push("Elegí la empresa que compra.");
+    }
+    if (!SUCURSALES_SIGMA.some((x) => x.codigo === cuerpo.sucursal)) {
+      problemas.push("Elegí la sucursal que recibe la mercadería.");
+    }
     if (problemas.length > 0) {
       // 422 y no 400: el JSON está bien formado, lo que no se puede es mandar
       // ESTA orden. La pantalla las lista todas juntas.
@@ -257,31 +276,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    /*
-     * A QUE EMPRESA Y SUCURSAL, elegidas en la pantalla.
-     *
-     * SE VALIDAN CONTRA LAS QUE EXISTEN y no se pasan tal cual: son dos
-     * strings que vienen del navegador y terminan en la cabecera de un
-     * comprobante del ERP. Un código inventado cargaría la orden a nombre de
-     * una sociedad que no existe, y eso no lo arregla nadie desde acá.
-     *
-     * Lo que no viene, o viene mal, cae en el default de siempre: la empresa
-     * del grupo del proveedor y Brandmark.
-     */
-    const empresa = EMPRESAS_SIGMA.some((e) => e.codigo === cuerpo.empresa)
-      ? String(cuerpo.empresa)
-      : undefined;
-    const sucursal = SUCURSALES_SIGMA.some((x) => x.codigo === cuerpo.sucursal)
-      ? String(cuerpo.sucursal)
-      : undefined;
-
     const payload = armarOrdenSigma(
       articulos,
       orden,
       nota,
       new Date(),
       usuarioSigma,
-      { empresa, sucursal },
+      { empresa: String(cuerpo.empresa), sucursal: String(cuerpo.sucursal) },
     );
 
     // La URL viaja a la pantalla junto con el error. NO LLEVA CREDENCIALES: el
