@@ -110,6 +110,12 @@ export async function POST(request: NextRequest) {
     datos?: DatosFactura;
     proveedorNombre?: string;
     confirmado?: boolean;
+    /**
+     * LO QUE SE TIPEO, para poder reabrir la factura y corregirla sin volver a
+     * cargarla. Viaja desde la pantalla y se guarda tal cual: el payload que
+     * entiende Sigma ya no alcanza para reconstruirla.
+     */
+    borrador?: unknown;
   };
   try {
     cuerpoPedido = await request.json();
@@ -128,12 +134,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // QUE NUMERO DE ENVIO ES. Entra en el `id`, así que es lo que decide si
+  // Sigma la toma como una factura nueva o como una que ya procesó. Se
+  // sanea acá: un intento que llegue roto desde el navegador no puede
+  // convertir un reenvío en un duplicado.
+  const intento = Math.max(1, Math.trunc(Number(datos.intento) || 1));
+  const datosConIntento: DatosFactura = { ...datos, intento };
+
   // LAS CUENTAS SALEN DE LA BASE. Ver arriba.
   const imputacion = await getImputacionContable();
   const { cuerpo, problemas, advertencias } = armarImportCompras(
     cruce,
     totales,
-    datos,
+    datosConIntento,
     imputacion,
   );
 
@@ -153,7 +166,7 @@ export async function POST(request: NextRequest) {
   // YA MANDADA: se avisa antes de volver a hablarle a Sigma. Su endpoint la
   // rechazaría igual por el `id`, pero preguntar de este lado explica mejor lo
   // que pasó que un "registro procesado anteriormente" suelto.
-  const previa = await facturaYaEnviada(idDeLaFactura(datos));
+  const previa = await facturaYaEnviada(idDeLaFactura(datosConIntento));
   if (previa && !cuerpoPedido.confirmado) {
     return NextResponse.json(
       {
@@ -197,6 +210,8 @@ export async function POST(request: NextRequest) {
         resultado: rechazada ? "rechazada" : "incierto",
         respuesta: texto,
         diferencias,
+        borrador: cuerpoPedido.borrador ?? null,
+        intento,
       });
       return NextResponse.json(
         {
@@ -216,6 +231,8 @@ export async function POST(request: NextRequest) {
       proveedorNombre: cuerpoPedido.proveedorNombre ?? null,
       resultado: "ok",
       diferencias,
+      borrador: cuerpoPedido.borrador ?? null,
+      intento,
       // QUEDA ESCRITO QUE SE MANDO DESCUADRADA. Si después hay que revisar
       // por qué una factura entró con un total que no cerraba, el registro lo
       // dice en vez de haber que reconstruirlo.

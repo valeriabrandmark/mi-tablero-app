@@ -238,6 +238,12 @@ export type DatosFactura = {
   otrosImpuestos: number;
   totalImpreso: number | null;
   percepciones: Percepcion[];
+  /**
+   * QUE NUMERO DE ENVIO ES. 1 (o sin cargar) la primera vez. Ver
+   * `idDeLaFactura`: sube sólo cuando alguien pide reenviar una factura que
+   * anuló en Sigma.
+   */
+  intento?: number;
 };
 
 /** El número máximo de caracteres que Sigma acepta en `numeroComprobante`. */
@@ -499,11 +505,29 @@ export function armarImportCompras(
  *
  * ES LA MISMA FACTURA SIEMPRE, y eso es todo el punto: dos envíos de la misma
  * factura llevan el mismo id, así que el segundo no la carga de nuevo.
+ *
+ * ---------------------------------------------------------------------------
+ * SALVO QUE SEA UN REENVIO, Y ESO ES DELIBERADO
+ *
+ * Esa misma protección es la que impide corregir una factura: anulada en
+ * Sigma y vuelta a mandar, con el mismo id no entra --Sigma la reconoce y
+ * contesta "registro procesado anteriormente"--.
+ *
+ * Por eso el `intento` entra en el id a partir del segundo: `...-1-001-R2`. El
+ * primero queda EXACTAMENTE como estaba, así que las facturas ya mandadas
+ * conservan su id y se las sigue encontrando.
+ *
+ * LA PROTECCION NO SE PIERDE porque el intento no sube solo: sube cuando
+ * alguien pide reenviar y confirma que la anuló del otro lado. Apretar dos
+ * veces el botón de mandar sigue dando el mismo id, y sigue sin duplicar.
  */
 export function idDeLaFactura(datos: {
   proveedorId: string;
   codigoComprobante: string;
   numeroComprobante: string;
+  intento?: number;
 }): string {
-  return ["FC", datos.proveedorId, datos.codigoComprobante, datos.numeroComprobante].join("-");
+  const base = ["FC", datos.proveedorId, datos.codigoComprobante, datos.numeroComprobante];
+  const intento = Math.trunc(datos.intento ?? 1);
+  return (intento > 1 ? [...base, `R${intento}`] : base).join("-");
 }

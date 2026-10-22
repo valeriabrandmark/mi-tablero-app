@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Aviso, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtMoneda, fmtNumero } from "@/lib/format";
@@ -27,6 +28,14 @@ const BOTON_ACTIVO = "border-c1 bg-c1/15 text-c1 rounded-lg border px-3 py-1.5 t
 const CAMPO =
   "border-line bg-panel-2 text-ink placeholder:text-muted/60 rounded-lg border px-2.5 py-1.5 text-sm focus:border-c1 focus:outline-none";
 
+/**
+ * LA MISMA CLAVE QUE USA LA PANTALLA DE CARGA. Reabrir una factura es escribir
+ * su borrador acá y mandar a la otra pestaña, que es exactamente lo que hace
+ * la pantalla cuando uno vuelve a entrar: no hay un camino nuevo que pueda
+ * comportarse distinto del normal.
+ */
+const CLAVE_BORRADOR = "carga-factura:borrador:v2";
+
 const COLOR_RECLAMO: Record<EstadoReclamo, string> = {
   pendiente: "border-amber-500/40 bg-amber-500/10 text-amber-200",
   reclamado: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
@@ -53,6 +62,7 @@ export default function FacturasEnviadas() {
   const [error, setError] = useState<string | null>(null);
   const [soloPendientes, setSoloPendientes] = useState(true);
   const [abierta, setAbierta] = useState<number | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     let vivo = true;
@@ -90,6 +100,47 @@ export default function FacturasEnviadas() {
     () => (facturas ?? []).filter((f) => f.conDiferencia > 0 && f.reclamo === "pendiente"),
     [facturas],
   );
+
+  /**
+   * REABRIR UNA FACTURA PARA CORREGIRLA.
+   *
+   * Escribe lo que se había tipeado en el borrador de la pantalla de carga,
+   * con el número de intento en el siguiente, y manda para allá.
+   *
+   * EL INTENTO ES LO QUE HACE QUE SIGMA LA TOME. `ImportCompras` es
+   * idempotente por el campo `id`: con el mismo id, una factura corregida no
+   * entra aunque la hayan anulado del otro lado --contesta "registro procesado
+   * anteriormente" y no hace nada--. A partir del segundo intento el id lleva
+   * un sufijo, así que entra como comprobante nuevo.
+   *
+   * Y POR ESO HAY QUE ANULARLA PRIMERO. Si del otro lado sigue viva, lo que se
+   * consigue es tenerla dos veces. La confirmación lo dice con todas las
+   * letras porque es lo único que separa una corrección de un duplicado.
+   */
+  const reabrir = (f: FacturaEnviada) => {
+    if (!f.borrador) return;
+    const siguiente = f.intento + 1;
+    const seguro = window.confirm(
+      `Reabrir la factura ${f.numero ?? ""} de ${f.proveedor ?? ""} para corregirla.\n\n` +
+        `Va a entrar en Sigma como un comprobante NUEVO (reenvío nº ${siguiente}).\n\n` +
+        "Antes de mandarla, anulá la anterior en Sigma. Si no la anulás, la " +
+        "factura queda cargada dos veces.",
+    );
+    if (!seguro) return;
+
+    try {
+      window.localStorage.setItem(
+        CLAVE_BORRADOR,
+        JSON.stringify({ ...(f.borrador as object), intento: siguiente }),
+      );
+    } catch {
+      setError(
+        "El navegador no dejó guardar el borrador, así que no se puede reabrir acá.",
+      );
+      return;
+    }
+    router.push("/facturas-compra");
+  };
 
   const marcar = async (id: number, reclamo: EstadoReclamo, nota: string) => {
     setError(null);
@@ -184,6 +235,7 @@ export default function FacturasEnviadas() {
                 abierta={abierta === f.id}
                 onAbrir={() => setAbierta(abierta === f.id ? null : f.id)}
                 onMarcar={(estado, nota) => marcar(f.id, estado, nota)}
+                onReabrir={() => reabrir(f)}
               />
             ))}
           </div>
@@ -199,11 +251,13 @@ function FilaFactura({
   abierta,
   onAbrir,
   onMarcar,
+  onReabrir,
 }: {
   factura: FacturaEnviada;
   abierta: boolean;
   onAbrir: () => void;
   onMarcar: (estado: EstadoReclamo, nota: string) => void | Promise<void>;
+  onReabrir: () => void;
 }) {
   const [nota, setNota] = useState(factura.reclamoNota ?? "");
   const [guardando, setGuardando] = useState(false);
@@ -227,6 +281,7 @@ function FilaFactura({
             {factura.fechaFactura ? `Factura del ${factura.fechaFactura}` : ""}
             {factura.fechaFactura ? " · " : ""}
             Enviada el {factura.enviadaEn}
+            {factura.intento > 1 ? ` (reenvío nº ${factura.intento})` : ""}
             {factura.usuario ? ` por ${factura.usuario}` : ""}
             {" · "}
             {fmtMoneda(factura.total)}
@@ -266,6 +321,22 @@ function FilaFactura({
             <button type="button" className={BOTON} onClick={onAbrir}>
               {abierta ? "Cerrar" : "Ver diferencias"}
             </button>
+          )}
+          {/* REABRIR SOLO SI HAY QUE PODER. Las facturas que se mandaron antes
+              de que esto existiera no tienen guardado lo que se tipeó, y no se
+              puede reconstruir del payload sin cambiarle los números. Ofrecer
+              el botón y que no funcione sería peor que no ofrecerlo. */}
+          {factura.borrador ? (
+            <button type="button" className={BOTON} onClick={onReabrir}>
+              Corregir y reenviar
+            </button>
+          ) : (
+            <span
+              className="text-muted text-xs"
+              title="Se mandó antes de que se guardara lo tipeado, así que no se puede reabrir. Hay que cargarla de nuevo en la otra pestaña."
+            >
+              Sin borrador
+            </span>
           )}
         </div>
       </div>

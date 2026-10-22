@@ -577,6 +577,49 @@ revisar(
 );
 
 // La alícuota se escribe con coma, como en el nombre del concepto.
+/* --- EL REENVIO: EL ID CAMBIA, Y SOLO CUANDO SE PIDE -------------------
+
+   `ImportCompras` es idempotente por el campo `id`, y eso es lo que evita la
+   factura duplicada. Esa misma protección es la que impide corregir una: con
+   el mismo id, una factura anulada en Sigma y vuelta a mandar no entra.
+
+   El `intento` resuelve las dos cosas a la vez, y por eso tiene prueba: si el
+   primero dejara de dar el id de siempre, las facturas ya mandadas perderían
+   su identidad; si el segundo diera el mismo, no habría forma de corregir una.
+   ------------------------------------------------------------------------ */
+
+{
+  const factura = {
+    proveedorId: "00011",
+    codigoComprobante: "FA",
+    numeroComprobante: "1-001",
+  };
+
+  revisar("sin intento, el id de siempre", idDeLaFactura(factura), "FC-00011-FA-1-001");
+  revisar(
+    "el primer intento da exactamente lo mismo",
+    idDeLaFactura({ ...factura, intento: 1 }),
+    "FC-00011-FA-1-001",
+  );
+  revisar(
+    "el segundo entra como comprobante nuevo",
+    idDeLaFactura({ ...factura, intento: 2 }),
+    "FC-00011-FA-1-001-R2",
+  );
+  revisar(
+    "y el tercero también",
+    idDeLaFactura({ ...factura, intento: 3 }),
+    "FC-00011-FA-1-001-R3",
+  );
+  // DOS ENVIOS DEL MISMO INTENTO SIGUEN SIENDO LA MISMA FACTURA: apretar dos
+  // veces el botón de mandar no puede duplicar nada.
+  revisar(
+    "el mismo intento dos veces da el mismo id",
+    idDeLaFactura({ ...factura, intento: 2 }) === idDeLaFactura({ ...factura, intento: 2 }),
+    true,
+  );
+}
+
 revisar("10.5 se escribe 10,5", alicuotaTexto(10.5), "10,5");
 revisar("21 se escribe 21", alicuotaTexto(21), "21");
 

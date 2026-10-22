@@ -226,6 +226,15 @@ export async function guardarFacturaEnviada(datos: {
    * se va a reclamar tiene que quedar guardado tal como se vio al mandarla.
    */
   diferencias: ResumenDiferencias;
+  /**
+   * LO QUE SE TIPEO, tal cual. No el payload: ése es lo que entiende Sigma y
+   * ya perdió la bonificación de cada renglón, el importe del papel y la OC
+   * contra la que se cruzó. Es lo que deja volver a abrir la factura para
+   * corregirla sin tipearla de nuevo.
+   */
+  borrador: unknown;
+  /** Qué número de envío es. Ver `idDeLaFactura`. */
+  intento: number;
 }): Promise<void> {
   try {
     await query(
@@ -233,9 +242,10 @@ export async function guardarFacturaEnviada(datos: {
          (usuario, id_sigma, proveedor_id, proveedor_nombre, empresa, sucursal,
           numero_comprobante, tipo_comprobante, fecha_factura, total,
           renglones, resultado, respuesta, payload,
-          diferencias, renglones_con_diferencia, dif_costo, dif_cantidad)
+          diferencias, renglones_con_diferencia, dif_costo, dif_cantidad,
+          borrador, intento)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9::date, $10, $11, $12, $13,
-               $14::jsonb, $15::jsonb, $16, $17, $18)`,
+               $14::jsonb, $15::jsonb, $16, $17, $18, $19::jsonb, $20)`,
       [
         datos.usuario,
         datos.cuerpo.id,
@@ -255,6 +265,8 @@ export async function guardarFacturaEnviada(datos: {
         datos.diferencias.renglones,
         datos.diferencias.difCosto,
         datos.diferencias.difCantidad,
+        JSON.stringify(datos.borrador ?? null),
+        datos.intento,
       ],
     );
   } catch (error) {
@@ -313,6 +325,14 @@ export type FacturaEnviada = {
   reclamoEn: string | null;
   reclamoPor: string | null;
   reclamoNota: string | null;
+  /** Qué número de envío fue. El reenvío arranca en el siguiente. */
+  intento: number;
+  /**
+   * Lo que se tipeó, para poder reabrirla y corregirla. `null` en las que se
+   * mandaron antes de que esto existiera: ésas no se pueden reabrir, y la
+   * pantalla lo dice en vez de ofrecer un botón que no va a funcionar.
+   */
+  borrador: unknown | null;
 };
 
 type FilaFactura = {
@@ -336,6 +356,8 @@ type FilaFactura = {
   reclamo_en: string | null;
   reclamo_por: string | null;
   reclamo_nota: string | null;
+  intento: number;
+  borrador: unknown | null;
 };
 
 /**
@@ -369,7 +391,7 @@ export async function getFacturasEnviadas(opciones?: {
             reclamo,
             to_char(reclamo_en at time zone 'America/Argentina/Buenos_Aires',
                     'DD/MM/YYYY HH24:MI')                        as reclamo_en,
-            reclamo_por, reclamo_nota
+            reclamo_por, reclamo_nota, intento, borrador
        from app.facturas_compra_enviadas
       where resultado = 'ok' ${filtro}
       order by enviada_en desc
@@ -398,6 +420,8 @@ export async function getFacturasEnviadas(opciones?: {
     reclamoEn: f.reclamo_en,
     reclamoPor: f.reclamo_por,
     reclamoNota: f.reclamo_nota,
+    intento: Number(f.intento ?? 1),
+    borrador: f.borrador ?? null,
   }));
 }
 
