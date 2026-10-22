@@ -14,6 +14,7 @@ import {
   CLASES_DIFERENCIA,
   cruzar,
   entraEnLaTabla,
+  resumirDiferencias,
   indexarMaestro,
   leerNumero,
   leerRenglones,
@@ -23,6 +24,7 @@ import {
   type ArticuloMaestro,
   type ClaseDiferencia,
   type LineaCruce,
+  type ResultadoCruce,
   type RenglonOC,
 } from "@/lib/factura-cruce";
 
@@ -328,6 +330,135 @@ revisar(
 
 // Una línea sin ninguna diferencia no entra aunque esté todo tildado.
 revisar("una línea sin diferencia nunca entra", entraEnLaTabla(lineaDif({}), TODAS), false);
+
+/* -------------------------------------------------------------------------
+   LAS DIFERENCIAS QUE SE CONGELAN AL MANDAR LA FACTURA
+
+   Se guardan con la factura y NO se recalculan nunca más: el cruce sale de la
+   OC y del maestro, y los dos cambian --una OC se anula, el maestro se
+   reescribe entero en cada corrida-- así que recalcular el cruce de una
+   factura de hace dos meses daría otro número. El reclamo se hace sobre el
+   que se vio el día que se mandó.
+   ------------------------------------------------------------------------- */
+
+function lineaCompleta(p: {
+  estado: LineaCruce["estado"];
+  sku?: string | null;
+  ocUnidades?: number;
+  ocPrecio?: number;
+  factUnidades?: number;
+  factPrecio?: number;
+  difUnidades?: number;
+  difPrecio?: number;
+}): LineaCruce {
+  return {
+    estado: p.estado,
+    sku: p.sku === undefined ? "A" : p.sku,
+    descripcion: "ARTICULO",
+    renglones: [],
+    como: null,
+    factor: 1,
+    oc:
+      p.ocUnidades == null
+        ? null
+        : { unidades: p.ocUnidades, precioNeto: p.ocPrecio ?? 0, neto: 0 },
+    factura:
+      p.factUnidades == null
+        ? null
+        : { unidades: p.factUnidades, precioNeto: p.factPrecio ?? 0, neto: 0 },
+    difUnidades: p.difUnidades ?? 0,
+    difPrecio: p.difPrecio ?? 0,
+    iva: 21,
+  } as LineaCruce;
+}
+
+const cruceCon = (lineas: LineaCruce[]) =>
+  ({ lineas, resumen: {} }) as unknown as ResultadoCruce;
+
+// LAS QUE COINCIDEN NO ENTRAN. Un renglón OK no se reclama, así que guardarlo
+// haría que la lista de "lo que falta reclamar" fuera la factura entera.
+{
+  const r = resumirDiferencias(
+    cruceCon([
+      lineaCompleta({ estado: "ok", ocUnidades: 10, factUnidades: 10 }),
+      lineaCompleta({
+        estado: "precio",
+        ocUnidades: 10,
+        ocPrecio: 100,
+        factUnidades: 10,
+        factPrecio: 110,
+        difPrecio: 100,
+      }),
+    ]),
+  );
+  revisar("sólo entran las que no están ok", r.renglones, 1);
+  revisar("y suma lo que cuesta", r.difCosto, 100);
+}
+
+// LO QUE CUESTA UNA DIFERENCIA DE CANTIDAD: las unidades que faltan o sobran,
+// AL COSTO DE LA OC. Es la misma cuenta que hace la pantalla.
+{
+  const r = resumirDiferencias(
+    cruceCon([
+      lineaCompleta({
+        estado: "falta en factura",
+        ocUnidades: 6,
+        ocPrecio: 37666.73,
+        difUnidades: -6,
+      }),
+    ]),
+  );
+  revisar("una no facturada cuesta sus unidades al costo de la OC", r.difCantidad, -226000.38);
+  revisar("y no mueve la de costo", r.difCosto, 0);
+}
+
+// SIN LINEA DE OC NO HAY COSTO DE OC: algo facturado que no estaba pedido se
+// valúa a lo que el proveedor cobró, que es lo único que se sabe.
+{
+  const r = resumirDiferencias(
+    cruceCon([
+      lineaCompleta({
+        estado: "no está en la OC",
+        factUnidades: 4,
+        factPrecio: 1000,
+        difUnidades: 4,
+      }),
+    ]),
+  );
+  revisar("lo que no estaba en la OC se valúa a lo facturado", r.difCantidad, 4000);
+}
+
+// Lo que se guarda tiene que alcanzar para reclamar SIN volver a abrir la
+// factura: qué artículo, cuánto se pidió y cuánto se facturó.
+{
+  const r = resumirDiferencias(
+    cruceCon([
+      lineaCompleta({
+        estado: "cantidad",
+        sku: "IM07005",
+        ocUnidades: 6,
+        ocPrecio: 100,
+        factUnidades: 4,
+        factPrecio: 100,
+        difUnidades: -2,
+      }),
+    ]),
+  );
+  const l = r.lineas[0]!;
+  revisar("guarda el sku", l.sku, "IM07005");
+  revisar("lo pedido", l.unidadesOC, 6);
+  revisar("lo facturado", l.unidadesFactura, 4);
+  revisar("y el motivo", l.motivo, "cantidad");
+}
+
+// Una factura que coincide en todo no deja nada para reclamar.
+{
+  const r = resumirDiferencias(
+    cruceCon([lineaCompleta({ estado: "ok", ocUnidades: 10, factUnidades: 10 })]),
+  );
+  revisar("sin diferencias no hay nada que reclamar", r.renglones, 0);
+  revisar("ni plata", [r.difCosto, r.difCantidad], [0, 0]);
+}
 
 if (FALLOS.length > 0) {
   console.error(`\n${FALLOS.length} prueba(s) fallaron.`);
