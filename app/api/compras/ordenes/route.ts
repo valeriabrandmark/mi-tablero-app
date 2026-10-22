@@ -20,14 +20,39 @@ export const dynamic = "force-dynamic";
  * Compras --SKU, cantidades, costos-- para todo el que tiene la sección. Un
  * historial que sólo ve quien lo escribió no sirve para lo que se pidió: poder
  * comparar contra lo que se mandó la vez pasada.
+ *
+ * ---------------------------------------------------------------------------
+ * TAMBIEN LO LEE LA CARGA DE FACTURAS, Y POR ESO ACEPTA LOS DOS MODULOS
+ *
+ * Es contra estas órdenes que se cruza una factura: sin ellas, la pantalla
+ * puede cargar la factura pero no tiene contra qué compararla. Cuando la carga
+ * de facturas se separó en su propio módulo, esta ruta se quedó pidiendo
+ * Compras y el primer usuario que tuvo facturas sin Compras entró a una
+ * pantalla que le decía "Sin permiso" en el primer panel.
+ *
+ * Darle las órdenes a quien carga facturas no abre nada nuevo: son los mismos
+ * SKU, cantidades y costos que va a ver en el cruce de la factura que está
+ * cargando.
  */
 export async function GET() {
   if (authConfigurada) {
     const permiso = permisoDelUsuario(await getUsuario());
-    if (!puedeVer(permiso, "/api/compras")) {
+    const puede =
+      puedeVer(permiso, "/api/compras") ||
+      puedeVer(permiso, "/api/compras/facturas");
+    if (!puede) {
       return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
     }
-    if (enConstruccion("/stock/compras") && !puedeVerBorradores(permiso)) {
+    // EL CARTEL DE "EN CONSTRUCCION" ES DE COMPRAS, no de esta ruta. A quien
+    // entra por la carga de facturas no le corresponde: su pantalla está
+    // publicada, y quedarse sin las órdenes la dejaría sin contra qué cruzar
+    // por el estado de OTRO tablero.
+    const porCompras = !puedeVer(permiso, "/api/compras/facturas");
+    if (
+      porCompras &&
+      enConstruccion("/stock/compras") &&
+      !puedeVerBorradores(permiso)
+    ) {
       return NextResponse.json({ error: "En construcción" }, { status: 403 });
     }
   }

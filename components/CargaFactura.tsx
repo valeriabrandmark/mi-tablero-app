@@ -1027,6 +1027,8 @@ function Formulario() {
         </Panel>
       )}
 
+      {hayProveedor && hayFactura && (
+        <>
           {/* 4. LOS TOTALES, Y EL ENVIO ---------------------------------- */}
           <Panel titulo="4. Totales del comprobante">
             <div className="grid gap-4 lg:grid-cols-2">
@@ -1142,9 +1144,9 @@ function Formulario() {
             />
           </Panel>
 
-          {/* 5. EL REPORTE DE DIFERENCIAS, CON LA TABLA DEL MAIL ADENTRO */}
-      {hayProveedor && hayFactura && (
-        <>
+          {/* 5. EL REPORTE DE DIFERENCIAS, CON SU RESUMEN ARRIBA Y LA TABLA
+              DEL MAIL ADENTRO. Las tarjetas van pegadas al reporte y no
+              arriba de los totales: son el resumen de ESTE panel. */}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
             <TarjetaKpi titulo="Coinciden" valor={fmtNumero(r.ok)} acento="#22c55e" compacta />
             <TarjetaKpi
