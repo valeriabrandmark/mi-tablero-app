@@ -13,6 +13,7 @@
  *     node --experimental-strip-types --import ./pruebas/registrar.mjs pruebas/permisos.mts
  */
 
+import { claimDeUsuario } from "@/lib/claim-usuario";
 import {
   moduloDeRuta,
   moduloPermiteRuta,
@@ -206,6 +207,86 @@ revisar(
 );
 // Mi cuenta sigue siendo de todos: es la contraseña de uno.
 revisar("Mi cuenta la ve cualquiera", puedeVer({ rol: "vendedor", vendedor: "SILVIO" }, "/cuenta"), true);
+
+// --- LO QUE SE GUARDA TIENE QUE SER LO QUE SE ESCRIBIO ---------------------
+//
+// Esta es la prueba que faltaba, y se nota en lo que costó no tenerla.
+//
+// El número de usuario de Sigma se guardaba sólo si estaba marcado `compras`,
+// con la clave escrita a mano en TRES lugares: el campo del panel, la
+// validación de la ruta y el armado del claim. Al separar la carga de
+// facturas --que también firma en Sigma-- se arreglaron los dos primeros y el
+// tercero no.
+//
+// El resultado fue el peor de los tres errores posibles: el panel pedía el
+// número, la persona lo escribía, el claim lo tiraba, y la validación
+// contestaba "hace falta el número de usuario de Sigma". Un cartel imposible
+// de obedecer, sobre un campo que estaba lleno.
+{
+  const guardado = claimDeUsuario({
+    modulos: ["facturas_compra"],
+    editar: ["facturas_compra"],
+    sigma: 16,
+    nombreSigma: "ERWIN",
+  });
+  revisar("con facturas, el número de Sigma se guarda", guardado.sigma, 16);
+  revisar("y su nombre también", guardado.nombre_sigma, "ERWIN");
+}
+
+{
+  const guardado = claimDeUsuario({
+    modulos: ["compras"],
+    editar: ["compras"],
+    sigma: 3,
+  });
+  revisar("con Compras también, como siempre", guardado.sigma, 3);
+}
+
+// Y SE DESCARTA CUANDO NO LO NECESITA NADIE: un número colgado de un permiso
+// que no escribe en el ERP no se usa para nada y confunde al que lo lee.
+{
+  const guardado = claimDeUsuario({
+    modulos: ["stock"],
+    editar: ["stock"],
+    sigma: 16,
+    nombreSigma: "ERWIN",
+  });
+  revisar("sin ningún módulo que firme, no se guarda", guardado.sigma, null);
+  revisar("ni el nombre", guardado.nombre_sigma, null);
+}
+
+// EDITAR SE RECORTA CONTRA VER, y de eso depende lo anterior: marcar "edita
+// facturas" sin marcar "ve facturas" no puede dejar un permiso que escribe en
+// el ERP sin pantalla donde hacerlo.
+{
+  const guardado = claimDeUsuario({
+    modulos: ["stock"],
+    editar: ["facturas_compra"],
+    sigma: 16,
+  });
+  revisar("editar sin ver no queda", guardado.editar, []);
+  revisar("y sin editar, tampoco el número", guardado.sigma, null);
+}
+
+// Lo que mande el navegador que no sea un módulo se descarta: el claim es lo
+// que después leen las tres barreras.
+{
+  const guardado = claimDeUsuario({
+    modulos: ["stock", "inventado", 7, null],
+    editar: ["stock"],
+  });
+  revisar("una clave inventada no entra", guardado.modulos, ["stock"]);
+}
+
+// Un número que no es un número no se guarda como si lo fuera.
+{
+  const guardado = claimDeUsuario({
+    modulos: ["facturas_compra"],
+    editar: ["facturas_compra"],
+    sigma: "dieciséis",
+  });
+  revisar("un número que no es número queda en null", guardado.sigma, null);
+}
 revisar("admin sigue viendo el historial de órdenes", puedeVer({ rol: "admin" }, "/api/compras/ordenes"), true);
 revisar("admin_tn ve Precios TN", puedeVer({ rol: "admin_tn" }, "/precios-tn"), true);
 revisar("admin_tn no ve nada más", puedeVer({ rol: "admin_tn" }, "/ventas-mayoristas"), false);

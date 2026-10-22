@@ -1,9 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { necesitaUsuarioSigma } from "@/lib/modulos";
 import {
-  esModulo,
-  necesitaUsuarioSigma,
-  type ClaveModulo,
-} from "@/lib/modulos";
+  claimDeUsuario,
+  modulosValidos,
+  numeroPositivo,
+  textoNoVacio,
+  type CuerpoUsuario,
+} from "@/lib/claim-usuario";
 import {
   exigirSuperadmin,
   rutaParaPonerContrasena,
@@ -30,47 +33,10 @@ export const dynamic = "force-dynamic";
  * que ir a la base a mano. Cuesta una línea evitarlo.
  */
 
-type Cuerpo = {
-  email?: unknown;
-  id?: unknown;
-  nombre?: unknown;
-  modulos?: unknown;
-  editar?: unknown;
-  sigma?: unknown;
-  nombreSigma?: unknown;
-};
-
-/** Las claves de módulo válidas de lo que haya mandado el navegador. */
-function modulos(valor: unknown): ClaveModulo[] {
-  return Array.isArray(valor) ? valor.filter(esModulo) : [];
-}
-
-function numero(valor: unknown): number | null {
-  const n = Number(valor);
-  return Number.isInteger(n) && n > 0 ? n : null;
-}
-
-function texto(valor: unknown): string | null {
-  return typeof valor === "string" && valor.trim() !== "" ? valor.trim() : null;
-}
-
-/**
- * El claim que se guarda. `editar` se recorta contra `modulos` acá TAMBIÉN
- * —aunque `permisoDelUsuario` lo vuelve a hacer al leer— para que lo guardado
- * no diga una cosa y lo aplicado otra: mirar el usuario en Supabase tiene que
- * alcanzar para saber qué puede hacer.
- */
-function claim(cuerpo: Cuerpo) {
-  const ve = modulos(cuerpo.modulos);
-  const edita = modulos(cuerpo.editar).filter((m) => ve.includes(m));
-  return {
-    rol: "personalizado",
-    modulos: ve,
-    editar: edita,
-    sigma: edita.includes("compras") ? numero(cuerpo.sigma) : null,
-    nombre_sigma: edita.includes("compras") ? texto(cuerpo.nombreSigma) : null,
-  };
-}
+// Lo que se guarda se arma en lib/claim-usuario.ts: ahí tiene pruebas, que es
+// justo lo que le faltó cuando la condición del número de Sigma quedó escrita
+// a mano en tres lugares y uno se desincronizó.
+type Cuerpo = CuerpoUsuario;
 
 /** La lista, con lo justo para la pantalla: nunca nada de la sesión. */
 export async function GET() {
@@ -89,12 +55,12 @@ export async function GET() {
     return {
       id: u.id,
       email: u.email ?? "",
-      nombre: texto(propia.nombre),
+      nombre: textoNoVacio(propia.nombre),
       rol: typeof meta.rol === "string" ? meta.rol : null,
       vendedor: typeof meta.vendedor === "string" ? meta.vendedor : null,
-      modulos: modulos(meta.modulos),
-      editar: modulos(meta.editar),
-      sigma: numero(meta.sigma),
+      modulos: modulosValidos(meta.modulos),
+      editar: modulosValidos(meta.editar),
+      sigma: numeroPositivo(meta.sigma),
       ultimoIngreso: u.last_sign_in_at ?? null,
     };
   });
@@ -139,12 +105,12 @@ export async function POST(request: NextRequest) {
   if (error) return error;
 
   const cuerpo = ((await request.json().catch(() => null)) ?? {}) as Cuerpo;
-  const email = texto(cuerpo.email)?.toLowerCase();
+  const email = textoNoVacio(cuerpo.email)?.toLowerCase();
   if (!email || !email.includes("@")) {
     return NextResponse.json({ error: "Falta el mail" }, { status: 400 });
   }
 
-  const permisos = claim(cuerpo);
+  const permisos = claimDeUsuario(cuerpo);
   if (permisos.modulos.length === 0) {
     return NextResponse.json(
       {
@@ -173,7 +139,7 @@ export async function POST(request: NextRequest) {
     // usuario no la puede tocar. Un nombre para saludar no es un permiso --que
     // alguien se cambie el suyo no le da acceso a nada-- así que va del otro
     // lado, que es el que le pertenece.
-    user_metadata: { nombre: texto(cuerpo.nombre) },
+    user_metadata: { nombre: textoNoVacio(cuerpo.nombre) },
     // Al azar y larga: nadie la ve ni la necesita, el acceso se toma por el
     // enlace de abajo.
     password: crypto.randomUUID() + crypto.randomUUID(),
@@ -196,11 +162,11 @@ export async function PATCH(request: NextRequest) {
   if (error) return error;
 
   const cuerpo = ((await request.json().catch(() => null)) ?? {}) as Cuerpo;
-  const id = texto(cuerpo.id);
+  const id = textoNoVacio(cuerpo.id);
   if (!id)
     return NextResponse.json({ error: "Falta el usuario" }, { status: 400 });
 
-  const nombre = texto(cuerpo.nombre);
+  const nombre = textoNoVacio(cuerpo.nombre);
 
   // SOBRE UNO MISMO SE CAMBIA EL NOMBRE, NO LOS PERMISOS.
   //
@@ -221,7 +187,7 @@ export async function PATCH(request: NextRequest) {
     });
   }
 
-  const permisos = claim(cuerpo);
+  const permisos = claimDeUsuario(cuerpo);
   // CUALQUIER MODULO QUE FIRME EN SIGMA, no sólo Compras. Miraba `compras` a
   // secas, así que al separar la carga de facturas se podía guardar a alguien
   // con permiso de cargar facturas y sin número: entraba y el botón no andaba.
@@ -281,8 +247,8 @@ export async function DELETE(request: NextRequest) {
   if (error) return error;
 
   const cuerpo = ((await request.json().catch(() => null)) ?? {}) as Cuerpo;
-  const id = texto(cuerpo.id);
-  const email = texto(cuerpo.email)?.toLowerCase() ?? null;
+  const id = textoNoVacio(cuerpo.id);
+  const email = textoNoVacio(cuerpo.email)?.toLowerCase() ?? null;
   if (!id || !email)
     return NextResponse.json(
       { error: "Falta el usuario o su mail" },
