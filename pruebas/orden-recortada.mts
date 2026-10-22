@@ -27,10 +27,14 @@
 
 import {
   alcanceDisponible,
+  desc2DelProveedor,
+  DESC2_FIJO_POR_PROVEEDOR,
   entraEnLaOrden,
+  factorNeto,
   nombreDelAlcanceMarca,
   queRecortaLaOrden,
   RECORTES_POR_DEFECTO,
+  renglonInicial,
   totalesDeLaOrden,
   type RenglonOrden,
 } from "@/lib/compras";
@@ -330,6 +334,54 @@ revisar(
   entraEnLaOrden({ marca: "CHICCO" }, "marca", []),
   true,
 );
+
+// --- EL DESC 2 FIJO DE UN PROVEEDOR --------------------------------------
+//
+// Con ROFINA son 4,94 % en todos los artículos, siempre. Escribirlo a mano en
+// cada renglón de cada orden sale igual todas las veces, y el día que alguien
+// se lo olvida en un renglón la orden pide más caro de lo acordado.
+
+// EL NOMBRE ES EL DEL MAESTRO, EXACTO: "ROFINA S A I C F", con los espacios
+// entre las siglas (156 artículos en sigma_articulos). Esta prueba está acá
+// porque un nombre mal escrito NO ROMPE NADA: simplemente no aplica el
+// descuento, y nadie se entera hasta que llega la factura.
+revisar(
+  "el proveedor se llama ROFINA S A I C F y lleva 4,94",
+  DESC2_FIJO_POR_PROVEEDOR["ROFINA S A I C F"],
+  4.94,
+);
+
+revisar("un renglón de ROFINA arranca con 4,94", 
+  renglonInicial(fila({ sku: "A", proveedor: "ROFINA S A I C F" })).descuento2,
+  4.94,
+);
+
+revisar(
+  "el de cualquier otro proveedor sigue en cero",
+  renglonInicial(fila({ sku: "A", proveedor: "COTY ARGENTINA SA" })).descuento2,
+  0,
+);
+
+// Un artículo sin proveedor cargado no puede quedar con el descuento de nadie.
+revisar("sin proveedor, cero", desc2DelProveedor(null), 0);
+
+// Los espacios de más no deberían costar el descuento: el nombre viaja desde
+// la base y ya se vio venir con espacios al borde en otras columnas.
+revisar("un espacio al borde no lo pierde", desc2DelProveedor("  ROFINA S A I C F "), 4.94);
+
+// EL DESC 1 NO SE TOCA. El sell in sigue saliendo del sell in, y los dos
+// descuentos se aplican EN CASCADA: 10 % y 4,94 % no son 14,94 %.
+{
+  const r = renglonInicial(
+    fila({ sku: "A", proveedor: "ROFINA S A I C F", sellInPct: 10 }),
+  );
+  revisar("el desc 1 sigue saliendo del sell in", r.descuento, 10);
+  revisar(
+    "y los dos se aplican en cascada",
+    Math.round(factorNeto(r.descuento, r.descuento2) * 1e6) / 1e6,
+    Math.round(0.9 * (1 - 0.0494) * 1e6) / 1e6,
+  );
+}
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);

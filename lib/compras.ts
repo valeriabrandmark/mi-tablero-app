@@ -611,13 +611,56 @@ export type RenglonOrden = {
    */
   descuento: number;
   /**
-   * DESC 2: el segundo descuento, en PUNTOS. ARRANCA SIEMPRE EN CERO y no sale
-   * de ningún dato: es el que se negocia por fuera del sell in de lista —una
-   * bonificación por volumen, un acuerdo puntual— y por eso lo pone la persona
-   * o no está.
+   * DESC 2: el segundo descuento, en PUNTOS. Es el que se negocia por fuera
+   * del sell in de lista —una bonificación por volumen, un acuerdo puntual—
+   * así que no sale de ningún dato: lo pone la persona.
+   *
+   * Arranca en CERO salvo que el proveedor tenga un acuerdo fijo. Ver
+   * `DESC2_FIJO_POR_PROVEEDOR`.
    */
   descuento2: number;
 };
+
+/**
+ * LOS PROVEEDORES QUE SIEMPRE LLEVAN EL MISMO DESC 2.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE EXISTE
+ *
+ * El desc 2 se negocia orden por orden, y por eso arranca vacío. Pero hay
+ * acuerdos que no se negocian cada vez: con ROFINA son 4,94 % fijos en TODOS
+ * los artículos, siempre. Escribirlo a mano en cada renglón de cada orden es
+ * trabajo que sale igual todas las veces, y el día que alguien se lo olvida en
+ * un renglón la orden sale pidiendo más caro de lo acordado.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE ACA Y NO EN LA BASE
+ *
+ * Porque es un acuerdo comercial puntual, no un dato que se actualice solo. No
+ * hay ninguna planilla ni ninguna tabla de Sigma de donde leerlo: si viviera en
+ * la base, alguien lo tendría que cargar a mano igual, y nadie sabría de dónde
+ * salió. Acá queda escrito con su motivo y cambiarlo es una línea.
+ *
+ * ---------------------------------------------------------------------------
+ * EL NOMBRE TIENE QUE SER EL DEL MAESTRO, EXACTO
+ *
+ * Es `sigma_articulos."proveedorNombre"`, tal cual: "ROFINA S A I C F", con
+ * los espacios entre las siglas. Un nombre que no coincide no rompe nada --y
+ * eso es lo peligroso-- simplemente no aplica el descuento y nadie se entera.
+ * Por eso hay una prueba que lo verifica contra el nombre real.
+ *
+ * SE PUEDE PISAR A MANO. Es un valor por defecto, no una regla: si una orden
+ * puntual lleva otro número, se escribe encima como cualquier otro renglón.
+ */
+export const DESC2_FIJO_POR_PROVEEDOR: Readonly<Record<string, number>> = {
+  "ROFINA S A I C F": 4.94,
+};
+
+/** El desc 2 con el que arranca un renglón de este proveedor. */
+export function desc2DelProveedor(proveedor: string | null): number {
+  if (!proveedor) return 0;
+  return DESC2_FIJO_POR_PROVEEDOR[proveedor.trim()] ?? 0;
+}
 
 /**
  * Los dos descuentos, aplicados EN CASCADA y no sumados.
@@ -662,8 +705,9 @@ export function renglonInicial(f: FilaCompra): RenglonOrden {
     // este tipo.
     cantidad: cantidadSugerida(f.sugerido, unidad, f.unidadesPorBulto),
     descuento: f.sellInPct ?? 0,
-    // Vacío a propósito: ver RenglonOrden.
-    descuento2: 0,
+    // Cero, salvo el proveedor que tiene un acuerdo fijo. Ver
+    // DESC2_FIJO_POR_PROVEEDOR.
+    descuento2: desc2DelProveedor(f.proveedor),
   };
 }
 
