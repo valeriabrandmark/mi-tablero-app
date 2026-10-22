@@ -78,8 +78,18 @@ function columnas(): Columna<FilaCompetencia>[] {
     {
       titulo: "Situación",
       celda: (f) => (
-        <span className={`rounded-full border px-2 py-0.5 text-[11px] whitespace-nowrap ${TONOS[grupoDe(f.grupo).tono]}`}>
-          {grupoDe(f.grupo).titulo}
+        <span className="flex items-center gap-1">
+          <span className={`rounded-full border px-2 py-0.5 text-[11px] whitespace-nowrap ${TONOS[grupoDe(f.grupo).tono]}`}>
+            {grupoDe(f.grupo).titulo}
+          </span>
+          {f.reposicion?.restringido && (
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[11px] whitespace-nowrap ${TONOS.critico}`}
+              title="Mercado Libre no deja mandar este producto a Full"
+            >
+              sin Full
+            </span>
+          )}
         </span>
       ),
       orden: (f) => GRUPOS.findIndex((g) => g.clave === f.grupo),
@@ -372,6 +382,13 @@ function Detalle({ f, hayFoxie }: { f: FilaCompetencia; hayFoxie: boolean }) {
           </p>
         )}
         {f.error && <p className="mt-1">Error de la consulta: {f.error}</p>}
+        {f.reposicion?.restringido && (
+          <p className="mt-1">
+            Mercado Libre tiene este producto restringido para Full: no se puede reponer stock ahí, así
+            que no puede competir con el beneficio de Full. El motivo (prohibido, no lo están recibiendo
+            o ventas bajas) sólo se ve en la pantalla de envíos a Full de ML.
+          </p>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

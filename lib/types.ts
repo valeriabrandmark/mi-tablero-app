@@ -1,3 +1,4 @@
+import type { ReposicionFull } from "@/lib/reposicion-full";
 /**
  * Todos los filtros del tablero son de selección múltiple: el valor es una
  * LISTA. Lista vacía (o ausente) significa "sin filtrar", no "ninguno".
@@ -1294,6 +1295,13 @@ export type FilaStockFull = {
   entradaExacta: boolean;
   uds30: number;
   valorizacion: number;
+  /**
+   * La recomendación de reposición de Full de Mercado Libre: si el producto
+   * está restringido para mandar a Full y cuánto sugiere mandar. Null cuando
+   * todavía no hay dato (el script no corrió, o el SKU no tiene producto en la
+   * tabla). Ver lib/queries-reposicion-full.ts.
+   */
+  reposicion: ReposicionFull | null;
 };
 
 export type DashboardStockFull = {

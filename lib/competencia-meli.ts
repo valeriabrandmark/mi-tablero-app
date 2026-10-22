@@ -25,6 +25,7 @@
  */
 
 import { CARGA_IMPOSITIVA } from "@/lib/impuestos";
+import type { ReposicionFull } from "@/lib/reposicion-full";
 
 /** El IVA con el que ML nos factura la comisión. */
 const IVA_COMISION = 1.21;
@@ -72,6 +73,11 @@ export type FilaCompetenciaBase = {
   envioFuente: "ventas" | "foxie" | null;
   costoFoxie: number | null;
   rivales: number;
+  /**
+   * Si Mercado Libre deja mandar este producto a Full. Un restringido no puede
+   * tener el beneficio de Full, y eso solo puede explicar que no gane la caja.
+   */
+  reposicion: ReposicionFull | null;
 };
 
 export type Boost = { id: string; status: string };

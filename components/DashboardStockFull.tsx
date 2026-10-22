@@ -16,6 +16,11 @@ import {
 import { PALETA, TEMA } from "@/lib/paleta";
 import { TRAMOS, tramoDe, UMBRALES_TARJETAS, UMBRAL_PARADO } from "@/lib/stock-full";
 import { useDatosTablero } from "@/lib/useDatosTablero";
+import {
+  NOMBRES_PLAZO,
+  NOMBRES_RECOMENDACION,
+  type ReposicionFull,
+} from "@/lib/reposicion-full";
 import type {
   DashboardStockFull,
   FilaNoDisponible,
@@ -179,7 +184,51 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
       orden: (f) => f.valorizacion,
       total: fmtMoneda(sumar(filas, (f) => f.valorizacion)),
     },
+    {
+      titulo: "Envío a Full",
+      ayuda:
+        "Lo que dice Mercado Libre en su recomendación de reposición: si el producto está restringido para mandar a Full (\"Eliminá este producto\") o cuántas unidades sugiere mandar. ML no informa el motivo de la restricción: ese sólo se ve en su pantalla de envíos a Full.",
+      celda: (f) => <CeldaReposicion r={f.reposicion} />,
+      // Los restringidos primero, después los que ML pide mandar, por cantidad.
+      orden: (f) =>
+        f.reposicion == null
+          ? null
+          : f.reposicion.restringido
+            ? 1_000_000
+            : (f.reposicion.cantidadSugerida ?? 0),
+      total: `${fmtNumero(filas.filter((f) => f.reposicion?.restringido).length)} restringidos`,
+    },
   ];
+}
+
+/** Restringido en rojo; si no, la sugerencia de ML con su plazo. */
+function CeldaReposicion({ r }: { r: ReposicionFull | null }) {
+  if (!r) return <span className="text-muted">—</span>;
+  if (r.restringido) {
+    return (
+      <span style={{ color: TEMA.negativo }} title={r.recomendacion ?? undefined}>
+        Restringido
+      </span>
+    );
+  }
+  if (r.cantidadSugerida) {
+    return (
+      <span title={r.recomendacion ?? undefined}>
+        Mandar {fmtNumero(r.cantidadSugerida)}
+        {(r.plazo || r.urgencia === "URGENT") && (
+          <span className="text-muted">
+            {" "}
+            · {r.urgencia === "URGENT" ? "urgente" : NOMBRES_PLAZO[r.plazo ?? ""] ?? r.plazo}
+          </span>
+        )}
+      </span>
+    );
+  }
+  return (
+    <span className="text-muted">
+      {r.recomendacion ? (NOMBRES_RECOMENDACION[r.recomendacion] ?? r.recomendacion) : "sin sugerencia"}
+    </span>
+  );
 }
 
 /**
