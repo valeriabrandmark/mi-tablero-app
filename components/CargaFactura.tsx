@@ -101,6 +101,14 @@ type Borrador = {
   codigoComprobante: string;
   /** Las percepciones, para poder imputarlas una por una. */
   percepciones: { concepto: string; monto: string }[];
+  /**
+   * QUE NUMERO DE ENVIO ES, cuando se reabrió una factura para corregirla.
+   *
+   * Sin cargar o 1 es una factura nueva. Sube sólo al reenviar desde
+   * "Enviadas a Sigma", y entra en el `id` que decide si Sigma la toma como
+   * nueva o como una que ya procesó (ver `idDeLaFactura`).
+   */
+  intento?: number;
 };
 
 let siguienteId = 0;
@@ -602,6 +610,23 @@ function Formulario() {
           Empezar otra
         </button>
       </div>
+
+      {/* QUE ESTO ES UN REENVIO, Y QUE DEPENDE DE ALGO QUE PASA AFUERA.
+          Sigma no deja cargar dos veces la misma factura, así que esto sólo
+          entra si del otro lado la anularon. Si no la anularon, el envío va a
+          fallar -- o peor, va a entrar y van a quedar las dos. */}
+      {(b.intento ?? 1) > 1 && (
+        <Aviso tono="alerta">
+          <p className="font-medium">
+            Reenvío nº {b.intento} de esta factura.
+          </p>
+          <p className="mt-1 text-xs">
+            Va a entrar en Sigma como un comprobante nuevo. Antes de mandarla,
+            asegurate de que la anterior esté <strong>anulada</strong> del otro
+            lado: si no, la factura queda cargada dos veces.
+          </p>
+        </Aviso>
+      )}
 
       {/* 1. LA OC ------------------------------------------------------- */}
       <Panel
@@ -1762,6 +1787,7 @@ function useArmadoDeFactura(
       percepciones: b.percepciones
         .map((p) => ({ concepto: p.concepto, monto: leerNumero(p.monto) ?? 0 }))
         .filter((p) => p.concepto && p.monto),
+      intento: b.intento ?? 1,
     }),
     [b],
   );
@@ -1976,7 +2002,9 @@ function EnviarASigma({
       const r = await fetch("/api/compras/facturas/sigma", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cruce, totales, datos, proveedorNombre }),
+        // EL BORRADOR VIAJA ENTERO: es lo que deja reabrir la factura para
+        // corregirla. El payload que entiende Sigma ya no alcanza.
+        body: JSON.stringify({ cruce, totales, datos, proveedorNombre, borrador: b }),
       });
       const j = await r.json();
       setResultado(

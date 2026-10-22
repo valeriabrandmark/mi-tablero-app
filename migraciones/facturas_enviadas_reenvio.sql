@@ -1,0 +1,41 @@
+-- migración `facturas_enviadas_reenvio` · 22/10/2026
+--
+-- PODER VOLVER A ABRIR UNA FACTURA Y MANDARLA DE NUEVO.
+--
+-- Una factura se manda, se anula en Sigma --porque tenía algo mal-- y hay que
+-- cargarla corregida. Hasta ahora eso era tipearla entera otra vez.
+--
+-- ---------------------------------------------------------------------------
+-- POR QUE NO ALCANZA CON EL `payload` QUE YA GUARDAMOS
+--
+-- El payload es lo que entiende Sigma: artículo, cantidad y precio unitario
+-- neto. NO es lo que se tipeó. Se perdieron en el camino la bonificación de
+-- cada renglón, el importe tal como venía en el papel, la OC contra la que se
+-- cruzó, el total impreso. Reconstruir el borrador desde el payload daría una
+-- factura que SE PARECE a la original con otros números adentro, y nadie lo
+-- notaría hasta que el cruce diera distinto.
+--
+-- Así que se guarda lo tipeado, tal cual.
+--
+-- ---------------------------------------------------------------------------
+-- POR QUE HACE FALTA EL NUMERO DE INTENTO
+--
+-- `ImportCompras` es IDEMPOTENTE por el campo `id`, y eso es lo que hoy evita
+-- la factura duplicada: mandar dos veces la misma contesta "registro procesado
+-- anteriormente" y no la carga de nuevo.
+--
+-- Esa misma protección es la que impide reenviar. Con el mismo `id`, una
+-- factura corregida --aunque la hayan anulado del otro lado-- no entra: Sigma
+-- la reconoce y no hace nada.
+--
+-- Por eso el reenvío lleva número de intento, y el `id` lo incluye a partir
+-- del segundo (`FC-...-1-001-R2`). El primero queda igual que siempre, así que
+-- las facturas que ya se mandaron conservan su id.
+--
+-- LA PROTECCION NO SE PIERDE: el intento no sube solo. Sube cuando alguien
+-- toca "reenviar" y confirma que la anuló en Sigma, que es una decisión y no
+-- un reintento automático. Apretar dos veces el botón de mandar sigue siendo
+-- el mismo id, y sigue sin duplicar nada.
+alter table app.facturas_compra_enviadas
+  add column if not exists borrador jsonb,
+  add column if not exists intento integer not null default 1;
