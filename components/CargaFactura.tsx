@@ -18,6 +18,7 @@ import {
   type TotalesComprobante,
   CLASES_DIFERENCIA,
   bloquesDelCuadro,
+  plataQueCuenta,
   entraEnLaTabla,
   type ClaseDiferencia,
 } from "@/lib/factura-cruce";
@@ -1314,7 +1315,11 @@ type ColumnaMail = {
   numerica?: boolean;
   /** `undefined` = va siempre. */
   bloque?: "precio" | "cantidad";
-  valor: (l: LineaCruce, d: DatosMail) => string;
+  valor: (
+    l: LineaCruce,
+    d: DatosMail,
+    elegidas: Set<ClaseDiferencia>,
+  ) => string;
 };
 
 /** Un porcentaje como se lee en el cuadro: 18 -> "18,00 %". */
@@ -1390,7 +1395,10 @@ const COLUMNAS_MAIL: ColumnaMail[] = [
     titulo: "Diferencia unit",
     numerica: true,
     bloque: "precio",
-    valor: (l) => {
+    // VACIA SI NO SE ESTA RECLAMANDO ESTA MITAD. Ver `plataQueCuenta`: el
+    // total de la columna tiene que ser la suma de lo que se ve arriba.
+    valor: (l, _d, elegidas) => {
+      if (!plataQueCuenta(l, elegidas).precio) return "—";
       const d = difPorUnidad(l);
       return d == null || d === 0 ? "—" : pesos(d);
     },
@@ -1399,7 +1407,10 @@ const COLUMNAS_MAIL: ColumnaMail[] = [
     titulo: "Diferencia total",
     numerica: true,
     bloque: "precio",
-    valor: (l) => (l.difPrecio === 0 ? "—" : pesos(l.difPrecio)),
+    valor: (l, _d, elegidas) =>
+      plataQueCuenta(l, elegidas).precio && l.difPrecio !== 0
+        ? pesos(l.difPrecio)
+        : "—",
   },
 
   // --- Lo que hace falta para reclamar una CANTIDAD ---------------------
@@ -1420,7 +1431,10 @@ const COLUMNAS_MAIL: ColumnaMail[] = [
     titulo: "Dif. $ cantidad",
     numerica: true,
     bloque: "cantidad",
-    valor: (l) => (difPorCantidad(l) === 0 ? "—" : pesos(difPorCantidad(l))),
+    valor: (l, _d, elegidas) =>
+      plataQueCuenta(l, elegidas).cantidad && difPorCantidad(l) !== 0
+        ? pesos(difPorCantidad(l))
+        : "—",
   },
 ];
 
@@ -1441,15 +1455,27 @@ function htmlMail(d: DatosMail, elegidas: Set<ClaseDiferencia>): string {
   };
   const columnas = columnasMail(elegidas);
   const bloques = bloquesDelCuadro(elegidas);
-  const totalCosto = d.lineas.reduce((s, l) => s + l.difPrecio, 0);
-  const totalCantidad = d.lineas.reduce((s, l) => s + difPorCantidad(l), 0);
+  /* EL TOTAL ES LA SUMA DE LO QUE SE VE, y nada más. Una línea puede entrar
+     al cuadro por una clase y traerse puesta la plata de otra que nadie pidió
+     reclamar; esa no suma. Ver `plataQueCuenta`. */
+  const totalCosto = d.lineas.reduce(
+    (s, l) => s + (plataQueCuenta(l, elegidas).precio ? l.difPrecio : 0),
+    0,
+  );
+  const totalCantidad = d.lineas.reduce(
+    (s, l) => s + (plataQueCuenta(l, elegidas).cantidad ? difPorCantidad(l) : 0),
+    0,
+  );
   const titulo = [d.proveedor, d.factura, d.oc].filter(Boolean).map(esc).join(" · ");
 
   const filas = d.lineas
     .map((l) => {
       const bg = fondo[l.estado] ?? "#fef3c7";
       return `<tr style="background:${bg};">${columnas
-        .map((c) => `<td style="${c.numerica ? num : td}">${esc(c.valor(l, d))}</td>`)
+        .map(
+          (c) =>
+            `<td style="${c.numerica ? num : td}">${esc(c.valor(l, d, elegidas))}</td>`,
+        )
         .join("")}</tr>`;
     })
     .join("");
@@ -1463,7 +1489,7 @@ function htmlMail(d: DatosMail, elegidas: Set<ClaseDiferencia>): string {
     (bloques.precio ? 1 : 0) -
     (bloques.cantidad ? 1 : 0);
   const celdasTotal = [
-    `<td style="${td}" colspan="${antesDelTotal}">Total diferencias</td>`,
+    `<td style="${td}" colspan="${antesDelTotal}">TOTAL SIN IVA</td>`,
     bloques.precio ? `<td style="${num}">${pesos(totalCosto)}</td>` : "",
     bloques.cantidad ? `<td style="${num}">${pesos(totalCantidad)}</td>` : "",
   ].join("");
@@ -1475,7 +1501,11 @@ function htmlMail(d: DatosMail, elegidas: Set<ClaseDiferencia>): string {
 <tbody>${filas}
 <tr style="background:#f1f5f9;font-weight:bold;">${celdasTotal}</tr>
 </tbody></table>
-<p style="font-size:12px;margin:8px 0 0;">Total factura calculado: ${pesos(d.totales.total)}${
+<p style="font-size:12px;margin:8px 0 0;">${
+    bloques.precio && bloques.cantidad
+      ? `<b>Total del detalle: ${pesos(totalCosto + totalCantidad)}</b> · `
+      : ""
+  }Total factura calculado: ${pesos(d.totales.total)}${
     d.totales.diferencia != null && !d.totales.cuadra
       ? ` · Total impreso: ${pesos(d.totales.total - d.totales.diferencia)}`
       : ""
@@ -1487,7 +1517,9 @@ function textoMail(d: DatosMail, elegidas: Set<ClaseDiferencia>): string {
   const columnas = columnasMail(elegidas);
   return [
     columnas.map((c) => c.titulo).join("\t"),
-    ...d.lineas.map((l) => columnas.map((c) => c.valor(l, d)).join("\t")),
+    ...d.lineas.map((l) =>
+      columnas.map((c) => c.valor(l, d, elegidas)).join("\t"),
+    ),
   ].join("\n");
 }
 

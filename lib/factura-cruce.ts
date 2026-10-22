@@ -1136,6 +1136,41 @@ export function entraEnLaTabla(l: LineaCruce, elegidas: Set<ClaseDiferencia>): b
  *
  * Con las cuatro clases tildadas --que es como arranca-- salen las dos.
  */
+/**
+ * QUE PLATA DE ESTA LINEA ENTRA EN EL TOTAL, segun lo tildado.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE NO ALCANZA CON FILTRAR LAS FILAS
+ *
+ * Una línea entra en el cuadro si cumple ALGUNA de las clases tildadas, y una
+ * línea puede cumplir dos. Si se tildó "precios de más" y "cantidades de
+ * menos", un renglón que facturó de menos en unidades entra por eso -- y se
+ * trae puesta su diferencia de precio, que puede ser NEGATIVA y que nadie
+ * pidió reclamar.
+ *
+ * Sumando la fila entera, ese importe se cuela en el total y lo baja. El
+ * cuadro quedaría pidiendo menos plata de la que corresponde, y la cuenta no
+ * daría con la suma de lo que se ve.
+ *
+ * Por eso cada mitad de la plata se cuenta por separado, y sólo si su propia
+ * clase está tildada. Lo que no entra tampoco se muestra: el total de una
+ * columna tiene que ser la suma de lo que se ve arriba, o el proveedor
+ * desconfía del cuadro entero -- con razón.
+ */
+export function plataQueCuenta(
+  l: LineaCruce,
+  elegidas: Set<ClaseDiferencia>,
+): { precio: boolean; cantidad: boolean } {
+  return {
+    precio:
+      (l.difPrecio > 0 && elegidas.has("precio_mas")) ||
+      (l.difPrecio < 0 && elegidas.has("precio_menos")),
+    cantidad:
+      (l.difUnidades > 0 && elegidas.has("cantidad_mas")) ||
+      (l.difUnidades < 0 && elegidas.has("cantidad_menos")),
+  };
+}
+
 export function bloquesDelCuadro(elegidas: Set<ClaseDiferencia>): {
   precio: boolean;
   cantidad: boolean;
