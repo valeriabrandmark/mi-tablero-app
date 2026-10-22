@@ -14,6 +14,7 @@ import {
   CLASES_DIFERENCIA,
   cruzar,
   bloquesDelCuadro,
+  plataQueCuenta,
   entraEnLaTabla,
   resumirDiferencias,
   indexarMaestro,
@@ -559,6 +560,55 @@ revisar(
 revisar(
   "sin nada tildado no sale ninguna",
   bloquesDelCuadro(new Set<ClaseDiferencia>()),
+  { precio: false, cantidad: false },
+);
+
+/* --- EL TOTAL ES LA SUMA DE LO QUE SE VE --------------------------------
+
+   Una línea entra al cuadro si cumple ALGUNA de las clases tildadas, y puede
+   cumplir dos. El caso que rompe la cuenta: se tilda "precios de más" y
+   "cantidades de menos", y entra un renglón que facturó de menos en unidades
+   TRAYENDOSE PUESTA una diferencia de precio negativa que nadie pidió
+   reclamar. Sumando la fila entera, ese importe baja el total y el cuadro
+   termina pidiendo menos plata de la que corresponde.
+   ------------------------------------------------------------------------ */
+
+{
+  // Facturó 2 unidades de menos Y cobró 500 de menos por unidad.
+  const mixta = lineaDif({ difUnidades: -2, difPrecio: -500 });
+
+  revisar(
+    "reclamando precios de más, su precio de menos NO suma",
+    plataQueCuenta(mixta, soloCon("precio_mas", "cantidad_menos")),
+    { precio: false, cantidad: true },
+  );
+  revisar(
+    "y si se tilda precios de menos, sí",
+    plataQueCuenta(mixta, soloCon("precio_menos")),
+    { precio: true, cantidad: false },
+  );
+}
+
+{
+  // El caso normal: cobró de más y facturó de más.
+  const dos = lineaDif({ difUnidades: 3, difPrecio: 800 });
+  revisar(
+    "con las cuatro tildadas suman las dos mitades",
+    plataQueCuenta(dos, TODAS),
+    { precio: true, cantidad: true },
+  );
+  revisar(
+    "sin nada tildado no suma ninguna",
+    plataQueCuenta(dos, new Set<ClaseDiferencia>()),
+    { precio: false, cantidad: false },
+  );
+}
+
+// Una línea sin diferencia no suma aunque esté todo tildado: cero no es ni de
+// más ni de menos.
+revisar(
+  "una línea sin diferencia no suma",
+  plataQueCuenta(lineaDif({}), TODAS),
   { precio: false, cantidad: false },
 );
 
