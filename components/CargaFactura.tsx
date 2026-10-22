@@ -16,6 +16,9 @@ import {
   type RenglonOC,
   type ResultadoCruce,
   type TotalesComprobante,
+  CLASES_DIFERENCIA,
+  entraEnLaTabla,
+  type ClaseDiferencia,
 } from "@/lib/factura-cruce";
 import {
   armarImportCompras,
@@ -523,6 +526,24 @@ function Formulario() {
     [maestro],
   );
 
+  /**
+   * SKU nuestro -> código con el que el proveedor lo vende.
+   *
+   * Es para la tabla que se le manda: nuestro SKU no le dice nada y lo obliga
+   * a traducir renglón por renglón antes de poder contestar. Los que no lo
+   * tienen cargado quedan afuera del mapa y la celda sale vacía, que es lo
+   * honesto: un código inventado es peor que ninguno.
+   */
+  const codigoDe = useMemo(
+    () =>
+      new Map(
+        maestro
+          .filter((a) => a.codigoCompra)
+          .map((a) => [a.sku, a.codigoCompra as string]),
+      ),
+    [maestro],
+  );
+
   const hayOC = renglonesOC.length > 0;
   /** El nombre del proveedor elegido, para la constancia del envío. */
   const nombreDelProveedor =
@@ -537,6 +558,10 @@ function Formulario() {
    */
   const hayProveedor = !!b.proveedor;
   const hayFactura = renglonesFactura.length > 0;
+
+  // El armado del envío, para las dos mitades: el destino (panel 2) y el
+  // botón (abajo de los totales). Ver `useArmadoDeFactura`.
+  const sigma = useArmadoDeFactura(b, resultado, totales);
   const r = resultado.resumen;
   const difCantidadTotal = diferencias.reduce((s, l) => s + difPorCantidad(l), 0);
 
@@ -550,8 +575,13 @@ function Formulario() {
     ]
       .filter(Boolean)
       .join(" "),
+    // El número solo, para la columna que va en cada renglón.
+    numeroFactura: b.cabecera.numero
+      ? `${b.cabecera.letra} ${b.cabecera.numero}`
+      : "",
     lineas: diferencias,
     descripcionDe,
+    codigoDe,
     totales,
   };
 
@@ -663,21 +693,12 @@ function Formulario() {
           pantalla se eligen después de haber cargado todo, cuando ya se está
           apurado. Acá se eligen antes de empezar, y el botón queda a mano sin
           tener que bajar por la tabla entera. */}
-      {hayProveedor && (
-        <CargarEnSigma
-          b={b}
-          cambiar={cambiar}
-          cruce={resultado}
-          totales={totales}
-          proveedorNombre={nombreDelProveedor}
-          hayFactura={hayFactura}
-        />
-      )}
+      {hayProveedor && <DestinoSigma b={b} cambiar={cambiar} datos={sigma.datos} />}
 
-      {/* 3. LA FACTURA --------------------------------------------------- */}
+      {/* 3. LOS ARTICULOS DE LA FACTURA ---------------------------------- */}
       {hayProveedor && (
         <Panel
-          titulo="3. Factura del proveedor"
+          titulo="3. Carga de artículos"
           nota={hayFactura ? `${renglonesFactura.length} renglones` : undefined}
         >
           <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -929,111 +950,8 @@ function Formulario() {
         </Panel>
       )}
 
-      {/* 4. EL REPORTE DE DIFERENCIAS ------------------------------------ */}
-      {hayProveedor && hayFactura && (
-        <>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-            <TarjetaKpi titulo="Coinciden" valor={fmtNumero(r.ok)} acento="#22c55e" compacta />
-            <TarjetaKpi
-              titulo="Con diferencia"
-              valor={fmtNumero(r.conDiferencia)}
-              acento={r.conDiferencia ? "#f59e0b" : undefined}
-              compacta
-            />
-            <TarjetaKpi
-              titulo="Faltan en la factura"
-              valor={fmtNumero(r.faltan)}
-              acento={r.faltan ? "#f43f5e" : undefined}
-              compacta
-            />
-            <TarjetaKpi
-              titulo="No estaban en la OC"
-              valor={fmtNumero(r.sobran)}
-              acento={r.sobran ? "#a78bfa" : undefined}
-              compacta
-            />
-            <TarjetaKpi
-              titulo="Dif. por costo"
-              valor={fmtMoneda(r.difPrecio)}
-              detalle="lo facturado de más (o de menos) contra el costo de la OC"
-              acento={Math.abs(r.difPrecio) > 1 ? "#f59e0b" : undefined}
-              compacta
-            />
-            <TarjetaKpi
-              titulo="Dif. por cantidad"
-              valor={fmtMoneda(difCantidadTotal)}
-              detalle="unidades de más o de menos, a costo de la OC"
-              acento={Math.abs(difCantidadTotal) > 1 ? "#f59e0b" : undefined}
-              compacta
-            />
-          </div>
-
-          <Panel
-            titulo="4. Reporte de diferencias"
-            nota={`Neto OC ${fmtMoneda(r.netoOC)} · Neto factura ${fmtMoneda(r.netoFactura)}`}
-          >
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <button
-                className={soloDiferencias ? BOTON_ACTIVO : BOTON}
-                onClick={() => setSoloDiferencias(true)}
-              >
-                Sólo diferencias ({diferencias.length})
-              </button>
-              <button
-                className={!soloDiferencias ? BOTON_ACTIVO : BOTON}
-                onClick={() => setSoloDiferencias(false)}
-              >
-                Todo ({resultado.lineas.length})
-              </button>
-              <button
-                className={BOTON}
-                onClick={() => descargarCsv(resultado.lineas, descripcionDe)}
-              >
-                Descargar cruce (CSV)
-              </button>
-            </div>
-
-            {lineasVisibles.length === 0 ? (
-              <Aviso tono="info">
-                Todos los artículos coinciden con la OC en cantidad y costo.
-              </Aviso>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[980px] text-xs">
-                  <thead>
-                    <tr className="border-line text-muted border-b text-left">
-                      <th className="py-2 pr-2 font-normal">Estado</th>
-                      <th className="py-2 pr-2 font-normal">Artículo</th>
-                      <th className="py-2 pr-2 text-right font-normal">Unid. OC</th>
-                      <th className="py-2 pr-2 text-right font-normal">Unid. factura</th>
-                      <th className="py-2 pr-2 text-right font-normal">Dif. unid.</th>
-                      <th className="py-2 pr-2 text-right font-normal">Costo unit. OC</th>
-                      <th className="py-2 pr-2 text-right font-normal">Costo unit. factura</th>
-                      <th className="py-2 pr-2 text-right font-normal">Dif. $ costo</th>
-                      <th className="py-2 text-right font-normal">Dif. $ cantidad</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lineasVisibles.map((l, i) => (
-                      <FilaCruce
-                        key={`${l.sku ?? "x"}-${l.renglones[0]?.fila ?? i}`}
-                        l={l}
-                        descripcionDe={descripcionDe}
-                        hayOC={hayOC}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            <p className="text-muted mt-3 text-xs">
-              Todo en unidades y a costo neto por unidad, con las bonificaciones del renglón. El
-              costo se compara con media unidad de tolerancia (0,5 % o $0,50).
-            </p>
-          </Panel>
-
-          {/* 5. LOS TOTALES ---------------------------------------------- */}
-          <Panel titulo="5. Totales del comprobante">
+          {/* 4. LOS TOTALES, Y EL ENVIO ---------------------------------- */}
+          <Panel titulo="4. Totales del comprobante">
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <label className="text-muted space-y-1 text-xs">
@@ -1113,10 +1031,132 @@ function Formulario() {
               centavos es redondeo; si no cuadra por más, casi siempre falta una percepción o un
               renglón.
             </p>
+
+            {/* EL BOTON VA ACA Y NO EN UN PANEL APARTE: lo último que se
+                mira antes de escribir en la contabilidad tiene que ser el
+                total contra el papel. */}
+            <EnviarASigma
+              b={b}
+              armado={sigma.armado}
+              imputacion={sigma.imputacion}
+              onImputacion={sigma.setImputacion}
+              cruce={resultado}
+              totales={totales}
+              datos={sigma.datos}
+              proveedorNombre={nombreDelProveedor}
+              hayFactura={hayFactura}
+            />
           </Panel>
 
-          {/* 6. LA TABLA PARA EL MAIL ------------------------------------ */}
-          <TablaParaMail datos={datosMail} />
+          {/* 5. EL REPORTE DE DIFERENCIAS, CON LA TABLA DEL MAIL ADENTRO */}
+      {hayProveedor && hayFactura && (
+        <>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+            <TarjetaKpi titulo="Coinciden" valor={fmtNumero(r.ok)} acento="#22c55e" compacta />
+            <TarjetaKpi
+              titulo="Con diferencia"
+              valor={fmtNumero(r.conDiferencia)}
+              acento={r.conDiferencia ? "#f59e0b" : undefined}
+              compacta
+            />
+            <TarjetaKpi
+              titulo="Faltan en la factura"
+              valor={fmtNumero(r.faltan)}
+              acento={r.faltan ? "#f43f5e" : undefined}
+              compacta
+            />
+            <TarjetaKpi
+              titulo="No estaban en la OC"
+              valor={fmtNumero(r.sobran)}
+              acento={r.sobran ? "#a78bfa" : undefined}
+              compacta
+            />
+            <TarjetaKpi
+              titulo="Dif. por costo"
+              valor={fmtMoneda(r.difPrecio)}
+              detalle="lo facturado de más (o de menos) contra el costo de la OC"
+              acento={Math.abs(r.difPrecio) > 1 ? "#f59e0b" : undefined}
+              compacta
+            />
+            <TarjetaKpi
+              titulo="Dif. por cantidad"
+              valor={fmtMoneda(difCantidadTotal)}
+              detalle="unidades de más o de menos, a costo de la OC"
+              acento={Math.abs(difCantidadTotal) > 1 ? "#f59e0b" : undefined}
+              compacta
+            />
+          </div>
+
+          <Panel
+            titulo="5. Reporte de diferencias"
+            nota={`Neto OC ${fmtMoneda(r.netoOC)} · Neto factura ${fmtMoneda(r.netoFactura)}`}
+          >
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <button
+                className={soloDiferencias ? BOTON_ACTIVO : BOTON}
+                onClick={() => setSoloDiferencias(true)}
+              >
+                Sólo diferencias ({diferencias.length})
+              </button>
+              <button
+                className={!soloDiferencias ? BOTON_ACTIVO : BOTON}
+                onClick={() => setSoloDiferencias(false)}
+              >
+                Todo ({resultado.lineas.length})
+              </button>
+              <button
+                className={BOTON}
+                onClick={() => descargarCsv(resultado.lineas, descripcionDe)}
+              >
+                Descargar cruce (CSV)
+              </button>
+            </div>
+
+            {lineasVisibles.length === 0 ? (
+              <Aviso tono="info">
+                Todos los artículos coinciden con la OC en cantidad y costo.
+              </Aviso>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[980px] text-xs">
+                  <thead>
+                    <tr className="border-line text-muted border-b text-left">
+                      <th className="py-2 pr-2 font-normal">Estado</th>
+                      <th className="py-2 pr-2 font-normal">Artículo</th>
+                      <th className="py-2 pr-2 text-right font-normal">Unid. OC</th>
+                      <th className="py-2 pr-2 text-right font-normal">Unid. factura</th>
+                      <th className="py-2 pr-2 text-right font-normal">Dif. unid.</th>
+                      <th className="py-2 pr-2 text-right font-normal">Costo unit. OC</th>
+                      <th className="py-2 pr-2 text-right font-normal">Costo unit. factura</th>
+                      <th className="py-2 pr-2 text-right font-normal">Dif. $ costo</th>
+                      <th className="py-2 text-right font-normal">Dif. $ cantidad</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lineasVisibles.map((l, i) => (
+                      <FilaCruce
+                        key={`${l.sku ?? "x"}-${l.renglones[0]?.fila ?? i}`}
+                        l={l}
+                        descripcionDe={descripcionDe}
+                        hayOC={hayOC}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="text-muted mt-3 text-xs">
+              Todo en unidades y a costo neto por unidad, con las bonificaciones del renglón. El
+              costo se compara con media unidad de tolerancia (0,5 % o $0,50).
+            </p>
+
+            {/* LA TABLA PARA EL PROVEEDOR, ADENTRO DEL REPORTE Y NO EN UN
+                PANEL APARTE. Es lo mismo mirado de dos formas: arriba
+                para entender qué pasó, abajo para mandárselo. Separadas,
+                había que bajar hasta otro panel para armar un mail sobre
+                la tabla que se estaba leyendo. */}
+            <TablaParaMail datos={datosMail} />
+          </Panel>
         </>
       )}
 
@@ -1230,9 +1270,23 @@ function FilaTotal({ label, valor, fuerte = false }: { label: string; valor: num
 type DatosMail = {
   proveedor: string;
   oc: string;
+  /** "Factura A 0001-00000111 del 01/10/2026", para el encabezado. */
   factura: string;
+  /**
+   * EL NUMERO SOLO, PARA LA COLUMNA. Va en cada renglón y no sólo en el
+   * título: la tabla se pega en un mail, se reenvía, se copia a una planilla
+   * del proveedor — y en cualquiera de esos pasos el encabezado se pierde y
+   * las filas quedan sin decir de qué factura hablan.
+   */
+  numeroFactura: string;
   lineas: LineaCruce[];
   descripcionDe: Map<string, string>;
+  /**
+   * SKU nuestro -> código con el que el proveedor lo vende. Es el dato que al
+   * proveedor le sirve: nuestro SKU no le dice nada y lo obliga a traducir
+   * renglón por renglón antes de poder contestar.
+   */
+  codigoDe: Map<string, string>;
   totales: ReturnType<typeof totalesComprobante>;
 };
 
@@ -1245,7 +1299,9 @@ const esc = (s: string) =>
 
 const ENCABEZADOS_MAIL = [
   "Motivo",
+  "Factura",
   "SKU",
+  "Cód. proveedor",
   "Descripción",
   "Unid. OC",
   "Unid. facturadas",
@@ -1256,11 +1312,13 @@ const ENCABEZADOS_MAIL = [
   "Dif. $ cantidad",
 ];
 
-function celdasMail(l: LineaCruce, descripcionDe: Map<string, string>): string[] {
+function celdasMail(l: LineaCruce, d: DatosMail): string[] {
   return [
     MOTIVO_MAIL[l.estado],
+    d.numeroFactura,
     l.sku ?? "",
-    (l.sku && descripcionDe.get(l.sku)) || l.descripcion,
+    (l.sku && d.codigoDe.get(l.sku)) || "",
+    (l.sku && d.descripcionDe.get(l.sku)) || l.descripcion,
     l.oc ? n0(l.oc.unidades) : "—",
     l.factura ? n0(l.factura.unidades) : "—",
     l.difUnidades === 0 ? "—" : `${l.difUnidades > 0 ? "+" : ""}${n0(l.difUnidades)}`,
@@ -1287,10 +1345,10 @@ function htmlMail(d: DatosMail): string {
 
   const filas = d.lineas
     .map((l) => {
-      const c = celdasMail(l, d.descripcionDe);
+      const c = celdasMail(l, d);
       const bg = fondo[l.estado] ?? "#fef3c7";
       return `<tr style="background:${bg};">${c
-        .map((v, i) => `<td style="${i >= 3 ? num : td}">${esc(v)}</td>`)
+        .map((v, i) => `<td style="${i >= 5 ? num : td}">${esc(v)}</td>`)
         .join("")}</tr>`;
     })
     .join("");
@@ -1300,7 +1358,7 @@ function htmlMail(d: DatosMail): string {
 <table style="border-collapse:collapse;">
 <thead><tr>${ENCABEZADOS_MAIL.map((h) => `<th style="${th}">${esc(h)}</th>`).join("")}</tr></thead>
 <tbody>${filas}
-<tr style="background:#f1f5f9;font-weight:bold;"><td style="${td}" colspan="8">Total diferencias</td><td style="${num}">${pesos(totalCosto)}</td><td style="${num}">${pesos(totalCantidad)}</td></tr>
+<tr style="background:#f1f5f9;font-weight:bold;"><td style="${td}" colspan="10">Total diferencias</td><td style="${num}">${pesos(totalCosto)}</td><td style="${num}">${pesos(totalCantidad)}</td></tr>
 </tbody></table>
 <p style="font-size:12px;margin:8px 0 0;">Total factura calculado: ${pesos(d.totales.total)}${
     d.totales.diferencia != null && !d.totales.cuadra
@@ -1313,20 +1371,36 @@ function htmlMail(d: DatosMail): string {
 function textoMail(d: DatosMail): string {
   return [
     ENCABEZADOS_MAIL.join("\t"),
-    ...d.lineas.map((l) => celdasMail(l, d.descripcionDe).join("\t")),
+    ...d.lineas.map((l) => celdasMail(l, d).join("\t")),
   ].join("\n");
 }
 
 function TablaParaMail({ datos }: { datos: DatosMail }) {
   const [copiado, setCopiado] = useState<"ok" | "error" | null>(null);
-  const html = useMemo(() => htmlMail(datos), [datos]);
+  const [elegidas, setElegidas] = useState<Set<ClaseDiferencia>>(
+    () => new Set(CLASES_DIFERENCIA.map((c) => c.clave)),
+  );
+
+  const recortados: DatosMail = useMemo(
+    () => ({ ...datos, lineas: datos.lineas.filter((l) => entraEnLaTabla(l, elegidas)) }),
+    [datos, elegidas],
+  );
+  const html = useMemo(() => htmlMail(recortados), [recortados]);
+
+  const alternar = (clave: ClaseDiferencia) =>
+    setElegidas((antes) => {
+      const ahora = new Set(antes);
+      if (ahora.has(clave)) ahora.delete(clave);
+      else ahora.add(clave);
+      return ahora;
+    });
 
   const copiar = async () => {
     try {
       await navigator.clipboard.write([
         new ClipboardItem({
           "text/html": new Blob([html], { type: "text/html" }),
-          "text/plain": new Blob([textoMail(datos)], { type: "text/plain" }),
+          "text/plain": new Blob([textoMail(recortados)], { type: "text/plain" }),
         }),
       ]);
       setCopiado("ok");
@@ -1337,16 +1411,52 @@ function TablaParaMail({ datos }: { datos: DatosMail }) {
 
   if (datos.lineas.length === 0) {
     return (
-      <Panel titulo="6. Tabla para el mail">
+      <div className="border-line mt-4 border-t pt-4">
         <Aviso tono="info">No hay diferencias para mandarle al proveedor.</Aviso>
-      </Panel>
+      </div>
     );
   }
 
   return (
-    <Panel titulo="6. Tabla para el mail" nota={`${datos.lineas.length} diferencias`}>
+    <div className="border-line mt-4 border-t pt-4">
+      <p className="text-ink mb-2 text-sm font-medium">
+        Tabla para el mail{" "}
+        <span className="text-muted font-normal">
+          · {recortados.lineas.length} de {datos.lineas.length} diferencias
+        </span>
+      </p>
+
+      {/* QUE SE INCLUYE. Ver CLASES_DIFERENCIA. */}
+      <div className="mb-3 grid gap-1.5 sm:grid-cols-2">
+        {CLASES_DIFERENCIA.map((c) => {
+          const cuantas = datos.lineas.filter(c.entra).length;
+          return (
+            <label
+              key={c.clave}
+              className="text-muted flex items-center gap-2 text-xs"
+              title={c.ayuda}
+            >
+              <input
+                type="checkbox"
+                checked={elegidas.has(c.clave)}
+                onChange={() => alternar(c.clave)}
+                disabled={cuantas === 0}
+              />
+              <span className={cuantas === 0 ? "opacity-50" : "text-ink"}>
+                {c.label}
+              </span>
+              <span className="opacity-70">({cuantas})</span>
+            </label>
+          );
+        })}
+      </div>
+
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <button className={BOTON_ACTIVO} onClick={() => void copiar()}>
+        <button
+          className={recortados.lineas.length > 0 ? BOTON_ACTIVO : BOTON}
+          onClick={() => void copiar()}
+          disabled={recortados.lineas.length === 0}
+        >
           Copiar tabla para el mail
         </button>
         {copiado === "ok" && (
@@ -1358,12 +1468,20 @@ function TablaParaMail({ datos }: { datos: DatosMail }) {
           </span>
         )}
       </div>
-      {/* Vista previa tal cual va a quedar en el correo, sobre fondo blanco. */}
-      <div
-        className="overflow-x-auto rounded-lg bg-white p-3"
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
-    </Panel>
+
+      {recortados.lineas.length === 0 ? (
+        <Aviso tono="info">
+          No queda ninguna diferencia con lo tildado. Marcá al menos una clase
+          para armar la tabla.
+        </Aviso>
+      ) : (
+        /* Vista previa tal cual va a quedar en el correo, sobre fondo blanco. */
+        <div
+          className="overflow-x-auto rounded-lg bg-white p-3"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      )}
+    </div>
   );
 }
 
@@ -1402,13 +1520,24 @@ function descargarCsv(lineas: LineaCruce[], descripcionDe: Map<string, string>) 
 }
 
 /* -------------------------------------------------------------------------
-   2. CARGAR EN SIGMA
+   CARGAR LA FACTURA EN SIGMA
 
    Lo que sale de acá queda cargado en la CONTABILIDAD de la empresa, así que
    la pantalla tiene una sola obligación: que nadie apriete el botón sin saber
    qué se va a mandar y a dónde.
 
-   Por eso el panel muestra los problemas ANTES de apretar nada --el mismo
+   ESTA PARTIDO EN DOS, y el orden de la pantalla es el motivo:
+
+     2. A DONDE VA      empresa, sucursal, código y percepciones, antes de
+                        cargar nada. Es lo que no se puede deshacer.
+     4. MANDARLA        abajo de los totales, que es contra lo que se
+                        corrobora el papel del proveedor.
+
+   Las dos mitades leen el MISMO armado (ver `useArmadoDeFactura`): si cada
+   una se lo trajera por su cuenta, la de arriba podría estar diciendo que
+   falta algo que la de abajo ya tiene.
+
+   Los problemas se muestran ANTES de apretar nada --el mismo
    `armarImportCompras` que usa el servidor corre acá para eso-- y el botón
    recién se habilita cuando no queda ninguno. El servidor vuelve a validar
    igual: lo de acá es para la persona, no para el ERP.
@@ -1432,26 +1561,31 @@ type ResultadoEnvio =
   | { ok: true; respuesta: string }
   | { ok: false; error: string; mandado?: boolean; yaEnviada?: { enviadaEn: string } };
 
-function CargarEnSigma({
-  b,
-  cambiar,
-  cruce,
-  totales,
-  proveedorNombre,
-  hayFactura,
-}: {
-  b: Borrador;
-  cambiar: (parche: Partial<Borrador>) => void;
-  cruce: ResultadoCruce;
-  totales: TotalesComprobante;
-  proveedorNombre: string | null;
-  /** Si ya hay renglones cargados. Sin ellos no hay nada que validar todavía. */
-  hayFactura: boolean;
-}) {
+/** Lo que sale de armar el envío: el cuerpo y las dos listas. */
+type ArmadoFactura = ReturnType<typeof armarImportCompras> | {
+  cuerpo: null;
+  problemas: string[];
+  advertencias: string[];
+};
+
+/**
+ * EL ARMADO DEL ENVIO, UNA SOLA VEZ PARA LAS DOS MITADES DE LA PANTALLA.
+ *
+ * A dónde va la factura se elige arriba (panel 2, antes de cargar nada) y se
+ * manda abajo (panel 4, después de corroborar los totales contra el papel).
+ * Están separados a propósito, pero los dos necesitan lo mismo: las cuentas
+ * contables y el cuerpo armado.
+ *
+ * Vive en un hook y no en cada componente porque si cada mitad se lo trajera
+ * por su cuenta serían dos consultas de cuentas y, peor, dos verdades: la de
+ * arriba podría estar diciendo que falta algo que la de abajo ya tiene.
+ */
+function useArmadoDeFactura(
+  b: Borrador,
+  cruce: ResultadoCruce,
+  totales: TotalesComprobante,
+) {
   const [imputacion, setImputacion] = useState<Record<string, Imputacion> | null>(null);
-  const [enviando, setEnviando] = useState(false);
-  const [confirmando, setConfirmando] = useState(false);
-  const [resultado, setResultado] = useState<ResultadoEnvio | null>(null);
 
   useEffect(() => {
     fetch("/api/compras/facturas/imputacion")
@@ -1484,7 +1618,7 @@ function CargarEnSigma({
     [b],
   );
 
-  const armado = useMemo(
+  const armado: ArmadoFactura = useMemo(
     () =>
       imputacion
         ? armarImportCompras(cruce, totales, datos, imputacion)
@@ -1496,68 +1630,34 @@ function CargarEnSigma({
     [cruce, totales, datos, imputacion],
   );
 
-  /**
-   * Los conceptos a los que les falta la cuenta, para poder cargarla acá.
-   *
-   * MIRA LAS DOS LISTAS. La del IVA frena y la de una percepción no, pero las
-   * dos se cargan igual desde el mismo formulario: que una no frene no
-   * significa que no se quiera cargar.
-   */
-  const cuentasQueFaltan = useMemo(() => {
-    const m = /Falta la cuenta o el tipo de impuesto de "(.+?)"/;
-    return [...armado.problemas, ...armado.advertencias]
-      .map((p) => m.exec(p)?.[1])
-      .filter((x): x is string => !!x);
-  }, [armado.problemas, armado.advertencias]);
+  return { armado, datos, imputacion, setImputacion };
+}
 
-  const listo = hayFactura && armado.problemas.length === 0 && !!armado.cuerpo;
+/* -------------------------------------------------------------------------
+   2. A DONDE VA LA FACTURA
 
-  const mandar = async () => {
-    setEnviando(true);
-    setResultado(null);
-    try {
-      const r = await fetch("/api/compras/facturas/sigma", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cruce, totales, datos, proveedorNombre }),
-      });
-      const j = await r.json();
-      setResultado(
-        r.ok
-          ? { ok: true, respuesta: String(j.respuesta ?? "") }
-          : {
-              ok: false,
-              error: String(j.error ?? `Error ${r.status}`),
-              mandado: j.mandado !== false,
-              yaEnviada: j.yaEnviada,
-            },
-      );
-      if (r.ok) setConfirmando(false);
-    } catch (e) {
-      setResultado({
-        ok: false,
-        error: e instanceof Error ? e.message : "Error de red",
-        mandado: true,
-      });
-    } finally {
-      setEnviando(false);
-    }
-  };
+   Empresa, sucursal, código y percepciones. Nada más: el botón está abajo,
+   con los totales.
 
+   VA ANTES DE CARGAR NADA porque es lo que no se puede deshacer --una factura
+   en la empresa equivocada es un asiento en los libros de otra sociedad-- y
+   al final de la pantalla se elegía con la carga ya hecha, cuando uno ya está
+   apurado por terminar.
+   ------------------------------------------------------------------------- */
+
+function DestinoSigma({
+  b,
+  cambiar,
+  datos,
+}: {
+  b: Borrador;
+  cambiar: (parche: Partial<Borrador>) => void;
+  datos: DatosFactura;
+}) {
   const campo = "text-muted space-y-1 text-xs";
 
   return (
-    <Panel
-      titulo="2. Cargar en Sigma"
-      nota={
-        armado.cuerpo && hayFactura
-          ? `${armado.cuerpo.mercaderias.length} renglones`
-          : undefined
-      }
-    >
-      {/* A QUE EMPRESA Y A QUE SUCURSAL. Es lo primero porque es lo que no se
-          puede deshacer: una factura en la empresa equivocada es un asiento en
-          los libros de otra sociedad. */}
+    <Panel titulo="2. Cargar en Sigma">
       <div className="mb-3 grid gap-2 sm:grid-cols-3">
         <label className={campo}>
           <span>Empresa</span>
@@ -1604,7 +1704,7 @@ function CargarEnSigma({
           dejarlas vacías las deja para cargar en Sigma, donde se las ve junto
           al resto del asiento. Lo que no se puede es mandarlas sin concepto:
           un monto suelto no se puede imputar a ninguna cuenta. */}
-      <div className="mb-3">
+      <div>
         <div className="mb-1 flex flex-wrap items-center gap-2">
           <span className="text-muted text-xs">
             Percepciones y otros impuestos
@@ -1663,19 +1763,109 @@ function CargarEnSigma({
         ))}
       </div>
 
-      {/* TODAVIA NO HAY QUE VALIDAR NADA. Con la factura vacía, la lista de
-          problemas sería la lista de todo lo que falta cargar: ruido rojo
-          arriba de la pantalla, en el momento en que la persona recién está
-          eligiendo dónde va. */}
-      {!hayFactura && (
-        <p className="text-muted text-xs">
-          Elegí acá dónde se carga la factura. El botón aparece cuando haya
-          renglones cargados más abajo.
-        </p>
-      )}
+      <p className="text-muted mt-3 text-xs">
+        Acá se elige dónde queda asentada la factura. El botón para mandarla
+        está abajo, con los totales: es ahí donde se corrobora contra el papel.
+      </p>
+    </Panel>
+  );
+}
+
+/* -------------------------------------------------------------------------
+   EL ENVIO, ADENTRO DE LOS TOTALES
+
+   VA JUSTO DEBAJO DE LOS NUMEROS y no en un panel aparte. Lo último que se
+   mira antes de escribir en la contabilidad tiene que ser el total contra el
+   papel, no un botón tres paneles más abajo que ya no muestra ninguno.
+   ------------------------------------------------------------------------- */
+
+function EnviarASigma({
+  b,
+  armado,
+  imputacion,
+  onImputacion,
+  cruce,
+  totales,
+  datos,
+  proveedorNombre,
+  hayFactura,
+}: {
+  b: Borrador;
+  armado: ArmadoFactura;
+  imputacion: Record<string, Imputacion> | null;
+  onImputacion: (nueva: Record<string, Imputacion>) => void;
+  cruce: ResultadoCruce;
+  totales: TotalesComprobante;
+  datos: DatosFactura;
+  proveedorNombre: string | null;
+  /** Si ya hay renglones cargados. Sin ellos no hay nada que validar todavía. */
+  hayFactura: boolean;
+}) {
+  const [enviando, setEnviando] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
+  const [resultado, setResultado] = useState<ResultadoEnvio | null>(null);
+
+  /**
+   * Los conceptos a los que les falta la cuenta, para poder cargarla acá.
+   *
+   * MIRA LAS DOS LISTAS. La del IVA frena y la de una percepción no, pero las
+   * dos se cargan igual desde el mismo formulario: que una no frene no
+   * significa que no se quiera cargar.
+   */
+  const cuentasQueFaltan = useMemo(() => {
+    const m = /Falta la cuenta o el tipo de impuesto de "(.+?)"/;
+    return [...armado.problemas, ...armado.advertencias]
+      .map((p) => m.exec(p)?.[1])
+      .filter((x): x is string => !!x);
+  }, [armado.problemas, armado.advertencias]);
+
+  const listo = hayFactura && armado.problemas.length === 0 && !!armado.cuerpo;
+
+  const mandar = async () => {
+    setEnviando(true);
+    setResultado(null);
+    try {
+      const r = await fetch("/api/compras/facturas/sigma", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cruce, totales, datos, proveedorNombre }),
+      });
+      const j = await r.json();
+      setResultado(
+        r.ok
+          ? { ok: true, respuesta: String(j.respuesta ?? "") }
+          : {
+              ok: false,
+              error: String(j.error ?? `Error ${r.status}`),
+              mandado: j.mandado !== false,
+              yaEnviada: j.yaEnviada,
+            },
+      );
+      if (r.ok) setConfirmando(false);
+    } catch (e) {
+      setResultado({
+        ok: false,
+        error: e instanceof Error ? e.message : "Error de red",
+        mandado: true,
+      });
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  if (!hayFactura) return null;
+
+  return (
+    <div className="border-line mt-4 border-t pt-4">
+      {/* LO QUE HAY QUE MIRAR ANTES DE APRETAR. Los subtotales de arriba salen
+          de los renglones que se cargaron; el papel es la única fuente de
+          verdad de lo que el proveedor cobró. */}
+      <p className="text-ink mb-3 text-sm font-medium">
+        Corroborá que los subtotales coincidan con la factura del proveedor.
+      </p>
 
       {/* LO QUE FALTA, antes de ofrecer el botón. */}
-      {hayFactura && armado.problemas.length > 0 && (
+      {armado.problemas.length > 0 && (
         <Aviso>
           <p className="font-medium">
             Todavía no se puede mandar. Falta{armado.problemas.length > 1 ? "n" : ""}{" "}
@@ -1691,12 +1881,10 @@ function CargarEnSigma({
 
       {/* LO QUE NO FRENA. Se avisa y se manda igual: la factura entra
           pendiente y en Sigma se corrige hasta que procesa. */}
-      {hayFactura && armado.advertencias.length > 0 && (
+      {armado.advertencias.length > 0 && (
         <div className={armado.problemas.length > 0 ? "mt-2" : ""}>
           <Aviso tono="alerta">
-            <p className="font-medium">
-              Se puede mandar igual, pero mirá esto:
-            </p>
+            <p className="font-medium">Se puede mandar igual, pero mirá esto:</p>
             <ul className="mt-1 list-disc pl-5 text-xs">
               {armado.advertencias.map((a, i) => (
                 <li key={i}>{a}</li>
@@ -1710,16 +1898,16 @@ function CargarEnSigma({
           necesita. Un formulario con los 31 conceptos obliga a decidir
           treinta cosas para mandar una factura; así se carga la que falta, en
           el momento en que hace falta, y queda para las próximas. */}
-      {hayFactura && cuentasQueFaltan.length > 0 && imputacion && (
+      {cuentasQueFaltan.length > 0 && imputacion && (
         <CuentasQueFaltan
           conceptos={cuentasQueFaltan}
-          onGuardada={(nueva) => setImputacion(nueva)}
+          onGuardada={(nueva) => onImputacion(nueva)}
         />
       )}
 
       {/* QUE SE VA A MANDAR. En una operación que escribe en la contabilidad,
           poder mirar el cuerpo antes vale más que el mensaje de éxito. */}
-      {hayFactura && armado.cuerpo && (
+      {armado.cuerpo && (
         <details className="mt-3">
           <summary className="text-muted cursor-pointer text-xs">
             Ver lo que se va a mandar
@@ -1730,40 +1918,38 @@ function CargarEnSigma({
         </details>
       )}
 
-      {hayFactura && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {!confirmando ? (
-            <button
-              className={listo ? BOTON_ACTIVO : BOTON}
-              disabled={!listo}
-              onClick={() => {
-                setResultado(null);
-                setConfirmando(true);
-              }}
-            >
-              Cargar la factura en Sigma
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {!confirmando ? (
+          <button
+            className={listo ? BOTON_ACTIVO : BOTON}
+            disabled={!listo}
+            onClick={() => {
+              setResultado(null);
+              setConfirmando(true);
+            }}
+          >
+            Enviar a Sigma
+          </button>
+        ) : (
+          <>
+            {/* CON NOMBRE Y NO CON CODIGO. "0001" no se lee; "Quo MKT" sí,
+                y es lo último que se mira antes de escribir en los libros
+                de esa sociedad. */}
+            <span className="text-ink text-xs">
+              Se va a cargar en <strong>{nombreDeEmpresa(b.empresa)}</strong>,
+              sucursal <strong>{nombreDeSucursal(b.sucursal)}</strong>, por{" "}
+              <strong>{fmtMoneda(armado.cuerpo?.total ?? 0)}</strong>. No se
+              puede deshacer desde acá.
+            </span>
+            <button className={BOTON_ACTIVO} onClick={() => void mandar()} disabled={enviando}>
+              {enviando ? "Mandando…" : "Confirmo, cargarla"}
             </button>
-          ) : (
-            <>
-              {/* CON NOMBRE Y NO CON CODIGO. "0001" no se lee; "Quo MKT" sí,
-                  y es lo último que se mira antes de escribir en los libros
-                  de esa sociedad. */}
-              <span className="text-ink text-xs">
-                Se va a cargar en <strong>{nombreDeEmpresa(b.empresa)}</strong>,
-                sucursal <strong>{nombreDeSucursal(b.sucursal)}</strong>, por{" "}
-                <strong>{fmtMoneda(armado.cuerpo?.total ?? 0)}</strong>. No se
-                puede deshacer desde acá.
-              </span>
-              <button className={BOTON_ACTIVO} onClick={() => void mandar()} disabled={enviando}>
-                {enviando ? "Mandando…" : "Confirmo, cargarla"}
-              </button>
-              <button className={BOTON} onClick={() => setConfirmando(false)} disabled={enviando}>
-                Cancelar
-              </button>
-            </>
-          )}
-        </div>
-      )}
+            <button className={BOTON} onClick={() => setConfirmando(false)} disabled={enviando}>
+              Cancelar
+            </button>
+          </>
+        )}
+      </div>
 
       {resultado && (
         <div className="mt-3">
@@ -1794,7 +1980,7 @@ function CargarEnSigma({
           )}
         </div>
       )}
-    </Panel>
+    </div>
   );
 }
 
