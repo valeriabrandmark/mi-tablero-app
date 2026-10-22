@@ -7,6 +7,7 @@ import {
   type FilaCompetenciaBase,
   type Rival,
 } from "@/lib/competencia-meli";
+import { getReposicionPorSku } from "@/lib/queries-reposicion-full";
 import { ULTIMO_COSTO_CON_OFERTAS } from "@/lib/sql-costos";
 
 /**
@@ -147,6 +148,9 @@ export async function getDashboardCompetencia(): Promise<DashboardCompetencia> {
      }`,
   );
 
+  // Aparte: la tabla puede no existir todavía (ver el archivo).
+  const reposicion = await getReposicionPorSku();
+
   const ultima = await queryOne<{ actualizado: Date | null }>(
     "select max(actualizado) as actualizado from bronze.ml_competencia",
   );
@@ -194,6 +198,7 @@ export async function getDashboardCompetencia(): Promise<DashboardCompetencia> {
       envioFuente: envioVentas != null ? "ventas" : envioFoxie != null ? "foxie" : null,
       costoFoxie: num(r.costo_foxie),
       rivales: num(r.rivales) ?? 0,
+      reposicion: (r.sku && reposicion?.get(String(r.sku).trim())) || null,
     };
     return clasificar(base);
   });

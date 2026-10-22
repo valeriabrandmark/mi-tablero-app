@@ -2,6 +2,7 @@ import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
+import { getReposicionPorSku } from "@/lib/queries-reposicion-full";
 import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import { CANAL_MELI } from "@/lib/meli";
 import {
@@ -481,7 +482,7 @@ const TOPE = 500;
 
 async function getFilas(f: FiltrosStockFull): Promise<FilaStockFull[]> {
   const w = where(f);
-  const filas = await query<FilaCruda>(
+  const [filas, reposicion] = await Promise.all([query<FilaCruda>(
     `${BASE}
      select sku, producto, proveedor, marca,
             disponible, no_disponible,
@@ -495,7 +496,10 @@ async function getFilas(f: FiltrosStockFull): Promise<FilaStockFull[]> {
               valorizacion desc
      limit ${TOPE}`,
     w.params,
-  );
+  ),
+    // Aparte, porque la tabla puede no existir todavía. Ver el archivo.
+    getReposicionPorSku(),
+  ]);
 
   const texto = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
@@ -512,6 +516,7 @@ async function getFilas(f: FiltrosStockFull): Promise<FilaStockFull[]> {
     entradaExacta: bool(r.entrada_exacta),
     uds30: num(r.uds30),
     valorizacion: num(r.valorizacion),
+    reposicion: (texto(r.sku) && reposicion?.get(texto(r.sku)!.trim())) || null,
   }));
 }
 
