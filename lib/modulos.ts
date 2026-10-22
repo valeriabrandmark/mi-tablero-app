@@ -66,6 +66,19 @@ export type Modulo = {
   firmaEnSigma?: true;
   /** Prefijos de página y de API. Una ruta es de este módulo si empieza con alguno. */
   rutas: string[];
+  /**
+   * RUTAS DE OTRO MODULO QUE ESTE TAMBIEN PUEDE LEER.
+   *
+   * No las posee --siguen siendo del módulo que las tiene en `rutas`, y por
+   * eso no entran en `moduloDeRuta`-- pero tenerlas acá alcanza para abrirlas.
+   *
+   * Existe por un caso concreto: la carga de facturas necesita el historial
+   * de órdenes para cruzar contra él, y ese historial es de Compras. Sin esto
+   * las opciones eran malas las dos: darle Compras entero a quien sólo carga
+   * facturas, o mover la ruta a facturas y que la perdiera quien tiene
+   * Compras.
+   */
+  tambienLee?: string[];
 };
 
 export const MODULOS: Modulo[] = [
@@ -133,6 +146,15 @@ export const MODULOS: Modulo[] = [
      * array -- que es lo último de lo que tiene que depender un permiso.
      */
     rutas: ["/facturas-compra", "/api/compras/facturas"],
+    /**
+     * EL HISTORIAL DE ORDENES ES CONTRA LO QUE SE CRUZA UNA FACTURA. Sin él la
+     * pantalla carga igual, pero no tiene contra qué comparar -- y lo que ve
+     * quien entra es un cartel rojo en el primer panel.
+     *
+     * No abre nada nuevo: son los mismos SKU, cantidades y costos que esa
+     * persona va a ver en el cruce de la factura que está cargando.
+     */
+    tambienLee: ["/api/compras/ordenes"],
   },
   {
     clave: "meli",
@@ -223,7 +245,15 @@ export function moduloPermiteRuta(
   }
 
   const duenio = moduloDeRuta(pathname);
-  return duenio != null && modulos.includes(duenio);
+  if (duenio != null && modulos.includes(duenio)) return true;
+
+  // Y si no es suya, puede ser una que alguno de sus módulos igual lee. Va
+  // DESPUES del dueño: lo prestado no le saca la ruta a nadie.
+  return MODULOS.some(
+    (m) =>
+      modulos.includes(m.clave) &&
+      (m.tambienLee ?? []).some((r) => empieza(pathname, r)),
+  );
 }
 
 /** El nombre lindo de un módulo, para mostrarlo. */

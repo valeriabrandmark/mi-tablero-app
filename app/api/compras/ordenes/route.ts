@@ -37,17 +37,18 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   if (authConfigurada) {
     const permiso = permisoDelUsuario(await getUsuario());
-    const puede =
-      puedeVer(permiso, "/api/compras") ||
-      puedeVer(permiso, "/api/compras/facturas");
-    if (!puede) {
+    // SU PROPIA RUTA, y no dos a mano. Quién puede leerla lo decide
+    // `lib/modulos.ts` --Compras la posee, la carga de facturas la lee-- que
+    // es la MISMA regla que aplica el proxy. Chequear otra cosa acá fue el
+    // error anterior: el proxy cortaba antes y este `if` nunca corría.
+    if (!puedeVer(permiso, "/api/compras/ordenes")) {
       return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
     }
     // EL CARTEL DE "EN CONSTRUCCION" ES DE COMPRAS, no de esta ruta. A quien
     // entra por la carga de facturas no le corresponde: su pantalla está
     // publicada, y quedarse sin las órdenes la dejaría sin contra qué cruzar
     // por el estado de OTRO tablero.
-    const porCompras = !puedeVer(permiso, "/api/compras/facturas");
+    const porCompras = !puedeVer(permiso, "/facturas-compra");
     if (
       porCompras &&
       enConstruccion("/stock/compras") &&

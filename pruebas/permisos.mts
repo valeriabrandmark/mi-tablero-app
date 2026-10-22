@@ -205,6 +205,60 @@ revisar(
   ),
   false,
 );
+/* --- LA PANTALLA DE FACTURAS NECESITA EL HISTORIAL DE ORDENES ------------
+
+   Es contra esas órdenes que se cruza una factura. El historial es de
+   Compras, así que con el módulo de facturas a secas daba "Sin permiso" en el
+   primer panel de la pantalla.
+
+   LA PRUEBA VA SOBRE `moduloPermiteRuta` Y NO SOBRE LA RUTA, y eso es el
+   punto: el primer intento de arreglarlo fue un `if` adentro del route.ts, y
+   no sirvió de nada porque EL PROXY CORTA ANTES usando esta misma función.
+   Las tres barreras --proxy, API y página-- preguntan acá. Si la respuesta de
+   acá es no, no importa lo que diga la ruta.
+   ------------------------------------------------------------------------ */
+
+revisar(
+  "con el módulo de facturas se leen las órdenes",
+  moduloPermiteRuta(["facturas_compra"], "/api/compras/ordenes"),
+  true,
+);
+revisar(
+  "y el proxy lo deja pasar, que es lo que importa",
+  puedeVer(conFacturas, "/api/compras/ordenes"),
+  true,
+);
+revisar(
+  "con Compras también, como siempre",
+  moduloPermiteRuta(["compras"], "/api/compras/ordenes"),
+  true,
+);
+
+// LO PRESTADO ES SOLO ESA RUTA. Leer el historial no abre el resto de
+// Compras, y sobre todo no abre la que MANDA órdenes al ERP.
+revisar(
+  "pero no la de mandar órdenes",
+  moduloPermiteRuta(["facturas_compra"], "/api/compras/sigma"),
+  false,
+);
+revisar(
+  "ni el tablero de Compras",
+  moduloPermiteRuta(["facturas_compra"], "/stock/compras"),
+  false,
+);
+// Y no se la presta a cualquiera que tenga algún módulo.
+revisar(
+  "con Stock no se leen las órdenes",
+  moduloPermiteRuta(["stock"], "/api/compras/ordenes"),
+  false,
+);
+// El dueño de la ruta no cambia: lo prestado no se la saca a nadie.
+revisar(
+  "el historial sigue siendo de Compras",
+  moduloDeRuta("/api/compras/ordenes"),
+  "compras",
+);
+
 // Mi cuenta sigue siendo de todos: es la contraseña de uno.
 revisar("Mi cuenta la ve cualquiera", puedeVer({ rol: "vendedor", vendedor: "SILVIO" }, "/cuenta"), true);
 
