@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   if (authConfigurada) {
     const permiso = permisoDelUsuario(await getUsuario());
-    if (!puedeVer(permiso, "/api/compras")) {
+    if (!puedeVer(permiso, "/api/compras/facturas")) {
       return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
     }
   }
@@ -51,7 +51,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   if (authConfigurada) {
     const permiso = permisoDelUsuario(await getUsuario());
-    if (!puedeVer(permiso, "/api/compras")) {
+    if (!puedeVer(permiso, "/api/compras/facturas")) {
       return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
     }
   }

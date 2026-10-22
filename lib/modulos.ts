@@ -39,6 +39,7 @@ export type ClaveModulo =
   | "logistica"
   | "stock"
   | "compras"
+  | "facturas_compra"
   | "meli"
   | "tienda_nube"
   | "precios_tn";
@@ -94,9 +95,27 @@ export const MODULOS: Modulo[] = [
     // El permiso de editar acá NO es un detalle: es mandar una orden a Sigma,
     // que no tiene deshacer. Ver `numeroDeSigma` en permisos.ts.
     queEdita: "mandar órdenes de compra al ERP",
-    // La carga de facturas es de Compras: cruza contra las órdenes que salen
-    // de acá y lee el mismo historial.
-    rutas: ["/stock/compras", "/api/compras", "/facturas-compra"],
+    rutas: ["/stock/compras", "/api/compras"],
+  },
+  {
+    clave: "facturas_compra",
+    nombre: "Carga de facturas de compra",
+    // Mismo peso que mandar una orden, y más: una orden mal cargada se anula,
+    // una factura toca cuenta corriente, stock e IVA.
+    queEdita: "cargar facturas de compra en el ERP",
+    /**
+     * MODULO APARTE Y NO PARTE DE COMPRAS, aunque cruce contra las órdenes que
+     * salen de ahí. Son dos trabajos distintos y los puede hacer gente
+     * distinta: uno le pide al proveedor, el otro asienta lo que llegó. Tenerlo
+     * adentro de Compras obligaba a elegir entre dar los dos o ninguno.
+     *
+     * OJO CON EL ORDEN DE LOS PREFIJOS: `/api/compras/facturas` es más largo
+     * que el `/api/compras` de Compras, así que gana éste (ver
+     * `moduloDeRuta`). Por eso también `/facturas-compra` salió de la lista de
+     * Compras: estando en los dos, con el mismo largo, decidía el orden del
+     * array -- que es lo último de lo que tiene que depender un permiso.
+     */
+    rutas: ["/facturas-compra", "/api/compras/facturas"],
   },
   {
     clave: "meli",
