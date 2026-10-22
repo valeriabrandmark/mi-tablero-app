@@ -1088,3 +1088,79 @@ export type ClaseDiferencia = (typeof CLASES_DIFERENCIA)[number]["clave"];
 export function entraEnLaTabla(l: LineaCruce, elegidas: Set<ClaseDiferencia>): boolean {
   return CLASES_DIFERENCIA.some((c) => elegidas.has(c.clave) && c.entra(l));
 }
+
+/* -------------------------------------------------------------------------
+   LO QUE QUEDA PARA RECLAMARLE AL PROVEEDOR, CONGELADO
+   ------------------------------------------------------------------------- */
+
+/**
+ * Una diferencia tal como se vio el día que se mandó la factura.
+ *
+ * SE GUARDA Y NO SE RECALCULA NUNCA MAS. El cruce sale de la OC y del maestro,
+ * y los dos cambian: una OC se anula, un artículo cambia de costo, el maestro
+ * se reescribe entero en cada corrida del orquestador. Recalcular el cruce de
+ * una factura de hace dos meses daría otro número, y el reclamo se hace sobre
+ * el que se vio al mandarla.
+ *
+ * Va lo mínimo para poder reclamar SIN volver a abrir la factura: qué
+ * artículo, cuánto se pidió, cuánto se facturó y cuánto cuesta la diferencia.
+ */
+export type DiferenciaGuardada = {
+  sku: string | null;
+  descripcion: string;
+  motivo: EstadoCruce;
+  unidadesOC: number | null;
+  unidadesFactura: number | null;
+  difUnidades: number;
+  difCosto: number;
+  difCantidad: number;
+};
+
+export type ResumenDiferencias = {
+  renglones: number;
+  difCosto: number;
+  difCantidad: number;
+  lineas: DiferenciaGuardada[];
+};
+
+/**
+ * LO QUE CUESTA UNA DIFERENCIA DE CANTIDAD: las unidades que faltan o sobran,
+ * valuadas al costo de la OC. Es la misma cuenta que hace la pantalla.
+ *
+ * Sin línea de OC no hay costo de OC --algo facturado que no estaba pedido--
+ * así que se valúa a lo que el proveedor cobró, que es lo único que se sabe.
+ */
+function pesosPorCantidad(l: LineaCruce): number {
+  const precio = l.oc?.precioNeto ?? l.factura?.precioNeto ?? 0;
+  return centavos(l.difUnidades * precio);
+}
+
+/**
+ * El resumen que se guarda con la factura.
+ *
+ * ENTRAN LAS LINEAS QUE NO ESTAN OK. Un renglón que coincide en cantidad y
+ * costo no se reclama, así que guardarlo sería guardar la factura entera -- y
+ * la lista de lo que falta reclamar se leería como la lista de todo lo que se
+ * compró.
+ */
+export function resumirDiferencias(cruce: ResultadoCruce): ResumenDiferencias {
+  const lineas: DiferenciaGuardada[] = cruce.lineas
+    .filter((l) => l.estado !== "ok")
+    .map((l) => ({
+      sku: l.sku,
+      descripcion: l.descripcion,
+      motivo: l.estado,
+      unidadesOC: l.oc?.unidades ?? null,
+      unidadesFactura: l.factura?.unidades ?? null,
+      difUnidades: l.difUnidades,
+      difCosto: centavos(l.difPrecio),
+      difCantidad: pesosPorCantidad(l),
+    }));
+
+  return {
+    renglones: lineas.length,
+    difCosto: centavos(lineas.reduce((s, l) => s + l.difCosto, 0)),
+    difCantidad: centavos(lineas.reduce((s, l) => s + l.difCantidad, 0)),
+    lineas,
+  };
+}

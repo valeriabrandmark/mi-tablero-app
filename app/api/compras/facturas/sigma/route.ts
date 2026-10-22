@@ -4,7 +4,11 @@ import {
   idDeLaFactura,
   type DatosFactura,
 } from "@/lib/sigma-compra";
-import type { ResultadoCruce, TotalesComprobante } from "@/lib/factura-cruce";
+import {
+  resumirDiferencias,
+  type ResultadoCruce,
+  type TotalesComprobante,
+} from "@/lib/factura-cruce";
 import { permisoDelUsuario, puedeCargarFacturas } from "@/lib/permisos";
 import {
   facturaYaEnviada,
@@ -161,6 +165,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // LAS DIFERENCIAS SE CONGELAN ACA, antes de hablarle a Sigma. Ver
+  // `resumirDiferencias`: el cruce no se puede recalcular después porque la OC
+  // y el maestro cambian, así que lo que se va a reclamar tiene que quedar
+  // guardado tal como se vio al mandarla.
+  const diferencias = resumirDiferencias(cruce);
+
   try {
     const respuesta = await fetch(urlDeSigma(), {
       method: "POST",
@@ -186,6 +196,7 @@ export async function POST(request: NextRequest) {
         proveedorNombre: cuerpoPedido.proveedorNombre ?? null,
         resultado: rechazada ? "rechazada" : "incierto",
         respuesta: texto,
+        diferencias,
       });
       return NextResponse.json(
         {
@@ -204,6 +215,7 @@ export async function POST(request: NextRequest) {
       cuerpo,
       proveedorNombre: cuerpoPedido.proveedorNombre ?? null,
       resultado: "ok",
+      diferencias,
       // QUEDA ESCRITO QUE SE MANDO DESCUADRADA. Si después hay que revisar
       // por qué una factura entró con un total que no cerraba, el registro lo
       // dice en vez de haber que reconstruirlo.
