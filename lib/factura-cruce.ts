@@ -1033,3 +1033,58 @@ export function renglonesDeOCPegada(
       descuento2: r.descuento2,
     }));
 }
+
+/* -------------------------------------------------------------------------
+   QUE DIFERENCIAS ENTRAN EN LA TABLA QUE SE LE MANDA AL PROVEEDOR
+   ------------------------------------------------------------------------- */
+
+/**
+ * QUE DIFERENCIAS ENTRAN EN LA TABLA QUE SE LE MANDA AL PROVEEDOR.
+ *
+ * Las cuatro no se reclaman igual. Lo que facturó de más --en precio o en
+ * cantidad-- es plata que se pide de vuelta; lo que facturó de menos muchas
+ * veces es mercadería que falta y se reclama por otro lado, o directamente no
+ * se reclama. Mandarlas todas juntas mezcla dos conversaciones y la más chica
+ * se come a la más cara.
+ *
+ * Arrancan las cuatro tildadas: es lo que la pantalla mostraba antes, así que
+ * quien no toque nada ve lo mismo de siempre.
+ */
+export const CLASES_DIFERENCIA = [
+  {
+    clave: "precio_mas",
+    label: "Dif. de precios de más",
+    ayuda: "Facturado por encima del costo de la OC",
+    entra: (l: LineaCruce) => l.difPrecio > 0,
+  },
+  {
+    clave: "precio_menos",
+    label: "Dif. de precios de menos",
+    ayuda: "Facturado por debajo del costo de la OC",
+    entra: (l: LineaCruce) => l.difPrecio < 0,
+  },
+  {
+    clave: "cantidad_mas",
+    label: "Dif. de cantidades de más",
+    ayuda: "Facturó más unidades de las pedidas, o algo que no estaba en la OC",
+    entra: (l: LineaCruce) => l.difUnidades > 0,
+  },
+  {
+    clave: "cantidad_menos",
+    label: "Dif. de cantidades de menos",
+    ayuda: "Facturó menos unidades de las pedidas, o no facturó algo pedido",
+    entra: (l: LineaCruce) => l.difUnidades < 0,
+  },
+] as const;
+
+export type ClaseDiferencia = (typeof CLASES_DIFERENCIA)[number]["clave"];
+
+/**
+ * UNA LINEA PUEDE ENTRAR POR MAS DE UNA. Un renglón con "cantidad y precio"
+ * cumple dos de las cuatro, y basta con que una esté tildada para que entre:
+ * sacarla porque la otra no lo está escondería una diferencia que sí se
+ * quiere reclamar.
+ */
+export function entraEnLaTabla(l: LineaCruce, elegidas: Set<ClaseDiferencia>): boolean {
+  return CLASES_DIFERENCIA.some((c) => elegidas.has(c.clave) && c.entra(l));
+}

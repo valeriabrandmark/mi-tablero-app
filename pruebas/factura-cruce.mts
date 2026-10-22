@@ -11,7 +11,9 @@
 import {
   adivinarColumnas,
   buscarArticulo,
+  CLASES_DIFERENCIA,
   cruzar,
+  entraEnLaTabla,
   indexarMaestro,
   leerNumero,
   leerRenglones,
@@ -19,6 +21,8 @@ import {
   parecido,
   totalesComprobante,
   type ArticuloMaestro,
+  type ClaseDiferencia,
+  type LineaCruce,
   type RenglonOC,
 } from "@/lib/factura-cruce";
 
@@ -227,6 +231,103 @@ revisar(
   [fijo.lineas[0].estado, fijo.lineas[0].factura?.unidades, fijo.lineas[0].difUnidades],
   ["cantidad", 2, -10],
 );
+
+/* -------------------------------------------------------------------------
+   QUE DIFERENCIAS ENTRAN EN LA TABLA DEL PROVEEDOR
+
+   Las cuatro clases no se reclaman igual: lo facturado de más es plata que se
+   pide de vuelta, lo de menos muchas veces es mercadería que falta y se
+   reclama por otro lado. Si el filtro se equivoca de signo, la tabla que sale
+   para reclamar plata termina pidiendo lo contrario de lo que corresponde.
+
+   EL SIGNO ES LO QUE SE PRUEBA ACA, y no es obvio de memoria:
+     difUnidades = facturadas - pedidas   (positivo: facturó de más)
+     difPrecio   = (precio facturado - precio OC) x unidades facturadas
+   ------------------------------------------------------------------------- */
+
+function lineaDif(p: { difUnidades?: number; difPrecio?: number }): LineaCruce {
+  return {
+    estado: "ok",
+    sku: "A",
+    descripcion: "A",
+    renglones: [],
+    como: null,
+    factor: 1,
+    oc: null,
+    factura: null,
+    difUnidades: p.difUnidades ?? 0,
+    difPrecio: p.difPrecio ?? 0,
+    iva: 21,
+  } as LineaCruce;
+}
+
+const TODAS = new Set<ClaseDiferencia>(CLASES_DIFERENCIA.map((c) => c.clave));
+const soloCon = (...claves: ClaseDiferencia[]) => new Set<ClaseDiferencia>(claves);
+
+revisar("son las cuatro clases", CLASES_DIFERENCIA.length, 4);
+
+// Cobró de más: difPrecio positivo. Es el caso que se reclama.
+revisar(
+  "precio de más entra en precio_mas",
+  entraEnLaTabla(lineaDif({ difPrecio: 500 }), soloCon("precio_mas")),
+  true,
+);
+revisar(
+  "y NO en precio_menos",
+  entraEnLaTabla(lineaDif({ difPrecio: 500 }), soloCon("precio_menos")),
+  false,
+);
+revisar(
+  "precio de menos entra en precio_menos",
+  entraEnLaTabla(lineaDif({ difPrecio: -500 }), soloCon("precio_menos")),
+  true,
+);
+
+// Facturó más unidades de las pedidas.
+revisar(
+  "cantidad de más entra en cantidad_mas",
+  entraEnLaTabla(lineaDif({ difUnidades: 6 }), soloCon("cantidad_mas")),
+  true,
+);
+revisar(
+  "cantidad de menos entra en cantidad_menos",
+  entraEnLaTabla(lineaDif({ difUnidades: -6 }), soloCon("cantidad_menos")),
+  true,
+);
+revisar(
+  "y no se cruzan",
+  entraEnLaTabla(lineaDif({ difUnidades: -6 }), soloCon("cantidad_mas")),
+  false,
+);
+
+// UNA LINEA PUEDE ENTRAR POR MAS DE UNA, y alcanza con que una esté tildada:
+// sacarla porque la otra no lo está escondería una diferencia que sí se
+// quiere reclamar.
+{
+  const mixta = lineaDif({ difUnidades: -6, difPrecio: 500 });
+  revisar("con las dos tildadas entra", entraEnLaTabla(mixta, TODAS), true);
+  revisar(
+    "con una sola de las dos, también",
+    entraEnLaTabla(mixta, soloCon("precio_mas")),
+    true,
+  );
+  revisar(
+    "con ninguna de las dos, no",
+    entraEnLaTabla(mixta, soloCon("cantidad_mas", "precio_menos")),
+    false,
+  );
+}
+
+// Sin nada tildado no sale ninguna: la pantalla lo avisa en vez de armar una
+// tabla vacía y dejar que alguien la pegue en un mail.
+revisar(
+  "sin nada tildado no entra ninguna",
+  entraEnLaTabla(lineaDif({ difPrecio: 500 }), new Set<ClaseDiferencia>()),
+  false,
+);
+
+// Una línea sin ninguna diferencia no entra aunque esté todo tildado.
+revisar("una línea sin diferencia nunca entra", entraEnLaTabla(lineaDif({}), TODAS), false);
 
 if (FALLOS.length > 0) {
   console.error(`\n${FALLOS.length} prueba(s) fallaron.`);
