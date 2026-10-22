@@ -102,6 +102,24 @@ export const EMPRESA_POR_GRUPO: Record<string, string> = {
   "NOA COMERCIAL": "0002",
 };
 
+/**
+ * LA EMPRESA QUE SE PROPONE, que no es lo mismo que la que se manda.
+ *
+ * `bronze.proveedores_grupo` es una lista corta y a mano --hoy siete
+ * proveedores, todos de NOA-- y el resto cae en Quo por descarte. Eso alcanza
+ * como SUGERENCIA y no como regla: un proveedor que cambia de empresa lo hace
+ * de un día para el otro y la lista se entera después, si alguien se acuerda.
+ *
+ * Pasó con DEPIMIEL: la lista decía NOA --y su historial de compras le daba la
+ * razón hasta abril-- pero había pasado a Quo. La orden salió a la empresa
+ * equivocada sin que nadie pudiera decir otra cosa, porque no había dónde.
+ *
+ * Por eso ahora esto propone y la pantalla decide.
+ */
+export function empresaSugerida(grupo: string | null | undefined): string {
+  return EMPRESA_POR_GRUPO[grupo ?? ""] ?? EMPRESA_POR_GRUPO["QUO MKT"]!;
+}
+
 /* -------------------------------------------------------------------------
    EL CUERPO
    ------------------------------------------------------------------------- */
@@ -333,6 +351,15 @@ export function armarOrdenSigma(
    * no deja olvidarlo.
    */
   usuarioSigma: number,
+  /**
+   * A QUE EMPRESA Y SUCURSAL VA LA ORDEN, cuando se eligió en la pantalla.
+   *
+   * Sin esto se cae en lo de siempre: la empresa del grupo del proveedor
+   * (`empresaSugerida`) y Brandmark. Es opcional para que una llamada vieja
+   * siga dando lo mismo, no porque dé igual: cargar una orden en la empresa
+   * equivocada es pedirle mercadería a nombre de otra sociedad.
+   */
+  destino?: { empresa?: string; sucursal?: string },
 ): OrdenSigma {
   const items: ItemSigma[] = [];
   let proveedorId = "";
@@ -406,9 +433,9 @@ export function armarOrdenSigma(
      */
     vencimiento: fecha,
     observacionInterna: "",
-    codigoSucursal: CODIGO_SUCURSAL,
+    codigoSucursal: destino?.sucursal || CODIGO_SUCURSAL,
     moneda: MONEDA,
-    empresa: EMPRESA_POR_GRUPO[grupo ?? ""] ?? EMPRESA_POR_GRUPO["QUO MKT"],
+    empresa: destino?.empresa || empresaSugerida(grupo),
     cotizacion: COTIZACION,
     /*
      * `frecdia` VA COMO FECHA, contra lo que dice la documentación.

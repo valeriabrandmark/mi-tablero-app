@@ -65,7 +65,13 @@ import { useBorradorOrden } from "@/lib/useBorradorOrden";
 import { useBorradoresVigentes } from "@/lib/useBorradoresVigentes";
 import { useOrdenCompleta } from "@/lib/useOrdenCompleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
-import { RESUMEN_CABECERA, type OrdenSigma } from "@/lib/sigma-orden";
+import { EMPRESAS_SIGMA, SUCURSALES_SIGMA } from "@/lib/sigma-compra";
+import {
+  CODIGO_SUCURSAL,
+  empresaSugerida,
+  RESUMEN_CABECERA,
+  type OrdenSigma,
+} from "@/lib/sigma-orden";
 import type { OrdenEnviada } from "@/lib/queries-ordenes";
 import { aXlsx } from "@/lib/xlsx";
 import type {
@@ -243,6 +249,17 @@ export default function DashboardComprasPage({
    * único que enseña es a apretar Aceptar sin leer.
    */
   const [confirmando, setConfirmando] = useState(false);
+
+  /**
+   * A QUE EMPRESA Y SUCURSAL VA LA ORDEN.
+   *
+   * Vacío quiere decir "la que corresponde por el proveedor" (ver
+   * `empresaSugerida`): no se fija al entrar, se deriva abajo. Si se fijara
+   * acá, cambiar de proveedor dejaría puesta la empresa del anterior -- que
+   * es exactamente el error que se quiere evitar.
+   */
+  const [empresaElegida, setEmpresaElegida] = useState("");
+  const [sucursalElegida, setSucursalElegida] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState<
     | { ok: true; enviado: OrdenSigma; numeroSigma: string | null }
@@ -803,6 +820,19 @@ export default function DashboardComprasPage({
    * mandara desde acá, cualquiera con la consola abierta podría cargar una
    * orden al precio que quiera.
    */
+  /**
+   * LA EMPRESA Y LA SUCURSAL CON LAS QUE SE VA A MANDAR.
+   *
+   * La sugerida sale del grupo del proveedor --una lista corta y a mano, ver
+   * `empresaSugerida`-- y lo elegido la pisa. Es derivado y no estado: cambiar
+   * de proveedor cambia la sugerencia sola, sin que quede la del anterior.
+   */
+  const empresaSugeridaDeLaOrden = empresaSugerida(
+    filasOrden.find((f) => f.grupo)?.grupo ?? null,
+  );
+  const empresaDeLaOrden = empresaElegida || empresaSugeridaDeLaOrden;
+  const sucursalDeLaOrden = sucursalElegida || CODIGO_SUCURSAL;
+
   const enviarASigma = async () => {
     if (!proveedorUnico || !ordenCompletaLista || resumen.renglones === 0)
       return;
@@ -817,7 +847,13 @@ export default function DashboardComprasPage({
       const r = await fetch("/api/compras/sigma", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ renglones, mes: data?.mes, nota: comentario }),
+        body: JSON.stringify({
+          renglones,
+          mes: data?.mes,
+          nota: comentario,
+          empresa: empresaDeLaOrden,
+          sucursal: sucursalDeLaOrden,
+        }),
       });
       const json = await r.json();
       // Salió o no salió, quedó registrada: si el panel está abierto, que se
@@ -2210,6 +2246,51 @@ export default function DashboardComprasPage({
                 Se va a cargar una orden de compra en Sigma. No se puede
                 deshacer desde acá: si sale mal, hay que anularla en Sigma.
               </p>
+
+              {/* A QUE EMPRESA Y A QUE SUCURSAL.
+                  Viene propuesta la del grupo del proveedor, pero se elige:
+                  esa lista es corta y a mano, y un proveedor que cambia de
+                  empresa lo hace de un día para el otro. Pasó con DEPIMIEL --
+                  la lista decía NOA, ya era de Quo, y la orden salió a la
+                  equivocada sin que hubiera dónde corregirlo. */}
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="text-muted space-y-1 text-xs">
+                  <span>Empresa que compra</span>
+                  <select
+                    className="border-line bg-panel-2 text-ink focus:border-c1 w-full rounded-lg border px-2.5 py-1.5 text-sm focus:outline-none"
+                    value={empresaDeLaOrden}
+                    onChange={(e) => setEmpresaElegida(e.target.value)}
+                    disabled={enviando}
+                  >
+                    {EMPRESAS_SIGMA.map((e) => (
+                      <option key={e.codigo} value={e.codigo}>
+                        {e.nombre}
+                      </option>
+                    ))}
+                  </select>
+                  {empresaDeLaOrden !== empresaSugeridaDeLaOrden && (
+                    <span className="block text-amber-300">
+                      Distinta de la que le corresponde a {proveedorUnico} por
+                      su grupo.
+                    </span>
+                  )}
+                </label>
+                <label className="text-muted space-y-1 text-xs">
+                  <span>Sucursal que recibe</span>
+                  <select
+                    className="border-line bg-panel-2 text-ink focus:border-c1 w-full rounded-lg border px-2.5 py-1.5 text-sm focus:outline-none"
+                    value={sucursalDeLaOrden}
+                    onChange={(e) => setSucursalElegida(e.target.value)}
+                    disabled={enviando}
+                  >
+                    {SUCURSALES_SIGMA.map((x) => (
+                      <option key={x.codigo} value={x.codigo}>
+                        {x.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               {/* EL MOMENTO DE NO VOLVER ATRAS merece decir QUE se manda con
                   todas las letras, sea cual sea el alcance elegido. */}
               {vistaEsRecorte && (
@@ -2276,7 +2357,9 @@ export default function DashboardComprasPage({
                   <span className="text-muted">Queda a nombre de</span>
                   <strong>{usuarioSigma ?? "—"}</strong>
                 </div>
-                {RESUMEN_CABECERA.map((c) => (
+                {/* La sucursal ya se eligió arriba: repetirla acá con un
+                    valor fijo era lo que hacía que nadie la mirara. */}
+                {RESUMEN_CABECERA.filter((c) => c.campo !== "Sucursal").map((c) => (
                   <div key={c.campo} className="flex justify-between gap-3">
                     <span className="text-muted">{c.campo}</span>
                     <span className="font-mono">{c.valor}</span>

@@ -11,6 +11,7 @@ import {
 } from "@/lib/permisos";
 import { getArticulosParaOrden } from "@/lib/queries-compras";
 import { guardarOrdenEnviada } from "@/lib/queries-ordenes";
+import { EMPRESAS_SIGMA, SUCURSALES_SIGMA } from "@/lib/sigma-compra";
 import {
   armarOrdenSigma,
   numeroDeOrdenSigma,
@@ -206,7 +207,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let cuerpo: { renglones?: unknown; mes?: unknown; nota?: unknown };
+  let cuerpo: {
+    renglones?: unknown;
+    mes?: unknown;
+    nota?: unknown;
+    /** A qué empresa y sucursal se carga la orden. Se validan más abajo. */
+    empresa?: unknown;
+    sucursal?: unknown;
+  };
   try {
     cuerpo = await request.json();
   } catch {
@@ -249,12 +257,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    /*
+     * A QUE EMPRESA Y SUCURSAL, elegidas en la pantalla.
+     *
+     * SE VALIDAN CONTRA LAS QUE EXISTEN y no se pasan tal cual: son dos
+     * strings que vienen del navegador y terminan en la cabecera de un
+     * comprobante del ERP. Un código inventado cargaría la orden a nombre de
+     * una sociedad que no existe, y eso no lo arregla nadie desde acá.
+     *
+     * Lo que no viene, o viene mal, cae en el default de siempre: la empresa
+     * del grupo del proveedor y Brandmark.
+     */
+    const empresa = EMPRESAS_SIGMA.some((e) => e.codigo === cuerpo.empresa)
+      ? String(cuerpo.empresa)
+      : undefined;
+    const sucursal = SUCURSALES_SIGMA.some((x) => x.codigo === cuerpo.sucursal)
+      ? String(cuerpo.sucursal)
+      : undefined;
+
     const payload = armarOrdenSigma(
       articulos,
       orden,
       nota,
       new Date(),
       usuarioSigma,
+      { empresa, sucursal },
     );
 
     // La URL viaja a la pantalla junto con el error. NO LLEVA CREDENCIALES: el

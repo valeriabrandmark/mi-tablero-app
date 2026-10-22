@@ -38,6 +38,7 @@ import {
   totalesDeLaOrden,
   type RenglonOrden,
 } from "@/lib/compras";
+import { empresaSugerida } from "@/lib/sigma-orden";
 import type { FilaCompra } from "@/lib/types";
 
 const FALLOS: string[] = [];
@@ -382,6 +383,24 @@ revisar("un espacio al borde no lo pierde", desc2DelProveedor("  ROFINA S A I C 
     Math.round(0.9 * (1 - 0.0494) * 1e6) / 1e6,
   );
 }
+
+/* --- A QUE EMPRESA VA LA ORDEN ------------------------------------------
+
+   `bronze.proveedores_grupo` es una lista corta y a mano --siete proveedores,
+   todos de NOA-- y el resto cae en Quo POR DESCARTE. Eso es una sugerencia y
+   no una regla, y la diferencia costó una orden: DEPIMIEL figuraba en la
+   lista como NOA, ya había pasado a Quo, y la orden salió a la empresa
+   equivocada sin que hubiera dónde corregirlo.
+
+   Lo que se prueba acá es la sugerencia, que sigue siendo el valor con el que
+   arranca el desplegable. Que se pueda cambiar es de la pantalla.
+   ------------------------------------------------------------------------ */
+
+revisar("NOA COMERCIAL propone la 0002", empresaSugerida("NOA COMERCIAL"), "0002");
+revisar("QUO MKT propone la 0001", empresaSugerida("QUO MKT"), "0001");
+// SIN GRUPO ES QUO, por descarte: la lista sólo tiene los de NOA.
+revisar("sin grupo, Quo", empresaSugerida(null), "0001");
+revisar("con un grupo que no existe, Quo también", empresaSugerida("LO QUE SEA"), "0001");
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);
