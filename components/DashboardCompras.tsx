@@ -20,6 +20,7 @@ import {
   MESES_RENTABILIDAD,
   nombreArchivo,
   porQueSugerido,
+  desc2DelProveedor,
   renglonInicial,
   UNIDADES_COMPRA,
   type ClaveUnidadCompra,
@@ -1213,9 +1214,11 @@ export default function DashboardComprasPage({
       orden: (f) => orden.get(f.sku)?.descuento ?? 0,
     },
     {
-      // EL SEGUNDO DESCUENTO ARRANCA VACÍO Y NO SALE DE NINGÚN DATO: es el que
-      // se negocia por fuera del sell in de lista. Se aplica EN CASCADA sobre
-      // lo que quedó del primero, no sumado -- ver factorNeto en lib/compras.
+      // EL SEGUNDO DESCUENTO LO PONE LA PERSONA: es el que se negocia por
+      // fuera del sell in de lista, así que arranca vacío salvo que el
+      // proveedor tenga un acuerdo fijo (ver DESC2_FIJO_POR_PROVEEDOR). Se
+      // aplica EN CASCADA sobre lo que quedó del primero, no sumado -- ver
+      // factorNeto en lib/compras.
       titulo: "Desc 2 %",
       ayuda:
         "Un segundo descuento, a mano y vacío por defecto. Se aplica EN CASCADA sobre el primero: 15 % y 10 % no son 25 % sino 23,5 %.",
@@ -1235,9 +1238,15 @@ export default function DashboardComprasPage({
               editar(f.sku, { descuento2: Number(e.target.value) || 0 })
             }
             className={`${CLASE_CELDA_EDITABLE} ${excedido ? "border-rose-500/60" : ""}`}
+            // DE DONDE SALIO EL NUMERO, cuando no lo escribió la persona. Un
+            // 4,94 que aparece solo en 156 renglones necesita decir por qué
+            // está ahí; si no, parece un error de otro.
             title={
               d2 > 0
-                ? `${d1} % y ${d2} % en cascada = ${((1 - factorNeto(d1, d2)) * 100).toFixed(2)} % de descuento total (no ${(d1 + d2).toFixed(2)} %)`
+                ? `${d1} % y ${d2} % en cascada = ${((1 - factorNeto(d1, d2)) * 100).toFixed(2)} % de descuento total (no ${(d1 + d2).toFixed(2)} %)` +
+                  (desc2DelProveedor(f.proveedor) > 0
+                    ? `. Los ${desc2DelProveedor(f.proveedor)} % son el acuerdo fijo con ${f.proveedor}: vienen cargados y se pueden cambiar.`
+                    : "")
                 : "Segundo descuento, a mano. Se aplica sobre lo que queda después del Desc 1, no se suma."
             }
             aria-label={`Desc 2 de ${f.sku}`}
