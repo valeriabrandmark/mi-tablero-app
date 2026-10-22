@@ -1,0 +1,28 @@
+-- migración `depimiel_pasa_a_quo` · 22/10/2026
+--
+-- *** PENDIENTE: NO SE PUDO APLICAR. Ver abajo. ***
+--
+-- DEPIMIEL SRL PASO A COMPRAR POR QUO MARKETING.
+--
+-- `bronze.proveedores_grupo` no es el grupo de todos los proveedores: es la
+-- lista de los que compran por NOA --siete-- y el resto cae en Quo por
+-- descarte (ver `empresaSugerida` en lib/sigma-orden.ts). Así que salir de la
+-- lista ES pasar a Quo.
+--
+-- Por eso una OC de DEPIMIEL salió a la empresa 0002. Su historial le daba la
+-- razón a la lista hasta abril: tres comprobantes por $2.389.651 en NOA. La
+-- única pista del cambio es una nota de crédito del 30/09 ya cargada en Quo.
+--
+-- ---------------------------------------------------------------------------
+-- POR QUE QUEDO PENDIENTE
+--
+-- Los DELETE contra esta tabla dieron timeout de 60s, por las dos vías
+-- (execute_sql y apply_migration). Las lecturas andan normales, así que no es
+-- la conexión: parece algo de esta tabla en particular. Se verificó después y
+-- la fila sigue estando.
+--
+-- NO ES URGENTE y por eso quedó así: desde que la empresa se elige en la
+-- pantalla al mandar la orden, esta fila decide el valor PROPUESTO y nada
+-- más. Mientras no se aplique, las OC de DEPIMIEL van a venir con 0002
+-- sugerida y hay que cambiarla a 0001 a mano.
+delete from bronze.proveedores_grupo where proveedor = 'DEPIMIEL SRL';

@@ -65,7 +65,12 @@ import { useBorradorOrden } from "@/lib/useBorradorOrden";
 import { useBorradoresVigentes } from "@/lib/useBorradoresVigentes";
 import { useOrdenCompleta } from "@/lib/useOrdenCompleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
-import { RESUMEN_CABECERA, type OrdenSigma } from "@/lib/sigma-orden";
+import { SUCURSALES_SIGMA } from "@/lib/sigma-compra";
+import {
+  EMPRESAS_QUE_COMPRAN,
+  RESUMEN_CABECERA,
+  type OrdenSigma,
+} from "@/lib/sigma-orden";
 import type { OrdenEnviada } from "@/lib/queries-ordenes";
 import { aXlsx } from "@/lib/xlsx";
 import type {
@@ -243,6 +248,20 @@ export default function DashboardComprasPage({
    * único que enseña es a apretar Aceptar sin leer.
    */
   const [confirmando, setConfirmando] = useState(false);
+
+  /**
+   * A QUE EMPRESA Y A QUE SUCURSAL VA LA ORDEN.
+   *
+   * ARRANCAN VACIAS Y HAY QUE ELEGIRLAS, sea quien sea el proveedor. Antes la
+   * empresa salía del grupo del proveedor y no se podía cambiar: así salió una
+   * orden de DEPIMIEL a NOA cuando el proveedor ya era de Quo.
+   *
+   * No se le pone un valor sugerido por lo mismo. Un default que acierta casi
+   * siempre es peor que ninguno: el que acierta casi siempre no se mira, y el
+   * día que no acierta la orden sale a nombre de otra sociedad.
+   */
+  const [empresaElegida, setEmpresaElegida] = useState("");
+  const [sucursalElegida, setSucursalElegida] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState<
     | { ok: true; enviado: OrdenSigma; numeroSigma: string | null }
@@ -803,6 +822,9 @@ export default function DashboardComprasPage({
    * mandara desde acá, cualquiera con la consola abierta podría cargar una
    * orden al precio que quiera.
    */
+  /** Sin las dos elegidas no se manda nada. */
+  const destinoCompleto = !!empresaElegida && !!sucursalElegida;
+
   const enviarASigma = async () => {
     if (!proveedorUnico || !ordenCompletaLista || resumen.renglones === 0)
       return;
@@ -817,7 +839,13 @@ export default function DashboardComprasPage({
       const r = await fetch("/api/compras/sigma", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ renglones, mes: data?.mes, nota: comentario }),
+        body: JSON.stringify({
+          renglones,
+          mes: data?.mes,
+          nota: comentario,
+          empresa: empresaElegida,
+          sucursal: sucursalElegida,
+        }),
       });
       const json = await r.json();
       // Salió o no salió, quedó registrada: si el panel está abierto, que se
@@ -2210,6 +2238,46 @@ export default function DashboardComprasPage({
                 Se va a cargar una orden de compra en Sigma. No se puede
                 deshacer desde acá: si sale mal, hay que anularla en Sigma.
               </p>
+
+              {/* A QUE EMPRESA Y A QUE SUCURSAL. Las dos se eligen, siempre,
+                  sea quien sea el proveedor. Arrancan vacías a propósito: un
+                  default que acierta casi siempre no se mira, y el día que no
+                  acierta la orden sale a nombre de otra sociedad. Pasó con
+                  DEPIMIEL, que la lista daba por NOA y ya era de Quo. */}
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="text-muted space-y-1 text-xs">
+                  <span>Empresa que compra</span>
+                  <select
+                    className="border-line bg-panel-2 text-ink focus:border-c1 w-full rounded-lg border px-2.5 py-1.5 text-sm focus:outline-none"
+                    value={empresaElegida}
+                    onChange={(e) => setEmpresaElegida(e.target.value)}
+                    disabled={enviando}
+                  >
+                    <option value="">Elegí la empresa…</option>
+                    {EMPRESAS_QUE_COMPRAN.map((e) => (
+                      <option key={e.codigo} value={e.codigo}>
+                        {e.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-muted space-y-1 text-xs">
+                  <span>Sucursal que recibe</span>
+                  <select
+                    className="border-line bg-panel-2 text-ink focus:border-c1 w-full rounded-lg border px-2.5 py-1.5 text-sm focus:outline-none"
+                    value={sucursalElegida}
+                    onChange={(e) => setSucursalElegida(e.target.value)}
+                    disabled={enviando}
+                  >
+                    <option value="">Elegí la sucursal…</option>
+                    {SUCURSALES_SIGMA.map((x) => (
+                      <option key={x.codigo} value={x.codigo}>
+                        {x.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               {/* EL MOMENTO DE NO VOLVER ATRAS merece decir QUE se manda con
                   todas las letras, sea cual sea el alcance elegido. */}
               {vistaEsRecorte && (
@@ -2300,11 +2368,23 @@ export default function DashboardComprasPage({
                 <button
                   type="button"
                   onClick={enviarASigma}
-                  disabled={enviando}
+                  disabled={enviando || !destinoCompleto}
+                  title={
+                    destinoCompleto
+                      ? undefined
+                      : "Elegí la empresa y la sucursal antes de mandar."
+                  }
                   className="border-c1 bg-c1 text-panel hover:bg-c1/85 rounded-lg border px-3 py-1.5 text-xs font-medium disabled:opacity-40"
                 >
                   {enviando ? "Mandando…" : "Confirmo, mandar la orden"}
                 </button>
+                {!destinoCompleto && (
+                  <span className="text-xs text-amber-300">
+                    Falta elegir {!empresaElegida ? "la empresa" : ""}
+                    {!empresaElegida && !sucursalElegida ? " y " : ""}
+                    {!sucursalElegida ? "la sucursal" : ""}.
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => setConfirmando(false)}

@@ -156,8 +156,8 @@ export const EMPRESAS_SIGMA: readonly { codigo: string; nombre: string }[] = [
 /**
  * Las sucursales. 0002 es Brandmark y 0003 es Noa, confirmado por ANA.
  *
- * Coincide con `CODIGO_SUCURSAL` de lib/sigma-orden.ts, que vale "0002" para
- * las órdenes de compra: la mercadería se recibe en Brandmark.
+ * Es la misma lista que ofrece la orden de compra: la sucursal se elige en
+ * las dos pantallas, y Brandmark es donde se recibe casi siempre.
  *
  * La 0001 queda con su código a secas porque no sabemos cómo se llama, y es
  * la que más facturas tiene cargadas (1.069 de 2026). Inventarle un nombre

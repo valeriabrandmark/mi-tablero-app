@@ -11,8 +11,10 @@ import {
 } from "@/lib/permisos";
 import { getArticulosParaOrden } from "@/lib/queries-compras";
 import { guardarOrdenEnviada } from "@/lib/queries-ordenes";
+import { SUCURSALES_SIGMA } from "@/lib/sigma-compra";
 import {
   armarOrdenSigma,
+  esEmpresaQueCompra,
   numeroDeOrdenSigma,
   problemasDeLaOrden,
   type ArticuloParaOrden,
@@ -206,7 +208,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let cuerpo: { renglones?: unknown; mes?: unknown; nota?: unknown };
+  let cuerpo: {
+    renglones?: unknown;
+    mes?: unknown;
+    nota?: unknown;
+    /** A qué empresa y sucursal se carga la orden. Se validan más abajo. */
+    empresa?: unknown;
+    sucursal?: unknown;
+  };
   try {
     cuerpo = await request.json();
   } catch {
@@ -239,7 +248,25 @@ export async function POST(request: NextRequest) {
       ]),
     );
 
+    /*
+     * A QUE EMPRESA Y A QUE SUCURSAL, elegidas en la pantalla.
+     *
+     * SE EXIGEN Y SE VALIDAN. Son dos strings que vienen del navegador y
+     * terminan en la cabecera de un comprobante del ERP: un código inventado
+     * cargaría la orden a nombre de una sociedad que no existe, y eso no lo
+     * arregla nadie desde acá.
+     *
+     * Y NO HAY DEFAULT. Antes la empresa salía del grupo del proveedor, y así
+     * salió una orden de DEPIMIEL a NOA cuando el proveedor ya era de Quo.
+     * Entran en la lista de problemas como cualquier otra cosa que falta.
+     */
     const problemas = problemasDeLaOrden(articulos, orden);
+    if (!esEmpresaQueCompra(cuerpo.empresa)) {
+      problemas.push("Elegí la empresa que compra.");
+    }
+    if (!SUCURSALES_SIGMA.some((x) => x.codigo === cuerpo.sucursal)) {
+      problemas.push("Elegí la sucursal que recibe la mercadería.");
+    }
     if (problemas.length > 0) {
       // 422 y no 400: el JSON está bien formado, lo que no se puede es mandar
       // ESTA orden. La pantalla las lista todas juntas.
@@ -255,6 +282,7 @@ export async function POST(request: NextRequest) {
       nota,
       new Date(),
       usuarioSigma,
+      { empresa: String(cuerpo.empresa), sucursal: String(cuerpo.sucursal) },
     );
 
     // La URL viaja a la pantalla junto con el error. NO LLEVA CREDENCIALES: el
