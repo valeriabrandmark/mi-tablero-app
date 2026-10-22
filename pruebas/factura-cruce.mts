@@ -13,6 +13,7 @@ import {
   buscarArticulo,
   CLASES_DIFERENCIA,
   cruzar,
+  bloquesDelCuadro,
   entraEnLaTabla,
   resumirDiferencias,
   indexarMaestro,
@@ -459,6 +460,107 @@ const cruceCon = (lineas: LineaCruce[]) =>
   revisar("sin diferencias no hay nada que reclamar", r.renglones, 0);
   revisar("ni plata", [r.difCosto, r.difCantidad], [0, 0]);
 }
+
+/* -------------------------------------------------------------------------
+   EL CUADRO DEL RECLAMO DE PRECIO
+
+   La cuenta que importa: el proveedor factura al costo de LISTA cuando
+   correspondía una bonificación, y lo que se le reclama es la diferencia
+   entre lo que cobró y lo que tendría que haber cobrado.
+
+   Los números de abajo salen de un reclamo de verdad (factura
+   A-00010-000243382 de 2/9/2026, la fila de CICATRICURE SERUM GOLD LIFT):
+   costo teórico 15.725,83, oferta aplicable 18 %, facturado 15.684,56 por
+   6 unidades. El proveedor aplicó 0,26 % donde correspondía 18 %, así que
+   se le reclaman 2.789,38 por unidad y 16.736,28 en total.
+
+   Está acá y no en la pantalla porque es LA cuenta del reclamo: si se
+   invierte un signo o se suman los descuentos en vez de componerlos, el
+   cuadro sale pidiendo otra cosa y nadie lo nota hasta que el proveedor
+   contesta.
+   ------------------------------------------------------------------------- */
+
+{
+  const MAESTRO_C: ArticuloMaestro[] = [
+    {
+      sku: "C0001",
+      descripcion: "CICATRICURE SERUM GOLD LIFT 30 ML",
+      codigoCompra: "7798140256120",
+      eanUnidad: null,
+      eanBulto: null,
+      unidadesPorBulto: 1,
+      iva: 21,
+    } as ArticuloMaestro,
+  ];
+
+  // La OC: costo de lista 15.725,83 con 18 % de bonificación.
+  const ocC: RenglonOC[] = [
+    { sku: "C0001", cantidad: 6, precio: 15725.83, descuento1: 18, descuento2: 0 },
+  ];
+
+  // La factura: 6 unidades a 15.684,56 netas, o sea casi sin descuento.
+  const facturaC = leerRenglones(
+    leerTablaPegada(
+      [
+        "Código\tDescripción\tCant.\tP. Unit.\tBonif %\tImporte",
+        "7798140256120\tCICATRICURE SERUM GOLD LIFT 30 ML\t6\t15.684,56\t0\t94.107,36",
+      ].join("\n"),
+    ),
+    ["codigo", "descripcion", "cantidad", "precio", "descuento1", "importe"],
+  );
+
+  const cruceC = cruzar(ocC, facturaC, MAESTRO_C);
+  const l = cruceC.lineas.find((x) => x.sku === "C0001")!;
+
+  revisar("el costo teórico es el de lista, sin bonificar", l.oc!.precioLista, 15725.83);
+  revisar("la oferta aplicable sale de los dos descuentos", l.oc!.ofertaPct, 18);
+  revisar(
+    "el neto que correspondía es la lista bonificada",
+    Math.round(l.oc!.precioNeto * 100) / 100,
+    12895.18,
+  );
+  revisar(
+    "la diferencia por unidad es lo que cobró de más",
+    Math.round((l.factura!.precioNeto! - l.oc!.precioNeto) * 100) / 100,
+    2789.38,
+  );
+  revisar("y la total, eso por las unidades", Math.round(l.difPrecio * 100) / 100, 16736.28);
+}
+
+// LOS DOS DESCUENTOS SE COMPONEN, NO SE SUMAN. 15 % y 10 % dan 23,5 %, que es
+// como los liquida el proveedor y como los aplica Sigma con FDESCU1 y FDESCU2.
+{
+  const ocDos: RenglonOC[] = [
+    { sku: "A", cantidad: 1, precio: 1000, descuento1: 15, descuento2: 10 },
+  ];
+  const cruceDos = cruzar(ocDos, [], []);
+  const l = cruceDos.lineas[0]!;
+  revisar("la oferta aplicable es compuesta", l.oc!.ofertaPct, 23.5);
+  revisar("y no la suma de las dos", l.oc!.ofertaPct === 25, false);
+}
+
+/* --- QUE COLUMNAS SALEN, SEGUN LO QUE SE RECLAMA ------------------------- */
+
+revisar(
+  "reclamando sólo precios salen las columnas de precio",
+  bloquesDelCuadro(new Set<ClaseDiferencia>(["precio_mas"])),
+  { precio: true, cantidad: false },
+);
+revisar(
+  "reclamando sólo cantidades, las de cantidad",
+  bloquesDelCuadro(new Set<ClaseDiferencia>(["cantidad_menos"])),
+  { precio: false, cantidad: true },
+);
+revisar(
+  "con las cuatro tildadas salen las dos",
+  bloquesDelCuadro(new Set<ClaseDiferencia>(CLASES_DIFERENCIA.map((c) => c.clave))),
+  { precio: true, cantidad: true },
+);
+revisar(
+  "sin nada tildado no sale ninguna",
+  bloquesDelCuadro(new Set<ClaseDiferencia>()),
+  { precio: false, cantidad: false },
+);
 
 if (FALLOS.length > 0) {
   console.error(`\n${FALLOS.length} prueba(s) fallaron.`);

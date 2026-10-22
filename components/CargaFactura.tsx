@@ -17,6 +17,7 @@ import {
   type ResultadoCruce,
   type TotalesComprobante,
   CLASES_DIFERENCIA,
+  bloquesDelCuadro,
   entraEnLaTabla,
   type ClaseDiferencia,
 } from "@/lib/factura-cruce";
@@ -1297,39 +1298,138 @@ const n0 = (n: number) => n.toLocaleString("es-AR", { maximumFractionDigits: 2 }
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-const ENCABEZADOS_MAIL = [
-  "Motivo",
-  "Factura",
-  "SKU",
-  "Cód. proveedor",
-  "Descripción",
-  "Unid. OC",
-  "Unid. facturadas",
-  "Dif. unid.",
-  "Costo unit. OC",
-  "Costo unit. facturado",
-  "Dif. $ costo",
-  "Dif. $ cantidad",
-];
+/* -------------------------------------------------------------------------
+   LAS COLUMNAS DEL CUADRO QUE SE LE MANDA AL PROVEEDOR
 
-function celdasMail(l: LineaCruce, d: DatosMail): string[] {
-  return [
-    MOTIVO_MAIL[l.estado],
-    d.numeroFactura,
-    l.sku ?? "",
-    (l.sku && d.codigoDe.get(l.sku)) || "",
-    (l.sku && d.descripcionDe.get(l.sku)) || l.descripcion,
-    l.oc ? n0(l.oc.unidades) : "—",
-    l.factura ? n0(l.factura.unidades) : "—",
-    l.difUnidades === 0 ? "—" : `${l.difUnidades > 0 ? "+" : ""}${n0(l.difUnidades)}`,
-    l.oc ? pesos(l.oc.precioNeto) : "—",
-    l.factura?.precioNeto != null ? pesos(l.factura.precioNeto) : "—",
-    l.difPrecio === 0 ? "—" : pesos(l.difPrecio),
-    difPorCantidad(l) === 0 ? "—" : pesos(difPorCantidad(l)),
-  ];
+   NO SON SIEMPRE LAS MISMAS: dependen de lo que se esté reclamando (ver
+   `bloquesDelCuadro`). Un reclamo de precio pide el costo teórico, el
+   descuento que aplicó y el que correspondía; uno de cantidad pide las
+   unidades. Con las dos tandas siempre puestas, la mitad del cuadro va en
+   guiones y el proveedor tiene que adivinar cuál mirar.
+   ------------------------------------------------------------------------- */
+
+type ColumnaMail = {
+  titulo: string;
+  /** Alineada a la derecha y sin cortar, como cualquier número. */
+  numerica?: boolean;
+  /** `undefined` = va siempre. */
+  bloque?: "precio" | "cantidad";
+  valor: (l: LineaCruce, d: DatosMail) => string;
+};
+
+/** Un porcentaje como se lee en el cuadro: 18 -> "18,00 %". */
+const pct = (n: number) => `${n2(n)} %`;
+
+/**
+ * EL DESCUENTO QUE APLICO DE VERDAD EN LA FACTURA, contra el costo de lista.
+ *
+ * Es la cuenta que contesta la pregunta del reclamo: "me cobraste la lista
+ * cuando tengo 18 % de bonificación". Si no hay costo de lista --un artículo
+ * que no estaba en la OC-- no hay contra qué medirlo.
+ */
+function descuentoAplicado(l: LineaCruce): number | null {
+  const lista = l.oc?.precioLista;
+  const neto = l.factura?.precioNeto;
+  if (!lista || neto == null) return null;
+  return (1 - neto / lista) * 100;
 }
 
-function htmlMail(d: DatosMail): string {
+/** Lo que se cobró de más (o de menos) POR UNIDAD. */
+function difPorUnidad(l: LineaCruce): number | null {
+  if (!l.oc || l.factura?.precioNeto == null) return null;
+  return l.factura.precioNeto - l.oc.precioNeto;
+}
+
+const COLUMNAS_MAIL: ColumnaMail[] = [
+  { titulo: "Motivo", valor: (l) => MOTIVO_MAIL[l.estado] },
+  { titulo: "Nº Factura", valor: (_l, d) => d.numeroFactura },
+  {
+    titulo: "Cód. Compra (proveedor)",
+    valor: (l, d) => (l.sku && d.codigoDe.get(l.sku)) || "",
+  },
+  { titulo: "SKU", valor: (l) => l.sku ?? "" },
+  {
+    titulo: "Descripción",
+    valor: (l, d) => (l.sku && d.descripcionDe.get(l.sku)) || l.descripcion,
+  },
+  {
+    titulo: "Unidades",
+    numerica: true,
+    valor: (l) => (l.factura ? n0(l.factura.unidades) : "—"),
+  },
+
+  // --- Lo que hace falta para reclamar un PRECIO ------------------------
+  {
+    titulo: "Costo teórico unit",
+    numerica: true,
+    bloque: "precio",
+    valor: (l) => (l.oc ? pesos(l.oc.precioLista) : "—"),
+  },
+  {
+    titulo: "Costo neto unit (facturado)",
+    numerica: true,
+    bloque: "precio",
+    valor: (l) => (l.factura?.precioNeto != null ? pesos(l.factura.precioNeto) : "—"),
+  },
+  {
+    titulo: "% Desc. aplicado en factura",
+    numerica: true,
+    bloque: "precio",
+    valor: (l) => {
+      const d = descuentoAplicado(l);
+      return d == null ? "—" : pct(d);
+    },
+  },
+  {
+    titulo: "% Oferta aplicable",
+    numerica: true,
+    bloque: "precio",
+    valor: (l) => (l.oc ? pct(l.oc.ofertaPct) : "—"),
+  },
+  {
+    titulo: "Diferencia unit",
+    numerica: true,
+    bloque: "precio",
+    valor: (l) => {
+      const d = difPorUnidad(l);
+      return d == null || d === 0 ? "—" : pesos(d);
+    },
+  },
+  {
+    titulo: "Diferencia total",
+    numerica: true,
+    bloque: "precio",
+    valor: (l) => (l.difPrecio === 0 ? "—" : pesos(l.difPrecio)),
+  },
+
+  // --- Lo que hace falta para reclamar una CANTIDAD ---------------------
+  {
+    titulo: "Unid. OC",
+    numerica: true,
+    bloque: "cantidad",
+    valor: (l) => (l.oc ? n0(l.oc.unidades) : "—"),
+  },
+  {
+    titulo: "Dif. unid.",
+    numerica: true,
+    bloque: "cantidad",
+    valor: (l) =>
+      l.difUnidades === 0 ? "—" : `${l.difUnidades > 0 ? "+" : ""}${n0(l.difUnidades)}`,
+  },
+  {
+    titulo: "Dif. $ cantidad",
+    numerica: true,
+    bloque: "cantidad",
+    valor: (l) => (difPorCantidad(l) === 0 ? "—" : pesos(difPorCantidad(l))),
+  },
+];
+
+function columnasMail(elegidas: Set<ClaseDiferencia>): ColumnaMail[] {
+  const bloques = bloquesDelCuadro(elegidas);
+  return COLUMNAS_MAIL.filter((c) => !c.bloque || bloques[c.bloque]);
+}
+
+function htmlMail(d: DatosMail, elegidas: Set<ClaseDiferencia>): string {
   const th =
     "border:1px solid #cbd5e1;background:#1e293b;color:#ffffff;padding:6px 8px;font-size:12px;text-align:left;";
   const td = "border:1px solid #cbd5e1;padding:5px 8px;font-size:12px;";
@@ -1339,26 +1439,41 @@ function htmlMail(d: DatosMail): string {
     "sin identificar": "#fee2e2",
     "no está en la OC": "#ede9fe",
   };
+  const columnas = columnasMail(elegidas);
+  const bloques = bloquesDelCuadro(elegidas);
   const totalCosto = d.lineas.reduce((s, l) => s + l.difPrecio, 0);
   const totalCantidad = d.lineas.reduce((s, l) => s + difPorCantidad(l), 0);
   const titulo = [d.proveedor, d.factura, d.oc].filter(Boolean).map(esc).join(" · ");
 
   const filas = d.lineas
     .map((l) => {
-      const c = celdasMail(l, d);
       const bg = fondo[l.estado] ?? "#fef3c7";
-      return `<tr style="background:${bg};">${c
-        .map((v, i) => `<td style="${i >= 5 ? num : td}">${esc(v)}</td>`)
+      return `<tr style="background:${bg};">${columnas
+        .map((c) => `<td style="${c.numerica ? num : td}">${esc(c.valor(l, d))}</td>`)
         .join("")}</tr>`;
     })
     .join("");
 
+  /* EL TOTAL VA DEBAJO DE SU PROPIA COLUMNA. Cuántas celdas hay que saltear
+     antes depende de qué bloques salieron, así que se cuenta en vez de
+     escribirlo a mano -- que es como quedó mal la última vez que cambiaron
+     las columnas. */
+  const antesDelTotal =
+    columnas.length -
+    (bloques.precio ? 1 : 0) -
+    (bloques.cantidad ? 1 : 0);
+  const celdasTotal = [
+    `<td style="${td}" colspan="${antesDelTotal}">Total diferencias</td>`,
+    bloques.precio ? `<td style="${num}">${pesos(totalCosto)}</td>` : "",
+    bloques.cantidad ? `<td style="${num}">${pesos(totalCantidad)}</td>` : "",
+  ].join("");
+
   return `<div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
 <p style="font-size:13px;margin:0 0 8px;"><b>Diferencias factura vs. OC</b>${titulo ? ` — ${titulo}` : ""}</p>
 <table style="border-collapse:collapse;">
-<thead><tr>${ENCABEZADOS_MAIL.map((h) => `<th style="${th}">${esc(h)}</th>`).join("")}</tr></thead>
+<thead><tr>${columnas.map((c) => `<th style="${th}">${esc(c.titulo)}</th>`).join("")}</tr></thead>
 <tbody>${filas}
-<tr style="background:#f1f5f9;font-weight:bold;"><td style="${td}" colspan="10">Total diferencias</td><td style="${num}">${pesos(totalCosto)}</td><td style="${num}">${pesos(totalCantidad)}</td></tr>
+<tr style="background:#f1f5f9;font-weight:bold;">${celdasTotal}</tr>
 </tbody></table>
 <p style="font-size:12px;margin:8px 0 0;">Total factura calculado: ${pesos(d.totales.total)}${
     d.totales.diferencia != null && !d.totales.cuadra
@@ -1368,10 +1483,11 @@ function htmlMail(d: DatosMail): string {
 </div>`;
 }
 
-function textoMail(d: DatosMail): string {
+function textoMail(d: DatosMail, elegidas: Set<ClaseDiferencia>): string {
+  const columnas = columnasMail(elegidas);
   return [
-    ENCABEZADOS_MAIL.join("\t"),
-    ...d.lineas.map((l) => celdasMail(l, d).join("\t")),
+    columnas.map((c) => c.titulo).join("\t"),
+    ...d.lineas.map((l) => columnas.map((c) => c.valor(l, d)).join("\t")),
   ].join("\n");
 }
 
@@ -1385,7 +1501,7 @@ function TablaParaMail({ datos }: { datos: DatosMail }) {
     () => ({ ...datos, lineas: datos.lineas.filter((l) => entraEnLaTabla(l, elegidas)) }),
     [datos, elegidas],
   );
-  const html = useMemo(() => htmlMail(recortados), [recortados]);
+  const html = useMemo(() => htmlMail(recortados, elegidas), [recortados, elegidas]);
 
   const alternar = (clave: ClaseDiferencia) =>
     setElegidas((antes) => {
@@ -1400,7 +1516,7 @@ function TablaParaMail({ datos }: { datos: DatosMail }) {
       await navigator.clipboard.write([
         new ClipboardItem({
           "text/html": new Blob([html], { type: "text/html" }),
-          "text/plain": new Blob([textoMail(recortados)], { type: "text/plain" }),
+          "text/plain": new Blob([textoMail(recortados, elegidas)], { type: "text/plain" }),
         }),
       ]);
       setCopiado("ok");

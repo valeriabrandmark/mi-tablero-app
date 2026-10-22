@@ -646,6 +646,22 @@ export type LineaCruce = {
   factor: number;
   oc: {
     unidades: number;
+    /**
+     * EL COSTO DE LISTA, SIN BONIFICAR. Es el "costo teórico" del cuadro que
+     * se le manda al proveedor: contra él se mide qué descuento aplicó de
+     * verdad en la factura.
+     */
+    precioLista: number;
+    /**
+     * LA BONIFICACION QUE CORRESPONDIA, en puntos (18 = 18 %), con los dos
+     * descuentos de la orden ya compuestos en cascada.
+     *
+     * No es la suma: 15 % y 10 % dan 23,5 % y no 25 %, porque el segundo se
+     * calcula sobre lo que quedó del primero. Es como los liquida el
+     * proveedor y como los aplica Sigma con FDESCU1 y FDESCU2.
+     */
+    ofertaPct: number;
+    /** El de lista con la bonificación aplicada: lo que se tendría que pagar. */
     precioNeto: number;
     neto: number;
   } | null;
@@ -778,9 +794,18 @@ export function cruzar(
   // 4) Cada renglón de la OC con lo que le tocó.
   for (const o of oc) {
     const a = indice.porSku.get(o.sku);
-    const precioNetoOC = o.precio * factorNeto(o.descuento1, o.descuento2);
+    const bonificacion = factorNeto(o.descuento1, o.descuento2);
+    const precioNetoOC = o.precio * bonificacion;
     const ladoOC = {
       unidades: o.cantidad,
+      precioLista: o.precio,
+      // En puntos y compuesto, no sumado. Ver `ofertaPct` en LineaCruce.
+      //
+      // REDONDEADO, porque es para mostrar y no para calcular: la plata sale
+      // de `factorNeto`, no de acá. Sin esto, un 18 % limpio sale
+      // 17,999999999999993 por cómo restan los flotantes, y el cuadro que se
+      // le manda al proveedor no puede tener eso adentro.
+      ofertaPct: Math.round((1 - bonificacion) * 1e6) / 1e4,
       precioNeto: precioNetoOC,
       neto: centavos(precioNetoOC * o.cantidad),
     };
@@ -1053,24 +1078,28 @@ export function renglonesDeOCPegada(
 export const CLASES_DIFERENCIA = [
   {
     clave: "precio_mas",
+    bloque: "precio",
     label: "Dif. de precios de más",
     ayuda: "Facturado por encima del costo de la OC",
     entra: (l: LineaCruce) => l.difPrecio > 0,
   },
   {
     clave: "precio_menos",
+    bloque: "precio",
     label: "Dif. de precios de menos",
     ayuda: "Facturado por debajo del costo de la OC",
     entra: (l: LineaCruce) => l.difPrecio < 0,
   },
   {
     clave: "cantidad_mas",
+    bloque: "cantidad",
     label: "Dif. de cantidades de más",
     ayuda: "Facturó más unidades de las pedidas, o algo que no estaba en la OC",
     entra: (l: LineaCruce) => l.difUnidades > 0,
   },
   {
     clave: "cantidad_menos",
+    bloque: "cantidad",
     label: "Dif. de cantidades de menos",
     ayuda: "Facturó menos unidades de las pedidas, o no facturó algo pedido",
     entra: (l: LineaCruce) => l.difUnidades < 0,
@@ -1087,6 +1116,33 @@ export type ClaseDiferencia = (typeof CLASES_DIFERENCIA)[number]["clave"];
  */
 export function entraEnLaTabla(l: LineaCruce, elegidas: Set<ClaseDiferencia>): boolean {
   return CLASES_DIFERENCIA.some((c) => elegidas.has(c.clave) && c.entra(l));
+}
+
+/**
+ * QUE COLUMNAS TIENE QUE TENER EL CUADRO, segun lo que se este reclamando.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE NO SON SIEMPRE LAS MISMAS
+ *
+ * Un reclamo de precio y uno de cantidad se leen distinto. El de precio es
+ * "me cobraste la lista y tengo 18 % de bonificación": lo que hay que ver es
+ * el costo teórico, el descuento que aplicó y el que correspondía. El de
+ * cantidad es "pedí 6 y facturaste 4": ahí el descuento no dice nada y lo que
+ * importa son las unidades.
+ *
+ * Con las dos tandas de columnas siempre puestas, la mitad del cuadro va en
+ * guiones y el proveedor tiene que adivinar cuál mirar. Así, el cuadro de un
+ * reclamo de precio sale con las columnas de precio y nada más.
+ *
+ * Con las cuatro clases tildadas --que es como arranca-- salen las dos.
+ */
+export function bloquesDelCuadro(elegidas: Set<ClaseDiferencia>): {
+  precio: boolean;
+  cantidad: boolean;
+} {
+  const hay = (b: "precio" | "cantidad") =>
+    CLASES_DIFERENCIA.some((c) => c.bloque === b && elegidas.has(c.clave));
+  return { precio: hay("precio"), cantidad: hay("cantidad") };
 }
 
 /* -------------------------------------------------------------------------
