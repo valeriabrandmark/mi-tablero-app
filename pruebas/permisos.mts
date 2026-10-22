@@ -17,6 +17,7 @@ import { moduloDeRuta, moduloPermiteRuta } from "@/lib/modulos";
 import {
   destinoObjetivos,
   enConstruccion,
+  puedeCargarFacturas,
   puedeEditar,
   puedeVer,
   puedeVerBorradores,
@@ -93,7 +94,11 @@ revisar("admin NO ve Precios TN", puedeVer({ rol: "admin" }, "/precios-tn"), fal
 revisar("admin ve el resto", puedeVer({ rol: "admin" }, "/ventas-mayoristas"), true);
 revisar("superadmin ve Precios TN", puedeVer({ rol: "superadmin" }, "/precios-tn"), true);
 
-// Carga de Facturas de compra: sólo el superadmin, aunque sea de Compras.
+// --- LA CARGA DE FACTURAS ES SU PROPIO MODULO -----------------------------
+//
+// Era "sólo superadmin" y vivía adentro de Compras. Ahora se puede dar sola, y
+// eso tiene que seguir cumpliendo las dos mitades: que se pueda DAR, y que no
+// se cuele de arriba por tener un rol amplio.
 const conCompras: Permiso = {
   rol: "personalizado",
   modulos: ["compras"],
@@ -101,11 +106,70 @@ const conCompras: Permiso = {
   sigma: null,
   nombreSigma: null,
 };
+const conFacturas: Permiso = {
+  rol: "personalizado",
+  modulos: ["facturas_compra"],
+  editar: ["facturas_compra"],
+  sigma: 9,
+  nombreSigma: "PRUEBA",
+};
+
 revisar("superadmin ve facturas de compra", puedeVer({ rol: "superadmin" }, "/facturas-compra"), true);
 revisar("admin NO ve facturas de compra", puedeVer({ rol: "admin" }, "/facturas-compra"), false);
 revisar("admin NO usa su api", puedeVer({ rol: "admin" }, "/api/compras/facturas"), false);
+
+// LAS DOS SEPARADAS, EN LOS DOS SENTIDOS. Es el punto de haberla sacado de
+// Compras: quien pide al proveedor y quien asienta lo que llegó pueden ser
+// personas distintas.
 revisar("con Compras NO ve facturas de compra", puedeVer(conCompras, "/facturas-compra"), false);
 revisar("con Compras sigue viendo Compras", puedeVer(conCompras, "/stock/compras"), true);
+revisar("con facturas SI ve facturas", puedeVer(conFacturas, "/facturas-compra"), true);
+revisar("y su api", puedeVer(conFacturas, "/api/compras/facturas"), true);
+revisar("pero NO ve Compras", puedeVer(conFacturas, "/stock/compras"), false);
+revisar("ni manda órdenes por su api", puedeVer(conFacturas, "/api/compras/sigma"), false);
+
+// EL PREFIJO MAS LARGO GANA, y acá es lo único que separa los dos módulos:
+// `/api/compras/facturas` empieza con `/api/compras`.
+revisar(
+  "su api es del módulo de facturas y no del de Compras",
+  moduloDeRuta("/api/compras/facturas"),
+  "facturas_compra",
+);
+revisar(
+  "y la de mandar órdenes sigue siendo de Compras",
+  moduloDeRuta("/api/compras/sigma"),
+  "compras",
+);
+
+// MANDARLA A SIGMA PIDE LAS TRES COSAS: ver, editar y número de Sigma. Sin el
+// número la factura no se puede firmar, así que un permiso sin número no sirve.
+revisar("con el módulo y el número, carga facturas", puedeCargarFacturas(conFacturas, "x@y.com"), true);
+revisar(
+  "sin el permiso de editar, no",
+  puedeCargarFacturas({ ...conFacturas, editar: [] }, "x@y.com"),
+  false,
+);
+revisar(
+  "sin número de Sigma, tampoco",
+  puedeCargarFacturas({ ...conFacturas, sigma: null }, "nadie@brandmark.com.ar"),
+  false,
+);
+revisar(
+  "y con Compras marcado pero no facturas, menos",
+  puedeCargarFacturas({ ...conCompras, editar: ["compras"], sigma: 9 }, "x@y.com"),
+  false,
+);
+// El `admin` de la lista de ERP puede mandar ÓRDENES, pero no ve esta
+// pantalla: que una cosa no abra la otra es toda la separación.
+revisar("un admin no carga facturas", puedeCargarFacturas({ rol: "admin" }, "a.maldonado@brandmark.com.ar"), false);
+
+// Y LA QUE LA USA TODOS LOS DIAS SIGUE PUDIENDO. Es la prueba que avisa si
+// separar el módulo le sacó el acceso a quien ya lo tenía.
+revisar(
+  "el superadmin de la lista de ERP sigue cargando facturas",
+  puedeCargarFacturas({ rol: "superadmin" }, "a.maldonado@brandmark.com.ar"),
+  true,
+);
 revisar("admin sigue viendo el historial de órdenes", puedeVer({ rol: "admin" }, "/api/compras/ordenes"), true);
 revisar("admin_tn ve Precios TN", puedeVer({ rol: "admin_tn" }, "/precios-tn"), true);
 revisar("admin_tn no ve nada más", puedeVer({ rol: "admin_tn" }, "/ventas-mayoristas"), false);

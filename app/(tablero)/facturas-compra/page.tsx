@@ -13,9 +13,15 @@ export const metadata = { title: "Carga de Facturas de compra — Tablero Brandm
  * importe del renglón-- y sale el reporte de diferencias y la tabla para el
  * mail al proveedor.
  *
- * El permiso es el del módulo Compras (lib/modulos.ts): la ve quien ve las
- * órdenes. Todavía no escribe en Sigma; el comprobante se sigue cargando con
- * la planilla.
+ * TIENE SU PROPIO MODULO (`facturas_compra` en lib/modulos.ts) y no el de
+ * Compras, aunque cruce contra las órdenes que salen de ahí: son dos trabajos
+ * distintos y los puede hacer gente distinta. Juntos había que dar los dos o
+ * ninguno.
+ *
+ * Esto SI escribe en Sigma (`ImportCompras`), así que además de ver la
+ * pantalla hace falta el permiso de editar del módulo y número de Sigma --ver
+ * `puedeCargarFacturas` en lib/permisos.ts--. El `admin` no la ve, igual que
+ * con Precios TN.
  */
 export default function CargaFacturaPage() {
   return <CargaFactura />;

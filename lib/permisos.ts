@@ -243,15 +243,26 @@ function esDePreciosTn(pathname: string): boolean {
 }
 
 /**
- * LA CARGA DE FACTURAS DE COMPRA ES SÓLO DEL `superadmin`, por pedido de Ani
- * (20/10/2026). Vive en el módulo Compras (lib/modulos.ts), pero tener Compras
- * --o ser `admin`-- no alcanza. Su API va con ella; el historial de órdenes
- * (`/api/compras/ordenes`) no, porque lo usa también Compras.
+ * La carga de facturas de compra.
+ *
+ * ---------------------------------------------------------------------------
+ * DEJO DE SER "SOLO SUPERADMIN" Y PASO A SER UN MODULO
+ *
+ * Nació cerrada al `superadmin` por pedido de Ani (20/10/2026), cuando todavía
+ * no escribía en Sigma y vivía adentro del módulo Compras. Hoy escribe, y
+ * tiene su propio módulo (`facturas_compra` en lib/modulos.ts): son dos
+ * trabajos distintos --uno le pide al proveedor, el otro asienta lo que
+ * llegó-- y estando juntos había que dar los dos o ninguno.
+ *
+ * LO QUE NO CAMBIA ES QUIEN LA VE HOY. Este bloque deja afuera al `admin`,
+ * igual que el de Precios TN: tener un rol amplio por otros motivos no abre
+ * una pantalla que deja asientos en la contabilidad. Lo que se gana es poder
+ * dársela a alguien EN CONCRETO desde el panel de Usuarios.
  */
-const RUTAS_SOLO_SUPERADMIN = ["/facturas-compra", "/api/compras/facturas"];
+const RAIZ_FACTURAS = ["/facturas-compra", "/api/compras/facturas"];
 
-function esSoloSuperadmin(pathname: string): boolean {
-  return RUTAS_SOLO_SUPERADMIN.some(
+function esDeFacturasCompra(pathname: string): boolean {
+  return RAIZ_FACTURAS.some(
     (r) => pathname === r || pathname.startsWith(`${r}/`),
   );
 }
@@ -295,8 +306,6 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
     return permiso.rol !== "personalizado" || permiso.modulos.length > 0;
   }
 
-  // Antes que todo lo demás: ni el módulo Compras ni el rol `admin` la abren.
-  if (esSoloSuperadmin(pathname)) return permiso.rol === "superadmin";
 
   // EL PERSONALIZADO SE RESUELVE ENTERO ACÁ, Y VA PRIMERO. Lo suyo es la lista
   // de módulos y nada más: no comparte ninguna regla con los roles viejos, ni
@@ -319,6 +328,12 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   if (esDePreciosTn(pathname) || esApiPreciosTn(pathname)) {
     return permiso.rol === "superadmin" || permiso.rol === "admin_tn";
   }
+
+  // LA CARGA DE FACTURAS, POR EL MISMO MOTIVO Y EN EL MISMO LUGAR. Va acá
+  // abajo del `personalizado` y arriba del `admin -> true`: abajo, para que
+  // quien tenga el módulo marcado entre --ese fue el error de Precios TN del
+  // 16/09, documentado arriba--; arriba, para que tener `admin` no la abra.
+  if (esDeFacturasCompra(pathname)) return permiso.rol === "superadmin";
 
   if (permiso.rol === "superadmin" || permiso.rol === "admin") return true;
 
@@ -479,6 +494,9 @@ export function puedeEditar(
   if (modulo === "compras") {
     return permiso.rol === "admin" && usuarioSigmaDe(email) != null;
   }
+  // `facturas_compra` no tiene ningún rol viejo que lo edite: el `superadmin`
+  // ya salió por arriba y el `admin` ni siquiera ve la pantalla. Se cae en el
+  // `false` de abajo a propósito, igual que cualquier módulo nuevo.
   return false;
 }
 
@@ -518,6 +536,28 @@ export function puedeEscribirEnElERP(
   if (!permiso) return false;
   if (!puedeVer(permiso, "/stock/compras")) return false;
   if (!puedeEditar(permiso, "compras", email)) return false;
+  return datosSigmaDe(permiso, email) != null;
+}
+
+/**
+ * Quién puede cargar una FACTURA de compra en Sigma.
+ *
+ * Las mismas tres condiciones que la de órdenes, pero sobre su propio módulo:
+ * ver la pantalla, poder editar en `facturas_compra`, y tener número de Sigma.
+ *
+ * ES UNA FUNCION APARTE Y NO LA DE ORDENES. Compartirlas obligaba a dar
+ * Compras para poder cargar una factura, que es justo lo que se separó: quien
+ * asienta lo que llegó no tiene por qué poder pedirle al proveedor. Y al
+ * revés — quien arma órdenes no queda con permiso de tocar la contabilidad
+ * sin que alguien lo haya decidido.
+ */
+export function puedeCargarFacturas(
+  permiso: Permiso | null,
+  email: string | null | undefined,
+): boolean {
+  if (!permiso) return false;
+  if (!puedeVer(permiso, "/facturas-compra")) return false;
+  if (!puedeEditar(permiso, "facturas_compra", email)) return false;
   return datosSigmaDe(permiso, email) != null;
 }
 

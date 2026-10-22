@@ -5,7 +5,7 @@ import {
   type DatosFactura,
 } from "@/lib/sigma-compra";
 import type { ResultadoCruce, TotalesComprobante } from "@/lib/factura-cruce";
-import { permisoDelUsuario, puedeEscribirEnElERP } from "@/lib/permisos";
+import { permisoDelUsuario, puedeCargarFacturas } from "@/lib/permisos";
 import {
   facturaYaEnviada,
   getImputacionContable,
@@ -80,14 +80,14 @@ function urlDeSigma(): string {
 }
 
 export async function POST(request: NextRequest) {
-  // MISMO PERMISO QUE MANDAR UNA ORDEN: `puedeEscribirEnElERP`, que además de
+  // MISMO PERMISO QUE MANDAR UNA ORDEN: `puedeCargarFacturas`, que además de
   // ver Compras pide estar habilitado en USUARIOS_ERP. Cargar una factura deja
   // un asiento en la contabilidad; ver el tablero no.
   let usuario: string | null = "local";
   if (authConfigurada) {
     const quien = await getUsuario();
     usuario = quien?.email ?? null;
-    if (!puedeEscribirEnElERP(permisoDelUsuario(quien), usuario)) {
+    if (!puedeCargarFacturas(permisoDelUsuario(quien), usuario)) {
       return NextResponse.json(
         {
           error:

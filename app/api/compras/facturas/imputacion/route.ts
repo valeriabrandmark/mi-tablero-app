@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { permisoDelUsuario, puedeEscribirEnElERP } from "@/lib/permisos";
+import { permisoDelUsuario, puedeCargarFacturas } from "@/lib/permisos";
 import {
   getImputacionContable,
   guardarImputacion,
@@ -23,7 +23,7 @@ async function quienPuede(): Promise<string | null | false> {
   if (!authConfigurada) return "local";
   const quien = await getUsuario();
   const email = quien?.email ?? null;
-  return puedeEscribirEnElERP(permisoDelUsuario(quien), email) ? email : false;
+  return puedeCargarFacturas(permisoDelUsuario(quien), email) ? email : false;
 }
 
 export async function GET() {
