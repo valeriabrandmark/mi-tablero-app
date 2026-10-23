@@ -159,9 +159,12 @@ export const MODULOS: Modulo[] = [
   {
     clave: "meli",
     nombre: "Mercado Libre",
-    queEdita: null,
+    // No escribe en Mercado Libre: guarda qué se decidió con cada alerta de
+    // "Mis tareas" (ver app/api/tareas-meli).
+    queEdita: "contestar las alertas de Mis tareas",
     rutas: [
       "/venta-minorista/mercado-libre",
+      "/api/tareas-meli",
       "/api/meli",
       "/api/stock-full",
       "/api/elasticidad",

@@ -521,6 +521,7 @@ export function puedeEditar(
   // Los roles viejos, uno por uno y no por descarte: un rol nuevo no tiene por
   // qué heredar permiso de escritura porque sí.
   if (modulo === "precios_tn") return permiso.rol === "admin_tn";
+  if (modulo === "meli") return permiso.rol === "responsable_meli";
   if (modulo === "compras") {
     return permiso.rol === "admin" && usuarioSigmaDe(email) != null;
   }
