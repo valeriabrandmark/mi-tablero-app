@@ -89,7 +89,7 @@ const NAV: ItemNav[] = [
       // aunque la vea una sola persona: es una tarea del negocio --la lista de
       // un proveedor que aumentó-- y no una configuración del tablero. El nav
       // la filtra sola con `puedeVer`, así que al resto ni le aparece.
-      { href: "/costos", label: "Actualizar costos", icono: "precios" },
+      { href: "/costos", label: "Actualizar costos", icono: "costos" },
     ],
   },
 ];
