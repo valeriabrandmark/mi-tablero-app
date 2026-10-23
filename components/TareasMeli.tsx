@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { fmtFechaCorta, fmtMoneda, fmtNumero } from "@/lib/format";
@@ -22,7 +22,11 @@ import { useDatosTablero } from "@/lib/useDatosTablero";
  * segunda es para ver qué se decidió y cuándo vuelve a revisarse.
  */
 
-type Props = { puedeContestar: boolean };
+type Props = {
+  puedeContestar: boolean;
+  /** Avisa cuántas alertas quedan sin contestar, para la fila de la rutina. */
+  onPendientes?: (n: number) => void;
+};
 
 function Respondida({ f }: { f: FilaDescarte }) {
   if (!f.ultima) return <span className="text-muted">—</span>;
@@ -136,11 +140,15 @@ function Contestar({ f, alGuardar }: { f: FilaDescarte; alGuardar: () => void })
   );
 }
 
-export default function TareasMeli({ puedeContestar }: Props) {
+export default function TareasMeli({ puedeContestar, onPendientes }: Props) {
   const { data, cargando, error, recargar } = useDatosTablero<DashboardTareasMeli>(
     "/api/tareas-meli",
     {},
   );
+
+  useEffect(() => {
+    if (data) onPendientes?.(data.filas.filter((f) => !f.ultima?.vigente).length);
+  }, [data, onPendientes]);
 
   if (error) return <Aviso>No se pudieron cargar las tareas: {error}</Aviso>;
   if (!data) {
