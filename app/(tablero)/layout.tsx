@@ -85,6 +85,11 @@ const NAV: ItemNav[] = [
       // corrida y comparten el permiso por prefijo, así que eran dos vistas de
       // un módulo y no dos módulos. Ver app/(tablero)/precios-tn/layout.tsx.
       { href: "/precios-tn", label: "Precios TN", icono: "precios" },
+      // Actualizar costos va en Operaciones y no al lado de "Mi cuenta",
+      // aunque la vea una sola persona: es una tarea del negocio --la lista de
+      // un proveedor que aumentó-- y no una configuración del tablero. El nav
+      // la filtra sola con `puedeVer`, así que al resto ni le aparece.
+      { href: "/costos", label: "Actualizar costos", icono: "precios" },
     ],
   },
 ];

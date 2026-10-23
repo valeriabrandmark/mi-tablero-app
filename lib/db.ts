@@ -120,6 +120,50 @@ export async function query<T extends QueryResultRow>(
   return res.rows;
 }
 
+/**
+ * Varias consultas en UNA transacción y en UNA conexión.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE NO ALCANZA CON `query("begin")`
+ *
+ * `query` le pide una conexión al pool CADA VEZ. Un `begin` suelto abre la
+ * transacción en una conexión, el `insert` puede caer en otra y el `commit` en
+ * una tercera: no hay transacción, y además queda una conexión del pool
+ * abierta en transacción que la próxima consulta hereda. El síntoma no es un
+ * error, es media escritura hecha y nadie enterado.
+ *
+ * Acá se saca UN cliente, se usa para todo y se devuelve pase lo que pase. Si
+ * algo tira, se hace rollback y se vuelve a tirar el error: quien llama se
+ * entera, y la base queda como estaba.
+ */
+export async function enTransaccion<T>(
+  trabajo: (
+    ejecutar: <R extends QueryResultRow>(
+      text: string,
+      params?: unknown[],
+    ) => Promise<R[]>,
+  ) => Promise<T>,
+): Promise<T> {
+  const cliente = await getPool().connect();
+  try {
+    await cliente.query("begin");
+    const resultado = await trabajo(async (text, params = []) => {
+      verificarParametros(text, params);
+      const res = await cliente.query(text, params);
+      return res.rows as never[];
+    });
+    await cliente.query("commit");
+    return resultado;
+  } catch (error) {
+    // El rollback puede fallar si la conexión ya se cayó: ahí no hay nada que
+    // deshacer y lo que importa es no tapar el error de verdad.
+    await cliente.query("rollback").catch(() => {});
+    throw error;
+  } finally {
+    cliente.release();
+  }
+}
+
 /** Primera fila, o `null` si la consulta no devolvió nada. */
 export async function queryOne<T extends QueryResultRow>(
   text: string,
