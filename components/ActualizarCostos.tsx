@@ -32,7 +32,42 @@ type Preparado = {
   mes: string;
   vigenteDesde: string;
   tramoVigente: { mes: string; vigenteDesde: string; nota: string | null } | null;
+  tramos: TramoGuardado[];
 };
+
+type TramoGuardado = {
+  mes: string;
+  vigenteDesde: string;
+  vigenteDesdeTexto: string;
+  origen: string;
+  articulos: number;
+  conCosto: number;
+  nota: string | null;
+  aplicadoPor: string | null;
+  aplicadoEn: string | null;
+  cambian: number | null;
+  sinCostoTeorico: number | null;
+  faltantes: number | null;
+  conOferta: number | null;
+  vigente: boolean;
+};
+
+/**
+ * EL ENLACE DE DESCARGA ES UN <a>, no un fetch con Blob.
+ *
+ * El servidor ya manda el `Content-Disposition` con el nombre, así que el
+ * navegador baja el archivo solo: sin estado de "bajando", sin tener que
+ * sostener ocho mil filas en memoria, y andando igual si se abre en otra
+ * pestaña o se copia el enlace.
+ */
+function enlaceDeTramo(t: TramoGuardado): string {
+  const p = new URLSearchParams({
+    mes: t.mes,
+    desde: t.vigenteDesde,
+    origen: t.origen,
+  });
+  return `/api/compras/costos/archivo?${p}`;
+}
 
 export default function ActualizarCostos() {
   /**
@@ -179,6 +214,20 @@ export default function ActualizarCostos() {
                 </>
               )}
             </p>
+
+            {/* BAJARLA ANTES DE APLICAR. Ocho mil filas se revisan en Excel y
+                no en una pantalla: ordenar por diferencia, filtrar un
+                proveedor, buscar un SKU. La pantalla muestra lo que frena; el
+                archivo deja mirar todo lo demás. */}
+            <div className="border-line mt-3 flex flex-wrap items-center gap-3 border-t pt-3">
+              <a className={BOTON} href="/api/compras/costos/archivo">
+                Bajar esta foto en Excel
+              </a>
+              <span className="text-muted text-xs">
+                Las {fmtNumero(s!.filas.length)} filas con el costo anterior al
+                lado, para revisarlas antes de aplicar.
+              </span>
+            </div>
           </Panel>
 
           {/* LO QUE FRENA. Ver el guard en lib/costos-snapshot. */}
@@ -367,6 +416,85 @@ export default function ActualizarCostos() {
                   </button>
                 </>
               )}
+            </div>
+          </Panel>
+
+          {/* LAS FOTOS GUARDADAS. El respaldo ya existía --`costos_historicos`
+              guarda cada tramo entero y nada los borra-- y nadie lo veía.
+              Acá se ven, y cada uno se baja como Excel.
+
+              EL ARCHIVO ES EL RESPALDO QUE SIRVE: uno que vive en la misma
+              base que el dato respaldado no es un respaldo. Bajado al Drive,
+              sí. */}
+          <Panel
+            titulo="Fotos guardadas"
+            nota={`${fmtNumero(datos.tramos.length)} tramos`}
+          >
+            <p className="text-muted mb-3 text-xs">
+              Cada actualización queda guardada entera y no se pisa. Bajá la que
+              quieras como Excel: trae el costo teórico, la oferta, el costo
+              real y <strong className="text-ink">contra qué cambió</strong>.
+            </p>
+            <div className="-mx-1 overflow-x-auto">
+              <table className="w-full min-w-[640px] text-xs">
+                <thead>
+                  <tr className="text-muted border-line border-b text-left">
+                    <th className="px-1 py-1.5 font-medium">Desde</th>
+                    <th className="px-1 py-1.5 font-medium">Mes</th>
+                    <th className="px-1 py-1.5 font-medium">Origen</th>
+                    <th className="px-1 py-1.5 text-right font-medium">Artículos</th>
+                    <th className="px-1 py-1.5 font-medium">Qué cambió</th>
+                    <th className="px-1 py-1.5" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {datos.tramos.map((t) => (
+                    <tr
+                      key={`${t.mes}-${t.vigenteDesde}-${t.origen}`}
+                      className="border-line/60 border-b last:border-0"
+                    >
+                      <td className="text-ink px-1 py-1.5 whitespace-nowrap">
+                        {t.vigenteDesdeTexto}
+                        {t.vigente && (
+                          <span className="text-c1 ml-1.5 text-[10px]">rige hoy</span>
+                        )}
+                      </td>
+                      <td className="text-muted px-1 py-1.5">{t.mes}</td>
+                      <td className="text-muted px-1 py-1.5">
+                        {t.origen === "tablero" ? "Tablero" : "Excel"}
+                      </td>
+                      <td className="text-ink px-1 py-1.5 text-right whitespace-nowrap">
+                        {fmtNumero(t.articulos)}
+                        <span className="text-muted">
+                          {" "}
+                          · {fmtNumero(t.conCosto)} con costo
+                        </span>
+                      </td>
+                      <td className="text-muted px-1 py-1.5">
+                        {/* LOS DEL EXCEL NO TIENEN NOTA, y eso también dice
+                            algo: salieron del camino viejo, donde el motivo
+                            vivía en el nombre del archivo. */}
+                        {t.nota ?? (
+                          <span className="text-muted/60">
+                            {t.origen === "tablero" ? "—" : "vino del Excel"}
+                          </span>
+                        )}
+                        {t.aplicadoPor && (
+                          <span className="text-muted/60 block text-[10px]">
+                            {t.aplicadoPor}
+                            {t.aplicadoEn ? ` · ${t.aplicadoEn}` : ""}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-1 py-1.5 text-right">
+                        <a className={BOTON} href={enlaceDeTramo(t)}>
+                          Excel
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </Panel>
         </>
