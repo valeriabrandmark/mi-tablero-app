@@ -34,6 +34,7 @@ export type ClaveIcono =
   | "stock"
   | "operaciones"
   | "precios"
+  | "costos"
   | "factura";
 
 /** Subpágina de un grupo. Lleva su propia marca porque es la que se mira. */
@@ -91,6 +92,7 @@ type ClaveTrazo =
   | "stock"
   | "operaciones"
   | "precios"
+  | "costos"
   | "factura";
 
 const TRAZOS: Record<ClaveTrazo, ReactNode> = {
@@ -142,6 +144,28 @@ const TRAZOS: Record<ClaveTrazo, ReactNode> = {
     <>
       <path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0l-7.2-7.2A2 2 0 0 1 3 12V4a1 1 0 0 1 1-1h8a2 2 0 0 1 1.4.6l7.2 7.2a2 2 0 0 1 0 2.8Z" />
       <circle cx="7.5" cy="7.5" r="1.3" stroke={NARANJA} />
+    </>
+  ),
+  // El peso dando la vuelta: sube por la izquierda, baja por la derecha. No es
+  // una etiqueta como Precios TN --eso es lo que le cobramos al cliente-- ni un
+  // engranaje: es el costo, que da la vuelta entera cada vez que un proveedor
+  // cambia la lista. Las dos flechas son el ciclo, y que una suba y la otra
+  // baje dice lo que de verdad pasa: nunca cambian todos para el mismo lado.
+  //
+  // EL PESO VA EN NARANJA y la vuelta en `currentColor`, igual que el punto de
+  // la etiqueta y la tilde de la factura: el acento marca de qué se trata y el
+  // resto se aclara al pasar por encima.
+  costos: (
+    <>
+      <path d="M12 19.5A7.5 7.5 0 0 1 4.5 12" />
+      <path d="m2.7 13.8 1.8-1.8 1.8 1.8" />
+      <path d="M12 4.5A7.5 7.5 0 0 1 19.5 12" />
+      <path d="m21.3 10.2-1.8 1.8-1.8-1.8" />
+      <path d="M12 6v12" stroke={NARANJA} />
+      <path
+        d="M14.8 8.2H10.6a1.9 1.9 0 0 0 0 3.9h2.8a1.9 1.9 0 0 1 0 3.9H9.3"
+        stroke={NARANJA}
+      />
     </>
   ),
   // Cajas apiladas. No se repite el cubo de Logística: ése es el paquete que
