@@ -28,12 +28,18 @@ const CAMPO =
 type Preparado = {
   snapshot: Snapshot;
   ofertas: { filas: number; sinSku: number; conOferta: number; problemas: string[] };
-  foto: { recibida: string; filas: number } | null;
+  foto: { id: number; recibida: string; filas: number } | null;
   mes: string;
   vigenteDesde: string;
   tramoVigente: { mes: string; vigenteDesde: string; nota: string | null } | null;
   tramos: TramoGuardado[];
 };
+
+/** Lo que contesta /api/compras/costos/planilla. Ver lib/ofertas-webapp. */
+type ResultadoDelPedido =
+  | { estado: "ok"; id: number | null; filas: number | null }
+  | { estado: "sin_conectar" }
+  | { estado: "falla"; motivo: string };
 
 type TramoGuardado = {
   mes: string;
@@ -87,6 +93,14 @@ export default function ActualizarCostos() {
   const [aplicando, setAplicando] = useState(false);
   const [listo, setListo] = useState<string | null>(null);
   const [recargas, setRecargas] = useState(0);
+  /**
+   * EL PEDIDO DE LA FOTO DEL MOMENTO.
+   *
+   * `null` mientras se está pidiendo. Después queda el resultado, que la
+   * pantalla muestra sólo si hay algo que decir: que anduvo no hace falta
+   * anunciarlo, la hora de la foto ya lo dice.
+   */
+  const [pedido, setPedido] = useState<ResultadoDelPedido | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -103,6 +117,36 @@ export default function ActualizarCostos() {
     };
   }, [recargas]);
 
+  /**
+   * AL ABRIR LA PANTALLA SE PIDE LA FOTO DEL MOMENTO.
+   *
+   * Corre UNA vez y al lado de la carga, no antes: la pantalla abre con la
+   * última foto que haya y se rearma cuando llega la nueva. Si se pidiera
+   * primero, no se vería nada hasta que la planilla contestara.
+   *
+   * SE RECARGA SALGA BIEN O SALGA MAL, a propósito. Si la ruta se cortó por
+   * tiempo pero la planilla igual mandó la hoja, la fila está escrita y hay
+   * que ir a buscarla; y si de verdad falló, recargar no cuesta nada. Recién
+   * después de recargar se sabe si hay algo que avisar.
+   */
+  useEffect(() => {
+    let vivo = true;
+    fetch("/api/compras/costos/planilla", { method: "POST" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .catch((e): ResultadoDelPedido => ({
+        estado: "falla",
+        motivo: `No se pudo pedir la foto (${e instanceof Error ? e.message : "error"}).`,
+      }))
+      .then((j: ResultadoDelPedido) => {
+        if (!vivo) return;
+        setPedido(j);
+        setRecargas((n) => n + 1);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, []);
+
   const datos = traido?.clave === recargas ? traido.datos : null;
 
   const aplicar = async () => {
@@ -112,7 +156,9 @@ export default function ActualizarCostos() {
       const r = await fetch("/api/compras/costos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nota }),
+        // EL ID DE LA FOTO QUE SE MIRO. Si para cuando llega llegó otra, el
+        // servidor corta: lo que se escribiría no sería lo que se vio.
+        body: JSON.stringify({ nota, fotoId: datos?.foto?.id ?? null }),
       });
       const j = await r.json();
       if (!r.ok) {
@@ -166,14 +212,45 @@ export default function ActualizarCostos() {
                 {fmtNumero(datos.ofertas.filas)} filas:{" "}
                 {fmtNumero(datos.ofertas.conOferta)} con oferta,{" "}
                 {fmtNumero(datos.ofertas.sinSku)} sin SKU (las de fórmula, se descartan).
-                {" "}Si editaste algo recién, mandala de nuevo desde el menú{" "}
-                <strong className="text-ink">Tablero → Mandar las ofertas ahora</strong>.
               </p>
             ) : (
               <Aviso tono="alerta">
                 Todavía no llegó ninguna foto del Consolidador.
               </Aviso>
             )}
+
+            {/* EL PEDIDO DE LA FOTO DEL MOMENTO.
+                Que haya andado no se anuncia: la hora de la foto ya lo dice, y
+                un cartel verde en cada carga es ruido. Lo que sí se dice es
+                cuando NO se pudo, porque entonces lo que está en pantalla es
+                de hasta doce horas atrás y eso cambia qué se está por aplicar. */}
+            {pedido === null ? (
+              <p className="text-muted mt-2 text-xs">
+                Pidiéndole a la planilla la foto de este momento…
+              </p>
+            ) : pedido.estado === "sin_conectar" ? (
+              <p className="text-muted mt-2 text-xs">
+                Esta es la última foto que la planilla mandó sola (va cada 12 horas).
+                Si editaste algo recién, mandala desde el menú{" "}
+                <strong className="text-ink">Tablero → Mandar las ofertas ahora</strong>{" "}
+                y recargá.
+              </p>
+            ) : pedido.estado === "falla" ? (
+              <div className="mt-2">
+                <Aviso tono="alerta">
+                  <p className="font-medium">
+                    No se pudo pedir la foto del momento, así que esta es la
+                    anterior.
+                  </p>
+                  <p className="mt-1 text-xs">{pedido.motivo}</p>
+                  <p className="mt-1 text-xs">
+                    Podés mandarla a mano desde la planilla (menú{" "}
+                    <strong>Tablero → Mandar las ofertas ahora</strong>) y recargar
+                    esta pantalla.
+                  </p>
+                </Aviso>
+              </div>
+            ) : null}
 
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <TarjetaKpi
