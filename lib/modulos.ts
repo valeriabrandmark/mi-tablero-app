@@ -164,6 +164,7 @@ export const MODULOS: Modulo[] = [
     queEdita: "contestar las alertas de Mis tareas",
     rutas: [
       "/venta-minorista/mercado-libre",
+      "/tareas/mercado-libre",
       "/api/tareas-meli",
       "/api/meli",
       "/api/stock-full",

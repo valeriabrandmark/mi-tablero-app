@@ -24,6 +24,7 @@ import {
 export type Logo = { src: string };
 
 export type ClaveIcono =
+  | "tareas"
   | "ventas"
   | "logistica"
   | "cuentas"
@@ -85,6 +86,7 @@ function PuntoEnObra() {
  * para esto haría más pesado el bundle que el tablero.
  */
 type ClaveTrazo =
+  | "tareas"
   | "ventas"
   | "logistica"
   | "cuentas"
@@ -96,6 +98,15 @@ type ClaveTrazo =
   | "factura";
 
 const TRAZOS: Record<ClaveTrazo, ReactNode> = {
+  // Una lista con tildes: lo que se hace, no lo que se mira.
+  tareas: (
+    <>
+      <path d="m4 6 1.5 1.5L8 5" />
+      <path d="m4 12 1.5 1.5L8 11" />
+      <path d="m4 18 1.5 1.5L8 17" />
+      <path d="M11 6.5h9M11 12.5h9M11 18.5h9" />
+    </>
+  ),
   ventas: (
     <>
       <circle cx="9" cy="20" r="1.5" />

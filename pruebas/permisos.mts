@@ -21,7 +21,9 @@ import {
 } from "@/lib/modulos";
 import {
   destinoObjetivos,
+  destinoTareas,
   enConstruccion,
+  paginaInicial,
   puedeCargarFacturas,
   puedeEditar,
   puedeVer,
@@ -532,6 +534,28 @@ revisar(
   puedeVer({ rol: "admin" }, "/precios-tn/rentabilidad"),
   false,
 );
+
+// --- "Mis tareas" -----------------------------------------------------------
+// El 23/10 la API de tareas quedó afuera de la lista cerrada del responsable
+// de Meli: veía la pestaña y le contestaba "Sin permiso". Estas tres son las
+// que lo hubieran atajado.
+{
+  const meli = { rol: "responsable_meli" } as const;
+  revisar("meli ve sus tareas", puedeVer(meli, "/tareas/mercado-libre"), true);
+  revisar("meli llama a la API de tareas", puedeVer(meli, "/api/tareas-meli"), true);
+  revisar("meli llama a la API de la rutina", puedeVer(meli, "/api/tareas-meli/rutina"), true);
+  revisar("meli entra por /tareas", puedeVer(meli, "/tareas"), true);
+  revisar("/tareas lo manda a las suyas", destinoTareas(meli), "/tareas/mercado-libre");
+  revisar("meli arranca el día en sus tareas", paginaInicial(meli), "/tareas/mercado-libre");
+  revisar("un vendedor no ve las tareas de Meli",
+    puedeVer({ rol: "vendedor", vendedor: "SILVIO" }, "/tareas/mercado-libre"), false);
+  revisar("ni la raíz, porque no tiene ninguna", puedeVer({ rol: "supervisor" }, "/tareas"), false);
+  revisar("admin_tn tampoco", puedeVer({ rol: "admin_tn" }, "/api/tareas-meli"), false);
+  revisar("el admin las ve", puedeVer({ rol: "admin" }, "/tareas/mercado-libre"), true);
+  const conMeli: Permiso = { rol: "personalizado", modulos: ["meli"], editar: [], sigma: null, nombreSigma: null };
+  revisar("un personalizado con Meli las ve", puedeVer(conMeli, "/tareas/mercado-libre"), true);
+  revisar("y entra por /tareas", puedeVer(conMeli, "/tareas"), true);
+}
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);

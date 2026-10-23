@@ -2,6 +2,7 @@ import BarraLateral, { type ItemNav } from "@/components/BarraLateral";
 import { enConstruccion, permisoDelUsuario, puedeVer, type Rol } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
+import { PAGINAS_TAREAS } from "@/lib/tareas";
 
 /**
  * El nav, en dos secciones que se despliegan.
@@ -16,6 +17,14 @@ import { getUsuario } from "@/lib/supabase/server";
  * página principal, y así se llega a ella con un click y no con dos.
  */
 const NAV: ItemNav[] = [
+  // PRIMERO, Y COMO MENU PROPIO: los tableros son para mirar y esto es para
+  // hacer. Un hijo por rol (lib/tareas.ts); cada persona ve sólo el suyo.
+  {
+    clave: "tareas",
+    label: "Mis tareas",
+    icono: "tareas",
+    hijos: PAGINAS_TAREAS.map((t) => ({ href: t.href, label: t.label, icono: t.icono })),
+  },
   {
     clave: "mayoristas",
     label: "Ventas Mayoristas",
