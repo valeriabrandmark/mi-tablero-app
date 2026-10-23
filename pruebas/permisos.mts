@@ -259,6 +259,45 @@ revisar(
   "compras",
 );
 
+/* --- ACTUALIZAR COSTOS: UN SOLO ROL --------------------------------------
+
+   Lo que sale de esa pantalla es el denominador de cada margen del tablero.
+   Tener Compras es decidir que se compra; esto es cambiar la vara con la que
+   se mide todo lo demas.
+   ------------------------------------------------------------------------ */
+
+revisar("el superadmin actualiza costos", puedeVer({ rol: "superadmin" }, "/costos"), true);
+revisar("y su api", puedeVer({ rol: "superadmin" }, "/api/compras/costos"), true);
+revisar("un admin NO", puedeVer({ rol: "admin" }, "/costos"), false);
+revisar("ni su api", puedeVer({ rol: "admin" }, "/api/compras/costos"), false);
+// NI CON COMPRAS MARCADO. Es el caso que importa: alguien que arma ordenes de
+// compra no tiene por que poder cambiar el costo con el que se mide el margen.
+revisar(
+  "con el módulo Compras tampoco",
+  puedeVer(
+    { rol: "personalizado", modulos: ["compras"], editar: ["compras"], sigma: 3, nombreSigma: "X" },
+    "/api/compras/costos",
+  ),
+  false,
+);
+// Y ACA ESTA EL MOTIVO DE QUE EL ORDEN IMPORTE. Por prefijo, esa api es de
+// Compras y el sistema de módulos la daría por buena -- pero `puedeVer`
+// resuelve el bloque de costos ANTES de llegar al permiso personalizado, así
+// que no llega. Es el mismo error que costó el 16/09 con Precios TN, al revés.
+revisar(
+  "el módulo la daría por buena...",
+  moduloPermiteRuta(["compras"], "/api/compras/costos"),
+  true,
+);
+revisar(
+  "...pero puedeVer la corta antes",
+  puedeVer(
+    { rol: "personalizado", modulos: ["compras"], editar: [], sigma: null, nombreSigma: null },
+    "/api/compras/costos",
+  ),
+  false,
+);
+
 // Mi cuenta sigue siendo de todos: es la contraseña de uno.
 revisar("Mi cuenta la ve cualquiera", puedeVer({ rol: "vendedor", vendedor: "SILVIO" }, "/cuenta"), true);
 

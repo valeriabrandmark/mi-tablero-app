@@ -196,6 +196,21 @@ const PAGINAS_DE_CUENTA = ["/cuenta", "/nueva-contrasena"];
  */
 const PAGINA_USUARIOS = "/usuarios";
 
+/**
+ * Actualizar los costos. UN SOLO ROL, y es más chico que los demás.
+ *
+ * El costo que sale de ahí es el denominador de cada margen del tablero:
+ * Compras, Stock, Mercado Libre, Rentabilidad. Tener Compras es decidir qué se
+ * compra; esto es cambiar la vara con la que se mide todo lo demás.
+ *
+ * Por pedido de ANA (23/10/2026): por ahora sólo ella.
+ */
+const RUTAS_COSTOS = ["/costos", "/api/compras/costos"];
+
+function esDeCostos(pathname: string): boolean {
+  return RUTAS_COSTOS.some((r) => pathname === r || pathname.startsWith(`${r}/`));
+}
+
 
 /** Raíz de la sección Venta minorista: la ven los admins y el responsable de Meli. */
 const RAIZ_MINORISTA = "/venta-minorista";
@@ -300,6 +315,9 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   if (!permiso) return false;
   if (PAGINAS_DE_CUENTA.includes(pathname)) return true;
   if (pathname === PAGINA_USUARIOS) return permiso.rol === "superadmin";
+  // VA ACA ARRIBA, antes del `personalizado` y del `admin -> true`: ningún
+  // módulo marcado y ningún rol amplio abren esto.
+  if (esDeCostos(pathname)) return permiso.rol === "superadmin";
 
   // "ACTUALIZAR AHORA" NO ES DE NINGUN MODULO: le sirve a todas las pantallas
   // por igual, como `/api/filtros`. Va acá arriba y no en `RUTAS_COMUNES`
