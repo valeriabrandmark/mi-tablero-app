@@ -1,3 +1,4 @@
+import { PAGINAS_TAREAS, RAIZ_TAREAS } from "@/lib/tareas";
 import { RUTA_ACTUALIZAR } from "@/lib/actualizar";
 import {
   slugVendedor,
@@ -244,6 +245,18 @@ const APIS_MINORISTA = [
   "/api/resultados-elasticidad",
 ];
 
+/**
+ * Las tareas del responsable de Meli: su página en "Mis tareas" y la API que
+ * la alimenta. Van aparte de `APIS_MINORISTA` porque no son de la sección
+ * Venta minorista sino del menú de tareas, y el día que otro rol tenga las
+ * suyas cada uno lleva su propia lista.
+ */
+const TAREAS_MELI = ["/tareas/mercado-libre", "/api/tareas-meli"];
+
+function esDeTareasMeli(pathname: string): boolean {
+  return TAREAS_MELI.some((r) => pathname === r || pathname.startsWith(`${r}/`));
+}
+
 function esApiMinorista(pathname: string): boolean {
   return APIS_MINORISTA.some(
     (r) => pathname === r || pathname.startsWith(`${r}/`),
@@ -319,6 +332,14 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   // módulo marcado y ningún rol amplio abren esto.
   if (esDeCostos(pathname)) return permiso.rol === "superadmin";
 
+  // LA RAIZ DE "MIS TAREAS" NO TIENE CONTENIDO PROPIO: redirige a la primera
+  // página de tareas que la persona pueda ver. Se abre si hay al menos una, y
+  // se decide con las mismas reglas que cada página, así que no puede quedar
+  // una raíz abierta que lleve a un 403.
+  if (pathname === RAIZ_TAREAS) {
+    return PAGINAS_TAREAS.some((t) => puedeVer(permiso, t.href));
+  }
+
   // "ACTUALIZAR AHORA" NO ES DE NINGUN MODULO: le sirve a todas las pantallas
   // por igual, como `/api/filtros`. Va acá arriba y no en `RUTAS_COMUNES`
   // porque esa lista sólo la mira el permiso personalizado, y esta ruta la
@@ -377,7 +398,7 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
     pathname === "/objetivos" || PAGINAS_OBJETIVOS.includes(pathname);
 
   if (permiso.rol === "responsable_meli") {
-    return esDeMinorista(pathname) || esApiMinorista(pathname);
+    return esDeMinorista(pathname) || esApiMinorista(pathname) || esDeTareasMeli(pathname);
   }
 
   if (permiso.rol === "supervisor") {
@@ -592,13 +613,24 @@ export function puedeCargarFacturas(
   return datosSigmaDe(permiso, email) != null;
 }
 
+/**
+ * Adónde manda `/tareas`: a la primera página de tareas que la persona puede
+ * ver. Sin sesión (desarrollo sin login), a la primera.
+ */
+export function destinoTareas(permiso: Permiso | null): string {
+  if (!permiso) return PAGINAS_TAREAS[0].href;
+  return PAGINAS_TAREAS.find((t) => puedeVer(permiso, t.href))?.href ?? paginaInicial(permiso);
+}
+
 /** Adónde mandar al usuario cuando entra, o cuando pide algo que no puede ver. */
 export function paginaInicial(permiso: Permiso | null): string {
   if (!permiso) return "/login";
   if (permiso.rol === "vendedor")
     return `/objetivos/${slugVendedor(permiso.vendedor)}`;
   if (permiso.rol === "supervisor") return PAGINAS_OBJETIVOS[0];
-  if (permiso.rol === "responsable_meli") return INICIO_MINORISTA;
+  // Entra por sus tareas: es por donde arranca el día, y desde ahí los
+  // tableros de Mercado Libre quedan a un clic.
+  if (permiso.rol === "responsable_meli") return PAGINAS_TAREAS[0].href;
   // El `admin_tn` no tiene permiso sobre ninguna otra página: mandarlo al
   // tablero de mayoristas sería mandarlo a un 403 apenas entra.
   if (permiso.rol === "admin_tn") return RAIZ_PRECIOS_TN;
