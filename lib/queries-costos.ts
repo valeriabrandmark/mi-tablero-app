@@ -37,6 +37,12 @@ const CLAVE_RECONSTRUIR = "costos_reconstruir_desde";
 const ORIGEN = "tablero";
 
 export type FotoDeOfertas = {
+  /**
+   * CUAL FOTO ES. Viaja hasta el navegador y vuelve al aplicar: si para
+   * entonces llegó otra, lo que se escribiría no es lo que se miró. Ver
+   * `aplicarCostos` y la ruta POST.
+   */
+  id: number;
   /** Cuándo la mandó la planilla, en hora de Buenos Aires. */
   recibida: string;
   filas: number;
@@ -110,8 +116,8 @@ async function leerCostoActual(): Promise<Map<string, number>> {
  * ve sea exactamente lo que se va a escribir.
  */
 export async function prepararCostos(ahora: Date = new Date()): Promise<Preparado> {
-  const cruda = await queryOne<{ filas: unknown; recibido: string; filas_n: number }>(
-    `select filas,
+  const cruda = await queryOne<{ id: number; filas: unknown; recibido: string; filas_n: number }>(
+    `select id, filas,
             to_char(recibido at time zone 'America/Argentina/Buenos_Aires',
                     'DD/MM/YYYY HH24:MI') as recibido,
             filas_n
@@ -158,7 +164,9 @@ export async function prepararCostos(ahora: Date = new Date()): Promise<Preparad
   return {
     snapshot: armarSnapshot(articulos, ofertas, costoActual),
     ofertas,
-    foto: cruda ? { recibida: cruda.recibido, filas: Number(cruda.filas_n) } : null,
+    foto: cruda
+      ? { id: Number(cruda.id), recibida: cruda.recibido, filas: Number(cruda.filas_n) }
+      : null,
     mes,
     vigenteDesde,
     tramoVigente: tramo

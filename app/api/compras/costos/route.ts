@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
   }
 
-  let cuerpo: { nota?: unknown };
+  let cuerpo: { nota?: unknown; fotoId?: unknown };
   try {
     cuerpo = await request.json();
   } catch {
@@ -75,6 +75,28 @@ export async function POST(request: NextRequest) {
     // snapshot viajando en el cuerpo, cualquiera podría fijar el costo de
     // cualquier artículo desde la consola.
     const preparado = await prepararCostos();
+
+    // LO QUE SE APLICA TIENE QUE SER LO QUE SE MIRO.
+    //
+    // La pantalla pide la foto del momento al abrirse, así que entre que se
+    // miró y se apretó pudo llegar otra --alguien editó la planilla y la
+    // mandó, o entró el envío automático de cada 12 horas. Si eso pasa, los
+    // números que se escribirían no son los que estaban en pantalla cuando se
+    // decidió aplicar, y nadie lo notaría: los contadores se ven iguales.
+    //
+    // Se corta y se pide mirar de nuevo. Es el único lugar donde una foto más
+    // fresca es un problema y no una mejora.
+    const fotoId = typeof cuerpo.fotoId === "number" ? cuerpo.fotoId : null;
+    if (fotoId != null && preparado.foto && preparado.foto.id !== fotoId) {
+      return NextResponse.json(
+        {
+          error:
+            "Llegó una foto de ofertas nueva mientras mirabas esta. " +
+            "Revisá los números otra vez antes de aplicar.",
+        },
+        { status: 409 },
+      );
+    }
 
     if (preparado.snapshot.problemas.length > 0) {
       // 422 y no 400: el pedido está bien formado, lo que no se puede es
