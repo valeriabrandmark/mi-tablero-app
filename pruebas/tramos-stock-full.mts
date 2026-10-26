@@ -15,6 +15,7 @@
  *     node --experimental-strip-types --import ./pruebas/registrar.mjs pruebas/tramos-stock-full.mts
  */
 
+import { NOMBRES_PLAZO, NOMBRES_RECOMENDACION } from "@/lib/reposicion-full";
 import {
   DIAS_PARA_PARADO,
   esTramoNunca,
@@ -148,6 +149,35 @@ revisar(
   new Set(TRAMOS.map((t) => t.label)).size,
   TRAMOS.length,
 );
+
+/* --- LOS NOMBRES DE LA REPOSICION ----------------------------------------
+
+   La columna "Envio a Full" muestra lo que contesta la API de Mercado Libre.
+   Lo que no este traducido sale con el nombre crudo en ingles -- a proposito,
+   para que un codigo nuevo se vea en vez de esconderse, que es justo como
+   aparecio NO_REPLENISHMENT en pantalla el 26/10/2026.
+
+   Esta prueba fija los tres que la cuenta contesta HOY. Si manana aparece uno
+   nuevo no va a fallar nada (ni tiene que fallar: el crudo es la red), pero
+   estos tres no pueden volver a salir en ingles sin que alguien se entere.
+   ------------------------------------------------------------------------ */
+
+const LOS_TRES = [
+  "NO_REPLENISHMENT",
+  "REPLENISH",
+  "NO_REPLENISHMENT_BY_RESTRICTION",
+];
+
+for (const codigo of LOS_TRES) {
+  const nombre = NOMBRES_RECOMENDACION[codigo];
+  revisar(`${codigo} tiene nombre`, typeof nombre === "string" && nombre.length > 0, true);
+  revisar(`y no es el codigo crudo`, nombre === codigo, false);
+}
+
+// LOS PLAZOS QUE LA CUENTA DEVUELVE, por lo mismo.
+for (const plazo of ["THIS_WEEK", "NEXT_WEEK", "IN_TWO_WEEKS", "NOT_REPLENISHMENT_NEEDED"]) {
+  revisar(`el plazo ${plazo} tiene nombre`, Boolean(NOMBRES_PLAZO[plazo]), true);
+}
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);
