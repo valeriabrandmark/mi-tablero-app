@@ -103,3 +103,31 @@ export function buscadorDeArticulo(
   ];
   return `(${partes.join(" or ")})`;
 }
+
+/**
+ * La condición que agrega "…o es el código MLA de alguna de sus publicaciones".
+ *
+ * ---------------------------------------------------------------------------
+ * ES UN CODIGO AJENO MAS, por eso vive acá
+ *
+ * El MLA no es nuestro: lo pone Mercado Libre. Y es el que uno tiene en la
+ * mano cuando el dato viene de una pregunta, de un reclamo o de la pantalla de
+ * ML -- justo los momentos en que hay que buscar el artículo rápido y el SKU
+ * no está a mano.
+ *
+ * Un SKU puede tener varias publicaciones (hasta 6 por inventario), así que la
+ * relación va por `in` y no por igualdad: cualquiera de sus MLA lo encuentra.
+ *
+ * SE COMPARA POR CONTENIDO, igual que el resto del buscador: es común pegar el
+ * código con un espacio de más, o sólo los dígitos sin el "MLA".
+ *
+ * @param colSku cómo se llama la columna de SKU en esa consulta.
+ * @param i      el parámetro donde ya está `%termino%`.
+ */
+export function clausulaCodigoMeli(colSku: string, i: number): string {
+  return `${colSku} in (
+            select m.sku
+              from bronze.ml_inventario_sku m
+              join bronze.ml_publicaciones p on p.inventory_id = m.inventory_id
+             where p.id ilike $${i})`;
+}
