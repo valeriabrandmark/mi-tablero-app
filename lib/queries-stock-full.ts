@@ -2,7 +2,12 @@ import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
-import { getDestacadosFull, getReposicionPorSku, hayTablaReposicion } from "@/lib/queries-reposicion-full";
+import {
+  getCambiosDeRestriccion,
+  getDestacadosFull,
+  getReposicionPorSku,
+  hayTablaReposicion,
+} from "@/lib/queries-reposicion-full";
 import { buscadorDeArticulo, clausulaCodigoMeli } from "@/lib/sql-codigos";
 import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import { CANAL_MELI } from "@/lib/meli";
@@ -637,7 +642,8 @@ async function getDashboardStockFullDirecto(
     f = { ...f, envioFull: undefined };
   }
 
-  const [kpis, umbrales, tramos, filas, noDisponible, historiaDesde, destacados] =
+  const [kpis, umbrales, tramos, filas, noDisponible, historiaDesde, destacados,
+         cambiosRestriccion] =
     await Promise.all([
       getKpis(f),
       getUmbrales(f),
@@ -649,6 +655,9 @@ async function getDashboardStockFullDirecto(
       // siguieran el filtro de la pantalla, el panel se vaciaria justo cuando
       // alguien esta mirando una marca y desapareceria el aviso.
       getDestacadosFull(),
+      // TAMPOCO SIGUEN LOS FILTROS: un producto que te liberaron es noticia
+      // aunque estés mirando otra marca.
+      getCambiosDeRestriccion(),
     ]);
 
   return {
@@ -659,6 +668,7 @@ async function getDashboardStockFullDirecto(
     noDisponible,
     recortada: filas.length === TOPE,
     destacados,
+    cambiosRestriccion,
     historiaDesde,
     generadoEn: new Date().toISOString(),
   };

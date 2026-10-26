@@ -51,6 +51,21 @@ export type DestacadoFull = {
   reposicion: ReposicionFull;
 };
 
+/**
+ * Un producto que ENTRO o SALIO de restriccion en Full.
+ *
+ * El tipo vive aca --y no en el archivo de consultas-- por lo mismo que
+ * `ReposicionFull`: lo importa un componente que corre en el navegador.
+ */
+export type CambioDeRestriccion = {
+  sku: string | null;
+  producto: string | null;
+  /** `true` = entró en restricción. `false` = salió. */
+  restringido: boolean;
+  fecha: string;
+  hace: number;
+};
+
 export const NOMBRES_RECOMENDACION: Record<string, string> = {
   NO_REPLENISHMENT: "No hace falta reponer",
   // SIN CANTIDAD: es lo que se muestra cuando ML recomienda reponer pero no

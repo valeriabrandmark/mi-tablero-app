@@ -20,6 +20,7 @@ import {
   NOMBRES_PLAZO,
   nombreDeRecomendacion,
   OPCIONES_ENVIO_FULL,
+  type CambioDeRestriccion,
   type DestacadoFull,
   type ReposicionFull,
 } from "@/lib/reposicion-full";
@@ -243,6 +244,93 @@ function CeldaReposicion({ r }: { r: ReposicionFull | null }) {
     <span className="text-muted">
       {r.recomendacion ? nombreDeRecomendacion(r.recomendacion) : "sin sugerencia"}
     </span>
+  );
+}
+
+/**
+ * Los que entraron o salieron de restricción.
+ *
+ * LOS QUE SALIERON VAN PRIMERO Y EN VERDE, y no es una preferencia estética.
+ * Entrar en restricción se nota solo: el stock deja de reponerse y en algún
+ * momento alguien pregunta. Salir NO avisa -- el producto queda habilitado,
+ * nadie se entera, y se siguen perdiendo semanas de venta de algo que ya se
+ * podía mandar. Ya pasó, y es el motivo por el que existe este panel.
+ */
+function PanelCambiosRestriccion({ cambios }: { cambios: CambioDeRestriccion[] }) {
+  const salieron = cambios.filter((c) => !c.restringido);
+  const entraron = cambios.filter((c) => c.restringido);
+
+  return (
+    <Panel
+      titulo="Cambios de restricción en Full"
+      nota={`últimos 60 días · ${fmtNumero(salieron.length)} se liberaron · ${fmtNumero(entraron.length)} se restringieron`}
+    >
+      {salieron.length > 0 && (
+        <Aviso tono="info">
+          <p className="font-medium">
+            {fmtNumero(salieron.length)}{" "}
+            {salieron.length === 1 ? "producto se liberó" : "productos se liberaron"}
+            : ya se les puede mandar stock.
+          </p>
+        </Aviso>
+      )}
+      <div className="-mx-1 mt-3 overflow-x-auto">
+        <table className="w-full min-w-[480px] text-xs">
+          <thead>
+            <tr className="text-muted border-line border-b text-left">
+              <th className="px-1 py-1.5 font-medium">Qué pasó</th>
+              <th className="px-1 py-1.5 font-medium">SKU</th>
+              <th className="px-1 py-1.5 font-medium">Producto</th>
+              <th className="px-1 py-1.5 font-medium">Cuándo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cambios.map((c, i) => (
+              <tr
+                key={`${c.sku ?? "sin-sku"}-${c.fecha}-${i}`}
+                className="border-line/60 border-b last:border-0"
+              >
+                <td className="px-1 py-1.5 whitespace-nowrap">
+                  <span
+                    style={{ color: c.restringido ? TEMA.negativo : PALETA[1] }}
+                  >
+                    {c.restringido ? "Se restringió" : "Se liberó"}
+                  </span>
+                </td>
+                <td className="text-ink px-1 py-1.5 font-mono whitespace-nowrap">
+                  {c.sku ?? "—"}
+                </td>
+                <td className="text-muted px-1 py-1.5">
+                  <span
+                    className="block max-w-[150px] sm:max-w-[320px] truncate"
+                    title={c.producto ?? undefined}
+                  >
+                    {c.producto ?? "—"}
+                  </span>
+                </td>
+                <td className="text-muted px-1 py-1.5 whitespace-nowrap">
+                  {c.fecha}
+                  <span className="text-muted/60">
+                    {" "}
+                    · hace {c.hace === 0 ? "hoy" : `${fmtNumero(c.hace)} d`}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {/* EL MOTIVO NO ESTA, y hay que decirlo: la API no lo manda. Se probaron
+          ocho endpoints el 26/10/2026 y ninguno lo expone -- los cuatro
+          motivos ("vendedores autorizados", "mejorá las ventas", "prohibido en
+          Full", "no lo estamos recibiendo") llegan como el mismo
+          `is_restricted`. Prometer el motivo acá sería prometer algo que no
+          tenemos. */}
+      <p className="text-muted mt-3 text-[11px] leading-tight">
+        Mercado Libre informa <strong>si</strong> un producto está restringido,
+        pero no por qué. El motivo está sólo en su pantalla de envíos a Full.
+      </p>
+    </Panel>
   );
 }
 
@@ -694,6 +782,13 @@ export default function DashboardStockFullPage() {
         <div
           className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
         >
+          {/* LO QUE CAMBIO VA PRIMERO. Es lo unico de esta pantalla que
+              caduca: un producto que te liberaron hoy es plata que se puede
+              mandar esta semana, y dentro de un mes ya no es noticia. */}
+          {data.cambiosRestriccion.length > 0 && (
+            <PanelCambiosRestriccion cambios={data.cambiosRestriccion} />
+          )}
+
           {/* LOS DESTACADOS DE MERCADO LIBRE.
               Va ARRIBA y no al final porque los que importan son los que
               estan en cero, y esos no aparecen en la tabla de Articulos: esa

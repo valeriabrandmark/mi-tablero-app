@@ -1,4 +1,8 @@
-import type { DestacadoFull, ReposicionFull } from "@/lib/reposicion-full";
+import type {
+  CambioDeRestriccion,
+  DestacadoFull,
+  ReposicionFull,
+} from "@/lib/reposicion-full";
 /**
  * Todos los filtros del tablero son de selección múltiple: el valor es una
  * LISTA. Lista vacía (o ausente) significa "sin filtrar", no "ninguno".
@@ -1323,6 +1327,11 @@ export type DashboardStockFull = {
    * quedaron sin stock, que en la tabla de Artículos no aparecen.
    */
   destacados: DestacadoFull[];
+  /**
+   * Los que entraron o salieron de restricción en los últimos dos meses. Es lo
+   * único que la foto de reposición no puede decir: se reemplaza entera.
+   */
+  cambiosRestriccion: CambioDeRestriccion[];
   /**
    * Desde cuándo hay foto diaria del stock, o null si todavía no hay ninguna.
    * Lo usa la pantalla para decir a partir de cuándo va a poder mostrar "días
