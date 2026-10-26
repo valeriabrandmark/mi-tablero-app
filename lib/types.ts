@@ -1,4 +1,4 @@
-import type { ReposicionFull } from "@/lib/reposicion-full";
+import type { DestacadoFull, ReposicionFull } from "@/lib/reposicion-full";
 /**
  * Todos los filtros del tablero son de selección múltiple: el valor es una
  * LISTA. Lista vacía (o ausente) significa "sin filtrar", no "ninguno".
@@ -1313,6 +1313,12 @@ export type DashboardStockFull = {
   /** Los artículos detrás de la tarjeta de "No disponible". */
   noDisponible: FilaNoDisponible[];
   recortada: boolean;
+  /**
+   * Los que Mercado Libre marca como destacados. NO siguen los filtros de la
+   * pantalla: son pocos y la gracia es verlos todos, sobre todo los que
+   * quedaron sin stock, que en la tabla de Artículos no aparecen.
+   */
+  destacados: DestacadoFull[];
   /**
    * Desde cuándo hay foto diaria del stock, o null si todavía no hay ninguna.
    * Lo usa la pantalla para decir a partir de cuándo va a poder mostrar "días

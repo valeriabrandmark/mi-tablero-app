@@ -2,7 +2,7 @@ import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
-import { getReposicionPorSku } from "@/lib/queries-reposicion-full";
+import { getDestacadosFull, getReposicionPorSku } from "@/lib/queries-reposicion-full";
 import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import { CANAL_MELI } from "@/lib/meli";
 import {
@@ -556,7 +556,7 @@ async function getOpcionesStockFullDirecto() {
 async function getDashboardStockFullDirecto(
   f: FiltrosStockFull,
 ): Promise<DashboardStockFull> {
-  const [kpis, umbrales, tramos, filas, noDisponible, historiaDesde] =
+  const [kpis, umbrales, tramos, filas, noDisponible, historiaDesde, destacados] =
     await Promise.all([
       getKpis(f),
       getUmbrales(f),
@@ -564,6 +564,10 @@ async function getDashboardStockFullDirecto(
       getFilas(f),
       getNoDisponible(f),
       getDesdeCuandoHayHistoria(),
+      // SIN FILTRAR, a proposito: son 18 y la gracia es verlos todos. Si
+      // siguieran el filtro de la pantalla, el panel se vaciaria justo cuando
+      // alguien esta mirando una marca y desapareceria el aviso.
+      getDestacadosFull(),
     ]);
 
   return {
@@ -573,6 +577,7 @@ async function getDashboardStockFullDirecto(
     filas,
     noDisponible,
     recortada: filas.length === TOPE,
+    destacados,
     historiaDesde,
     generadoEn: new Date().toISOString(),
   };

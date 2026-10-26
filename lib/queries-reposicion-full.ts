@@ -1,7 +1,7 @@
 import { query, queryOne } from "@/lib/db";
-import type { ReposicionFull } from "@/lib/reposicion-full";
+import type { DestacadoFull, ReposicionFull } from "@/lib/reposicion-full";
 
-export type { ReposicionFull };
+export type { DestacadoFull, ReposicionFull };
 
 /**
  * La recomendación de reposición de Full de Mercado Libre, por SKU.
@@ -40,7 +40,11 @@ export async function getReposicionPorSku(): Promise<Map<string, ReposicionFull>
             case when bool_or(r.urgencia = 'URGENT') then 'URGENT'
                  else max(r.urgencia) end                           as urgencia,
             case when bool_or(r.plazo = 'THIS_WEEK') then 'THIS_WEEK'
-                 else max(r.plazo) end                              as plazo
+                 else max(r.plazo) end                              as plazo,
+            -- DESTACADO POR MERCADO LIBRE. Viene en la columna tags, que se
+            -- guarda como el JSON crudo: se busca con like y no parseando,
+            -- porque es una etiqueta suelta en una lista de dos o tres.
+            bool_or(r.tags like '%star_product%')                    as destacado
      from bronze.ml_reposicion_full r
      left join bronze.ml_inventario_sku m on m.inventory_id = r.inventory_id
      where coalesce(m.sku, r.sku, r.sku_ml) is not null
@@ -56,7 +60,84 @@ export async function getReposicionPorSku(): Promise<Map<string, ReposicionFull>
       cantidadSugerida: cant != null && Number.isFinite(cant) ? cant : null,
       urgencia: (r.urgencia as string) ?? null,
       plazo: (r.plazo as string) ?? null,
+      destacado: Boolean(r.destacado),
     });
   }
   return mapa;
+}
+
+/**
+ * Los productos que Mercado Libre marca como DESTACADOS (`star_product`).
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE TIENEN PANEL PROPIO Y NO ALCANZA CON LA ESTRELLA EN LA TABLA
+ *
+ * Porque la tabla de Artículos lista lo que TIENE stock (`disponible > 0 or
+ * no_disponible > 0`), y de los 18 destacados del 26/10/2026 SIETE estaban en
+ * cero. O sea que los que más importan son justo los que ahí no se ven: un
+ * destacado vacío no es un artículo parado más, es el que Mercado Libre mismo
+ * iba a empujar y no tiene con qué vender.
+ *
+ * El más caro de la lista ese día --AC01001-- había facturado $1.541.490 en 30
+ * días y tenía cero unidades en Full, marcado urgente.
+ *
+ * Van ordenados por stock ascendente: los vacíos arriba, que es donde hay algo
+ * que hacer. A igual stock, primero los que más facturaron.
+ */
+export async function getDestacadosFull(): Promise<DestacadoFull[]> {
+  const existe = await queryOne<{ ok: boolean }>(
+    "select to_regclass('bronze.ml_reposicion_full') is not null as ok",
+  );
+  if (!existe?.ok) return [];
+
+  const rows = await query(
+    `select coalesce(m.sku, r.sku_ml)                               as sku,
+            max(p.title)                                            as producto,
+            sum(coalesce(r.stock_total, 0))                         as en_full,
+            sum(r.unidades_30d)                                     as unidades_30d,
+            sum(r.facturacion_30d)                                  as facturacion_30d,
+            bool_or(r.restringido)                                  as restringido,
+            string_agg(distinct r.recomendacion, ' / ')             as recomendacion,
+            sum(r.cantidad_sugerida)                                as cantidad_sugerida,
+            case when bool_or(r.urgencia = 'URGENT') then 'URGENT'
+                 else max(r.urgencia) end                           as urgencia,
+            case when bool_or(r.plazo = 'THIS_WEEK') then 'THIS_WEEK'
+                 else max(r.plazo) end                              as plazo
+       from bronze.ml_reposicion_full r
+       left join bronze.ml_inventario_sku m on m.inventory_id = r.inventory_id
+       -- EL TITULO SE AGRUPA ANTES DE UNIRLO, no en el join.
+       --
+       -- Un inventario esta publicado en varios avisos --hasta 6, y 3.887 de
+       -- los inventarios tienen mas de uno-- asi que unir publicaciones
+       -- directo multiplica la fila y las sumas salen infladas: AC01001 daba
+       -- 30 unidades y $4.624.470 en vez de 10 y $1.541.490. Es el mismo
+       -- motivo por el que Stock Full agrupa por inventario antes de sumar.
+       left join (select inventory_id, max(title) as title
+                    from bronze.ml_publicaciones
+                   where inventory_id is not null
+                   group by inventory_id) p on p.inventory_id = r.inventory_id
+      where r.tags like '%star_product%'
+      group by 1
+      order by sum(coalesce(r.stock_total, 0)) asc,
+               sum(r.facturacion_30d) desc nulls last`,
+  );
+
+  return rows.map((r) => {
+    const cant = r.cantidad_sugerida == null ? null : Number(r.cantidad_sugerida);
+    return {
+      sku: typeof r.sku === "string" ? r.sku.trim() : null,
+      producto: typeof r.producto === "string" ? r.producto : null,
+      enFull: Number(r.en_full ?? 0),
+      unidades30d: r.unidades_30d == null ? null : Number(r.unidades_30d),
+      facturacion30d: r.facturacion_30d == null ? null : Number(r.facturacion_30d),
+      reposicion: {
+        restringido: r.restringido == null ? null : Boolean(r.restringido),
+        recomendacion: (r.recomendacion as string) ?? null,
+        cantidadSugerida: cant != null && Number.isFinite(cant) ? cant : null,
+        urgencia: (r.urgencia as string) ?? null,
+        plazo: (r.plazo as string) ?? null,
+        destacado: true,
+      },
+    };
+  });
 }

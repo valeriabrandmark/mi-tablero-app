@@ -14,6 +14,15 @@ export type ReposicionFull = {
   urgencia: string | null;
   /** Plazo para mandar, ej. THIS_WEEK. */
   plazo: string | null;
+  /**
+   * DESTACADO POR MERCADO LIBRE (`star_product`).
+   *
+   * Lo pone ML, no nosotros, y son pocos: 18 de 4.037 el 26/10/2026. De esos,
+   * 17 vendieron el ultimo mes y SIETE estaban sin stock en Full. Ahi esta el
+   * valor de mostrarlo: un destacado vacio no es un articulo parado mas, es el
+   * que ML mismo iba a empujar y no tiene que vender.
+   */
+  destacado: boolean;
 };
 
 /**
@@ -27,6 +36,21 @@ export type ReposicionFull = {
  * LO QUE NO ESTE ACA SIGUE SALIENDO CON SU NOMBRE CRUDO, a proposito: un
  * codigo nuevo tiene que verse para poder nombrarlo. Asi aparecio este.
  */
+/**
+ * Un producto que Mercado Libre marca como destacado, con lo que hace falta
+ * para decidir si hay que mandarle stock. La consulta esta en
+ * lib/queries-reposicion-full.ts; el tipo vive aca por lo mismo que
+ * `ReposicionFull`: lo importa un componente que corre en el navegador.
+ */
+export type DestacadoFull = {
+  sku: string | null;
+  producto: string | null;
+  enFull: number;
+  unidades30d: number | null;
+  facturacion30d: number | null;
+  reposicion: ReposicionFull;
+};
+
 export const NOMBRES_RECOMENDACION: Record<string, string> = {
   NO_REPLENISHMENT: "No hace falta reponer",
   // SIN CANTIDAD: es lo que se muestra cuando ML recomienda reponer pero no
