@@ -185,8 +185,13 @@ const CUENTAS: Record<string, Imputacion> = {
   // con la cuenta contable de cada artículo. Mandarlo además es contarlo dos
   // veces, y así entró una factura de verdad: MERCADERIAS DE REVENTA dos
   // veces por el mismo importe, con el subtotal al doble.
-  // EL IVA TAMPOCO VIAJA: se agrega en Sigma una vez pasada la factura.
-  revisar("con mercaderías el contable va vacío", cuerpo.contable, []);
+  // EL IVA VIAJA EN $0. Sigma no acepta el contable vacío ("array contable
+  // no puede estar vacio"), así que va el renglón para completarlo allá.
+  revisar(
+    "con mercaderías el contable lleva el IVA en $0",
+    cuerpo.contable,
+    [{ monto: 0, cuenta: "8008", tipoImpuesto: "I21", observacion: "IVA a completar en Sigma" }],
+  );
   revisar(
     "no hay ninguna línea a la cuenta de mercaderías",
     cuerpo.contable.filter((c) => c.cuenta === "20000").length,
@@ -318,7 +323,11 @@ const CUENTAS: Record<string, Imputacion> = {
     CUENTAS,
   );
   revisar("con percepciones no hay problemas", problemas, []);
-  revisar("no viaja ninguna línea de impuestos", cuerpo.contable, []);
+  revisar(
+    "no viaja ninguna percepción, sólo el IVA en $0",
+    cuerpo.contable.map((c) => [c.cuenta, c.monto]),
+    [["8008", 0]],
+  );
   revisar("el total sigue siendo el subtotal", cuerpo.total, 1000);
   revisar(
     "se avisa el IVA y las percepciones que quedan para Sigma",
@@ -327,8 +336,8 @@ const CUENTAS: Record<string, Imputacion> = {
   );
 }
 
-// SIN LAS CUENTAS DEL IVA NI DE LAS PERCEPCIONES SE MANDA IGUAL: no viajan,
-// así que no hay por qué pedirlas.
+// SIN LAS CUENTAS DE LAS PERCEPCIONES SE MANDA IGUAL: no viajan, así que no
+// hay por qué pedirlas.
 {
   const cruce = cruceDe([linea({ sku: "A", unidades: 1, precioNeto: 100, neto: 100, iva: 21 })]);
   const { problemas, advertencias } = armarImportCompras(
@@ -340,14 +349,44 @@ const CUENTAS: Record<string, Imputacion> = {
       totalImpreso: 171,
       percepciones: [{ concepto: "Percepción IVA", monto: 50 }],
     },
-    imputacionDeFabrica(),
+    { ...imputacionDeFabrica(), "IVA 21 %": { cuenta: "8008", tipoImpuesto: "I21" } },
   );
-  revisar("sin cuentas de impuestos no frena", problemas, []);
+  revisar("sin cuentas de percepciones no frena", problemas, []);
   revisar(
     "ni se piden",
     advertencias.some((a) => a.includes("Falta la cuenta")),
     false,
   );
+}
+
+// Un renglón de IVA en $0 por cada alícuota de las mercaderías, de mayor a
+// menor. Y una factura toda exenta igual lleva uno, al 21.
+{
+  const { cuerpo } = armarImportCompras(
+    cruceDe([
+      linea({ sku: "A", unidades: 1, precioNeto: 100, neto: 100, iva: 10.5 }),
+      linea({ sku: "B", unidades: 1, precioNeto: 100, neto: 100, iva: 21 }),
+      linea({ sku: "C", unidades: 1, precioNeto: 100, neto: 100, iva: 10.5 }),
+    ]),
+    totalesDe({ netoGravado: 300, iva: [{ alicuota: 21, importe: 21 }, { alicuota: 10.5, importe: 21 }] }),
+    DATOS,
+    CUENTAS,
+  );
+  revisar(
+    "un IVA en $0 por alícuota",
+    cuerpo.contable.map((c) => [c.tipoImpuesto, c.monto]),
+    [["I21", 0], ["I10", 0]],
+  );
+}
+{
+  const { cuerpo, problemas } = armarImportCompras(
+    cruceDe([linea({ sku: "A", unidades: 1, precioNeto: 100, neto: 100, iva: 0 })]),
+    totalesDe({ netoGravado: 100, iva: [] }),
+    DATOS,
+    CUENTAS,
+  );
+  revisar("una factura exenta se manda igual", problemas, []);
+  revisar("con un IVA 21 en $0", cuerpo.contable.map((c) => c.tipoImpuesto), ["I21"]);
 }
 
 // --- Lo que falta -------------------------------------------------------
@@ -407,7 +446,8 @@ const CUENTAS: Record<string, Imputacion> = {
   revisar("y lo que viaja es el subtotal", cuerpo.total, 100);
 }
 
-// El IVA ya no viaja, así que tampoco se pide su cuenta.
+// EL IVA VIAJA EN $0, CON SU CUENTA: sin ella no hay renglón contable, y
+// Sigma no acepta el comprobante sin al menos uno.
 {
   const cruce = cruceDe([linea({ sku: "A", unidades: 1, precioNeto: 100, neto: 100, iva: 21 })]);
   const { problemas } = armarImportCompras(
@@ -417,9 +457,9 @@ const CUENTAS: Record<string, Imputacion> = {
     imputacionDeFabrica(), // sólo las de IIBB: falta el neto y el IVA
   );
   revisar(
-    "sin la cuenta del IVA se manda igual",
+    "sin la cuenta del IVA no se manda",
     problemas.some((p) => p.includes('"IVA 21 %"')),
-    false,
+    true,
   );
   // LA DEL NETO YA NO HACE FALTA CUANDO HAY MERCADERIAS: esa línea no se
   // manda, la arma Sigma con la cuenta del artículo. Pedirla sería pedir una
