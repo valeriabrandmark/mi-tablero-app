@@ -29,9 +29,13 @@ export type ReposicionFull = {
  */
 export const NOMBRES_RECOMENDACION: Record<string, string> = {
   NO_REPLENISHMENT: "No hace falta reponer",
-  // SIN CANTIDAD, porque la API la manda vacia para todos los productos de la
-  // cuenta (4.037 de 4.037 el 26/10/2026) -- incluidos estos. Decir "conviene
-  // reponer" sin numero es lo unico honesto que se puede decir hoy.
+  // SIN CANTIDAD: es lo que se muestra cuando ML recomienda reponer pero no
+  // dice cuanto. Hasta el 26/10/2026 era el caso de TODOS, porque el
+  // orquestador leia `suggested_quantity` como si fuera un numero y en
+  // realidad es un objeto -- {"type": "exact", "value": 140}-- asi que se
+  // guardaba vacio (ver el PR 130 de tablero_quo). Arreglado eso, estos pasan
+  // a mostrar "Mandar N" y este texto queda para los que igual no traigan
+  // cantidad.
   REPLENISH: "Conviene reponer",
   NO_REPLENISHMENT_BY_RESTRICTION: "No se puede enviar: restringido",
 };
