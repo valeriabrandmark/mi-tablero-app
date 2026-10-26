@@ -22,6 +22,7 @@ import {
   OPCIONES_ENVIO_FULL,
   type CambioDeRestriccion,
   type DestacadoFull,
+  type NoAdmiteFull,
   type ReposicionFull,
 } from "@/lib/reposicion-full";
 import type {
@@ -212,18 +213,26 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
           : f.reposicion.restringido
             ? 1_000_000
             : (f.reposicion.cantidadSugerida ?? 0),
-      total: `${fmtNumero(filas.filter((f) => f.reposicion?.restringido).length)} restringidos`,
+      total: `${fmtNumero(filas.filter((f) => f.reposicion?.restringido).length)} no admitidos`,
     },
   ];
 }
 
-/** Restringido en rojo; si no, la sugerencia de ML con su plazo. */
+/**
+ * Lo que Full hace con este artículo: si no lo admite, en rojo; si lo admite,
+ * cuánto conviene mandar.
+ *
+ * DICE "NO ADMITE" Y NO "RESTRINGIDO" porque es lo que hay que hacer con el
+ * dato: no se puede mandar. "Restringido" obliga a recordar restringido para
+ * qué -- la mercadería que ya está en Full se sigue vendiendo igual, lo que
+ * está bloqueado es mandar más.
+ */
 function CeldaReposicion({ r }: { r: ReposicionFull | null }) {
   if (!r) return <span className="text-muted">—</span>;
   if (r.restringido) {
     return (
       <span style={{ color: TEMA.negativo }} title={r.recomendacion ?? undefined}>
-        Restringido
+        No admite
       </span>
     );
   }
@@ -416,6 +425,63 @@ function PanelDestacados({ destacados }: { destacados: DestacadoFull[] }) {
           </tbody>
         </table>
       </div>
+    </Panel>
+  );
+}
+
+/**
+ * Los que Full no admite por inflamables.
+ *
+ * VAN EN UN PANEL Y NO EN LA TABLA porque no están en la tabla: esa lista los
+ * SKU con stock EN FULL, y éstos nunca entraron. Si no se muestran acá, la
+ * pregunta "¿por qué este artículo no está en Full?" se queda sin respuesta en
+ * todo el tablero.
+ *
+ * No es un aviso --no cambia, no caduca-- así que va al final, como
+ * referencia.
+ */
+function PanelNoAdmite({ articulos }: { articulos: NoAdmiteFull[] }) {
+  const [verTodos, setVerTodos] = useState(false);
+  const visibles = verTodos ? articulos : articulos.slice(0, 12);
+
+  return (
+    <Panel
+      titulo="Full no admite · inflamables"
+      nota={`${fmtNumero(articulos.length)} artículos`}
+    >
+      <p className="text-muted mb-3 text-xs">
+        Mercado Libre los marca como inflamables —aerosoles, lacas— y no los
+        acepta en Full. <strong className="text-ink">No están restringidos:
+        nunca entraron</strong>, así que no aparecen en la tabla de abajo ni
+        van a avisar que se liberaron.
+      </p>
+      <ul className="text-muted grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
+        {visibles.map((a) => (
+          <li key={a.sku} className="truncate" title={a.producto ?? undefined}>
+            <span className="text-ink font-mono">{a.sku}</span>
+            {a.producto ? ` · ${a.producto}` : ""}
+          </li>
+        ))}
+      </ul>
+      {articulos.length > 12 && (
+        <button
+          type="button"
+          className="text-muted hover:text-ink mt-2 text-xs underline"
+          onClick={() => setVerTodos((v) => !v)}
+        >
+          {verTodos
+            ? "Ver menos"
+            : `Ver los ${fmtNumero(articulos.length)}`}
+        </button>
+      )}
+      {/* EL ATRIBUTO AFIRMA, NO DESCARTA. Lo declaran 355 de 9.141
+          publicaciones: sólo las categorías donde ML lo pregunta. Que un
+          artículo no esté en esta lista no quiere decir que Full lo acepte. */}
+      <p className="text-muted mt-3 text-[11px] leading-tight">
+        Sale del atributo <strong>Es inflamable</strong> de la publicación, que
+        sólo piden algunas categorías. Que un artículo no esté en esta lista no
+        garantiza que Full lo acepte.
+      </p>
     </Panel>
   );
 }
@@ -833,6 +899,10 @@ export default function DashboardStockFullPage() {
               }}
             />
           </Panel>
+
+          {data.noAdmite.length > 0 && (
+            <PanelNoAdmite articulos={data.noAdmite} />
+          )}
 
           <Panel
             titulo="Artículos"

@@ -1,6 +1,7 @@
 import type {
   CambioDeRestriccion,
   DestacadoFull,
+  NoAdmiteFull,
   ReposicionFull,
 } from "@/lib/reposicion-full";
 /**
@@ -1332,6 +1333,12 @@ export type DashboardStockFull = {
    * único que la foto de reposición no puede decir: se reemplaza entera.
    */
   cambiosRestriccion: CambioDeRestriccion[];
+  /**
+   * Los que Full no admite por inflamables. No están en la tabla de Artículos
+   * --nunca entraron a Full-- así que si no se muestran acá no se ven en
+   * ningún lado.
+   */
+  noAdmite: NoAdmiteFull[];
   /**
    * Desde cuándo hay foto diaria del stock, o null si todavía no hay ninguna.
    * Lo usa la pantalla para decir a partir de cuándo va a poder mostrar "días
