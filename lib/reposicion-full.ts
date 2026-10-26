@@ -66,6 +66,16 @@ export type CambioDeRestriccion = {
   hace: number;
 };
 
+/**
+ * Un articulo que Full NO ADMITE por inflamable. No esta restringido: nunca
+ * entro a Full, asi que no aparece en la tabla de Articulos ni puede generar
+ * un aviso de entrada o salida.
+ */
+export type NoAdmiteFull = {
+  sku: string;
+  producto: string | null;
+};
+
 export const NOMBRES_RECOMENDACION: Record<string, string> = {
   NO_REPLENISHMENT: "No hace falta reponer",
   // SIN CANTIDAD: es lo que se muestra cuando ML recomienda reponer pero no
@@ -119,7 +129,9 @@ export const NOMBRES_PLAZO: Record<string, string> = {
  * "Mandar N". Es el mismo estado.
  */
 export const OPCIONES_ENVIO_FULL = [
-  { clave: "restringido", etiqueta: "Restringido" },
+  // "NO ADMITE" Y NO "RESTRINGIDO": tiene que decir lo mismo que la celda, si
+  // no el filtro ofrece una etiqueta que no existe en ninguna fila.
+  { clave: "restringido", etiqueta: "No admite" },
   { clave: "reponer", etiqueta: "Conviene reponer" },
   { clave: "no-hace-falta", etiqueta: "No hace falta reponer" },
   { clave: "sin-dato", etiqueta: "Sin dato de ML" },

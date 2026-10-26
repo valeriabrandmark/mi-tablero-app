@@ -1,11 +1,13 @@
+import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import type {
   CambioDeRestriccion,
   DestacadoFull,
+  NoAdmiteFull,
   ReposicionFull,
 } from "@/lib/reposicion-full";
 
-export type { CambioDeRestriccion, DestacadoFull, ReposicionFull };
+export type { CambioDeRestriccion, DestacadoFull, NoAdmiteFull, ReposicionFull };
 
 /**
  * La recomendación de reposición de Full de Mercado Libre, por SKU.
@@ -220,3 +222,79 @@ export async function getCambiosDeRestriccion(
     hace: Number(r.hace ?? 0),
   }));
 }
+
+/**
+ * Los artículos que Full NO ADMITE por ser inflamables.
+ *
+ * ---------------------------------------------------------------------------
+ * ESTOS NO ESTAN RESTRINGIDOS: NUNCA ENTRARON
+ *
+ * Un aerosol no es un producto de Full al que ML le bloqueó la reposición: es
+ * un producto que Full no acepta, punto. De los 141 SKU marcados "Es
+ * inflamable = Sí" el 26/10/2026, NINGUNO está en Full -- las 260
+ * publicaciones figuran con logística `not_specified`.
+ *
+ * Por eso no aparecen en la tabla de Artículos (esa lista lo que tiene stock
+ * en Full) y por eso no pueden generar un aviso de entrada o salida: no hay
+ * transición que detectar. Si no se muestran acá, no se muestran en ningún
+ * lado, y la pregunta "¿por qué este no está en Full?" se queda sin respuesta.
+ *
+ * ---------------------------------------------------------------------------
+ * EL ATRIBUTO AFIRMA, NO DESCARTA
+ *
+ * `IS_FLAMMABLE` lo declaran 355 de 9.141 publicaciones: sólo las categorías
+ * donde ML lo pregunta. Que un artículo no lo tenga NO quiere decir que no sea
+ * inflamable, quiere decir que su categoría no lo pregunta. Sirve para decir
+ * "éste no se puede", nunca para decir "éste sí".
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE SE CACHEA APARTE
+ *
+ * Porque leer el atributo obliga a recorrer la columna `attributes`, que son
+ * 14 MB de JSON: 430 ms medidos contra la base. La lista no depende de los
+ * filtros de la pantalla, así que cacheada por su cuenta se calcula una vez y
+ * no una por cada filtro que alguien toque.
+ *
+ * Si algún día molesta, el arreglo de fondo es que el orquestador guarde el
+ * dato como columna al escribir `ml_publicaciones` -- es lo que ya se hizo con
+ * el SKU por inventario, por este mismo motivo.
+ */
+async function getNoAdmiteFullDirecto(): Promise<NoAdmiteFull[]> {
+  const rows = await query(
+    // `as materialized` no es decorativo: sin eso Postgres mete las
+    // subconsultas adentro del Seq Scan y las corre tres veces por fila --
+    // 1.060 ms en vez de 430.
+    `with marcadas as materialized (
+       select p.title, p."shipping.logistic_type" as tipo, p.attributes::jsonb as attrs
+         from bronze.ml_publicaciones p
+        where p.attributes like '%"IS_FLAMMABLE"%'
+     ),
+     leidas as materialized (
+       select title, tipo,
+              (select a->>'value_name' from jsonb_array_elements(attrs) a
+                where a->>'id' = 'SELLER_SKU' limit 1)   as sku,
+              (select a->>'value_name' from jsonb_array_elements(attrs) a
+                where a->>'id' = 'IS_FLAMMABLE' limit 1) as inflamable
+         from marcadas
+     )
+     select sku, max(title) as producto
+       from leidas
+      where inflamable = 'Sí' and sku is not null
+      -- SI ALGUNO ESTUVIERA EN FULL no sería un "no admite": estaría adentro,
+      -- y lo que diga de él la columna de reposición manda. Hoy no hay
+      -- ninguno, pero el día que lo haya, que no aparezca en los dos lados.
+      group by sku
+     having not bool_or(tipo = 'fulfillment')
+      order by sku`,
+  );
+
+  return rows.map((r) => ({
+    sku: String(r.sku).trim(),
+    producto: typeof r.producto === "string" ? r.producto : null,
+  }));
+}
+
+export const getNoAdmiteFull = cacheado(
+  "stock-full:no-admite",
+  getNoAdmiteFullDirecto,
+);

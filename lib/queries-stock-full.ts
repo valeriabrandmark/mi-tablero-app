@@ -5,6 +5,7 @@ import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import {
   getCambiosDeRestriccion,
   getDestacadosFull,
+  getNoAdmiteFull,
   getReposicionPorSku,
   hayTablaReposicion,
 } from "@/lib/queries-reposicion-full";
@@ -643,7 +644,7 @@ async function getDashboardStockFullDirecto(
   }
 
   const [kpis, umbrales, tramos, filas, noDisponible, historiaDesde, destacados,
-         cambiosRestriccion] =
+         cambiosRestriccion, noAdmite] =
     await Promise.all([
       getKpis(f),
       getUmbrales(f),
@@ -658,6 +659,9 @@ async function getDashboardStockFullDirecto(
       // TAMPOCO SIGUEN LOS FILTROS: un producto que te liberaron es noticia
       // aunque estés mirando otra marca.
       getCambiosDeRestriccion(),
+      // TAMPOCO SIGUE LOS FILTROS, y además no podría: estos artículos no
+      // están en `base` -- no tienen stock en Full porque Full no los acepta.
+      getNoAdmiteFull(),
     ]);
 
   return {
@@ -669,6 +673,7 @@ async function getDashboardStockFullDirecto(
     recortada: filas.length === TOPE,
     destacados,
     cambiosRestriccion,
+    noAdmite,
     historiaDesde,
     generadoEn: new Date().toISOString(),
   };
