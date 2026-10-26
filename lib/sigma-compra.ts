@@ -270,11 +270,11 @@ export const MAX_NUMERO_COMPROBANTE = 20;
  * algo que después se corrige del otro lado. Se avisa y se deja mandar.
  *
  * ---------------------------------------------------------------------------
- * VIAJA SOLO EL SUBTOTAL
+ * VIAJA COMPLETA
  *
- * Las mercaderías y un `total` igual al neto gravado, sin IVA ni impuestos.
- * El IVA viaja en $0 --Sigma no acepta el contable vacío-- y se completa
- * allá, junto con las percepciones, una vez pasada la factura.
+ * Las mercaderías, el IVA y las percepciones, y un `total` que es la suma de
+ * todo eso. Sigma no recalcula el total al editar el comprobante, así que lo
+ * que no se manda desde acá no se suma después.
  */
 export function armarImportCompras(
   cruce: ResultadoCruce,
@@ -292,17 +292,21 @@ export function armarImportCompras(
     );
   }
 
-  // EL TOTAL CONTRA EL PAPEL SIGUE AVISANDO, aunque ya no sea lo que viaja
-  // (ver `total` abajo). El subtotal que se manda sale de los mismos
-  // renglones que el total calculado: si el calculado no da el impreso, lo
-  // más probable es que falte un renglón o un precio, y eso sí viaja.
-  if (totales.cuadra === false) {
+  // EL TOTAL CONTRA EL PAPEL AVISA, NO FRENA. Lo que viaja en `total` es la
+  // suma de lo que se manda (ver abajo); si no da el impreso, lo más probable
+  // es que falte un renglón, un precio o una percepción, y conviene mirarlo
+  // antes de mandar: Sigma deja el total tal como llega.
+  if (totales.cuadra === null) {
+    advertencias.push(
+      `Falta el total impreso: no hay contra qué corroborar los ${pesos(totales.total)} que se mandan.`,
+    );
+  } else if (totales.cuadra === false) {
     const dif = totales.diferencia ?? 0;
     advertencias.push(
       `El total calculado no cuadra con el impreso: da ${pesos(Math.abs(dif))}` +
         ` ${dif > 0 ? "más" : "menos"} (calculado ${pesos(totales.total)},` +
-        ` impreso ${pesos(datos.totalImpreso ?? 0)}). Revisá los renglones:` +
-        " el subtotal que se manda sale de ellos.",
+        ` impreso ${pesos(datos.totalImpreso ?? 0)}). Revisá los renglones y` +
+        " las percepciones: Sigma deja el total tal como se manda.",
     );
   }
   if (!datos.codigoComprobante) {
@@ -357,10 +361,10 @@ export function armarImportCompras(
   const imputar = (
     concepto: string,
     monto: number,
-    // EN CERO A PROPOSITO: el renglón de IVA que va para completar en Sigma
-    // (ver abajo). Sin esto, un monto en cero no viaja.
-    enCero = false,
     observacion?: string,
+    // EN CERO A PROPOSITO: el renglón de IVA de una factura exenta (ver
+    // abajo). Sin esto, un monto en cero no viaja.
+    enCero = false,
   ) => {
     if (!monto && !enCero) return;
     const cta = imputacion[concepto];
@@ -392,8 +396,8 @@ export function armarImportCompras(
   // genera el asiento del neto a partir de las MERCADERIAS que le mandamos.
   // Mandarle además una línea contable con el neto es contarlo dos veces.
   //
-  // Así que con mercaderías `contable` lleva sólo el IVA en $0 para completar
-  // en Sigma (ver abajo). El neto se manda únicamente cuando no hay
+  // Así que con mercaderías `contable` lleva sólo el IVA y las percepciones
+  // (ver abajo). El neto se manda únicamente cuando no hay
   // mercaderías --una factura que no mueve stock-- porque ahí no hay de dónde
   // más sacarlo.
   //
@@ -427,45 +431,43 @@ export function armarImportCompras(
     });
   }
 
-  // --- EL IVA Y LAS PERCEPCIONES SE CARGAN EN SIGMA ---------------------
+  // --- EL IVA Y LAS PERCEPCIONES VIAJAN COMPLETOS ----------------------
   //
-  // Antes viajaban el IVA por alícuota y las percepciones detalladas, y el
-  // `total` era el impreso. Se pidió que no: la factura entra SOLO CON EL
-  // SUBTOTAL y el IVA se agrega en Sigma una vez pasada, igual que los
-  // impuestos. Así lo que se manda es lo que sale de los renglones y nada
-  // más, y el asiento de impuestos se arma del otro lado, con el papel.
+  // SIGMA NO RECALCULA EL TOTAL. Se probó con una factura de verdad: mandada
+  // sólo con el subtotal y el IVA en $0, se le cargaron el IVA y las
+  // percepciones a mano y el total quedó en el subtotal. Lo que se manda en
+  // `total` es lo que queda, y lo que no viaja desde acá no se suma después.
   //
-  // PERO EL CONTABLE NO PUEDE IR VACIO. Se aprendió mandando una factura de
-  // verdad: con sólo mercaderías Sigma contesta "array contable no puede
-  // estar vacio". Así que va UN RENGLON DE IVA EN $0 POR ALICUOTA, con su
-  // cuenta, para que en Sigma se edite con el importe real. Las percepciones
-  // se agregan allá.
-  //
-  // Por eso sí se pide la cuenta del IVA y no la de las percepciones. Se
-  // avisa cuánto queda para cargar, para que no se olvide.
-  if (mercaderias.length > 0) {
-    const alicuotas = [
-      ...new Set(cruce.lineas.filter((l) => l.sku && l.iva).map((l) => l.iva)),
-    ].sort((a, b) => b - a);
-    // Una factura toda exenta igual necesita un renglón: va al 21, que es la
-    // cuenta que siempre está configurada.
-    for (const a of alicuotas.length > 0 ? alicuotas : [21]) {
-      imputar(`IVA ${alicuotaTexto(a)} %`, 0, true, "IVA a completar en Sigma");
-    }
+  // Así que todo sale de la app: el IVA por alícuota con su importe y cada
+  // percepción imputada a su cuenta. Y por eso lo que antes avisaba ahora
+  // frena: una percepción sin cuenta o un detalle que no suma lo cargado
+  // dejaría un total incompleto que del otro lado no se arregla.
+  for (const i of totales.iva) {
+    if (i.alicuota) imputar(`IVA ${alicuotaTexto(i.alicuota)} %`, i.importe);
   }
 
-  const quedaEnSigma: string[] = [];
-  if (totales.ivaTotal) {
-    quedaEnSigma.push(`el IVA (${pesos(totales.ivaTotal)}, viaja en $ 0 para editarlo)`);
-  }
-  if (datos.otrosImpuestos) {
-    quedaEnSigma.push(`las percepciones y otros impuestos (${pesos(datos.otrosImpuestos)})`);
-  }
-  if (quedaEnSigma.length > 0) {
-    advertencias.push(
-      `Se manda sólo el subtotal, ${pesos(totales.netoGravado)}:` +
-        ` ${quedaEnSigma.join(" y ")} se carga${quedaEnSigma.length > 1 ? "n" : ""} en Sigma.`,
+  const sumaPercepciones = centavos(
+    datos.percepciones.reduce((s, p) => s + p.monto, 0),
+  );
+  if (Math.abs(sumaPercepciones - datos.otrosImpuestos) > 0.01) {
+    problemas.push(
+      datos.percepciones.length === 0
+        ? `Hay ${pesos(datos.otrosImpuestos)} de percepciones y otros impuestos sin detallar:` +
+            " elegí el concepto de cada una en el paso 2."
+        : `El detalle de percepciones (${pesos(sumaPercepciones)}) no suma lo cargado` +
+            ` como percepciones y otros (${pesos(datos.otrosImpuestos)}): faltan` +
+            ` ${pesos(datos.otrosImpuestos - sumaPercepciones)}.`,
     );
+  }
+  // La observación las distingue cuando dos caen en la misma cuenta y
+  // subcuenta: Sigma las registra por separado en vez de sumarlas.
+  for (const p of datos.percepciones) imputar(p.concepto, p.monto, p.concepto);
+
+  // SIGMA NO ACEPTA EL CONTABLE VACIO ("array contable no puede estar
+  // vacio"), también con mercaderías. Una factura toda exenta y sin
+  // percepciones no tiene nada que imputar: va un IVA 21 en $0.
+  if (mercaderias.length > 0 && contable.length === 0 && totales.ivaTotal === 0) {
+    imputar("IVA 21 %", 0, undefined, true);
   }
 
   // SIN IMPUTACION NO HAY COMPROBANTE. Sigma lo rechaza, también con
@@ -482,9 +484,11 @@ export function armarImportCompras(
     empresa: datos.empresa,
     proveedorId: datos.proveedorId,
     fechaFactura: datos.fechaFactura,
-    // EL SUBTOTAL, SIN IVA NI IMPUESTOS: el neto gravado, ya con la
-    // bonificación al pie. Es lo que suman las mercaderías que viajan.
-    total: totales.netoGravado,
+    // LA SUMA DE LO QUE VIAJA: el neto gravado --lo que suman las
+    // mercaderías, ya con el pie--, el IVA y las percepciones detalladas.
+    // Sigma deja este número tal cual (ver arriba), así que tiene que estar
+    // completo.
+    total: centavos(totales.netoGravado + totales.ivaTotal + sumaPercepciones),
     tipoComprobante: datos.tipo,
     codigoComprobante: datos.codigoComprobante,
     numeroComprobante: datos.numeroComprobante,
