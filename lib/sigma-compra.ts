@@ -269,8 +269,11 @@ export const MAX_NUMERO_COMPROBANTE = 20;
  * no protege nada: sólo obliga a encontrar el centavo antes de poder cargar
  * algo que después se corrige del otro lado. Se avisa y se deja mandar.
  *
- * Lo mismo con las percepciones sin detallar. Lo que se manda es lo que no se
- * discute --las mercaderías y el IVA-- y lo demás se termina del otro lado.
+ * ---------------------------------------------------------------------------
+ * VIAJA SOLO EL SUBTOTAL
+ *
+ * Las mercaderías y un `total` igual al neto gravado, sin IVA ni impuestos.
+ * El IVA y las percepciones se agregan en Sigma una vez pasada la factura.
  */
 export function armarImportCompras(
   cruce: ResultadoCruce,
@@ -288,20 +291,17 @@ export function armarImportCompras(
     );
   }
 
-  // EL TOTAL AVISA, NO FRENA. Ver arriba. Lo que viaja en `total` sigue
-  // siendo el IMPRESO cuando está cargado: es lo que cobró el proveedor, y es
-  // contra ese número que se revisa la factura en Sigma.
-  if (totales.cuadra === null) {
-    advertencias.push(
-      `Falta el total impreso: se manda el calculado, ${pesos(totales.total)}.`,
-    );
-  } else if (!totales.cuadra) {
+  // EL TOTAL CONTRA EL PAPEL SIGUE AVISANDO, aunque ya no sea lo que viaja
+  // (ver `total` abajo). El subtotal que se manda sale de los mismos
+  // renglones que el total calculado: si el calculado no da el impreso, lo
+  // más probable es que falte un renglón o un precio, y eso sí viaja.
+  if (totales.cuadra === false) {
     const dif = totales.diferencia ?? 0;
     advertencias.push(
       `El total calculado no cuadra con el impreso: da ${pesos(Math.abs(dif))}` +
         ` ${dif > 0 ? "más" : "menos"} (calculado ${pesos(totales.total)},` +
-        ` impreso ${pesos(datos.totalImpreso ?? 0)}). Se manda el impreso:` +
-        " en Sigma queda pendiente y se corrige ahí.",
+        ` impreso ${pesos(datos.totalImpreso ?? 0)}). Revisá los renglones:` +
+        " el subtotal que se manda sale de ellos.",
     );
   }
   if (!datos.codigoComprobante) {
@@ -351,24 +351,14 @@ export function armarImportCompras(
     problemas.push("No hay renglones de la factura para mandar.");
   }
 
-  // --- Contable: neto por alícuota, IVA por alícuota y percepciones ------
+  // --- Contable: el neto por alícuota, sólo si no hay mercaderías --------
   const contable: LineaContable[] = [];
-  const imputar = (
-    concepto: string,
-    monto: number,
-    observacion?: string,
-    // SE PUEDE MANDAR SIN ESTA LINEA. Las percepciones sí: en Sigma se agregan
-    // a mano sobre el comprobante pendiente. El IVA no: es el asiento mismo.
-    opcional = false,
-  ) => {
+  const imputar = (concepto: string, monto: number) => {
     if (!monto) return;
     const cta = imputacion[concepto];
     if (!cta || !cta.cuenta || !cta.tipoImpuesto) {
-      (opcional ? advertencias : problemas).push(
-        `Falta la cuenta o el tipo de impuesto de "${concepto}"` +
-          (opcional
-            ? `: esos ${pesos(monto)} no se mandan y quedan para cargar en Sigma.`
-            : ". Se configura una vez."),
+      problemas.push(
+        `Falta la cuenta o el tipo de impuesto de "${concepto}". Se configura una vez.`,
       );
       return;
     }
@@ -379,7 +369,6 @@ export function armarImportCompras(
     };
     if (cta.subcuenta) linea.subcuenta = cta.subcuenta;
     if (cta.centroCosto) linea.centroCosto = cta.centroCosto;
-    if (observacion) linea.observacion = observacion.slice(0, 100);
     contable.push(linea);
   };
 
@@ -394,10 +383,10 @@ export function armarImportCompras(
   // genera el asiento del neto a partir de las MERCADERIAS que le mandamos.
   // Mandarle además una línea contable con el neto es contarlo dos veces.
   //
-  // Así que lo que viaja en `contable` es sólo lo que NO sale de los
-  // artículos: el IVA y las percepciones. El neto se manda únicamente cuando
-  // no hay mercaderías --una factura que no mueve stock-- porque ahí no hay
-  // de dónde más sacarlo.
+  // Así que con mercaderías `contable` va vacío (el IVA y las percepciones
+  // se cargan en Sigma, ver abajo). El neto se manda únicamente cuando no hay
+  // mercaderías --una factura que no mueve stock-- porque ahí no hay de dónde
+  // más sacarlo.
   //
   // Las cuentas de "Neto gravado %" quedan configuradas igual: son las de ese
   // caso, y borrarlas sería perder el dato para cuando haga falta.
@@ -429,52 +418,31 @@ export function armarImportCompras(
     });
   }
 
-  for (const i of totales.iva) {
-    if (i.alicuota) imputar(`IVA ${alicuotaTexto(i.alicuota)} %`, i.importe);
+  // --- EL IVA Y LAS PERCEPCIONES SE CARGAN EN SIGMA ---------------------
+  //
+  // Antes viajaban el IVA por alícuota y las percepciones detalladas, y el
+  // `total` era el impreso. Se pidió que no: la factura entra SOLO CON EL
+  // SUBTOTAL y el IVA se agrega en Sigma una vez pasada, igual que los
+  // impuestos. Así lo que se manda es lo que sale de los renglones y nada
+  // más, y el asiento de impuestos se arma del otro lado, con el papel.
+  //
+  // Por eso no se piden las cuentas del IVA ni de las percepciones: no
+  // viajan. Se avisa cuánto queda para cargar, para que no se olvide.
+  const quedaEnSigma: string[] = [];
+  if (totales.ivaTotal) quedaEnSigma.push(`el IVA (${pesos(totales.ivaTotal)})`);
+  if (datos.otrosImpuestos) {
+    quedaEnSigma.push(`las percepciones y otros impuestos (${pesos(datos.otrosImpuestos)})`);
   }
-
-  // --- LAS PERCEPCIONES SE DETALLAN O SE CARGAN EN SIGMA ----------------
-  //
-  // Antes el detalle era obligatorio: con un monto en "otros impuestos" y
-  // ningún concepto elegido, la factura no salía. La idea era buena --Sigma
-  // necesita saber a qué cuenta va cada una, y un monto suelto no se puede
-  // imputar-- pero el precio lo pagaba la factura entera: para cargar una
-  // compra había que resolver primero la percepción.
-  //
-  // No hace falta. El comprobante entra pendiente y las percepciones se
-  // agregan ahí, que es donde se las ve con el resto del asiento. Así que
-  // mandamos lo que no se discute --las mercaderías y el IVA-- y de las
-  // percepciones mandamos sólo las que estén detalladas.
-  //
-  // LO QUE SE AVISA, PORQUE NO ES GRATIS: si no se detallan, el `total` sigue
-  // siendo el impreso --que las incluye-- y el detalle no. En Sigma el
-  // comprobante queda con esa diferencia a la vista, que es justamente lo que
-  // hay que cargar a mano.
-  const sumaPercepciones = centavos(
-    datos.percepciones.reduce((s, p) => s + p.monto, 0),
-  );
-  if (datos.otrosImpuestos && datos.percepciones.length === 0) {
+  if (quedaEnSigma.length > 0) {
     advertencias.push(
-      `Las percepciones (${pesos(datos.otrosImpuestos)}) no se mandan detalladas.` +
-        " Están en el total, así que en Sigma el comprobante queda con esa" +
-        " diferencia para cargarlas a mano.",
-    );
-  } else if (Math.abs(sumaPercepciones - datos.otrosImpuestos) > 0.01) {
-    advertencias.push(
-      `El detalle de percepciones (${pesos(sumaPercepciones)}) no suma lo` +
-        ` cargado como otros impuestos (${pesos(datos.otrosImpuestos)}):` +
-        ` la diferencia de ${pesos(Math.abs(datos.otrosImpuestos - sumaPercepciones))}` +
-        " queda para cargar en Sigma.",
+      `Se manda sólo el subtotal, ${pesos(totales.netoGravado)}:` +
+        ` ${quedaEnSigma.join(" y ")} se carga${quedaEnSigma.length > 1 ? "n" : ""} en Sigma.`,
     );
   }
-  // La observación las distingue cuando dos caen en la misma cuenta y
-  // subcuenta: Sigma las registra por separado en vez de sumarlas.
-  for (const p of datos.percepciones) imputar(p.concepto, p.monto, p.concepto, true);
 
   // SIN MERCADERIAS Y SIN IMPUTACION NO HAY COMPROBANTE. Con mercaderías sí
-  // lo hay, aunque `contable` vaya vacío: el asiento del neto lo arma Sigma
-  // con la cuenta de cada artículo (ver arriba). Eso pasa sólo en una factura
-  // sin IVA ni percepciones.
+  // lo hay, y `contable` va vacío: el asiento del neto lo arma Sigma con la
+  // cuenta de cada artículo (ver arriba), y el IVA se le agrega allá.
   if (contable.length === 0 && mercaderias.length === 0) {
     problemas.push("No hay ninguna imputación contable: Sigma no acepta el comprobante sin al menos una.");
   }
@@ -487,7 +455,9 @@ export function armarImportCompras(
     empresa: datos.empresa,
     proveedorId: datos.proveedorId,
     fechaFactura: datos.fechaFactura,
-    total: datos.totalImpreso ?? totales.total,
+    // EL SUBTOTAL, SIN IVA NI IMPUESTOS: el neto gravado, ya con la
+    // bonificación al pie. Es lo que suman las mercaderías que viajan.
+    total: totales.netoGravado,
     tipoComprobante: datos.tipo,
     codigoComprobante: datos.codigoComprobante,
     numeroComprobante: datos.numeroComprobante,
