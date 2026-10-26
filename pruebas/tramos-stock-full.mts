@@ -15,7 +15,12 @@
  *     node --experimental-strip-types --import ./pruebas/registrar.mjs pruebas/tramos-stock-full.mts
  */
 
-import { NOMBRES_PLAZO, NOMBRES_RECOMENDACION } from "@/lib/reposicion-full";
+import {
+  nombreDeRecomendacion,
+  NOMBRES_PLAZO,
+  NOMBRES_RECOMENDACION,
+  OPCIONES_ENVIO_FULL,
+} from "@/lib/reposicion-full";
 import {
   DIAS_PARA_PARADO,
   esTramoNunca,
@@ -178,6 +183,48 @@ for (const codigo of LOS_TRES) {
 for (const plazo of ["THIS_WEEK", "NEXT_WEEK", "IN_TWO_WEEKS", "NOT_REPLENISHMENT_NEEDED"]) {
   revisar(`el plazo ${plazo} tiene nombre`, Boolean(NOMBRES_PLAZO[plazo]), true);
 }
+
+
+// UN SKU CON DOS PRODUCTOS llega con las dos recomendaciones pegadas, y esa
+// clave combinada no esta en la tabla: salia cruda en pantalla, mezclada entre
+// filas que si estaban traducidas. Son 6 SKU el 26/10/2026.
+revisar(
+  "las recomendaciones combinadas se traducen las dos",
+  nombreDeRecomendacion("NO_REPLENISHMENT / REPLENISH"),
+  "No hace falta reponer / Conviene reponer",
+);
+revisar(
+  "una sola sigue igual",
+  nombreDeRecomendacion("REPLENISH"),
+  "Conviene reponer",
+);
+// LO QUE NO CONOCEMOS SIGUE SALIENDO CRUDO, que es la red de siempre.
+revisar("un codigo nuevo no se pierde", nombreDeRecomendacion("ALGO_NUEVO"), "ALGO_NUEVO");
+revisar(
+  "y combinado con uno conocido tampoco",
+  nombreDeRecomendacion("REPLENISH / ALGO_NUEVO"),
+  "Conviene reponer / ALGO_NUEVO",
+);
+
+// LAS OPCIONES DEL FILTRO SON LO QUE DICE LA COLUMNA. Si alguna dejara de
+// coincidir con su nombre, el filtro ofreceria una etiqueta que no existe en
+// ninguna fila y no traeria nada, sin decir por que.
+revisar(
+  "la opcion Restringido existe",
+  OPCIONES_ENVIO_FULL.some((o) => o.clave === "restringido"),
+  true,
+);
+revisar(
+  "las etiquetas del filtro salen de los nombres de la columna",
+  OPCIONES_ENVIO_FULL.filter((o) => o.clave === "reponer" || o.clave === "no-hace-falta")
+    .map((o) => o.etiqueta),
+  [NOMBRES_RECOMENDACION.REPLENISH, NOMBRES_RECOMENDACION.NO_REPLENISHMENT],
+);
+revisar(
+  "y las claves no se repiten",
+  new Set(OPCIONES_ENVIO_FULL.map((o) => o.clave)).size,
+  OPCIONES_ENVIO_FULL.length,
+);
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);

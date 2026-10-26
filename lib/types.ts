@@ -1201,6 +1201,10 @@ export type FiltrosStockFull = {
   tramo?: string;
   /** "Sin vender hace más de N días". El que nunca vendió entra siempre. */
   minDias?: number;
+  /** SKU, descripción, EAN, código del proveedor o código MLA. */
+  buscar?: string;
+  /** Lo que dice la columna "Envío a Full". Ver OPCIONES_ENVIO_FULL. */
+  envioFull?: string[];
 };
 
 export type KpisStockFull = {

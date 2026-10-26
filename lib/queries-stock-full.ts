@@ -2,7 +2,8 @@ import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
-import { getDestacadosFull, getReposicionPorSku } from "@/lib/queries-reposicion-full";
+import { getDestacadosFull, getReposicionPorSku, hayTablaReposicion } from "@/lib/queries-reposicion-full";
+import { buscadorDeArticulo, clausulaCodigoMeli } from "@/lib/sql-codigos";
 import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import { CANAL_MELI } from "@/lib/meli";
 import {
@@ -226,6 +227,58 @@ const BASE_CON_TRABADO = baseSql(false);
 
 type Where = { sql: string; params: unknown[] };
 
+/**
+ * Lo que dice la columna "Envío a Full", en SQL.
+ *
+ * ---------------------------------------------------------------------------
+ * EL ORDEN IMPORTA, igual que en la celda
+ *
+ * Un SKU puede tener varios productos en Full, y la celda los resume con una
+ * regla: si CUALQUIERA está restringido, el SKU dice "Restringido" -- eso pisa
+ * a todo lo demás, porque es lo que impide mandar. Por eso "Conviene reponer"
+ * y "No hace falta" llevan el `not bool_or(restringido)`: sin él, un restringido
+ * mixto aparecería también en esos dos, y el filtro mostraría filas que en
+ * pantalla dicen otra cosa.
+ *
+ * LO QUE SI SE SUPERPONE, Y ESTA BIEN: un SKU sin restricción con un producto
+ * REPLENISH y otro NO_REPLENISHMENT entra en los dos filtros, porque su celda
+ * dice las dos cosas ("Conviene reponer / No hace falta reponer"). Son 6 SKU
+ * el 26/10/2026. Los filtros muestran lo que dice la columna, y esa columna
+ * dice dos cosas.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE AGRUPA EN LA SUBCONSULTA Y NO ES UN `exists` CORRELACIONADO
+ *
+ * Porque el correlacionado NO TERMINA. Escrito como `exists (… where sku =
+ * base.sku …)`, Postgres lo corre una vez por fila: no hay índice sobre
+ * `coalesce(m.sku, r.sku_ml)`, así que son 4.037 filas unidas de nuevo por
+ * cada SKU de la pantalla. Probado contra la base: pasa los 60 segundos y
+ * corta por timeout.
+ *
+ * Agrupando una sola vez y comparando con `in`, el planificador arma un hash
+ * join y la misma pregunta tarda 11 ms.
+ */
+const ENVIO_FULL_POR_SKU = `select trim(coalesce(m.sku, r.sku_ml))
+       from bronze.ml_reposicion_full r
+       left join bronze.ml_inventario_sku m on m.inventory_id = r.inventory_id
+      where coalesce(m.sku, r.sku_ml) is not null
+      group by 1`;
+
+const COND_ENVIO_FULL: Record<string, string> = {
+  restringido: `trim(base.sku) in (${ENVIO_FULL_POR_SKU} having bool_or(r.restringido))`,
+  reponer: `trim(base.sku) in (${ENVIO_FULL_POR_SKU}
+      having bool_or(r.recomendacion = 'REPLENISH') and not bool_or(r.restringido))`,
+  "no-hace-falta": `trim(base.sku) in (${ENVIO_FULL_POR_SKU}
+      having bool_or(r.recomendacion = 'NO_REPLENISHMENT') and not bool_or(r.restringido))`,
+  // SIN DATO NO ES UN ESTADO DE ML sino la ausencia de respuesta: productos
+  // que la API no contestó, o que no están en el mapa de inventarios. La
+  // columna los muestra con un guión y hay que poder juntarlos.
+  //
+  // `not in` es seguro acá porque la subconsulta ya descarta los nulos; con un
+  // null adentro, `not in` no devolvería ninguna fila.
+  "sin-dato": `trim(base.sku) not in (${ENVIO_FULL_POR_SKU})`,
+};
+
 /** Los filtros de la pantalla, sobre el CTE `base`. */
 function where(f: FiltrosStockFull): Where {
   const params: unknown[] = [CANAL_MELI];
@@ -234,6 +287,26 @@ function where(f: FiltrosStockFull): Where {
   agregarFiltro(clauses, params, "proveedor", f.proveedor);
   agregarFiltro(clauses, params, "marca", f.marca);
   agregarFiltro(clauses, params, "sku", f.sku);
+
+  // EL BUSCADOR MIRA LOS CODIGOS QUE NO SON NUESTROS, además del SKU y la
+  // descripción: el EAN y el código del proveedor (lib/sql-codigos) y el MLA
+  // de las publicaciones. En esta pantalla el dato a mano suele venir de ML.
+  const termino = f.buscar?.trim();
+  if (termino) {
+    params.push(`%${termino}%`);
+    const i = params.length;
+    clauses.push(
+      `(${buscadorDeArticulo(termino, i)} or ${clausulaCodigoMeli("base.sku", i)})`,
+    );
+  }
+
+  // LO QUE DICE "ENVIO A FULL". Varias opciones se suman con `or`: elegir
+  // "Restringido" y "Conviene reponer" muestra las dos, como el resto de los
+  // selectores múltiples de la pantalla.
+  const envios = (f.envioFull ?? []).filter((c) => c in COND_ENVIO_FULL);
+  if (envios.length) {
+    clauses.push(`(${envios.map((c) => `(${COND_ENVIO_FULL[c]})`).join(" or ")})`);
+  }
 
   // "Sin vender hace más de N días" trata al que nunca vendió como el peor
   // caso, que es lo correcto: si tiene stock y jamás rotó, es exactamente lo
@@ -556,6 +629,14 @@ async function getOpcionesStockFullDirecto() {
 async function getDashboardStockFullDirecto(
   f: FiltrosStockFull,
 ): Promise<DashboardStockFull> {
+  // SI LA TABLA DE REPOSICION NO ESTA, el filtro de "Envío a Full" se cae acá
+  // y no en cada consulta: así `where()` puede dar por sentado que, si el
+  // filtro llegó, las tablas que nombra existen. Pasa en una base recién
+  // creada, antes de la primera corrida del orquestador.
+  if (f.envioFull?.length && !(await hayTablaReposicion())) {
+    f = { ...f, envioFull: undefined };
+  }
+
   const [kpis, umbrales, tramos, filas, noDisponible, historiaDesde, destacados] =
     await Promise.all([
       getKpis(f),

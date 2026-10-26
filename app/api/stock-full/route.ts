@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { lista } from "@/lib/filtros";
+import { OPCIONES_ENVIO_FULL } from "@/lib/reposicion-full";
 import { TRAMOS } from "@/lib/stock-full";
 import { permisoDelUsuario, puedeVer } from "@/lib/permisos";
 import {
@@ -40,6 +41,13 @@ export async function GET(request: NextRequest) {
       ? (sp.get("tramo") ?? undefined)
       : undefined,
     minDias,
+    buscar: sp.get("buscar")?.trim() || undefined,
+    // Se validan contra la lista real, igual que el tramo: una clave
+    // inventada en la URL no filtra nada en vez de vaciar la tabla sin
+    // explicación.
+    envioFull: lista(sp, "envioFull")?.filter((c) =>
+      OPCIONES_ENVIO_FULL.some((o) => o.clave === c),
+    ),
   };
 
   try {

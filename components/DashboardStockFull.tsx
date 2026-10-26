@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
-import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
+import { BotonLimpiar, CampoBusqueda, SelectorMultiple } from "@/components/SelectorFiltro";
 import { contarSkus, sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
@@ -18,7 +18,8 @@ import { TRAMOS, tramoDe, UMBRALES_TARJETAS, UMBRAL_PARADO } from "@/lib/stock-f
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import {
   NOMBRES_PLAZO,
-  NOMBRES_RECOMENDACION,
+  nombreDeRecomendacion,
+  OPCIONES_ENVIO_FULL,
   type DestacadoFull,
   type ReposicionFull,
 } from "@/lib/reposicion-full";
@@ -240,7 +241,7 @@ function CeldaReposicion({ r }: { r: ReposicionFull | null }) {
   }
   return (
     <span className="text-muted">
-      {r.recomendacion ? (NOMBRES_RECOMENDACION[r.recomendacion] ?? r.recomendacion) : "sin sugerencia"}
+      {r.recomendacion ? nombreDeRecomendacion(r.recomendacion) : "sin sugerencia"}
     </span>
   );
 }
@@ -481,6 +482,8 @@ export default function DashboardStockFullPage() {
         tramo: filtros.tramo ? [filtros.tramo] : undefined,
         minDias:
           filtros.minDias == null ? undefined : [String(filtros.minDias)],
+        buscar: filtros.buscar ? [filtros.buscar] : undefined,
+        envioFull: filtros.envioFull,
       },
       { conOpciones: "1" },
     );
@@ -499,6 +502,8 @@ export default function DashboardStockFullPage() {
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
     sinValores(filtros.sku) &&
+    sinValores(filtros.envioFull) &&
+    !filtros.buscar &&
     filtros.minDias == null;
 
   return (
@@ -558,6 +563,15 @@ export default function DashboardStockFullPage() {
             })}
           </div>
 
+          {/* EL BUSCADOR VA PRIMERO entre los selectores: cuando se llega con
+              un código en la mano --de una pregunta, de un reclamo, de la
+              pantalla de ML-- es lo único que se quiere usar, y los demás
+              filtros sobran. */}
+          <CampoBusqueda
+            valor={filtros.buscar ?? ""}
+            onChange={(v) => cambiar({ ...filtros, buscar: v || undefined })}
+            placeholder="SKU, descripción, EAN o MLA…"
+          />
           <SelectorMultiple
             etiqueta="Proveedor"
             valores={filtros.proveedor}
@@ -569,6 +583,22 @@ export default function DashboardStockFullPage() {
             valores={filtros.marca}
             opciones={data?.opciones?.marcas ?? []}
             onChange={(v) => cambiar({ ...filtros, marca: v })}
+          />
+          <SelectorMultiple
+            etiqueta="Envío a Full"
+            valores={filtros.envioFull}
+            // Las opciones son fijas --son los estados posibles, no lo que
+            // haya hoy en la base-- así que no viajan con los datos.
+            opciones={OPCIONES_ENVIO_FULL.map((o) => o.etiqueta)}
+            onChange={(v) =>
+              cambiar({
+                ...filtros,
+                envioFull: v?.flatMap((e) => {
+                  const o = OPCIONES_ENVIO_FULL.find((x) => x.etiqueta === e);
+                  return o ? [o.clave as string] : [];
+                }),
+              })
+            }
           />
           <BotonLimpiar
             onClick={() => cambiar(inicial)}

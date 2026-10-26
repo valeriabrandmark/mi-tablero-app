@@ -20,6 +20,25 @@ export type { DestacadoFull, ReposicionFull };
  * siguen igual que antes en vez de romperse.
  */
 
+/**
+ * Si la tabla de reposición ya existe.
+ *
+ * SE RECUERDA EL "SI" Y NO EL "NO". Una tabla no desaparece, así que una vez
+ * que está se puede dejar de preguntar; mientras no está hay que seguir
+ * mirando, porque la crea la primera corrida del orquestador y la pantalla
+ * tiene que enterarse sin esperar un redeploy.
+ */
+let tablaConfirmada = false;
+
+export async function hayTablaReposicion(): Promise<boolean> {
+  if (tablaConfirmada) return true;
+  const existe = await queryOne<{ ok: boolean }>(
+    "select to_regclass('bronze.ml_reposicion_full') is not null as ok",
+  );
+  tablaConfirmada = Boolean(existe?.ok);
+  return tablaConfirmada;
+}
+
 export async function getReposicionPorSku(): Promise<Map<string, ReposicionFull> | null> {
   const existe = await queryOne<{ ok: boolean }>(
     "select to_regclass('bronze.ml_reposicion_full') is not null as ok",
