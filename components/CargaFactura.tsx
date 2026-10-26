@@ -24,6 +24,7 @@ import {
 } from "@/lib/factura-cruce";
 import {
   armarImportCompras,
+  CONCEPTOS_PERCEPCION,
   EMPRESAS_SIGMA,
   SUCURSALES_SIGMA,
   type DatosFactura,
@@ -1769,7 +1770,7 @@ function descargarCsv(lineas: LineaCruce[], descripcionDe: Map<string, string>) 
 
    ESTA PARTIDO EN DOS, y el orden de la pantalla es el motivo:
 
-     2. A DONDE VA      empresa, sucursal y código, antes de
+     2. A DONDE VA      empresa, sucursal, código y percepciones, antes de
                         cargar nada. Es lo que no se puede deshacer.
      4. MANDARLA        abajo de los totales, que es contra lo que se
                         corrobora el papel del proveedor.
@@ -1888,7 +1889,7 @@ function useArmadoDeFactura(
 /* -------------------------------------------------------------------------
    2. A DONDE VA LA FACTURA
 
-   Empresa, sucursal y código. Nada más: el botón está abajo,
+   Empresa, sucursal, código y percepciones. Nada más: el botón está abajo,
    con los totales.
 
    VA ANTES DE CARGAR NADA porque es lo que no se puede deshacer --una factura
@@ -1952,15 +1953,68 @@ function DestinoSigma({
         </label>
       </div>
 
-      {/* SOLO EL SUBTOTAL. El IVA y las percepciones no viajan: se agregan
-          en Sigma una vez pasada la factura. */}
-      <p className="text-muted text-xs">
-        A Sigma se manda sólo el subtotal, con el IVA en $0. El IVA y las percepciones
-        {datos.otrosImpuestos
-          ? ` (hay ${fmtMoneda(datos.otrosImpuestos)} en esta factura)`
-          : ""}{" "}
-        se cargan en Sigma una vez pasada la factura.
-      </p>
+      {/* LAS PERCEPCIONES SE DETALLAN ACA, TODAS. Sigma no recalcula el total
+          al editar el comprobante: la que no viaja desde acá no se suma
+          después. Y cada una con su concepto, porque un monto suelto no se
+          puede imputar a ninguna cuenta. */}
+      <div>
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          <span className="text-muted text-xs">
+            Percepciones y otros impuestos
+            {datos.otrosImpuestos
+              ? ` · hay ${fmtMoneda(datos.otrosImpuestos)} en el total: detallalas todas acá`
+              : " · si la factura trae, cargá el monto en «Percepciones y otros» y detallalas acá"}
+          </span>
+          <button
+            className={BOTON}
+            onClick={() =>
+              cambiar({ percepciones: [...b.percepciones, { concepto: "", monto: "" }] })
+            }
+          >
+            + Agregar percepción
+          </button>
+        </div>
+        {b.percepciones.map((p, i) => (
+          <div key={i} className="mb-1 flex flex-wrap items-center gap-2">
+            <select
+              className={`${CAMPO} w-64 text-xs`}
+              value={p.concepto}
+              onChange={(e) => {
+                const copia = [...b.percepciones];
+                copia[i] = { ...copia[i]!, concepto: e.target.value };
+                cambiar({ percepciones: copia });
+              }}
+            >
+              <option value="">Elegí el concepto…</option>
+              {CONCEPTOS_PERCEPCION.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <input
+              className={`${CAMPO} w-32 text-right text-xs`}
+              inputMode="decimal"
+              value={p.monto}
+              placeholder="0,00"
+              onChange={(e) => {
+                const copia = [...b.percepciones];
+                copia[i] = { ...copia[i]!, monto: e.target.value };
+                cambiar({ percepciones: copia });
+              }}
+            />
+            <button
+              className="text-muted hover:text-rose-300 text-xs"
+              onClick={() =>
+                cambiar({ percepciones: b.percepciones.filter((_, j) => j !== i) })
+              }
+              aria-label="Sacar la percepción"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
 
       <p className="text-muted mt-3 text-xs">
         Acá se elige dónde queda asentada la factura. El botón para mandarla
@@ -2014,8 +2068,8 @@ function EnviarASigma({
   /**
    * Los conceptos a los que les falta la cuenta, para poder cargarla acá.
    *
-   * Puede faltar la del IVA, que viaja en $0 para completar en Sigma, o la
-   * del neto en una factura sin mercaderías. Las percepciones no viajan.
+   * MIRA LAS DOS LISTAS por las dudas, aunque hoy toda cuenta que falta
+   * frena: el IVA y las percepciones viajan completos.
    */
   const cuentasQueFaltan = useMemo(() => {
     const m = /Falta la cuenta o el tipo de impuesto de "(.+?)"/;
@@ -2149,8 +2203,8 @@ function EnviarASigma({
             <span className="text-ink text-xs">
               Se va a cargar en <strong>{nombreDeEmpresa(b.empresa)}</strong>,
               sucursal <strong>{nombreDeSucursal(b.sucursal)}</strong>, por{" "}
-              <strong>{fmtMoneda(armado.cuerpo?.total ?? 0)}</strong> de
-              subtotal, sin IVA. No se puede deshacer desde acá.
+              <strong>{fmtMoneda(armado.cuerpo?.total ?? 0)}</strong> con IVA
+              y percepciones. No se puede deshacer desde acá.
             </span>
             <button className={BOTON_ACTIVO} onClick={() => void mandar()} disabled={enviando}>
               {enviando ? "Mandando…" : "Confirmo, cargarla"}
