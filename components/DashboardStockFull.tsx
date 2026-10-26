@@ -19,6 +19,7 @@ import { useDatosTablero } from "@/lib/useDatosTablero";
 import {
   NOMBRES_PLAZO,
   NOMBRES_RECOMENDACION,
+  type DestacadoFull,
   type ReposicionFull,
 } from "@/lib/reposicion-full";
 import type {
@@ -74,10 +75,23 @@ function columnas(filas: FilaStockFull[]): Columna<FilaStockFull>[] {
       titulo: "Producto",
       celda: (f) => (
         <span
-          className="block max-w-[136px] sm:max-w-[300px] truncate"
-          title={f.producto ?? undefined}
+          className="flex items-center gap-1 max-w-[136px] sm:max-w-[300px]"
+          title={
+            f.reposicion?.destacado
+              ? `${f.producto ?? ""} · destacado por Mercado Libre`.trim()
+              : (f.producto ?? undefined)
+          }
         >
-          {f.producto ?? "—"}
+          {/* LA ESTRELLA ES DE MERCADO LIBRE, no nuestra. Son pocos --18 de
+              4.037-- y por eso va como marca al lado del nombre y no como
+              columna propia: una columna entera para 18 filas es una columna
+              vacía 4.019 veces. */}
+          {f.reposicion?.destacado && (
+            <span className="shrink-0 text-amber-300" aria-hidden>
+              ★
+            </span>
+          )}
+          <span className="truncate">{f.producto ?? "—"}</span>
         </span>
       ),
       orden: (f) => f.producto,
@@ -228,6 +242,92 @@ function CeldaReposicion({ r }: { r: ReposicionFull | null }) {
     <span className="text-muted">
       {r.recomendacion ? (NOMBRES_RECOMENDACION[r.recomendacion] ?? r.recomendacion) : "sin sugerencia"}
     </span>
+  );
+}
+
+/**
+ * Los destacados de Mercado Libre, los vacíos primero.
+ *
+ * Son pocos --18 de 4.037 el 26/10/2026-- y no siguen los filtros de la
+ * pantalla a propósito: si los siguieran, el panel se vaciaría justo cuando
+ * alguien está mirando una marca y el aviso desaparecería.
+ */
+function PanelDestacados({ destacados }: { destacados: DestacadoFull[] }) {
+  const vacios = destacados.filter((d) => d.enFull === 0);
+
+  return (
+    <Panel
+      titulo="Destacados por Mercado Libre"
+      nota={
+        `${fmtNumero(destacados.length)} productos` +
+        (vacios.length ? ` · ${fmtNumero(vacios.length)} sin stock en Full` : "")
+      }
+    >
+      <p className="text-muted mb-3 text-xs">
+        Los marca Mercado Libre, no nosotros.{" "}
+        {vacios.length > 0 ? (
+          <>
+            Los <strong className="text-ink">{fmtNumero(vacios.length)}</strong>{" "}
+            que están en cero no aparecen en la tabla de abajo —esa lista lo que
+            tiene stock— y son los que más cuestan: ML los iba a empujar y no
+            tienen con qué vender.
+          </>
+        ) : (
+          <>Ahora mismo todos tienen stock en Full.</>
+        )}
+      </p>
+      <div className="-mx-1 overflow-x-auto">
+        <table className="w-full min-w-[560px] text-xs">
+          <thead>
+            <tr className="text-muted border-line border-b text-left">
+              <th className="px-1 py-1.5 font-medium">SKU</th>
+              <th className="px-1 py-1.5 font-medium">Producto</th>
+              <th className="px-1 py-1.5 text-right font-medium">En Full</th>
+              <th className="px-1 py-1.5 text-right font-medium">Vendidas 30d</th>
+              <th className="px-1 py-1.5 text-right font-medium">Facturación 30d</th>
+              <th className="px-1 py-1.5 font-medium">Envío a Full</th>
+            </tr>
+          </thead>
+          <tbody>
+            {destacados.map((d, i) => (
+              <tr
+                key={`${d.sku ?? "sin-sku"}-${i}`}
+                className="border-line/60 border-b last:border-0"
+              >
+                <td className="text-ink px-1 py-1.5 font-mono whitespace-nowrap">
+                  {d.sku ?? "—"}
+                </td>
+                <td className="text-muted px-1 py-1.5">
+                  <span
+                    className="block max-w-[150px] sm:max-w-[300px] truncate"
+                    title={d.producto ?? undefined}
+                  >
+                    {d.producto ?? "—"}
+                  </span>
+                </td>
+                {/* EL CERO EN ROJO: es el único número de la fila que pide
+                    hacer algo hoy. */}
+                <td
+                  className="px-1 py-1.5 text-right"
+                  style={d.enFull === 0 ? { color: TEMA.negativo } : undefined}
+                >
+                  {fmtNumero(d.enFull)}
+                </td>
+                <td className="text-ink px-1 py-1.5 text-right">
+                  {d.unidades30d == null ? "—" : fmtNumero(d.unidades30d)}
+                </td>
+                <td className="text-ink px-1 py-1.5 text-right whitespace-nowrap">
+                  {d.facturacion30d == null ? "—" : fmtMoneda(d.facturacion30d)}
+                </td>
+                <td className="px-1 py-1.5">
+                  <CeldaReposicion r={d.reposicion} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   );
 }
 
@@ -564,6 +664,16 @@ export default function DashboardStockFullPage() {
         <div
           className={`space-y-4 transition-opacity ${cargando ? "opacity-50" : ""}`}
         >
+          {/* LOS DESTACADOS DE MERCADO LIBRE.
+              Va ARRIBA y no al final porque los que importan son los que
+              estan en cero, y esos no aparecen en la tabla de Articulos: esa
+              lista lo que TIENE stock. Un destacado vacio no es un articulo
+              parado mas, es el que ML mismo iba a empujar y no tiene que
+              vender. */}
+          {data.destacados.length > 0 && (
+            <PanelDestacados destacados={data.destacados} />
+          )}
+
           <Panel
             titulo="Cuánto stock hay en cada tramo"
             nota="Valorizado · por días desde la última venta, y los que nunca vendieron por hace cuánto están en Full · click para filtrar"
