@@ -1955,7 +1955,7 @@ function DestinoSigma({
       {/* SOLO EL SUBTOTAL. El IVA y las percepciones no viajan: se agregan
           en Sigma una vez pasada la factura. */}
       <p className="text-muted text-xs">
-        A Sigma se manda sólo el subtotal, sin IVA. El IVA y las percepciones
+        A Sigma se manda sólo el subtotal, con el IVA en $0. El IVA y las percepciones
         {datos.otrosImpuestos
           ? ` (hay ${fmtMoneda(datos.otrosImpuestos)} en esta factura)`
           : ""}{" "}
@@ -2014,8 +2014,8 @@ function EnviarASigma({
   /**
    * Los conceptos a los que les falta la cuenta, para poder cargarla acá.
    *
-   * Hoy sólo puede faltar la del neto, en una factura sin mercaderías: el IVA
-   * y las percepciones ya no viajan (se cargan en Sigma).
+   * Puede faltar la del IVA, que viaja en $0 para completar en Sigma, o la
+   * del neto en una factura sin mercaderías. Las percepciones no viajan.
    */
   const cuentasQueFaltan = useMemo(() => {
     const m = /Falta la cuenta o el tipo de impuesto de "(.+?)"/;

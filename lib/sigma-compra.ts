@@ -273,7 +273,8 @@ export const MAX_NUMERO_COMPROBANTE = 20;
  * VIAJA SOLO EL SUBTOTAL
  *
  * Las mercaderías y un `total` igual al neto gravado, sin IVA ni impuestos.
- * El IVA y las percepciones se agregan en Sigma una vez pasada la factura.
+ * El IVA viaja en $0 --Sigma no acepta el contable vacío-- y se completa
+ * allá, junto con las percepciones, una vez pasada la factura.
  */
 export function armarImportCompras(
   cruce: ResultadoCruce,
@@ -353,8 +354,15 @@ export function armarImportCompras(
 
   // --- Contable: el neto por alícuota, sólo si no hay mercaderías --------
   const contable: LineaContable[] = [];
-  const imputar = (concepto: string, monto: number) => {
-    if (!monto) return;
+  const imputar = (
+    concepto: string,
+    monto: number,
+    // EN CERO A PROPOSITO: el renglón de IVA que va para completar en Sigma
+    // (ver abajo). Sin esto, un monto en cero no viaja.
+    enCero = false,
+    observacion?: string,
+  ) => {
+    if (!monto && !enCero) return;
     const cta = imputacion[concepto];
     if (!cta || !cta.cuenta || !cta.tipoImpuesto) {
       problemas.push(
@@ -369,6 +377,7 @@ export function armarImportCompras(
     };
     if (cta.subcuenta) linea.subcuenta = cta.subcuenta;
     if (cta.centroCosto) linea.centroCosto = cta.centroCosto;
+    if (observacion) linea.observacion = observacion.slice(0, 100);
     contable.push(linea);
   };
 
@@ -383,8 +392,8 @@ export function armarImportCompras(
   // genera el asiento del neto a partir de las MERCADERIAS que le mandamos.
   // Mandarle además una línea contable con el neto es contarlo dos veces.
   //
-  // Así que con mercaderías `contable` va vacío (el IVA y las percepciones
-  // se cargan en Sigma, ver abajo). El neto se manda únicamente cuando no hay
+  // Así que con mercaderías `contable` lleva sólo el IVA en $0 para completar
+  // en Sigma (ver abajo). El neto se manda únicamente cuando no hay
   // mercaderías --una factura que no mueve stock-- porque ahí no hay de dónde
   // más sacarlo.
   //
@@ -426,10 +435,29 @@ export function armarImportCompras(
   // impuestos. Así lo que se manda es lo que sale de los renglones y nada
   // más, y el asiento de impuestos se arma del otro lado, con el papel.
   //
-  // Por eso no se piden las cuentas del IVA ni de las percepciones: no
-  // viajan. Se avisa cuánto queda para cargar, para que no se olvide.
+  // PERO EL CONTABLE NO PUEDE IR VACIO. Se aprendió mandando una factura de
+  // verdad: con sólo mercaderías Sigma contesta "array contable no puede
+  // estar vacio". Así que va UN RENGLON DE IVA EN $0 POR ALICUOTA, con su
+  // cuenta, para que en Sigma se edite con el importe real. Las percepciones
+  // se agregan allá.
+  //
+  // Por eso sí se pide la cuenta del IVA y no la de las percepciones. Se
+  // avisa cuánto queda para cargar, para que no se olvide.
+  if (mercaderias.length > 0) {
+    const alicuotas = [
+      ...new Set(cruce.lineas.filter((l) => l.sku && l.iva).map((l) => l.iva)),
+    ].sort((a, b) => b - a);
+    // Una factura toda exenta igual necesita un renglón: va al 21, que es la
+    // cuenta que siempre está configurada.
+    for (const a of alicuotas.length > 0 ? alicuotas : [21]) {
+      imputar(`IVA ${alicuotaTexto(a)} %`, 0, true, "IVA a completar en Sigma");
+    }
+  }
+
   const quedaEnSigma: string[] = [];
-  if (totales.ivaTotal) quedaEnSigma.push(`el IVA (${pesos(totales.ivaTotal)})`);
+  if (totales.ivaTotal) {
+    quedaEnSigma.push(`el IVA (${pesos(totales.ivaTotal)}, viaja en $ 0 para editarlo)`);
+  }
   if (datos.otrosImpuestos) {
     quedaEnSigma.push(`las percepciones y otros impuestos (${pesos(datos.otrosImpuestos)})`);
   }
@@ -440,10 +468,9 @@ export function armarImportCompras(
     );
   }
 
-  // SIN MERCADERIAS Y SIN IMPUTACION NO HAY COMPROBANTE. Con mercaderías sí
-  // lo hay, y `contable` va vacío: el asiento del neto lo arma Sigma con la
-  // cuenta de cada artículo (ver arriba), y el IVA se le agrega allá.
-  if (contable.length === 0 && mercaderias.length === 0) {
+  // SIN IMPUTACION NO HAY COMPROBANTE. Sigma lo rechaza, también con
+  // mercaderías (ver arriba).
+  if (contable.length === 0 && !problemas.some((p) => p.startsWith("Falta la cuenta"))) {
     problemas.push("No hay ninguna imputación contable: Sigma no acepta el comprobante sin al menos una.");
   }
 
