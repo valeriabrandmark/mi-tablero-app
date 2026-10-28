@@ -32,7 +32,6 @@ import {
 } from "@/lib/types";
 
 const ETIQUETA_CRUZADO: Record<(typeof CRUZADOS)[number], string> = {
-  proveedor: "Proveedor",
   cliente: "Cliente",
   sku: "SKU",
   comprobante: "Comprobante",
@@ -89,6 +88,23 @@ function notaClientes(filas: RentabilidadCliente[]): string {
   const sinDato = filas.length - medibles;
   const base = `${medibles} clientes · sobre facturación s/IVA`;
   return sinDato > 0 ? `${base} · ${sinDato} sin venta neta` : base;
+}
+
+/**
+ * Lo que se le agrega a la nota de los gráficos por proveedor cuando hay
+ * proveedores elegidos.
+ *
+ * Esos dos gráficos NO se recortan con el filtro de proveedor --filtrar un
+ * gráfico por proveedor por proveedor lo deja en una sola barra-- así que
+ * muestran la lista entera con lo elegido resaltado y el resto atenuado.
+ *
+ * El texto hace falta desde que proveedor tiene selector propio: antes el filtro
+ * sólo salía de hacer click en el gráfico, y el chip de abajo lo explicaba.
+ * Elegido desde el desplegable no hay chip, y sin esta línea el gráfico parece
+ * no haberse enterado del filtro que sí movió todo lo demás.
+ */
+function notaResaltado(elegidos?: string[]): string {
+  return elegidos?.length ? " · lo elegido resaltado, la lista sigue completa" : "";
 }
 
 function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
@@ -685,7 +701,7 @@ export default function Dashboard() {
           <div className="grid gap-4 xl:grid-cols-2">
             <Panel
               titulo="Facturación Neta por proveedor"
-              nota={`${data.facturacionPorProveedor.length} proveedores`}
+              nota={`${data.facturacionPorProveedor.length} proveedores${notaResaltado(filtros.proveedor)}`}
             >
               <TortaProveedores
                 datos={data.facturacionPorProveedor}
@@ -697,7 +713,7 @@ export default function Dashboard() {
 
             <Panel
               titulo="Margen % por proveedor"
-              nota={`${data.margenPorProveedor.length} proveedores · sobre facturación s/IVA`}
+              nota={`${data.margenPorProveedor.length} proveedores · sobre facturación s/IVA${notaResaltado(filtros.proveedor)}`}
             >
               {/* Alto acotado con scroll propio: sin el piso de unidades entran
                   todos los proveedores y el panel se estiraría metros. */}

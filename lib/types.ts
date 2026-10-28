@@ -14,9 +14,16 @@ export type Filtros = {
   mes?: string[];
   /** Vía `fact_ventas_flete` -> `reporte_logistica`, igual que el slicer del .pbit. */
   provincia?: string[];
+  /**
+   * Proveedor y marca tienen selector arriba Y son filtros cruzados: el
+   * proveedor también sale de hacer click en la torta o en las barras de
+   * margen. Las dos vías escriben el mismo filtro, así que lo elegido en el
+   * selector aparece resaltado en esos gráficos.
+   */
+  proveedor?: string[];
+  marca?: string[];
   // Filtros cruzados: salen de hacer click en un gráfico o en una tabla.
   // No tienen selector propio; se limpian con su chip o con "Limpiar".
-  proveedor?: string[];
   cliente?: string[];
   sku?: string[];
   comprobante?: string[];
@@ -33,8 +40,15 @@ export type Filtros = {
   buscar?: string;
 };
 
-/** Dimensiones que solo existen como filtro cruzado (sin selector arriba). */
-export const CRUZADOS = ["proveedor", "cliente", "sku", "comprobante"] as const;
+/**
+ * Dimensiones que solo existen como filtro cruzado (sin selector arriba), y por
+ * eso necesitan un chip que diga que están puestas y permita sacarlas.
+ *
+ * `proveedor` salió de esta lista cuando se le dio selector: el desplegable ya
+ * muestra lo elegido y lo deja destildar, así que el chip mostraba el mismo
+ * filtro dos veces.
+ */
+export const CRUZADOS = ["cliente", "sku", "comprobante"] as const;
 export type Cruzado = (typeof CRUZADOS)[number];
 
 export type FilaArticulo = {
@@ -113,6 +127,8 @@ export type OpcionesFiltro = {
   empresas: string[];
   meses: string[];
   provincias: string[];
+  proveedores: string[];
+  marcas: string[];
 };
 
 // --- Logística --------------------------------------------------------------
