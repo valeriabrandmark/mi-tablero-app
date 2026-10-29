@@ -19,6 +19,7 @@ export default function BarraFiltros({
     sinValores(filtros.empresa) &&
     sinValores(filtros.mes) &&
     sinValores(filtros.proveedor) &&
+    sinValores(filtros.marca) &&
     sinValores(filtros.provincia) &&
     !filtros.buscar;
 
@@ -48,6 +49,22 @@ export default function BarraFiltros({
         valores={filtros.provincia}
         opciones={opciones?.provincias ?? []}
         onChange={(v) => onChange({ ...filtros, provincia: v })}
+      />
+      {/* Proveedor ya se filtraba haciendo click en la torta o en las barras de
+          margen; el selector es la otra puerta al mismo filtro. Por eso lo que
+          se elige acá queda resaltado en esos dos gráficos en vez de recortarlos:
+          un gráfico por proveedor filtrado por proveedor es una sola barra. */}
+      <SelectorMultiple
+        etiqueta="Proveedor"
+        valores={filtros.proveedor}
+        opciones={opciones?.proveedores ?? []}
+        onChange={(v) => onChange({ ...filtros, proveedor: v })}
+      />
+      <SelectorMultiple
+        etiqueta="Marca"
+        valores={filtros.marca}
+        opciones={opciones?.marcas ?? []}
+        onChange={(v) => onChange({ ...filtros, marca: v })}
       />
 
       <CampoBusqueda

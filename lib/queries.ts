@@ -25,7 +25,7 @@ import { joinCostoDelDia } from "@/lib/sql-costos";
 
 type Where = { sql: string; params: unknown[] };
 
-const OPCIONALES: [ClaveLista, string][] = [
+const OPCIONALES = [
   ["vendedor", "vendedor"],
   ["empresa", "empresa"],
   ["mes", "mes_comercial"],
@@ -33,7 +33,28 @@ const OPCIONALES: [ClaveLista, string][] = [
   ["cliente", "cliente"],
   ["sku", "sku"],
   ["comprobante", "comprobante"],
-];
+] as const satisfies readonly [ClaveLista, string][];
+
+/**
+ * Red de seguridad, hermana de la de `lib/filtros.ts`: si se agrega un filtro
+ * de lista y no se le da columna acá, esto rompe el build.
+ *
+ * Hace falta porque las dos mitades fallan distinto. Olvidar la clave en
+ * `CLAVES_FILTRO` deja el filtro afuera de la URL y no pasa NADA --no se puede
+ * ni elegir--. Olvidar la columna acá es peor: el selector aparece, se puede
+ * tildar, la URL lo lleva... y el `where` lo ignora. El tablero contesta
+ * números sin filtrar y nada avisa.
+ *
+ * Quedan dos afuera a propósito, las dos abajo en `whereBase`: `provincia`, que
+ * no es una columna de `fact_ventas` --se llega por el envío, va como `exists`--
+ * y `marca`, que compara sin distinguir mayúsculas.
+ */
+type ClaveSinColumna = Exclude<
+  ClaveLista,
+  "provincia" | "marca" | (typeof OPCIONALES)[number][0]
+>;
+const _todasLasClavesTienenColumna: ClaveSinColumna extends never ? true : never = true;
+void _todasLasClavesTienenColumna;
 
 /**
  * Filtro fijo de la página (canal + exclusión de no-vendedores) más los
@@ -84,6 +105,23 @@ function whereBase(
       `(${alias}.cliente ilike $${i}` +
         ` or ${buscadorDeArticulo(termino, i, `${alias}.sku`, `${alias}.producto`)})`,
     );
+  }
+
+  // LA MARCA SE COMPARA SIN DISTINGUIR MAYUSCULAS.
+  //
+  // Porque viene como la escribió quien cargó el artículo en Sigma, y la misma
+  // marca aparece con dos grafías: "47 street" en 6 renglones y "47 STREET" en
+  // 2. Comparando exacto, el desplegable muestra las dos --idénticas a la
+  // vista-- y elegir una deja afuera los renglones de la otra sin decir nada.
+  //
+  // Hoy es un solo caso de 218 marcas y 8 renglones de 13.945, así que no es
+  // por el número: es que es la clase de error que no se ve. El selector ofrece
+  // UNA entrada por marca (ver `getOpcionesFiltroDirecto`) y acá se compara
+  // normalizado, así que da igual con qué grafía se guardó.
+  const marcasElegidas = f.marca;
+  if (marcasElegidas?.length && !omitir.includes("marca")) {
+    params.push(marcasElegidas.map((m) => m.trim().toUpperCase()));
+    clauses.push(`upper(trim(${alias}.marca)) = any($${params.length}::text[])`);
   }
 
   // La provincia no está en fact_ventas: se llega por el envío. Va como EXISTS
@@ -576,10 +614,28 @@ async function getOpcionesFiltroDirecto(): Promise<OpcionesFiltro> {
       w.params,
     );
 
-  const [vendedores, empresas, meses] = await Promise.all([
+  // UNA SOLA ENTRADA POR MARCA aunque esté guardada con dos grafías distintas
+  // (ver el filtro de marca en `whereBase`). Se queda una cualquiera de cada
+  // grupo --la primera alfabética-- porque la comparación va normalizada: con
+  // cuál de las dos se muestre, el resultado es el mismo.
+  //
+  // Y el orden es el normalizado, que además es el que conviene para leer: con
+  // `order by valor` las marcas en mayúsculas se van todas al principio, así que
+  // "ALGABO" y "Algabo Baby" quedarían en extremos opuestos de la lista.
+  const marcas = query<{ valor: string }>(
+    `select distinct on (upper(trim(fv.marca))) trim(fv.marca) as valor
+     from gold.fact_ventas fv
+     where ${w.sql} and nullif(trim(fv.marca), '') is not null
+     order by upper(trim(fv.marca)), trim(fv.marca)`,
+    w.params,
+  );
+
+  const [vendedores, empresas, meses, proveedores, lasMarcas] = await Promise.all([
     columna("vendedor", "asc"),
     columna("empresa", "asc"),
     columna("mes_comercial", "desc"),
+    columna("proveedor", "asc"),
+    marcas,
   ]);
 
   return {
@@ -587,6 +643,8 @@ async function getOpcionesFiltroDirecto(): Promise<OpcionesFiltro> {
     empresas: empresas.map((r) => r.valor),
     meses: meses.map((r) => r.valor),
     provincias: provincias.map((r) => r.valor),
+    proveedores: proveedores.map((r) => r.valor),
+    marcas: lasMarcas.map((r) => r.valor),
   };
 }
 

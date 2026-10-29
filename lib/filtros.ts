@@ -14,6 +14,7 @@ export const CLAVES_FILTRO = [
   "mes",
   "provincia",
   "proveedor",
+  "marca",
   "cliente",
   "sku",
   "comprobante",
