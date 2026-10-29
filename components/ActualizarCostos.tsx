@@ -25,10 +25,16 @@ const BOTON_ACTIVO =
 const CAMPO =
   "border-line bg-panel-2 text-ink placeholder:text-muted/60 rounded-lg border px-2.5 py-1.5 text-sm focus:border-c1 focus:outline-none";
 
+/** De dónde salió el costo teórico. Ver `FuenteTeorico` en lib/queries-costos. */
+type FuenteTeorico =
+  | { tipo: "sigma"; articulos: number }
+  | { tipo: "copia"; motivo: string; copiaDe: string | null; articulos: number };
+
 type Preparado = {
   snapshot: Snapshot;
   ofertas: { filas: number; sinSku: number; conOferta: number; problemas: string[] };
   foto: { id: number; recibida: string; filas: number } | null;
+  teorico: FuenteTeorico;
   mes: string;
   vigenteDesde: string;
   tramoVigente: { mes: string; vigenteDesde: string; nota: string | null } | null;
@@ -251,6 +257,37 @@ export default function ActualizarCostos() {
                 </Aviso>
               </div>
             ) : null}
+
+            {/* DE DONDE SALIO EL COSTO TEORICO.
+                Mismo criterio que arriba: que Sigma haya contestado va en una
+                línea gris, y que se haya usado la copia va con alarma. Es lo
+                que faltaba el 29/10/2026: ANA cambió costos en Sigma, apretó el
+                botón y se aplicó la copia de 23 horas antes sin que nada lo
+                dijera. El silencio era el problema, no la copia. */}
+            {datos.teorico.tipo === "sigma" ? (
+              <p className="text-muted mt-2 text-xs">
+                Costo teórico pedido a Sigma en el momento:{" "}
+                <strong className="text-ink">{fmtNumero(datos.teorico.articulos)}</strong>{" "}
+                artículos activos.
+              </p>
+            ) : (
+              <div className="mt-2">
+                <Aviso tono="alerta">
+                  <p className="font-medium">
+                    El costo teórico no salió de Sigma: es la copia{" "}
+                    {datos.teorico.copiaDe
+                      ? `del ${datos.teorico.copiaDe}`
+                      : "guardada, sin fecha conocida"}
+                    .
+                  </p>
+                  <p className="mt-1 text-xs">{datos.teorico.motivo}</p>
+                  <p className="mt-1 text-xs">
+                    Si cambiaste un costo en Sigma hace un rato, no va a entrar: esa
+                    copia la refresca el orquestador una vez por día.
+                  </p>
+                </Aviso>
+              </div>
+            )}
 
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <TarjetaKpi

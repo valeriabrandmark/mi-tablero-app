@@ -6,6 +6,12 @@ import { getUsuario } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// EL MAESTRO SE LE PIDE A SIGMA EN EL MOMENTO (ver lib/sigma-articulos), y esa
+// llamada se corta a los 30 s. Con el techo por omision de la plataforma, una
+// Sigma lenta mataria la funcion antes de que el plan B pudiera actuar: en vez
+// de "se uso la copia, mira por que", la pantalla daria un error pelado. Los 60
+// dejan 30 s de aire para la consulta a la base y el armado de la foto.
+export const maxDuration = 60;
 
 /**
  * Actualizar los costos desde el tablero.
