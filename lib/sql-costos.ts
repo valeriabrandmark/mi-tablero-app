@@ -29,7 +29,33 @@
  *
  * Nada de backticks adentro de estos SQL: viven en template literals y uno solo
  * parte la cadena.
+ *
+ * ---------------------------------------------------------------------------
+ * EL EMPATE ENTRE EL BOTON Y EL EXCEL
+ *
+ * `bronze.costos_historicos` la escriben DOS caminos, y cada uno borra sólo lo
+ * suyo: `costos.py` desde los Excel del orquestador (`origen = 'excel'`) y el
+ * botón de actualizar costos del tablero (`origen = 'tablero'`). Conviven a
+ * propósito.
+ *
+ * La regla es la vigencia: manda el tramo que arrancó más cerca de hoy, venga
+ * de donde venga. Una lista nueva en Excel con fecha posterior entra sola, que
+ * es lo que se espera de una lista nueva.
+ *
+ * Pero las dos pueden caer EL MISMO DIA --el botón escribe con la fecha de hoy
+ * y un archivo `2026-10-29.xlsx` también-- y ahí la vigencia no desempata. Sin
+ * criterio, `distinct on` se queda con la fila que Postgres devuelva primero:
+ * el costo del tablero depende del plan de ejecución. Ya hay un caso en la
+ * base (2026-10 / 21-10, el SKU C03041 con los dos orígenes); no se notó
+ * porque los dos valores coinciden.
+ *
+ * Desempata el botón. Es el único de los dos que alguien aprieta mirando la
+ * pantalla, con la foto delante y dejando su nombre en el tramo: si se tomó el
+ * trabajo de revisarla, su número vale más que el del archivo.
  */
+
+/** Lo escrito desde el tablero gana el empate. Ver arriba. */
+const DESEMPATE = `(origen = 'tablero') desc`;
 
 /**
  * El último costo conocido de cada SKU, uno por SKU.
@@ -47,7 +73,7 @@
 const ULTIMO_TRAMO = `
   from bronze.costos_historicos
   where costo_real > 0 and vigente_desde <= current_date
-  order by sku, mes_comercial desc, vigente_desde desc`;
+  order by sku, mes_comercial desc, vigente_desde desc, ${DESEMPATE}`;
 
 export const ULTIMO_COSTO_VIGENTE = `
   select distinct on (sku) sku, costo_real, costo_teorico${ULTIMO_TRAMO}`;
@@ -89,7 +115,8 @@ export const COSTOS_VIGENTES_POR_MES = `
   from bronze.costos_historicos
   order by sku, mes_comercial,
            (vigente_desde <= current_date) desc,
-           abs(vigente_desde - current_date)`;
+           abs(vigente_desde - current_date),
+           ${DESEMPATE}`;
 
 /**
  * El tramo vigente EL DÍA DE LA VENTA, para colgar de una tabla de ventas.
@@ -113,7 +140,7 @@ export function joinCostoDelDia(t: string, cols: string): string {
        where c.sku = ${t}.sku
          and c.mes_comercial = ${t}.mes_comercial
          and c.vigente_desde <= ${t}.fecha
-       order by c.vigente_desde desc
+       order by c.vigente_desde desc, (c.origen = 'tablero') desc
        limit 1
      ) ch on true`;
 }
