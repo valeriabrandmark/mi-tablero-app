@@ -1,6 +1,7 @@
 import { enTransaccion, query, queryOne } from "@/lib/db";
 import { mesComercialActual } from "@/lib/constantes";
 import { armarSnapshot, type ArticuloParaCostear, type Snapshot } from "@/lib/costos-snapshot";
+import { pedirArticulosASigma } from "@/lib/sigma-articulos";
 import { leerOfertas, type OfertasDeLaPlanilla } from "@/lib/ofertas-planilla";
 import type { CaratulaCostos, FilaDeArchivo } from "@/lib/exportar-costos";
 
@@ -52,6 +53,8 @@ export type Preparado = {
   snapshot: Snapshot;
   ofertas: OfertasDeLaPlanilla;
   foto: FotoDeOfertas | null;
+  /** De dónde salió el costo teórico: Sigma en vivo, o la copia del día. */
+  teorico: FuenteTeorico;
   /** El mes comercial al que va a parar el tramo. */
   mes: string;
   /** Desde cuándo rige. Hoy: es cuando se supo. */
@@ -63,15 +66,105 @@ export type Preparado = {
 };
 
 /**
+ * De dónde salió el costo teórico de esta foto.
+ *
+ * Viaja hasta la pantalla y hasta la carátula del archivo porque es lo primero
+ * que hay que mirar cuando los costos no son los esperados. Ver
+ * `lib/sigma-articulos.ts` para por qué puede no ser Sigma.
+ */
+export type FuenteTeorico =
+  | { tipo: "sigma"; articulos: number }
+  | {
+      tipo: "copia";
+      motivo: string;
+      /** Cuándo corrió bien el catálogo por última vez. `null` si no se sabe. */
+      copiaDe: string | null;
+      articulos: number;
+    };
+
+/**
+ * El mismo texto para la pantalla y para la carátula del archivo.
+ *
+ * Uno solo y no dos redacciones: es la misma pregunta --"¿de dónde salió este
+ * costo?"-- y si el archivo y la pantalla la contestaran con palabras distintas
+ * habría que averiguar cuál de las dos es la que vale.
+ */
+export function textoDeLaFuente(f: FuenteTeorico): string {
+  if (f.tipo === "sigma") {
+    return `costo teórico pedido a Sigma en el momento (${f.articulos} artículos)`;
+  }
+  const de = f.copiaDe ? `del ${f.copiaDe}` : "sin fecha conocida";
+  return `costo teórico de la COPIA ${de} y no de Sigma — ${f.motivo}`;
+}
+
+/**
+ * CUANDO CORRIO BIEN `sigma.py --catalogo` POR ULTIMA VEZ.
+ *
+ * Es la edad real de la copia. La tabla no tiene fecha de sincronización --se
+ * reemplaza entera-- así que el único lugar donde está es el estado del
+ * orquestador. Sin esto, avisar "se usó la copia" no sirve de nada: lo que hay
+ * que saber es si es de hace una hora o de hace tres días.
+ */
+async function cuandoSeCopioElCatalogo(): Promise<string | null> {
+  try {
+    const fila = await queryOne<{ cuando: string | null }>(
+      `select to_char(
+                (valor -> 'sigma.py --catalogo' ->> 'ok')::timestamp,
+                'DD/MM/YYYY HH24:MI') as cuando
+         from ops.estado
+        where clave = 'pasos'`,
+    );
+    return fila?.cuando ?? null;
+  } catch {
+    // La tabla de estado es del orquestador, no de acá: que no exista o que
+    // cambie de forma no puede voltear la pantalla de costos.
+    return null;
+  }
+}
+
+/**
  * LOS QUE SE COSTEAN: los activos del maestro. Un artículo desactivado no se
  * compra ni se vende, así que darle un costo nuevo es escribir filas que
  * ninguna pantalla va a leer.
+ *
+ * SE LE PIDE A SIGMA EN EL MOMENTO, y la copia de `bronze.sigma_articulos` es
+ * el plan B. Al revés de como estaba: la copia se refresca una vez por día, así
+ * que un costo cambiado hoy en Sigma no entraba hasta mañana. Ver
+ * `lib/sigma-articulos.ts`.
  *
  * Sale a función aparte porque la leen dos: la foto que se muestra y el
  * archivo que se baja. Con el SQL copiado en los dos, el día que cambie el
  * filtro va a cambiar en uno solo.
  */
-async function leerArticulos(): Promise<ArticuloParaCostear[]> {
+async function leerArticulos(): Promise<{
+  articulos: ArticuloParaCostear[];
+  fuente: FuenteTeorico;
+}> {
+  const vivo = await pedirArticulosASigma();
+  if (vivo.estado === "ok") {
+    return {
+      articulos: vivo.articulos,
+      fuente: { tipo: "sigma", articulos: vivo.articulos.length },
+    };
+  }
+
+  const articulos = await leerArticulosDeLaCopia();
+  return {
+    articulos,
+    fuente: {
+      tipo: "copia",
+      motivo:
+        vivo.estado === "sin_conectar"
+          ? "Faltan las variables de Sigma en Vercel (SIGMA_URL_CLIENTE, SIGMA_BASEALIAS, SIGMA_ID_CLIENTE, SIGMA_TOKEN)."
+          : vivo.motivo,
+      copiaDe: await cuandoSeCopioElCatalogo(),
+      articulos: articulos.length,
+    },
+  };
+}
+
+/** El plan B: la copia que deja el orquestador una vez por día. */
+async function leerArticulosDeLaCopia(): Promise<ArticuloParaCostear[]> {
   const filas = await query<{
     sku: string;
     proveedor: string | null;
@@ -109,13 +202,26 @@ async function leerCostoActual(): Promise<Map<string, number>> {
 }
 
 /**
- * Arma la foto SIN escribir nada.
+ * Arma la foto SIN escribir nada, y devuelve además el maestro con el que la
+ * armó.
  *
  * Es lo que mira la pantalla antes de aplicar. Se calcula entero del lado del
  * servidor --y no a medias acá y a medias en el navegador-- para que lo que se
  * ve sea exactamente lo que se va a escribir.
+ *
+ * EL MAESTRO SALE POR ACA Y NO SE VUELVE A LEER. Antes `fotoParaArchivo` lo
+ * leía de nuevo, que con la copia en la base era sólo una consulta de más.
+ * Ahora el maestro se le pide a Sigma, así que leerlo dos veces en el mismo
+ * request serían dos llamadas a la API -- con el riesgo de que la segunda
+ * conteste 429 y el archivo salga con la copia vieja mientras la pantalla
+ * muestra lo de Sigma. Dos fuentes para la misma foto es justo lo que no puede
+ * pasar.
  */
-export async function prepararCostos(ahora: Date = new Date()): Promise<Preparado> {
+async function prepararConMaestro(ahora: Date): Promise<{
+  preparado: Preparado;
+  articulos: ArticuloParaCostear[];
+  costoActual: Map<string, number>;
+}> {
   const cruda = await queryOne<{ id: number; filas: unknown; recibido: string; filas_n: number }>(
     `select id, filas,
             to_char(recibido at time zone 'America/Argentina/Buenos_Aires',
@@ -134,7 +240,7 @@ export async function prepararCostos(ahora: Date = new Date()): Promise<Preparad
     );
   }
 
-  const articulos = await leerArticulos();
+  const { articulos, fuente: teorico } = await leerArticulos();
 
   const tramos = await listarTramos(12);
 
@@ -162,18 +268,28 @@ export async function prepararCostos(ahora: Date = new Date()): Promise<Preparad
   );
 
   return {
-    snapshot: armarSnapshot(articulos, ofertas, costoActual),
-    ofertas,
-    foto: cruda
-      ? { id: Number(cruda.id), recibida: cruda.recibido, filas: Number(cruda.filas_n) }
-      : null,
-    mes,
-    vigenteDesde,
-    tramoVigente: tramo
-      ? { mes: tramo.mes, vigenteDesde: tramo.vigente, nota: tramo.nota }
-      : null,
-    tramos,
+    articulos,
+    costoActual,
+    preparado: {
+      snapshot: armarSnapshot(articulos, ofertas, costoActual),
+      ofertas,
+      teorico,
+      foto: cruda
+        ? { id: Number(cruda.id), recibida: cruda.recibido, filas: Number(cruda.filas_n) }
+        : null,
+      mes,
+      vigenteDesde,
+      tramoVigente: tramo
+        ? { mes: tramo.mes, vigenteDesde: tramo.vigente, nota: tramo.nota }
+        : null,
+      tramos,
+    },
   };
+}
+
+/** La foto sola, que es lo que necesita la pantalla. */
+export async function prepararCostos(ahora: Date = new Date()): Promise<Preparado> {
+  return (await prepararConMaestro(ahora)).preparado;
 }
 
 /**
@@ -468,10 +584,9 @@ export function caratulaDeTramo(t: TramoGuardado): CaratulaCostos {
 export async function fotoParaArchivo(
   ahora: Date = new Date(),
 ): Promise<{ caratula: CaratulaCostos; filas: FilaDeArchivo[]; mes: string; vigenteDesde: string }> {
-  const preparado = await prepararCostos(ahora);
+  const { preparado, articulos, costoActual } = await prepararConMaestro(ahora);
   const { snapshot, mes, vigenteDesde } = preparado;
 
-  const [articulos, costoActual] = await Promise.all([leerArticulos(), leerCostoActual()]);
   const porSku = new Map(articulos.map((a) => [a.sku, a]));
 
   const partes = [
@@ -486,6 +601,10 @@ export async function fotoParaArchivo(
   // DE CUANDO ES LA FOTO DE OFERTAS. Es lo primero que hay que mirar si los
   // números no son los esperados: la planilla puede haberse editado después.
   if (preparado.foto) partes.push(`ofertas recibidas el ${preparado.foto.recibida}`);
+  // Y DE DONDE SALIO EL COSTO TEORICO, por lo mismo. Un archivo bajado con la
+  // copia de ayer y otro con Sigma en vivo pueden no coincidir, y abiertos la
+  // semana que viene no habría forma de saber cuál era cuál.
+  partes.push(textoDeLaFuente(preparado.teorico));
 
   return {
     mes,
