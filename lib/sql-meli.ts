@@ -60,10 +60,13 @@ export const POR_INVENTARIO_SKU = `
  * Necesita un CTE `por_inv` (ver POR_INVENTARIO_SKU) antes. Lo usan Stock y
  * Compras, que tienen que contar lo mismo.
  *
- * PENDIENTE DE INGRESO ("en camino"): lo que ya salió de Tucumán --Digip ya no
- * lo cuenta-- pero Mercado Libre todavía no recibió, así que
- * /inventories/{id}/stock/fulfillment tampoco. Sin esto, cada envío a Full en
- * tránsito desaparecía del stock y el sugerido pedía de más.
+ * PENDIENTE DE INGRESO: lo DECLARADO en envíos a Full que Mercado Libre todavía
+ * no recibió --la columna "Pendientes de ingreso" de su reporte de stock--, y
+ * que /inventories/{id}/stock/fulfillment no cuenta. OJO: es lo declarado, no
+ * lo despachado. Si un envío se declara por más de lo que se manda, la
+ * diferencia sigue figurando hasta que ML lo cierra (01/11/2026: IM07003 con
+ * 1.200 pendientes y nada despachado desde Digip). Se toma igual el número de
+ * ML, por decisión del negocio.
  *
  * No hay campo directo en la API: sale de restar dos que sí hay.
  *   ml_reposicion_full.stock_total  (replenishment, stock.total_stock)

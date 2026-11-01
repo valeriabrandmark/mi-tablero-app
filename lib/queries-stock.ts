@@ -139,7 +139,7 @@ stock as (
          -- es de ninguno de los dos.
          case $3::text
            when 'tucuman' then coalesce(t.unidades, 0)
-           -- Lo pendiente de ingreso cuenta como Full: ya salió de Tucumán.
+           -- Lo pendiente de ingreso a Full (según ML) cuenta como Full.
            when 'full'    then coalesce(f.unidades, 0) + coalesce(f.en_camino, 0)
            else coalesce(t.unidades, 0) + coalesce(f.unidades, 0)
                 + coalesce(f.en_camino, 0)
