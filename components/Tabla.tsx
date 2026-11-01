@@ -337,7 +337,13 @@ export function Tabla<T>({
   return (
     <div className="relative">
       {/* Las tablas anchas scrollean solas, la página nunca scrollea en horizontal. */}
-      <div ref={contenedor} className="-mx-1 max-h-[420px] overflow-auto px-1">
+      {/* ALTO SEGUN LA VENTANA: 420 px como piso, y en una pantalla alta hasta
+          el 70% de la ventana, para no scrollear adentro de una caja chica
+          con media pantalla vacía abajo. */}
+      <div
+        ref={contenedor}
+        className="-mx-1 max-h-[max(420px,70dvh)] overflow-auto px-1"
+      >
         <table className="w-full text-xs">
           <thead className="bg-panel sticky top-0 z-20">
             <tr className="border-line border-b">
@@ -368,7 +374,13 @@ export function Tabla<T>({
                     // columna fija se cruza con el resto del encabezado --que
                     // ya está pegado arriba-- y tiene que ganar en los dos
                     // ejes a la vez.
-                    className={`bg-panel text-muted py-2 pr-3 font-medium whitespace-nowrap ${
+                    // EL ENCABEZADO SÍ PARTE EN RENGLONES (entre palabras,
+                    // nunca adentro de una). Con `nowrap` un título largo como
+                    // "Unidades mes pasado" ensanchaba una columna de números
+                    // de cuatro cifras, y sumado en veinte columnas era buena
+                    // parte del scroll horizontal. Alineado abajo para que los
+                    // de un renglón queden pegados a los datos.
+                    className={`bg-panel text-muted py-2 pr-3 align-bottom leading-tight font-medium ${
                       c.numerica ? "text-right" : "text-left"
                     } ${i < fijas ? "z-30 pl-1" : ""} ${bordeFijo(i)}`}
                   >

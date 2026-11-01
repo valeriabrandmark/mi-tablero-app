@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -495,6 +495,28 @@ function Contenido({
   );
 }
 
+/** Dónde se recuerda, por navegador, si la barra de escritorio está oculta. */
+const CLAVE_OCULTA = "barra-lateral-oculta";
+/** Aviso interno: `storage` sólo llega a las OTRAS pestañas, no a ésta. */
+const EVENTO_OCULTA = "barra-lateral-oculta";
+
+function leerOculta(): boolean {
+  try {
+    return localStorage.getItem(CLAVE_OCULTA) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function suscribirOculta(avisar: () => void) {
+  window.addEventListener(EVENTO_OCULTA, avisar);
+  window.addEventListener("storage", avisar);
+  return () => {
+    window.removeEventListener(EVENTO_OCULTA, avisar);
+    window.removeEventListener("storage", avisar);
+  };
+}
+
 export default function BarraLateral(props: {
   nav: ItemNav[];
   email: string | null;
@@ -504,15 +526,66 @@ export default function BarraLateral(props: {
   puedeVerUsuarios: boolean;
 }) {
   const [abierta, setAbierta] = useState(false);
+  // OCULTA O NO SE RECUERDA en el navegador: quien la cierra para ver una tabla
+  // ancha la quiere cerrada también en la próxima pantalla. Con
+  // useSyncExternalStore el servidor pinta "visible" y el cliente corrige al
+  // hidratar, sin desajuste y sin un setState dentro de un efecto.
+  const oculta = useSyncExternalStore(suscribirOculta, leerOculta, () => false);
+
+  function alternar() {
+    try {
+      localStorage.setItem(CLAVE_OCULTA, oculta ? "0" : "1");
+    } catch {
+      // Modo privado o almacenamiento bloqueado: no se recuerda, y listo.
+    }
+    window.dispatchEvent(new Event(EVENTO_OCULTA));
+  }
 
   return (
     <>
-      {/* Escritorio: columna fija */}
-      <aside className="border-line bg-panel hidden w-60 shrink-0 border-r lg:block">
+      {/* Escritorio: columna fija que se oculta con la flecha. Al ocultarse
+          el ancho va a cero y el tablero ocupa toda la ventana. */}
+      <div className="relative hidden shrink-0 lg:block">
         <div className="sticky top-0 h-dvh">
-          <Contenido {...props} />
+          <aside
+            aria-hidden={oculta}
+            inert={oculta}
+            className={`border-line bg-panel h-full overflow-hidden transition-[width] duration-200 ${
+              oculta ? "w-0 border-r-0" : "w-60 border-r"
+            }`}
+          >
+            {/* Ancho fijo adentro: mientras se achica, el contenido no se
+                reacomoda renglón por renglón, se corta. */}
+            <div className="h-full w-60">
+              <Contenido {...props} />
+            </div>
+          </aside>
+
+          <button
+            type="button"
+            onClick={alternar}
+            aria-label={oculta ? "Mostrar menú" : "Ocultar menú"}
+            title={oculta ? "Mostrar menú" : "Ocultar menú"}
+            aria-expanded={!oculta}
+            className={`border-line bg-panel text-muted hover:text-ink hover:bg-panel-2 absolute top-5 z-40 flex size-6 items-center justify-center rounded-full border shadow-sm transition-colors ${
+              oculta ? "left-1.5" : "left-full -translate-x-1/2"
+            }`}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={`size-3.5 transition-transform ${oculta ? "rotate-180" : ""}`}
+              aria-hidden="true"
+            >
+              <path d="m15 6-6 6 6 6" />
+            </svg>
+          </button>
         </div>
-      </aside>
+      </div>
 
       {/* Móvil: barra con botón y panel deslizante */}
       <div className="border-line bg-panel/80 fixed inset-x-0 top-0 z-30 flex items-center gap-3 border-b px-4 py-3 backdrop-blur lg:hidden">
