@@ -991,7 +991,7 @@ export default function DashboardComprasPage({
     {
       titulo: "Full total",
       ayuda:
-        "Unidades en Mercado Libre Full: las aptas para vender más las pendientes de ingreso (enviadas desde Tucumán y todavía no recibidas por ML). El detalle de cuántas están en camino aparece debajo.",
+        "Unidades en Mercado Libre Full: las aptas para vender más las pendientes de ingreso (las declaradas en envíos a Full que Mercado Libre todavía no recibió; la columna \"Pendientes de ingreso\" del reporte de stock de Full). Debajo, cuántas están pendientes.",
       celda: (f) => {
         const u = f.full + f.fullEnCamino;
         if (u <= 0) return "—";
@@ -1000,7 +1000,7 @@ export default function DashboardComprasPage({
             <span>{fmtNumero(u)}</span>
             {f.fullEnCamino > 0 && (
               <span className="text-muted text-[10px]">
-                {fmtNumero(f.fullEnCamino)} en camino
+                {fmtNumero(f.fullEnCamino)} pend. ingreso
               </span>
             )}
           </span>
@@ -1013,7 +1013,7 @@ export default function DashboardComprasPage({
     {
       titulo: "Stock",
       ayuda:
-        "Las unidades que hay hoy: depósito de Tucumán más Mercado Libre Full, incluido lo pendiente de ingreso a Full (enviado y todavía no recibido por ML). NO suma lo pedido al proveedor y todavía no recibido -- Digip informa tránsito y recepción en cero.",
+        "Las unidades que hay hoy: depósito de Tucumán más Mercado Libre Full, incluido lo pendiente de ingreso a Full (declarado en envíos a Full y todavía no recibido por ML). NO suma lo pedido al proveedor y todavía no recibido -- Digip informa tránsito y recepción en cero.",
       celda: (f) => fmtNumero(f.total),
       numerica: true,
       orden: (f) => f.total,

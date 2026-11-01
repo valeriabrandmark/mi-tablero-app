@@ -92,26 +92,31 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
       total: fmtNumero(sumar(filas, (f) => f.tuc)),
     },
     {
-      titulo: "Full",
-      ayuda: "Unidades en el depósito de Mercado Libre Full.",
-      celda: (f) => fmtNumero(f.full),
-      numerica: true,
-      orden: (f) => f.full,
-      total: fmtNumero(sumar(filas, (f) => f.full)),
-    },
-    {
-      titulo: "En camino Full",
+      titulo: "Full total",
       ayuda:
-        "Pendiente de ingreso a Full: ya salió de Tucumán y Mercado Libre todavía no lo recibió. Es la columna \"Pendientes de ingreso\" del reporte de stock de Full.",
-      celda: (f) => (f.fullEnCamino > 0 ? fmtNumero(f.fullEnCamino) : "—"),
+        "Unidades en Mercado Libre Full: las aptas para vender más las pendientes de ingreso (las declaradas en envíos a Full que Mercado Libre todavía no recibió; la columna \"Pendientes de ingreso\" del reporte de stock de Full). Debajo, cuántas están pendientes.",
+      celda: (f) => {
+        const u = f.full + f.fullEnCamino;
+        if (u <= 0) return "—";
+        return (
+          <span className="inline-flex flex-col items-end leading-tight">
+            <span>{fmtNumero(u)}</span>
+            {f.fullEnCamino > 0 && (
+              <span className="text-muted text-[10px]">
+                {fmtNumero(f.fullEnCamino)} pend. ingreso
+              </span>
+            )}
+          </span>
+        );
+      },
       numerica: true,
-      orden: (f) => f.fullEnCamino,
-      total: fmtNumero(sumar(filas, (f) => f.fullEnCamino)),
+      orden: (f) => f.full + f.fullEnCamino,
+      total: fmtNumero(sumar(filas, (f) => f.full + f.fullEnCamino)),
     },
     {
       titulo: "Total u.",
       ayuda:
-        "Tucumán más Full más lo que está en camino a Full. No descuenta lo pedido al proveedor y todavía no recibido, porque Digip informa tránsito y recepción en cero.",
+        "Tucumán más Full total (incluye lo pendiente de ingreso a Full). No descuenta lo pedido al proveedor y todavía no recibido, porque Digip informa tránsito y recepción en cero.",
       celda: (f) => fmtNumero(f.total),
       numerica: true,
       orden: (f) => f.total,

@@ -1550,7 +1550,7 @@ export type FilaStock = {
   tuc: number;
   /** Depósito de Mercado Libre (Full), unidades disponibles. */
   full: number;
-  /** Full, pendiente de ingreso: ya salió de Tucumán y ML todavía no lo recibió. */
+  /** Full, pendiente de ingreso: declarado en envíos a Full y todavía no recibido por ML. */
   fullEnCamino: number;
   total: number;
   /** Costo neto del último mes con costo cargado. `0` si no hay. */
@@ -1894,7 +1894,7 @@ export type FilaCompra = {
   tuc: number;
   /** Full, unidades aptas para vender. */
   full: number;
-  /** Full, pendiente de ingreso: ya salió de Tucumán y ML todavía no lo recibió. */
+  /** Full, pendiente de ingreso: declarado en envíos a Full y todavía no recibido por ML. */
   fullEnCamino: number;
   /** Tucumán + Full + pendiente de ingreso a Full. */
   total: number;
