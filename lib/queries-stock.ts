@@ -12,7 +12,7 @@ import {
   VENTANA_POR_DEFECTO,
   tramoCobertura,
 } from "@/lib/stock";
-import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
+import { FULL_POR_SKU, POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import type {
   DashboardStock,
@@ -57,11 +57,8 @@ with por_inv as (
   ${POR_INVENTARIO_SKU}
 ),
 full_ml as (
-  select i.sku, sum(coalesce(f.available_quantity, 0)) as unidades
-  from bronze.ml_stock_full f
-  join por_inv i on i.inventory_id = f.inventory_id
-  where i.sku is not null
-  group by i.sku
+  -- Aptas para vender y pendiente de ingreso. Ver FULL_POR_SKU.
+  ${FULL_POR_SKU}
 ),
 tuc as (
   -- Agrupado por código: hay 24 códigos repetidos en el export de Digip, y sin
@@ -135,14 +132,17 @@ stock as (
   select coalesce(t.sku, f.sku)         as sku,
          coalesce(t.unidades, 0)        as tuc,
          coalesce(f.unidades, 0)        as full_ml,
+         coalesce(f.en_camino, 0)       as full_en_camino,
          -- El total depende del depósito elegido, y de ahí cuelga TODO lo
          -- demás: la plata, la cobertura, el exceso y el sugerido. Mirar sólo
          -- Full y seguir valorizando los dos depósitos daría un número que no
          -- es de ninguno de los dos.
          case $3::text
            when 'tucuman' then coalesce(t.unidades, 0)
-           when 'full'    then coalesce(f.unidades, 0)
+           -- Lo pendiente de ingreso cuenta como Full: ya salió de Tucumán.
+           when 'full'    then coalesce(f.unidades, 0) + coalesce(f.en_camino, 0)
            else coalesce(t.unidades, 0) + coalesce(f.unidades, 0)
+                + coalesce(f.en_camino, 0)
          end                            as total
   from tuc t
   full outer join full_ml f on f.sku = t.sku
@@ -157,6 +157,7 @@ base as (
          a."attributes.marca"                           as marca,
          s.tuc,
          s.full_ml,
+         s.full_en_camino,
          s.total,
          coalesce(c.costo_real, 0)                      as costo,
          s.total * coalesce(c.costo_real, 0)            as valor,
@@ -357,7 +358,7 @@ async function getFilas(f: FiltrosStock): Promise<FilaStock[]> {
   const filas = await query<Record<string, string | null>>(
     `${BASE}
      select sku, producto, proveedor, marca,
-            tuc, full_ml, total, costo, valor,
+            tuc, full_ml, full_en_camino, total, costo, valor,
             uds, uds_meli, uds_tn, uds_may,
             ritmo_diario, cobertura, exceso_u, exceso, sugerido,
             to_char(ultima_venta, 'YYYY-MM-DD') as ultima_venta,
@@ -378,6 +379,7 @@ async function getFilas(f: FiltrosStock): Promise<FilaStock[]> {
     marca: r.marca,
     tuc: num(r.tuc),
     full: num(r.full_ml),
+    fullEnCamino: num(r.full_en_camino),
     total: num(r.total),
     costo: num(r.costo),
     valor: num(r.valor),

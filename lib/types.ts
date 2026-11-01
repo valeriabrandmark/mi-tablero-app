@@ -1550,6 +1550,8 @@ export type FilaStock = {
   tuc: number;
   /** Depósito de Mercado Libre (Full), unidades disponibles. */
   full: number;
+  /** Full, pendiente de ingreso: ya salió de Tucumán y ML todavía no lo recibió. */
+  fullEnCamino: number;
   total: number;
   /** Costo neto del último mes con costo cargado. `0` si no hay. */
   costo: number;

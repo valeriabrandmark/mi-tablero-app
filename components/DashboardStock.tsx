@@ -100,9 +100,18 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
       total: fmtNumero(sumar(filas, (f) => f.full)),
     },
     {
+      titulo: "En camino Full",
+      ayuda:
+        "Pendiente de ingreso a Full: ya salió de Tucumán y Mercado Libre todavía no lo recibió. Es la columna \"Pendientes de ingreso\" del reporte de stock de Full.",
+      celda: (f) => (f.fullEnCamino > 0 ? fmtNumero(f.fullEnCamino) : "—"),
+      numerica: true,
+      orden: (f) => f.fullEnCamino,
+      total: fmtNumero(sumar(filas, (f) => f.fullEnCamino)),
+    },
+    {
       titulo: "Total u.",
       ayuda:
-        "Tucumán más Full. Es stock FÍSICO: no descuenta lo ya pedido y todavía no recibido, porque Digip informa tránsito y recepción en cero.",
+        "Tucumán más Full más lo que está en camino a Full. No descuenta lo pedido al proveedor y todavía no recibido, porque Digip informa tránsito y recepción en cero.",
       celda: (f) => fmtNumero(f.total),
       numerica: true,
       orden: (f) => f.total,

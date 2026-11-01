@@ -28,7 +28,7 @@ import {
   PROVEEDORES_NO_MERCADERIA,
   VENTANA_POR_DEFECTO,
 } from "@/lib/stock";
-import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
+import { FULL_POR_SKU, POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import type { ArticuloParaOrden } from "@/lib/sigma-orden";
 import type {
   ArticuloSinFicha,
@@ -87,28 +87,8 @@ with por_inv as (
   ${POR_INVENTARIO_SKU}
 ),
 full_ml as (
-  -- PENDIENTE DE INGRESO A FULL ("en camino"): lo que ya salió de Tucumán
-  -- --Digip ya no lo cuenta-- pero Mercado Libre todavía no recibió, así que
-  -- /stock/fulfillment tampoco lo cuenta. Sin esto, cada envío a Full en
-  -- tránsito desaparecía del stock y el sugerido pedía de más.
-  --
-  -- No hay campo directo en la API: sale de restar dos que sí hay.
-  --   ml_reposicion_full.stock_total  (replenishment, stock.total_stock)
-  --       = en Full + pendiente de ingreso
-  --   ml_stock_full.total             (/inventories/{id}/stock/fulfillment)
-  --       = en Full (aptas + no aptas)
-  -- Validado contra el reporte "Stock general Full" del 01/11/2026: coincide
-  -- exacto con la columna "Pendientes de ingreso" en 523 de 561 productos (el
-  -- resto, corrimiento horario entre la corrida y el reporte).
-  -- greatest(.., 0): las dos fotos no son del mismo segundo.
-  select i.sku,
-         sum(coalesce(f.available_quantity, 0)) as unidades,
-         sum(greatest(coalesce(r.stock_total, 0) - coalesce(f.total, 0), 0)) as en_camino
-  from bronze.ml_stock_full f
-  join por_inv i on i.inventory_id = f.inventory_id
-  left join bronze.ml_reposicion_full r on r.inventory_id = f.inventory_id
-  where i.sku is not null
-  group by i.sku
+  -- Aptas para vender y pendiente de ingreso. Ver FULL_POR_SKU.
+  ${FULL_POR_SKU}
 ),
 tuc as (
   -- Agrupado por código: hay 24 códigos repetidos en el export de Digip.

@@ -981,6 +981,36 @@ export default function DashboardComprasPage({
       orden: (f) => f.unidadesPorBulto,
     },
     {
+      titulo: "Tucumán",
+      ayuda: "Unidades disponibles en el depósito de Tucumán, según Digip.",
+      celda: (f) => (f.tuc > 0 ? fmtNumero(f.tuc) : "—"),
+      numerica: true,
+      orden: (f) => f.tuc,
+      total: fmtNumero(sumar(filas, (f) => f.tuc)),
+    },
+    {
+      titulo: "Full",
+      ayuda:
+        "Unidades en Mercado Libre Full: las aptas para vender más las pendientes de ingreso (enviadas desde Tucumán y todavía no recibidas por ML). El detalle de cuántas están en camino aparece debajo.",
+      celda: (f) => {
+        const u = f.full + f.fullEnCamino;
+        if (u <= 0) return "—";
+        return (
+          <span className="inline-flex flex-col items-end leading-tight">
+            <span>{fmtNumero(u)}</span>
+            {f.fullEnCamino > 0 && (
+              <span className="text-muted text-[10px]">
+                {fmtNumero(f.fullEnCamino)} en camino
+              </span>
+            )}
+          </span>
+        );
+      },
+      numerica: true,
+      orden: (f) => f.full + f.fullEnCamino,
+      total: fmtNumero(sumar(filas, (f) => f.full + f.fullEnCamino)),
+    },
+    {
       titulo: "Stock",
       ayuda:
         "Las unidades que hay hoy: depósito de Tucumán más Mercado Libre Full, incluido lo pendiente de ingreso a Full (enviado y todavía no recibido por ML). NO suma lo pedido al proveedor y todavía no recibido -- Digip informa tránsito y recepción en cero.",
