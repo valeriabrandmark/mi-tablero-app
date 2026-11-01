@@ -182,7 +182,12 @@ export default async function TableroLayout({ children }: LayoutProps<"/">) {
           </p>
         )}
 
-        <main className="w-full max-w-[1600px] flex-1 px-4 py-6 sm:px-6">{children}</main>
+        {/* SIN TOPE DE ANCHO: había un max-w de 1600 px y en un monitor grande
+            --o con la barra oculta-- sobraba espacio a la derecha mientras las
+            tablas anchas obligaban a scrollear en horizontal. El contenido
+            ocupa lo que haya. `lg:pl-8` deja lugar a la flecha de la barra
+            cuando está oculta. */}
+        <main className="w-full flex-1 px-4 py-6 sm:px-6 lg:pl-8">{children}</main>
       </div>
     </div>
   );
