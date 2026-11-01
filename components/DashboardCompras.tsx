@@ -989,7 +989,7 @@ export default function DashboardComprasPage({
       total: fmtNumero(sumar(filas, (f) => f.tuc)),
     },
     {
-      titulo: "Full",
+      titulo: "Full total",
       ayuda:
         "Unidades en Mercado Libre Full: las aptas para vender más las pendientes de ingreso (enviadas desde Tucumán y todavía no recibidas por ML). El detalle de cuántas están en camino aparece debajo.",
       celda: (f) => {
