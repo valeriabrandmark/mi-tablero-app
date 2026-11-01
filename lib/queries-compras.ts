@@ -28,7 +28,7 @@ import {
   PROVEEDORES_NO_MERCADERIA,
   VENTANA_POR_DEFECTO,
 } from "@/lib/stock";
-import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
+import { FULL_POR_SKU, POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import type { ArticuloParaOrden } from "@/lib/sigma-orden";
 import type {
   ArticuloSinFicha,
@@ -87,11 +87,8 @@ with por_inv as (
   ${POR_INVENTARIO_SKU}
 ),
 full_ml as (
-  select i.sku, sum(coalesce(f.available_quantity, 0)) as unidades
-  from bronze.ml_stock_full f
-  join por_inv i on i.inventory_id = f.inventory_id
-  where i.sku is not null
-  group by i.sku
+  -- Aptas para vender y pendiente de ingreso. Ver FULL_POR_SKU.
+  ${FULL_POR_SKU}
 ),
 tuc as (
   -- Agrupado por código: hay 24 códigos repetidos en el export de Digip.
@@ -348,7 +345,9 @@ stock as (
   select coalesce(t.sku, f.sku)                          as sku,
          coalesce(t.unidades, 0)                         as tuc,
          coalesce(f.unidades, 0)                         as full_ml,
-         coalesce(t.unidades, 0) + coalesce(f.unidades, 0) as total
+         coalesce(f.en_camino, 0)                        as full_en_camino,
+         coalesce(t.unidades, 0) + coalesce(f.unidades, 0)
+           + coalesce(f.en_camino, 0)                    as total
   from tuc t
   full outer join full_ml f on f.sku = t.sku
 ),
@@ -380,6 +379,7 @@ base as (
          greatest(coalesce(a."unidadesPorBulto", 1), 1)  as u_bulto,
          s.tuc,
          s.full_ml,
+         s.full_en_camino,
          s.total,
          coalesce(c.costo_real, 0)                      as costo,
          s.total * coalesce(c.costo_real, 0)            as valor,
@@ -818,7 +818,7 @@ async function getFilas(
   const filas = await query<Record<string, unknown>>(
     `${BASE}
      select sku, producto, proveedor, grupo, marca, codigo_compra, ean, u_bulto,
-            tuc, full_ml, total, costo, valor, costo_lista,
+            tuc, full_ml, full_en_camino, total, costo, valor, costo_lista,
             sell_in_pct,
             uds, ritmo_diario, dias_ritmo, ritmo_recortado, cobertura, sugerido,
             es_nuevo, sugerido_minimo, es_discontinuo,
@@ -872,6 +872,7 @@ async function getFilas(
     unidadesPorBulto: num(r.u_bulto),
     tuc: num(r.tuc),
     full: num(r.full_ml),
+    fullEnCamino: num(r.full_en_camino),
     total: num(r.total),
     costo: num(r.costo),
     valor: num(r.valor),

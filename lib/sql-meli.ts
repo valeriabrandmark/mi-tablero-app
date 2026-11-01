@@ -53,3 +53,34 @@ export const POR_INVENTARIO_SKU = `
       where m2.inventory_id = p.inventory_id
     )
   group by p.inventory_id`;
+
+/**
+ * Stock de Full por SKU: lo APTO PARA VENDER y lo PENDIENTE DE INGRESO.
+ *
+ * Necesita un CTE `por_inv` (ver POR_INVENTARIO_SKU) antes. Lo usan Stock y
+ * Compras, que tienen que contar lo mismo.
+ *
+ * PENDIENTE DE INGRESO ("en camino"): lo que ya salió de Tucumán --Digip ya no
+ * lo cuenta-- pero Mercado Libre todavía no recibió, así que
+ * /inventories/{id}/stock/fulfillment tampoco. Sin esto, cada envío a Full en
+ * tránsito desaparecía del stock y el sugerido pedía de más.
+ *
+ * No hay campo directo en la API: sale de restar dos que sí hay.
+ *   ml_reposicion_full.stock_total  (replenishment, stock.total_stock)
+ *       = en Full + pendiente de ingreso
+ *   ml_stock_full.total             (/stock/fulfillment)
+ *       = en Full (aptas + no aptas)
+ * Validado contra el reporte "Stock general Full" del 01/11/2026: coincide
+ * exacto con "Pendientes de ingreso" en 523 de 561 productos (el resto es
+ * corrimiento horario entre la corrida y el reporte). greatest(.., 0) porque
+ * las dos fotos no son del mismo segundo.
+ */
+export const FULL_POR_SKU = `
+  select i.sku,
+         sum(coalesce(f.available_quantity, 0)) as unidades,
+         sum(greatest(coalesce(r.stock_total, 0) - coalesce(f.total, 0), 0)) as en_camino
+  from bronze.ml_stock_full f
+  join por_inv i on i.inventory_id = f.inventory_id
+  left join bronze.ml_reposicion_full r on r.inventory_id = f.inventory_id
+  where i.sku is not null
+  group by i.sku`;
