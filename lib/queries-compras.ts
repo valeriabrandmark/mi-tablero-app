@@ -87,9 +87,26 @@ with por_inv as (
   ${POR_INVENTARIO_SKU}
 ),
 full_ml as (
-  select i.sku, sum(coalesce(f.available_quantity, 0)) as unidades
+  -- PENDIENTE DE INGRESO A FULL ("en camino"): lo que ya salió de Tucumán
+  -- --Digip ya no lo cuenta-- pero Mercado Libre todavía no recibió, así que
+  -- /stock/fulfillment tampoco lo cuenta. Sin esto, cada envío a Full en
+  -- tránsito desaparecía del stock y el sugerido pedía de más.
+  --
+  -- No hay campo directo en la API: sale de restar dos que sí hay.
+  --   ml_reposicion_full.stock_total  (replenishment, stock.total_stock)
+  --       = en Full + pendiente de ingreso
+  --   ml_stock_full.total             (/inventories/{id}/stock/fulfillment)
+  --       = en Full (aptas + no aptas)
+  -- Validado contra el reporte "Stock general Full" del 01/11/2026: coincide
+  -- exacto con la columna "Pendientes de ingreso" en 523 de 561 productos (el
+  -- resto, corrimiento horario entre la corrida y el reporte).
+  -- greatest(.., 0): las dos fotos no son del mismo segundo.
+  select i.sku,
+         sum(coalesce(f.available_quantity, 0)) as unidades,
+         sum(greatest(coalesce(r.stock_total, 0) - coalesce(f.total, 0), 0)) as en_camino
   from bronze.ml_stock_full f
   join por_inv i on i.inventory_id = f.inventory_id
+  left join bronze.ml_reposicion_full r on r.inventory_id = f.inventory_id
   where i.sku is not null
   group by i.sku
 ),
@@ -348,7 +365,9 @@ stock as (
   select coalesce(t.sku, f.sku)                          as sku,
          coalesce(t.unidades, 0)                         as tuc,
          coalesce(f.unidades, 0)                         as full_ml,
-         coalesce(t.unidades, 0) + coalesce(f.unidades, 0) as total
+         coalesce(f.en_camino, 0)                        as full_en_camino,
+         coalesce(t.unidades, 0) + coalesce(f.unidades, 0)
+           + coalesce(f.en_camino, 0)                    as total
   from tuc t
   full outer join full_ml f on f.sku = t.sku
 ),
@@ -380,6 +399,7 @@ base as (
          greatest(coalesce(a."unidadesPorBulto", 1), 1)  as u_bulto,
          s.tuc,
          s.full_ml,
+         s.full_en_camino,
          s.total,
          coalesce(c.costo_real, 0)                      as costo,
          s.total * coalesce(c.costo_real, 0)            as valor,
@@ -818,7 +838,7 @@ async function getFilas(
   const filas = await query<Record<string, unknown>>(
     `${BASE}
      select sku, producto, proveedor, grupo, marca, codigo_compra, ean, u_bulto,
-            tuc, full_ml, total, costo, valor, costo_lista,
+            tuc, full_ml, full_en_camino, total, costo, valor, costo_lista,
             sell_in_pct,
             uds, ritmo_diario, dias_ritmo, ritmo_recortado, cobertura, sugerido,
             es_nuevo, sugerido_minimo, es_discontinuo,
@@ -872,6 +892,7 @@ async function getFilas(
     unidadesPorBulto: num(r.u_bulto),
     tuc: num(r.tuc),
     full: num(r.full_ml),
+    fullEnCamino: num(r.full_en_camino),
     total: num(r.total),
     costo: num(r.costo),
     valor: num(r.valor),

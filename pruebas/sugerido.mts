@@ -49,6 +49,7 @@ function fila(cambios: Partial<FilaCompra>): FilaCompra {
     unidadesPorBulto: 1,
     tuc: 1,
     full: 0,
+    fullEnCamino: 0,
     total: 1,
     costo: 1000,
     valor: 1000,

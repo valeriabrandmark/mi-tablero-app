@@ -983,7 +983,7 @@ export default function DashboardComprasPage({
     {
       titulo: "Stock",
       ayuda:
-        "Las unidades que hay hoy: depósito de Tucumán más Mercado Libre Full. Es stock físico, NO descuenta lo ya pedido y todavía no recibido -- Digip informa tránsito y recepción en cero.",
+        "Las unidades que hay hoy: depósito de Tucumán más Mercado Libre Full, incluido lo pendiente de ingreso a Full (enviado y todavía no recibido por ML). NO suma lo pedido al proveedor y todavía no recibido -- Digip informa tránsito y recepción en cero.",
       celda: (f) => fmtNumero(f.total),
       numerica: true,
       orden: (f) => f.total,
