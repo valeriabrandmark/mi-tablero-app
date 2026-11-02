@@ -62,6 +62,7 @@ async function leerEstado(): Promise<EstadoActualizacion> {
     version: string | null;
     minutos: number | null;
     sell_in_pendiente: boolean | null;
+    corrida: string | null;
   }>(
     // La foto del sell in se compara contra `actualizado` y no contra el reloj:
     // lo que hay que saber no es si la planilla es reciente sino si el pipeline
@@ -71,10 +72,16 @@ async function leerEstado(): Promise<EstadoActualizacion> {
     //
     // `bronze.sell_in_crudo` tiene cinco filas --las últimas cinco fotos, el
     // resto lo poda el pipeline-- así que el max sale en nada.
+    // LA FILA DE LA CORRIDA VA COMO SUBCONSULTA y no como join: mientras el
+    // orquestador no tenga el cambio que la escribe, esa clave no existe, y un
+    // join la dejaría sin fila -- la pantalla se quedaría sin saber ni de
+    // cuándo son los datos. Así, lo que falta es `corrida` y nada más.
     `select to_char(e.actualizado, 'YYYYMMDDHH24MISS') as version,
             floor(extract(epoch from (now() - e.actualizado)) / 60)::int as minutos,
             (select max(recibido) > e.actualizado from bronze.sell_in_crudo)
-              as sell_in_pendiente
+              as sell_in_pendiente,
+            (select to_char(c.actualizado, 'YYYYMMDDHH24MISS')
+               from ops.estado c where c.clave = 'corrida') as corrida
        from ops.estado e where e.clave = 'pasos'`,
   );
   return {
@@ -82,6 +89,7 @@ async function leerEstado(): Promise<EstadoActualizacion> {
     minutos: fila?.minutos ?? null,
     esperaMinutos: ESPERA_MINUTOS,
     sellInPendiente: fila?.sell_in_pendiente === true,
+    corrida: fila?.corrida ?? null,
   };
 }
 

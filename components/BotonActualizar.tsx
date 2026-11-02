@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  cambioDesdeElPedido,
   faltanMinutos,
   haceCuanto,
   RUTA_ACTUALIZAR,
@@ -76,6 +77,13 @@ type Fase =
   | { tipo: "quieto" }
   | { tipo: "pidiendo" }
   | { tipo: "esperando"; desde: number }
+  /**
+   * LLEGO ALGO PERO EL PIPELINE SIGUE. Es la fase que faltaba: los primeros
+   * pasos ya escribieron --la pantalla se puede recargar y va a mostrar algo
+   * nuevo-- pero la corrida no termino. Se sigue preguntando desde acá, así que
+   * lleva el `desde` del pedido original para que la paciencia no se reinicie.
+   */
+  | { tipo: "llegando"; desde: number }
   | { tipo: "listo" }
   | { tipo: "al_dia"; minutos: number | null }
   | { tipo: "tardando" }
@@ -110,6 +118,11 @@ export default function BotonActualizar({
   // el que se creó.
   const versionAlPedir = useRef<string | null>(null);
 
+  // La marca de fin de corrida con la que se apretó, para saber si la que
+  // termine es una nueva. En una ref por lo mismo que la de arriba.
+  const corridaAlPedir = useRef<string | null>(null);
+
+
   // El aviso, en una ref. Si el padre pasara una función nueva en cada render,
   // tenerla en las dependencias del efecto desarmaría y volvería a armar el
   // intervalo en cada uno: la cuenta de los 10 segundos nunca llegaría al final
@@ -137,19 +150,38 @@ export default function BotonActualizar({
   // MIENTRAS SE ESPERA, SE PREGUNTA. El efecto se desarma solo cuando la fase
   // deja de ser "esperando", así que no hace falta limpiar a mano en cada rama.
   useEffect(() => {
-    if (fase.tipo !== "esperando") return;
+    if (fase.tipo !== "esperando" && fase.tipo !== "llegando") return;
     const arranque = fase.desde;
+    const yaLlego = fase.tipo === "llegando";
 
     const id = setInterval(async () => {
       const r = await fetch(RUTA_ACTUALIZAR, { cache: "no-store" }).catch(() => null);
       const d: EstadoActualizacion | null = r?.ok ? await r.json().catch(() => null) : null;
       if (d) setEstado(d);
+      if (!d) return;
 
-      if (d && d.version !== versionAlPedir.current) {
+      const cambio = cambioDesdeElPedido(d, {
+        version: versionAlPedir.current,
+        corrida: corridaAlPedir.current,
+      });
+
+      // TERMINO. Se vuelve a avisar aunque ya se haya avisado al llegar lo
+      // primero: lo que se ve en pantalla todavía es de la mitad de la corrida.
+      if (cambio === "termino") {
         setFase({ tipo: "listo" });
         avisar.current();
         return;
       }
+
+      // LLEGO ALGO. Se avisa UNA sola vez --en la transición-- para que la
+      // pantalla muestre lo que ya entró, y se sigue esperando el final. Sin el
+      // `yaLlego`, cada vuelta del intervalo volvería a pedirle los datos al
+      // servidor cada diez segundos durante toda la corrida.
+      if (cambio === "llego_algo" && !yaLlego) {
+        setFase({ tipo: "llegando", desde: arranque });
+        avisar.current();
+      }
+
       if (Date.now() - arranque > PACIENCIA_MINUTOS * 60_000) {
         setFase({ tipo: "tardando" });
       }
@@ -196,6 +228,7 @@ export default function BotonActualizar({
       minutos: cuerpo.minutos,
       esperaMinutos: cuerpo.esperaMinutos,
       sellInPendiente: cuerpo.sellInPendiente === true,
+      corrida: cuerpo.corrida ?? null,
     });
 
     if (resultado === "al_dia") {
@@ -208,10 +241,14 @@ export default function BotonActualizar({
     }
 
     versionAlPedir.current = cuerpo.version;
+    corridaAlPedir.current = cuerpo.corrida ?? null;
     setFase({ tipo: "esperando", desde: Date.now() });
   }, [onDatosNuevos]);
 
-  const trabajando = fase.tipo === "pidiendo" || fase.tipo === "esperando";
+  // "llegando" tambien es trabajando: el boton sigue deshabilitado porque la
+  // corrida no termino, y apretarlo de nuevo no haria mas que encolar otra.
+  const trabajando =
+    fase.tipo === "pidiendo" || fase.tipo === "esperando" || fase.tipo === "llegando";
 
   return (
     <div className="flex flex-col items-end gap-1">
@@ -261,6 +298,18 @@ function Leyenda({
     return (
       <p className="text-muted text-[11px]">
         Buscando datos nuevos… suele tardar un par de minutos.
+      </p>
+    );
+  }
+  // LLEGO ALGO PERO FALTA. La pantalla YA tiene datos nuevos --se releyó al
+  // entrar en esta fase-- y por eso no dice "buscando". Lo que dice es que no
+  // es todo, que es lo que antes se callaba: el cartel saltaba a "Listo" con el
+  // primer paso y quien lo leía daba por terminada una corrida que recién
+  // empezaba.
+  if (fase.tipo === "llegando") {
+    return (
+      <p className="text-muted text-[11px]">
+        Llegaron datos nuevos · el pipeline sigue corriendo…
       </p>
     );
   }
