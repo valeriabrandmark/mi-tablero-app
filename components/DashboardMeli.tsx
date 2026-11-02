@@ -1033,6 +1033,29 @@ export default function DashboardMeliPage({
             </Panel>
           </div>
 
+          <Panel
+            titulo="Artículos"
+            nota={`${data.articulos.length} SKUs · click para filtrar · impuestos aparte (${fmtPct(CARGA_IMPOSITIVA)})`}
+          >
+            <Tabla
+              filas={data.articulos}
+              columnas={columnasArticulos(data.articulos)}
+              // La consulta trae hasta TOPE_ARTICULOS líneas. Si llegó al tope, el
+              // total es el de lo que se ve y NO el del recorte entero, así que
+              // la etiqueta lo dice en vez de dejar creer que es todo.
+              etiquetaTotal={
+                data.articulos.length === TOPE_ARTICULOS
+                  ? `Total (top ${TOPE_ARTICULOS})`
+                  : "Total"
+              }
+              clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
+              onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
+              activa={(a) =>
+                filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false
+              }
+            />
+          </Panel>
+
           {/* Las cancelaciones van al FINAL y en su propio panel, no mezcladas
               con las ventas. Es una decisión, no una comodidad: una cancelación
               no es una venta, así que no entra en ningún KPI de arriba ni en
@@ -1089,29 +1112,6 @@ export default function DashboardMeliPage({
               </p>
             </Panel>
           )}
-
-          <Panel
-            titulo="Artículos"
-            nota={`${data.articulos.length} SKUs · click para filtrar · impuestos aparte (${fmtPct(CARGA_IMPOSITIVA)})`}
-          >
-            <Tabla
-              filas={data.articulos}
-              columnas={columnasArticulos(data.articulos)}
-              // La consulta trae hasta TOPE_ARTICULOS líneas. Si llegó al tope, el
-              // total es el de lo que se ve y NO el del recorte entero, así que
-              // la etiqueta lo dice en vez de dejar creer que es todo.
-              etiquetaTotal={
-                data.articulos.length === TOPE_ARTICULOS
-                  ? `Total (top ${TOPE_ARTICULOS})`
-                  : "Total"
-              }
-              clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
-              onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
-              activa={(a) =>
-                filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false
-              }
-            />
-          </Panel>
         </div>
       )}
     </div>
