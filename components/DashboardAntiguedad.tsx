@@ -266,6 +266,11 @@ export default function DashboardAntiguedadPage() {
   const sinEnlazar =
     data != null && data.antiguedadAl != null && data.antiguedadSkus === 0;
   const sinFoto = sinCalcular || sinEnlazar;
+  // FOTO VIEJA: el paso corre todas las noches, así que una foto de más de
+  // dos días quiere decir que dejó de correr. Los días y los tramos que se
+  // ven son de esa fecha, no de hoy, y hay que decirlo arriba de todo.
+  const diasFoto = data?.antiguedadDias ?? null;
+  const fotoVieja = diasFoto != null && diasFoto > 2;
   const sinCambios =
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
@@ -377,6 +382,21 @@ export default function DashboardAntiguedadPage() {
             </button>
           ))}
         </div>
+      )}
+
+      {fotoVieja && (
+        <Aviso tono="alerta">
+          <p className="font-medium">
+            La antigüedad en Full está desactualizada: es del{" "}
+            {fmtFechaCorta(data!.antiguedadAl!)} (hace {diasFoto} días).
+          </p>
+          <p className="mt-1">
+            El cálculo nocturno («Antigüedad Full» en GitHub Actions de
+            tablero_quo) dejó de guardar fotos. Los días y tramos de abajo son de
+            esa fecha, y sólo se muestran para artículos que hoy tienen stock en
+            Full.
+          </p>
+        </Aviso>
       )}
 
       {error && (
