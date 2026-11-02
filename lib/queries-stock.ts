@@ -196,7 +196,9 @@ base as (
   left join costo c on c.sku = s.sku
   left join ventas v on v.sku = s.sku
   left join compras co on co.sku = s.sku
-  left join antiguedad ant on ant.sku = s.sku
+  -- Sólo si hoy hay stock disponible en Full: ver la misma regla en
+  -- lib/queries-stock-antiguedad.ts.
+  left join antiguedad ant on ant.sku = s.sku and s.full_ml > 0
   where s.total > 0
     and coalesce(a."proveedorNombre", '') <> all($2::text[])
 ),

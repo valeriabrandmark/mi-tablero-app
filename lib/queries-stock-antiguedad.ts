@@ -212,7 +212,11 @@ base as (
   left join bronze.proveedores_grupo pg on pg.proveedor = ar."proveedorNombre"
   left join costo c on c.sku = s.sku
   left join ventas v on v.sku = s.sku
-  left join ant a on a.sku = s.sku
+  -- SOLO SI HOY HAY STOCK EN FULL. La foto de antigüedad puede ser de días
+  -- atrás (sólo se calcula para inventarios con stock): un artículo que se
+  -- vendió entero después de la foto seguía mostrando sus "104 días en Full"
+  -- con cero unidades. Sin stock no hay antigüedad que mostrar.
+  left join ant a on a.sku = s.sku and (s.aptas + s.no_aptas) > 0
   where s.sku is not null
     and (s.aptas + s.tuc + s.no_aptas) > 0
     and coalesce(ar."proveedorNombre", '') <> all($1::text[])
@@ -445,6 +449,7 @@ async function getOpcionesAntiguedadDirecto() {
  */
 async function getFotoAntiguedad(): Promise<{
   fecha: string | null;
+  dias: number | null;
   skus: number;
   skusFull: number;
 }> {
@@ -461,8 +466,9 @@ async function getFotoAntiguedad(): Promise<{
   );
 
   try {
-    const fila = await queryOne<{ fecha: string | null; skus: string }>(
+    const fila = await queryOne<{ fecha: string | null; skus: string; dias: string | null }>(
       `select to_char(max(fecha), 'YYYY-MM-DD')                          as fecha,
+              current_date - max(fecha)                                  as dias,
               count(distinct sku) filter (
                 where fecha = (select max(fecha) from bronze.ml_stock_antiguedad)
               )                                                          as skus
@@ -470,11 +476,12 @@ async function getFotoAntiguedad(): Promise<{
     );
     return {
       fecha: fila?.fecha ?? null,
+      dias: fila?.dias == null ? null : num(fila.dias),
       skus: num(fila?.skus),
       skusFull: num(enFull?.v),
     };
   } catch {
-    return { fecha: null, skus: 0, skusFull: num(enFull?.v) };
+    return { fecha: null, dias: null, skus: 0, skusFull: num(enFull?.v) };
   }
 }
 
@@ -498,6 +505,7 @@ async function getDashboardAntiguedadDirecto(
     ventanaVentas: VENTANA_VENTAS_DIAS,
     diasPorVencer: DIAS_POR_VENCER_ALERTA,
     antiguedadAl: foto.fecha,
+    antiguedadDias: foto.dias,
     antiguedadSkus: foto.skus,
     antiguedadSkusFull: foto.skusFull,
     generadoEn: new Date().toISOString(),

@@ -1746,6 +1746,8 @@ export type DashboardAntiguedad = {
   diasPorVencer: number;
   /** Fecha de la última foto de antigüedad. `null` si todavía no corrió. */
   antiguedadAl: string | null;
+  /** Cuántos días tiene esa foto, según la base. Más de 2: dejó de correr. */
+  antiguedadDias: number | null;
   /**
    * Cuántos SKU trae esa foto. Puede ser 0 con fecha cargada: el paso calcula
    * por inventario de Mercado Libre y el enlace con nuestro código es otro
