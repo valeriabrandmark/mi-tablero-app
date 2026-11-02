@@ -79,6 +79,26 @@ export function fmtFechaCortaConAnio(iso: string): string {
 }
 
 /**
+ * `31/10/26 14:07` para las tablas de Mercado Libre, donde la hora importa.
+ *
+ * Recibe "YYYY-MM-DD HH:MM" y lo parte, igual que las dos de arriba. NO
+ * construye un `Date`: la hora ya viene convertida a la de Buenos Aires por el
+ * servidor, y pasarla por `Date` en el navegador la volvería a correr según el
+ * huso de quien mire. En una tabla de ventas por hora, un corrimiento de tres
+ * horas no se nota como error -- se lee como que vendimos de madrugada.
+ *
+ * Si no hay hora devuelve sólo la fecha: una orden sin hora es un dato que
+ * falta, y escribir "00:00" la haría pasar por medianoche.
+ */
+export function fmtFechaHora(valor: string | null | undefined): string {
+  if (!valor) return "—";
+  const [fecha, hora] = valor.trim().split(/[ T]/);
+  if (!fecha) return "—";
+  const corta = fmtFechaCortaConAnio(fecha);
+  return hora ? `${corta} ${hora.slice(0, 5)}` : corta;
+}
+
+/**
  * Formateador que le corresponde a cada métrica de objetivos. Existe para que
  * un objetivo de facturación no se muestre como "45.000.000" pelado ni uno de
  * unidades con signo de pesos.

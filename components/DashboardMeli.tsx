@@ -22,7 +22,7 @@ import {
   TarjetaKpi,
 } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
-import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
+import { fmtFechaCorta, fmtFechaHora, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { CARGA_IMPOSITIVA, TOPE_ARTICULOS } from "@/lib/meli";
 import { PALETA, TEMA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
@@ -93,6 +93,16 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
         "Número de orden de Mercado Libre. Se puede copiar y pegar en el buscador de ML.",
       celda: (a) => celdaOrden(a.nroOrden),
       orden: (a) => a.nroOrden,
+    },
+    {
+      titulo: "Fecha y hora",
+      ayuda:
+        "Cuándo se hizo la orden, en hora de Buenos Aires. La hora sale de " +
+        "bronze.ml_ventas; si esa orden todavía no está ahí, queda un guión.",
+      celda: (a) => (
+        <span className="whitespace-nowrap">{fmtFechaHora(a.fechaHora)}</span>
+      ),
+      orden: (a) => a.fechaHora,
     },
     { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
     {
@@ -1023,6 +1033,29 @@ export default function DashboardMeliPage({
             </Panel>
           </div>
 
+          <Panel
+            titulo="Artículos"
+            nota={`${data.articulos.length} SKUs · click para filtrar · impuestos aparte (${fmtPct(CARGA_IMPOSITIVA)})`}
+          >
+            <Tabla
+              filas={data.articulos}
+              columnas={columnasArticulos(data.articulos)}
+              // La consulta trae hasta TOPE_ARTICULOS líneas. Si llegó al tope, el
+              // total es el de lo que se ve y NO el del recorte entero, así que
+              // la etiqueta lo dice en vez de dejar creer que es todo.
+              etiquetaTotal={
+                data.articulos.length === TOPE_ARTICULOS
+                  ? `Total (top ${TOPE_ARTICULOS})`
+                  : "Total"
+              }
+              clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
+              onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
+              activa={(a) =>
+                filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false
+              }
+            />
+          </Panel>
+
           {/* Las cancelaciones van al FINAL y en su propio panel, no mezcladas
               con las ventas. Es una decisión, no una comodidad: una cancelación
               no es una venta, así que no entra en ningún KPI de arriba ni en
@@ -1079,29 +1112,6 @@ export default function DashboardMeliPage({
               </p>
             </Panel>
           )}
-
-          <Panel
-            titulo="Artículos"
-            nota={`${data.articulos.length} SKUs · click para filtrar · impuestos aparte (${fmtPct(CARGA_IMPOSITIVA)})`}
-          >
-            <Tabla
-              filas={data.articulos}
-              columnas={columnasArticulos(data.articulos)}
-              // La consulta trae hasta TOPE_ARTICULOS líneas. Si llegó al tope, el
-              // total es el de lo que se ve y NO el del recorte entero, así que
-              // la etiqueta lo dice en vez de dejar creer que es todo.
-              etiquetaTotal={
-                data.articulos.length === TOPE_ARTICULOS
-                  ? `Total (top ${TOPE_ARTICULOS})`
-                  : "Total"
-              }
-              clave={(a, i) => `${a.sku ?? "sin-sku"}-${i}`}
-              onClickFila={(a) => a.sku && alternarEn("sku")(a.sku)}
-              activa={(a) =>
-                filtros.sku?.length ? filtros.sku.includes(a.sku ?? "") : false
-              }
-            />
-          </Panel>
         </div>
       )}
     </div>

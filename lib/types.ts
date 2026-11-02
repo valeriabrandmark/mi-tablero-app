@@ -827,6 +827,14 @@ export type ArticuloMeli = {
 export type LineaVentaMeli = ArticuloMeli & {
   /** El número de orden de Mercado Libre, para ir a buscarla allá. */
   nroOrden: string | null;
+  /**
+   * Cuándo se hizo la orden, "YYYY-MM-DD HH:MM" en hora de Buenos Aires.
+   *
+   * Sale de `bronze.ml_ventas.date_created` y no de `gold.fact_ventas.fecha`,
+   * que es un `date` pelado sin hora. `null` si esa orden todavía no está en
+   * bronze.
+   */
+  fechaHora: string | null;
 };
 
 export type OpcionesMeli = {
@@ -913,6 +921,12 @@ export type FilaAlertaMeli = {
    */
   parcial: boolean;
   fecha: string | null;
+  /**
+   * La misma fecha con la hora, "YYYY-MM-DD HH:MM" en hora de Buenos Aires.
+   * Ver `LineaVentaMeli.fechaHora`. `fecha` se mantiene aparte porque es la de
+   * `gold.fact_ventas` y existe siempre; ésta puede faltar.
+   */
+  fechaHora: string | null;
   nroOrden: string | null;
   sku: string | null;
   producto: string | null;

@@ -10,7 +10,7 @@ import {
 } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
-import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
+import { fmtFechaCorta, fmtFechaHora, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import {
   CARGA_IMPOSITIVA,
   IMPUESTOS,
@@ -94,9 +94,15 @@ function columnas(filas: FilaAlertaMeli[]): Columna<FilaAlertaMeli>[] {
       orden: (f) => f.nivel,
     },
     {
-      titulo: "Fecha",
-      celda: (f) => (f.fecha ? fmtFechaCorta(f.fecha) : "—"),
-      orden: (f) => f.fecha,
+      titulo: "Fecha y hora",
+      ayuda:
+        "Cuándo se hizo la orden, en hora de Buenos Aires. La hora sale de " +
+        "bronze.ml_ventas; si esa orden todavía no está ahí, queda sólo el día.",
+      // Se ordena por `fechaHora` y se cae a `fecha` cuando falta, para que las
+      // órdenes sin hora no se vayan todas juntas al final: con el día alcanza
+      // para ubicarlas entre las demás.
+      celda: (f) => (f.fechaHora ? fmtFechaHora(f.fechaHora) : f.fecha ? fmtFechaCorta(f.fecha) : "—"),
+      orden: (f) => f.fechaHora ?? f.fecha,
     },
     {
       titulo: "N° Orden",
