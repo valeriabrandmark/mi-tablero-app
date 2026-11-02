@@ -12,7 +12,7 @@ import {
   VENTANA_POR_DEFECTO,
   tramoCobertura,
 } from "@/lib/stock";
-import { FULL_POR_SKU, POR_INVENTARIO_SKU } from "@/lib/sql-meli";
+import { ANTIGUEDAD_VIGENTE, FULL_POR_SKU, POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import type {
   DashboardStock,
@@ -105,9 +105,10 @@ antiguedad as (
          case when sum(a.unidades) > 0
               then sum(a.dias_promedio * a.unidades) / sum(a.unidades)
          end                                                       as dias
-  from bronze.ml_stock_antiguedad a
-  where a.fecha = (select max(fecha) from bronze.ml_stock_antiguedad)
-    and a.sku is not null
+  -- La última foto de cada inventario, no la del último día: ver
+  -- ANTIGUEDAD_VIGENTE en lib/sql-meli.ts.
+  from (${ANTIGUEDAD_VIGENTE}) a
+  where a.sku is not null
   group by a.sku
 ),
 ventas as (
