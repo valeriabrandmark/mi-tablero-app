@@ -63,6 +63,33 @@ const COMISION = "coalesce(comision, 0) * cantidad";
 const ENVIO = "coalesce(envio, 0)";
 const RENTABILIDAD = `(${VENTA_SIVA}) - (${COSTO}) - (${COMISION}) - (${ENVIO})`;
 
+/**
+ * LA HORA DE LA ORDEN, que en gold no está.
+ *
+ * `gold.fact_ventas.fecha` es un `date` pelado: dice el día y nada más. La hora
+ * vive en `bronze.ml_ventas.date_created`, y hay que convertirla a hora de
+ * Buenos Aires acá --no en el navegador-- para que la tabla diga la misma hora
+ * para todos los que la miren.
+ *
+ * VA COMO SUBCONSULTA CON `limit 1` Y NO COMO JOIN, por lo mismo que el `exists`
+ * de las alertas: `bronze.ml_ventas` puede tener la misma orden más de una vez
+ * --pasó, 790 filas de más por un error de huso, ver
+ * limpiar_duplicados_ml_ventas.sql-- y un join pelado multiplicaría la fila de
+ * venta, que es como se inflan los totales sin que nada falle. Hoy la tabla
+ * está limpia (98.384 filas, 98.384 ids), pero la consulta no tiene por qué
+ * depender de que la limpieza siga hecha.
+ *
+ * Una orden que no esté en bronze devuelve `null` y la fila igual aparece: sin
+ * hora, no desaparecida.
+ */
+const FECHA_HORA = `(select to_char(v.date_created::timestamptz
+                                      at time zone 'America/Argentina/Buenos_Aires',
+                                    'YYYY-MM-DD HH24:MI')
+                       from bronze.ml_ventas v
+                      where v.id::bigint = fv.nro_orden::bigint
+                      order by v.date_created
+                      limit 1)`;
+
 // Las mismas expresiones calificadas con el alias de la tabla, para las
 // consultas que hacen join contra bronze.ml_ventas y donde una columna suelta
 // seria ambigua. Se derivan de las de arriba en vez de escribirse dos veces:
@@ -753,6 +780,10 @@ async function getArticulos(f: FiltrosMeli): Promise<LineaVentaMeli[]> {
   const filas = await query<Record<string, string>>(
     `select sku,
             nro_orden,
+            -- nro_orden es clave de agrupacion, asi que la subconsulta da un
+            -- solo valor por grupo. El max es lo que se lo dice a Postgres.
+            -- (Sin backticks: adentro de un template literal cortan la cadena.)
+            max(${FECHA_HORA})                as fecha_hora,
             max(producto)                     as producto,
             max(proveedor)                    as proveedor,
             max(marca)                        as marca,
@@ -786,6 +817,7 @@ async function getArticulos(f: FiltrosMeli): Promise<LineaVentaMeli[]> {
     // numero, esto empieza a mostrar ordenes que no existen, y el lugar para
     // arreglarlo es el tipo de la columna en modelo.py, no aca.
     nroOrden: r.nro_orden == null ? null : String(BigInt(Math.trunc(Number(r.nro_orden)))),
+    fechaHora: r.fecha_hora ?? null,
   }));
 }
 
@@ -1046,6 +1078,7 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
 
   const filas = await query<Record<string, string | null>>(
     `select to_char(fecha, 'YYYY-MM-DD')     as fecha,
+            ${FECHA_HORA}                    as fecha_hora,
             nro_orden::bigint::text          as nro_orden,
             sku, producto, proveedor, marca,
             cantidad,
@@ -1108,6 +1141,7 @@ async function getFilasAlertas(f: FiltrosMeli): Promise<FilaAlertaMeli[]> {
       nivel,
       parcial: r.parcial === "true",
       fecha: r.fecha,
+      fechaHora: r.fecha_hora ?? null,
       nroOrden: r.nro_orden,
       sku: r.sku,
       producto: r.producto,

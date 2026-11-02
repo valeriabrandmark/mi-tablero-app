@@ -22,7 +22,7 @@ import {
   TarjetaKpi,
 } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
-import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
+import { fmtFechaCorta, fmtFechaHora, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
 import { CARGA_IMPOSITIVA, TOPE_ARTICULOS } from "@/lib/meli";
 import { PALETA, TEMA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
@@ -93,6 +93,16 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
         "Número de orden de Mercado Libre. Se puede copiar y pegar en el buscador de ML.",
       celda: (a) => celdaOrden(a.nroOrden),
       orden: (a) => a.nroOrden,
+    },
+    {
+      titulo: "Fecha y hora",
+      ayuda:
+        "Cuándo se hizo la orden, en hora de Buenos Aires. La hora sale de " +
+        "bronze.ml_ventas; si esa orden todavía no está ahí, queda un guión.",
+      celda: (a) => (
+        <span className="whitespace-nowrap">{fmtFechaHora(a.fechaHora)}</span>
+      ),
+      orden: (a) => a.fechaHora,
     },
     { titulo: "SKU", celda: (a) => a.sku ?? "—", orden: (a) => a.sku },
     {
