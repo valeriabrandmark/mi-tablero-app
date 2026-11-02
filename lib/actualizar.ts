@@ -117,7 +117,56 @@ export type EstadoActualizacion = {
    * nuevos NO están. Con esto la pantalla puede decir la diferencia.
    */
   sellInPendiente: boolean;
+  /**
+   * CUANDO TERMINO LA CORRIDA ENTERA, no un paso suelto.
+   *
+   * `version` cambia con CADA paso que termina, así que sube apenas el
+   * pipeline arranca: el 02/11 la corrida empezó 23:59:33, el primer paso
+   * escribió a los 29 segundos y la corrida terminó 00:07:22. Con sólo
+   * `version`, el botón decía "Listo: datos nuevos" a los 30 segundos de una
+   * corrida de ocho minutos, con el catálogo de Mercado Libre y la reposición
+   * de Full todavía sin traer.
+   *
+   * Esto sale de `ops.estado['corrida']`, que el orquestador escribe al
+   * terminar --por `atexit`, así que también cuando se corta--. Las dos señales
+   * se usan juntas: `version` dice "llegó algo" y esto dice "terminó".
+   *
+   * `null` mientras el orquestador todavía no tenga el cambio que la escribe.
+   * El botón lo trata como antes --versión nueva es "listo"-- así que el
+   * tablero se puede desplegar antes que el orquestador sin que nadie quede
+   * esperando un final que no va a llegar.
+   */
+  corrida: string | null;
 };
+
+/** Qué pasó entre lo que había al apretar el botón y lo que hay ahora. */
+export type CambioDesdeElPedido = "nada" | "llego_algo" | "termino";
+
+/**
+ * Las dos señales, leídas juntas.
+ *
+ * Es una función suelta y no la lógica metida adentro del intervalo del botón
+ * para poder probarla sin navegador: son cuatro casos y tres de ellos sólo
+ * pasan con el pipeline corriendo, que no es algo que se pueda reproducir a
+ * mano cuando uno quiere.
+ *
+ * EL FINAL GANA SOBRE TODO. Si la corrida terminó no importa qué haya pasado
+ * con `version`: ya está todo.
+ *
+ * Y SI AL APRETAR NO HABIA MARCA DE FIN, una versión nueva es el final. Ese es
+ * el caso de un orquestador que todavía no escribe la marca: sin esto, el botón
+ * esperaría los 25 minutos de su paciencia un final que nadie va a escribir, y
+ * el tablero no se podría desplegar antes que el otro repo.
+ */
+export function cambioDesdeElPedido(
+  ahora: EstadoActualizacion,
+  alPedir: { version: string | null; corrida: string | null },
+): CambioDesdeElPedido {
+  if (ahora.corrida !== null && ahora.corrida !== alPedir.corrida) return "termino";
+  if (ahora.version === alPedir.version) return "nada";
+  if (alPedir.corrida === null) return "termino";
+  return "llego_algo";
+}
 
 /**
  * Cuántos minutos faltan para que el botón pueda volver a pedir una corrida.
