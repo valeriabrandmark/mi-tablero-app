@@ -87,3 +87,22 @@ export const FULL_POR_SKU = `
   left join bronze.ml_reposicion_full r on r.inventory_id = f.inventory_id
   where i.sku is not null
   group by i.sku`;
+
+/** Hasta cuántos días atrás se acepta la última foto de un inventario. */
+export const DIAS_VIGENCIA_ANTIGUEDAD = 15;
+
+/**
+ * La ÚLTIMA foto de antigüedad de CADA inventario, de los últimos
+ * DIAS_VIGENCIA_ANTIGUEDAD días. Se usa como tabla, adentro de un `from ( ... ) a`.
+ *
+ * NO ES "LA FOTO DEL ÚLTIMO DÍA". Desde noviembre de 2026 el paso de
+ * tablero_quo (ml_antiguedad.py) no llega a recorrer todos los inventarios en
+ * una corrida --Mercado Libre frena el endpoint de operaciones-- así que cada
+ * noche actualiza una parte, empezando por los más desactualizados. Quedarse
+ * con `max(fecha)` mostraría sólo lo que se calculó anoche.
+ */
+export const ANTIGUEDAD_VIGENTE = `
+  select distinct on (inventory_id) *
+  from bronze.ml_stock_antiguedad
+  where fecha >= current_date - ${DIAS_VIGENCIA_ANTIGUEDAD}
+  order by inventory_id, fecha desc`;

@@ -263,14 +263,20 @@ export default function DashboardAntiguedadPage() {
   // Mercado Libre sin enlazar a nuestro SKU. En los dos casos mostrar ceros
   // sería peor que no mostrar nada: se leen como "no hay mercadería vieja".
   const sinCalcular = data != null && data.antiguedadAl == null;
-  const sinEnlazar =
-    data != null && data.antiguedadAl != null && data.antiguedadSkus === 0;
-  const sinFoto = sinCalcular || sinEnlazar;
-  // FOTO VIEJA: el paso corre todas las noches, así que una foto de más de
-  // dos días quiere decir que dejó de correr. Los días y los tramos que se
-  // ven son de esa fecha, no de hoy, y hay que decirlo arriba de todo.
+  // FOTO VIEJA: el paso corre todas las noches y actualiza una parte de los
+  // inventarios, así que si la última actualización tiene más de dos días es
+  // que dejó de correr. Hay que decirlo arriba de todo.
   const diasFoto = data?.antiguedadDias ?? null;
   const fotoVieja = diasFoto != null && diasFoto > 2;
+  // Sin SKU con foto vigente: si es porque la foto es vieja lo dice el aviso de
+  // arriba; si no, es que no se enlazó con nuestros códigos.
+  const sinEnlazar =
+    data != null &&
+    data.antiguedadAl != null &&
+    data.antiguedadSkus === 0 &&
+    !fotoVieja;
+  const sinFoto =
+    sinCalcular || sinEnlazar || (fotoVieja && data?.antiguedadSkus === 0);
   const sinCambios =
     sinValores(filtros.proveedor) &&
     sinValores(filtros.marca) &&
@@ -392,9 +398,9 @@ export default function DashboardAntiguedadPage() {
           </p>
           <p className="mt-1">
             El cálculo nocturno («Antigüedad Full» en GitHub Actions de
-            tablero_quo) dejó de guardar fotos. Los días y tramos de abajo son de
-            esa fecha, y sólo se muestran para artículos que hoy tienen stock en
-            Full.
+            tablero_quo) no guardó nada desde entonces. Cada artículo muestra
+            su último cálculo de los últimos 15 días, y sólo si hoy tiene stock
+            en Full.
           </p>
         </Aviso>
       )}

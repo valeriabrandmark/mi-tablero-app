@@ -1,7 +1,7 @@
 import { query, queryOne } from "@/lib/db";
 import { CANAL_MELI } from "@/lib/meli";
 import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
-import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
+import { ANTIGUEDAD_VIGENTE, POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import { PROVEEDORES_NO_MERCADERIA } from "@/lib/stock";
 import {
   COLUMNAS_EN_RIESGO,
@@ -47,9 +47,10 @@ with ant as (
          case when sum(a.unidades) > 0
               then sum(a.dias_promedio * a.unidades) / sum(a.unidades)
          end as dias
-  from bronze.ml_stock_antiguedad a
-  where a.fecha = (select max(fecha) from bronze.ml_stock_antiguedad)
-    and a.sku is not null
+  -- La última foto de cada inventario, no la del último día: ver
+  -- ANTIGUEDAD_VIGENTE en lib/sql-meli.ts.
+  from (${ANTIGUEDAD_VIGENTE}) a
+  where a.sku is not null
   group by a.sku
 ),
 por_inv as (

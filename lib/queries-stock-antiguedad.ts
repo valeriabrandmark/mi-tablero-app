@@ -2,7 +2,7 @@ import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { buscadorDeArticulo } from "@/lib/sql-codigos";
-import { POR_INVENTARIO_SKU } from "@/lib/sql-meli";
+import { ANTIGUEDAD_VIGENTE, POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import {
   GRUPO_PROVEEDOR_POR_DEFECTO,
@@ -110,9 +110,10 @@ ant as (
          case when sum(a.unidades) > 0
               then sum(a.dias_promedio * a.unidades) / sum(a.unidades)
          end as dias
-  from bronze.ml_stock_antiguedad a
-  where a.fecha = (select max(fecha) from bronze.ml_stock_antiguedad)
-    and a.sku is not null
+  -- La última foto de cada inventario, no la del último día: ver
+  -- ANTIGUEDAD_VIGENTE en lib/sql-meli.ts.
+  from (${ANTIGUEDAD_VIGENTE}) a
+  where a.sku is not null
   group by a.sku
 ),
 lotes as (${LOTES}
@@ -469,9 +470,7 @@ async function getFotoAntiguedad(): Promise<{
     const fila = await queryOne<{ fecha: string | null; skus: string; dias: string | null }>(
       `select to_char(max(fecha), 'YYYY-MM-DD')                          as fecha,
               current_date - max(fecha)                                  as dias,
-              count(distinct sku) filter (
-                where fecha = (select max(fecha) from bronze.ml_stock_antiguedad)
-              )                                                          as skus
+              (select count(distinct sku) from (${ANTIGUEDAD_VIGENTE}) v) as skus
        from bronze.ml_stock_antiguedad`,
     );
     return {
