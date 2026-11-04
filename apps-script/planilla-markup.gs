@@ -176,13 +176,37 @@ function actualizarPrecios() {
   hoja.getRange(FILA_ENCABEZADO + 1, COL_COMPETENCIA, cuantas, 1).setValues(competencias);
   SpreadsheetApp.flush();
 
-  var cuando = new Date(datos.generadoEn).toLocaleString("es-AR");
+  // SE MUESTRA CUANDO CORRIO LA COMPARACION, no cuando contesto el tablero.
+  // Antes decia la hora de la respuesta --siempre "ahora"-- al lado de unos
+  // precios que podian ser de hace tres dias.
+  var cuando = datos.comparadoEn
+    ? new Date(datos.comparadoEn).toLocaleString("es-AR")
+    : null;
+  var dias = cuando
+    ? Math.floor((new Date() - new Date(datos.comparadoEn)) / 86400000)
+    : null;
+
+  var pie;
+  if (!cuando) {
+    pie = "No se sabe de cuando es la comparacion.";
+  } else if (dias >= 1) {
+    // SE AVISA CUANDO EL DATO NO ES DE HOY. Una comparacion vieja se pega
+    // igual de prolija que una de hoy: sin esto, la planilla se ve recien
+    // actualizada y los precios de la competencia son de la semana pasada.
+    pie =
+      "OJO: la competencia es de la comparacion del " + cuando +
+      " (" + dias + (dias === 1 ? " dia" : " dias") + " atras). " +
+      "Para traer la de hoy hay que correr la comparacion primero.";
+  } else {
+    pie = "Comparacion del " + cuando + ".";
+  }
+
   ui.alert(
     "Listo",
     "Precio de venta actual escrito en " + conNuestro + " articulos.\n" +
     "Precio de la competencia escrito en " + conCompetencia + ".\n" +
     sinDato + " SKU de la planilla no estan en la ultima comparacion y " +
-    "quedaron como estaban.\n\nDatos del tablero al " + cuando + ".",
+    "quedaron como estaban.\n\n" + pie,
     ui.ButtonSet.OK
   );
 }
