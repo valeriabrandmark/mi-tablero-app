@@ -1374,13 +1374,33 @@ export async function aprobarPorIds(ids: number[], quien: string): Promise<numbe
  * competir, y la columna "Estado con precio de la competencia" diria PIERDE
  * sobre una tienda que no nos obliga a nada.
  */
-export async function getPreciosParaPlanilla(): Promise<
-  { sku: string; nuestro: number | null; competencia: number | null }[]
-> {
-  const corrida = await queryOne<{ id: number }>(ULTIMA_CORRIDA, []);
-  if (!corrida) return [];
+export async function getPreciosParaPlanilla(): Promise<{
+  /**
+   * CUANDO SE MIRO A LA COMPETENCIA, que NO es cuando se pidió el dato.
+   *
+   * La primera versión mandaba `new Date()` y el cartel de la planilla decía
+   * "Datos del tablero al 4/11 09:24" sobre precios de la comparación del 2.
+   * La hora de la respuesta siempre es ahora: puesta al lado de unos precios,
+   * afirma que son de ahora, y es justo lo que no se puede saber mirando la
+   * planilla. Una corrida que no se hizo en tres días se ve igual de fresca.
+   */
+  comparadoEn: string | null;
+  filas: { sku: string; nuestro: number | null; competencia: number | null }[];
+}> {
+  const corrida = await queryOne<{ id: number; terminada: string | null }>(
+    `select id, terminada_en as terminada
+       from precios.corrida
+      where tipo = 'propuesta' and estado = 'ok'
+      order by id desc limit 1`,
+    [],
+  );
+  if (!corrida) return { comparadoEn: null, filas: [] };
 
-  return query<{ sku: string; nuestro: number | null; competencia: number | null }>(
+  const filas = await query<{
+    sku: string;
+    nuestro: number | null;
+    competencia: number | null;
+  }>(
     `select p.sku                                  as sku,
             ${PRECIO_VIGENTE}::float8              as nuestro,
             p.referencia_competencia::float8       as competencia
@@ -1389,4 +1409,5 @@ export async function getPreciosParaPlanilla(): Promise<
       order by p.sku`,
     [corrida.id],
   );
+  return { comparadoEn: corrida.terminada, filas };
 }

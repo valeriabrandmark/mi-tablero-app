@@ -79,12 +79,12 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const filas = await getPreciosParaPlanilla();
+  const { comparadoEn, filas } = await getPreciosParaPlanilla();
   return NextResponse.json({
-    // La fecha viaja para que la planilla pueda decir de cuando es lo que
-    // acaba de pegar. Sin eso, una corrida que fallo se ve igual que una que
-    // anduvo: las mismas celdas, con los numeros de antes.
-    generadoEn: new Date().toISOString(),
+    // CUANDO CORRIO LA COMPARACION, no cuando se pidio el dato. Ver
+    // `getPreciosParaPlanilla`: la hora de la respuesta siempre es ahora, y
+    // puesta al lado de unos precios afirma que son de ahora.
+    comparadoEn,
     total: filas.length,
     precios: filas,
   });
