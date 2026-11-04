@@ -46,15 +46,37 @@ function tokenValido(request: NextRequest): boolean {
 
 export async function GET(request: NextRequest) {
   if (!tokenValido(request)) {
-    // NO SE DISTINGUE "falta el token" de "el token esta mal", a proposito:
-    // la diferencia solo le sirve a quien esta probando llaves. Lo que sí se
-    // distingue, en el log del servidor y no acá, es que falte la variable.
-    if (!process.env.PLANILLA_PRECIOS_TOKEN) {
+    // SE DISTINGUE "el servidor no tiene token" DE "el token esta mal", Y LA
+    // PRIMERA VERSION NO LO HACIA.
+    //
+    // Parecia lo prudente: no contar nada. Costo una tarde. La variable se
+    // cargo en Vercel DESPUES del deploy --que es lo normal, y en Vercel no
+    // entra en vigencia hasta el siguiente-- asi que el servidor rechazaba
+    // todo, y el cartel del Apps Script afirmaba "el token no coincide". Se
+    // reviso tres veces un token que estaba bien.
+    //
+    // Y NO SE FILTRA NADA UTIL. Cuando no hay token configurado, la ruta
+    // rechaza TODO: no hay llave que adivinar ni dato que sacar. Lo unico que
+    // se cuenta es que la ruta todavia no esta configurada, que es
+    // exactamente lo que quien la configura necesita saber.
+    const sinConfigurar = !process.env.PLANILLA_PRECIOS_TOKEN;
+    if (sinConfigurar) {
       console.error(
         "PLANILLA_PRECIOS_TOKEN no esta configurada: la planilla no puede leer.",
       );
     }
-    return NextResponse.json({ error: "Sin permiso" }, { status: 401 });
+    return NextResponse.json(
+      {
+        error: "Sin permiso",
+        motivo: sinConfigurar ? "sin_configurar" : "token_invalido",
+        detalle: sinConfigurar
+          ? "El tablero no tiene PLANILLA_PRECIOS_TOKEN. Si ya la cargaste en " +
+            "Vercel, falta volver a desplegar: las variables nuevas recien " +
+            "entran en el deploy siguiente."
+          : "El token del script no coincide con el del tablero.",
+      },
+      { status: 401 },
+    );
   }
 
   const filas = await getPreciosParaPlanilla();

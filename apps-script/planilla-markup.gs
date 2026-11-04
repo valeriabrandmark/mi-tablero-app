@@ -90,13 +90,45 @@ function actualizarPrecios() {
   }
 
   if (respuesta.getResponseCode() !== 200) {
-    ui.alert(
-      "El tablero contesto " + respuesta.getResponseCode(),
-      respuesta.getResponseCode() === 401
-        ? "El token no coincide con el que tiene el tablero (PLANILLA_PRECIOS_TOKEN)."
-        : respuesta.getContentText().slice(0, 300),
-      ui.ButtonSet.OK
-    );
+    // EL CARTEL DICE CUAL DE LAS DOS COSAS ES, Y ANTES NO.
+    //
+    // Decia "el token no coincide" ante cualquier 401, y la primera vez que
+    // fallo de verdad la causa era la otra: la variable estaba cargada en
+    // Vercel pero no desplegada. Se reviso tres veces un token que estaba
+    // bien. Un mensaje que afirma una causa que no comprobó es peor que uno
+    // que dice "no se".
+    var cuerpo = respuesta.getContentText();
+    var motivo = "";
+    var detalle = "";
+    try {
+      var json = JSON.parse(cuerpo);
+      motivo = json.motivo || "";
+      detalle = json.detalle || "";
+    } catch (e) {
+      // El tablero no contesto JSON: lo mas probable es que ni siquiera haya
+      // llegado a la ruta (404 de Vercel, una URL mal escrita, un login de
+      // por medio). Se muestra crudo, que es lo unico honesto.
+    }
+
+    var titulo = "El tablero contesto " + respuesta.getResponseCode();
+    var texto;
+    if (motivo === "sin_configurar") {
+      titulo = "Al tablero le falta el token";
+      texto = detalle;
+    } else if (motivo === "token_invalido") {
+      titulo = "El token no coincide";
+      texto =
+        "El PLANILLA_TOKEN de este script no es igual al " +
+        "PLANILLA_PRECIOS_TOKEN del tablero. Ojo con los espacios o el salto " +
+        "de linea al final cuando se copia y pega.";
+    } else if (respuesta.getResponseCode() === 404) {
+      texto =
+        "La direccion existe pero no esa ruta. Revisa TABLERO_URL, y que el " +
+        "tablero ya se haya desplegado con la ruta /api/precios-tn/planilla.";
+    } else {
+      texto = cuerpo.slice(0, 300);
+    }
+    ui.alert(titulo, texto, ui.ButtonSet.OK);
     return;
   }
 
