@@ -1342,3 +1342,51 @@ export async function aprobarPorIds(ids: number[], quien: string): Promise<numbe
   );
   return filas.length;
 }
+
+/* -------------------------------------------------------------------------
+   La planilla de markup: dos columnas y nada mas.
+   ------------------------------------------------------------------------- */
+
+/**
+ * Lo que la planilla "markup tienda nube" necesita, por SKU.
+ *
+ * ---------------------------------------------------------------------------
+ * SON DOS NUMEROS, Y ESO ES TODO LO QUE HAY QUE MANDAR.
+ *
+ * Esa planilla ya hace las cuentas: su pestaña PRODUCTOS tiene el costo, el
+ * IVA de cada articulo y las formulas de markup, margen y estado, tanto para
+ * el precio propio (columnas J a M, que salen de I) como para el de la
+ * competencia (O a R, que salen de N). Las de la competencia estan escritas
+ * desde el dia uno y dicen `IF(N7="","",...)`: esperan que N se llene.
+ *
+ * Asi que no se manda markup, ni margen, ni estado. Mandarlos seria calcular
+ * de este lado lo que la planilla calcula del otro --con otros supuestos de
+ * cuotas y descuentos, los suyos-- y tener dos numeros que se contradicen en
+ * la misma fila. Se mandan los dos precios y la planilla hace el resto.
+ *
+ *   I  Precio de venta actual   ->  `nuestro`
+ *   N  Precio de la competencia ->  `competencia`
+ *
+ * LA COMPETENCIA ES `referencia_competencia` Y NO EL MINIMO DE LAS
+ * OBSERVACIONES. Es el minimo que calculo el motor, que ya deja afuera a las
+ * fuentes "se mira y no cuenta" --Farmacity, Suavinex--. Sacar el minimo acá
+ * de nuevo pondria en la planilla un precio contra el que decidimos no
+ * competir, y la columna "Estado con precio de la competencia" diria PIERDE
+ * sobre una tienda que no nos obliga a nada.
+ */
+export async function getPreciosParaPlanilla(): Promise<
+  { sku: string; nuestro: number | null; competencia: number | null }[]
+> {
+  const corrida = await queryOne<{ id: number }>(ULTIMA_CORRIDA, []);
+  if (!corrida) return [];
+
+  return query<{ sku: string; nuestro: number | null; competencia: number | null }>(
+    `select p.sku                                  as sku,
+            ${PRECIO_VIGENTE}::float8              as nuestro,
+            p.referencia_competencia::float8       as competencia
+       from precios.propuesta p
+      where p.corrida_id = $1::bigint
+      order by p.sku`,
+    [corrida.id],
+  );
+}
