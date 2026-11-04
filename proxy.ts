@@ -2,22 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { SUPABASE_ANON_KEY, SUPABASE_URL, authConfigurada } from "@/lib/supabase/env";
 import { paginaInicial, permisoDelUsuario, puedeVer } from "@/lib/permisos";
-
-/** Rutas accesibles sin sesión. */
-const RUTAS_PUBLICAS = [
-  "/login",
-  "/auth-no-configurada",
-  "/recuperar",
-  // El canje del link del mail: llega SIN sesión, esa es la idea.
-  "/auth/confirmar",
-  // Se llega con la sesión de recuperación, pero también hay que poder entrar
-  // sin ella para mostrar el cartel de "este link ya no sirve".
-  "/nueva-contrasena",
-];
-
-function esPublica(pathname: string) {
-  return RUTAS_PUBLICAS.some((r) => pathname === r || pathname.startsWith(`${r}/`));
-}
+// La lista vive en lib/ y no acá: es una regla, no plomería de middleware,
+// y asi se puede probar sin levantar Next. Ver el comentario de ese archivo.
+import { esPublica } from "@/lib/rutas-sin-sesion";
 
 /** A las llamadas de datos les conviene un 403 JSON, no el HTML de una página. */
 function sinPermiso(pathname: string) {
