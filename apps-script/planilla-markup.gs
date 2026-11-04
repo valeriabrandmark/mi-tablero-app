@@ -42,9 +42,50 @@
 
 var HOJA = "PRODUCTOS";
 var FILA_ENCABEZADO = 6;      // los datos arrancan en la 7
-var COL_SKU = 1;              // A
-var COL_NUESTRO = 9;          // I
-var COL_COMPETENCIA = 14;     // N
+
+/**
+ * LAS COLUMNAS SE BUSCAN POR SU ENCABEZADO, NO POR SU LETRA.
+ *
+ * La primera version las tenia fijas --A, I, N-- y duro una semana: se
+ * agregaron columnas, "Precio de venta actual" se corrio de I a J y "Precio
+ * de la competencia" de N a O. Con numeros fijos eso no falla con un error:
+ * escribe los precios en la columna de al lado, encima de otra cosa, y hay
+ * que darse cuenta mirando.
+ *
+ * Buscandolas por el titulo, mover o agregar columnas no rompe nada. Y si
+ * alguna no aparece, el script se planta y lo dice, en vez de escribir en el
+ * lugar equivocado.
+ */
+var TITULOS = {
+  sku: ["sku"],
+  nuestro: ["precio de venta actual"],
+  competencia: ["precio de la competencia"],
+};
+
+/** Sin acentos, sin mayusculas y sin espacios de mas, para poder comparar. */
+function normalizar(texto) {
+  return String(texto == null ? "" : texto)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * En que columna esta el encabezado que empieza con alguno de estos textos.
+ * Devuelve 0 si no esta: quien llama decide que hacer, y lo unico correcto
+ * es plantarse.
+ */
+function columnaDe(encabezados, posibles) {
+  for (var c = 0; c < encabezados.length; c++) {
+    var titulo = normalizar(encabezados[c]);
+    for (var p = 0; p < posibles.length; p++) {
+      if (titulo.indexOf(posibles[p]) === 0) return c + 1;
+    }
+  }
+  return 0;
+}
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -138,6 +179,31 @@ function actualizarPrecios() {
     porSku[String(datos.precios[i].sku).trim()] = datos.precios[i];
   }
 
+  // DONDE ESTA CADA COLUMNA, SEGUN EL ENCABEZADO DE HOY.
+  var encabezados = hoja
+    .getRange(FILA_ENCABEZADO, 1, 1, hoja.getLastColumn())
+    .getValues()[0];
+  var COL_SKU = columnaDe(encabezados, TITULOS.sku);
+  var COL_NUESTRO = columnaDe(encabezados, TITULOS.nuestro);
+  var COL_COMPETENCIA = columnaDe(encabezados, TITULOS.competencia);
+
+  var faltan = [];
+  if (!COL_SKU) faltan.push("SKU");
+  if (!COL_NUESTRO) faltan.push("Precio de venta actual");
+  if (!COL_COMPETENCIA) faltan.push("Precio de la competencia");
+  if (faltan.length) {
+    // NO SE ADIVINA. Escribir en la columna de al lado pisa datos buenos y no
+    // se nota hasta que alguien mira.
+    ui.alert(
+      "No encuentro las columnas",
+      "En la fila " + FILA_ENCABEZADO + " de " + HOJA + " no esta: " +
+      faltan.join(", ") + ".\n\nSi les cambiaste el nombre, avisame cual es " +
+      "el nuevo y lo ajusto en el script.",
+      ui.ButtonSet.OK
+    );
+    return;
+  }
+
   var ultima = hoja.getLastRow();
   if (ultima <= FILA_ENCABEZADO) {
     ui.alert("La pestaña " + HOJA + " no tiene filas de datos.");
@@ -156,7 +222,11 @@ function actualizarPrecios() {
 
   for (var f = 0; f < cuantas; f++) {
     var sku = String(skus[f][0] || "").trim();
-    if (!sku) continue;
+    // EL "0" TAMBIEN ES VACIO ACA. La columna del SKU ahora es una formula
+    // --`=FUENTES!D2`-- y una formula que apunta a una celda vacia devuelve
+    // 0, no "". Sin esto, cada fila sobrante de la planilla contaria como un
+    // SKU que el comparador no conoce, y el cartel informaria de mas.
+    if (!sku || sku === "0") continue;
     var fila = porSku[sku];
     if (!fila) {
       sinDato++;
@@ -203,10 +273,23 @@ function actualizarPrecios() {
 
   ui.alert(
     "Listo",
-    "Precio de venta actual escrito en " + conNuestro + " articulos.\n" +
-    "Precio de la competencia escrito en " + conCompetencia + ".\n" +
+    "Precio de venta actual (columna " + letra(COL_NUESTRO) + ") escrito en " +
+    conNuestro + " articulos.\n" +
+    "Precio de la competencia (columna " + letra(COL_COMPETENCIA) + ") escrito en " +
+    conCompetencia + ".\n" +
     sinDato + " SKU de la planilla no estan en la ultima comparacion y " +
     "quedaron como estaban.\n\n" + pie,
     ui.ButtonSet.OK
   );
+}
+
+/** El numero de columna como letra, para que el cartel hable como la hoja. */
+function letra(n) {
+  var s = "";
+  while (n > 0) {
+    var r = (n - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
 }
