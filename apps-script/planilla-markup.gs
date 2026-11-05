@@ -1,29 +1,51 @@
 /**
  * Botón "Precios TN → Actualizar precios y competencia" en la planilla
- * "markup tienda nube".
+ * "Markup Tienda nube".
  *
  * ===========================================================================
- *  QUE HACE, Y SOBRE TODO QUE NO TOCA
+ *  EL BOTON ESCRIBE EN SU PROPIA HOJA, Y PRODUCTOS LA BUSCA POR SKU
  * ===========================================================================
  *
- * Llena DOS columnas de la pestaña PRODUCTOS, buscando cada SKU en la
- * columna A:
+ * La primera version escribia los precios DIRECTO en las filas de PRODUCTOS,
+ * por posicion. Andaba, y era una bomba de tiempo: PRODUCTOS sale de FUENTES,
+ * que se actualiza sola. El dia que FUENTES cambie de orden o le entre una
+ * fila, las filas de PRODUCTOS se corren y los precios escritos se quedan
+ * donde estaban -- pegados al producto equivocado, sin que nada avise. Un
+ * precio en la fila de otro articulo no se ve como un error: se ve como un
+ * precio.
  *
- *   I   Precio de venta actual (con IVA)   -> lo que la tienda tiene hoy
- *   N   Precio de la competencia (con IVA) -> el competidor mas barato
+ * Ademas, escribir solo encima tampoco borraba lo viejo: un SKU que salia de
+ * la comparacion conservaba para siempre su ultimo precio.
  *
- * Y NADA MAS. Las columnas O, P, Q y R --markup, margen peor caso, margen
- * 1 pago y estado contra la competencia-- ya son formulas de la planilla y se
- * recalculan solas cuando N se llena. Lo mismo J a M cuando se llena I.
- * Escribirlas desde acá seria calcular con otros supuestos lo que la planilla
- * ya calcula con los suyos, y terminar con dos numeros peleados en la misma
- * fila.
+ * Asi que ahora:
  *
- * LOS SKU QUE EL COMPARADOR NO CONOCE NO SE TOCAN. No se borran ni se ponen
- * en cero: una celda vacia en N significa "no sabemos", y es lo que las
- * formulas de la planilla ya esperan. Un cero significaria "la competencia lo
- * regala", que es una afirmacion, y haria que R diga PIERDE sobre un dato
- * que no existe.
+ *   1. El script BORRA Y REESCRIBE la hoja `PRECIOS TN`, que es suya. Lo que
+ *      no vino en esta corrida desaparece, que es la unica forma de que la
+ *      hoja diga lo que hay y no lo que hubo.
+ *   2. PRODUCTOS trae los dos precios con un BUSCARV por SKU. Si las filas se
+ *      corren, la formula sigue al SKU y el numero viaja con el.
+ *
+ * NO TOCA PRODUCTOS. Ni una celda. Por eso tampoco puede volver a pisar una
+ * formula, que es lo que paso dos veces cuando se movieron las columnas.
+ *
+ * ===========================================================================
+ *  LAS DOS FORMULAS QUE VAN EN PRODUCTOS (una vez, y se arrastran)
+ * ===========================================================================
+ *
+ *   J7   Precio de venta actual (con IVA)
+ *        =IF(OR($A7="";$A7=0);"";IFERROR(VLOOKUP(TO_TEXT($A7);'PRECIOS TN'!$A:$C;2;FALSE);""))
+ *
+ *   O7   Precio de la competencia (con IVA)
+ *        =IF(OR($A7="";$A7=0);"";IFERROR(VLOOKUP(TO_TEXT($A7);'PRECIOS TN'!$A:$C;3;FALSE);""))
+ *
+ * El `TO_TEXT` es por el tipo del SKU: la hoja no cruza el texto "7795001"
+ * con el numero 7795001. Del lado de aca se fuerza texto con el formato "@",
+ * y `TO_TEXT` hace lo mismo del lado de PRODUCTOS. Con las dos puntas en
+ * texto el cruce es exacto, venga el SKU como venga.
+ *
+ * El `IFERROR` deja la celda VACIA cuando el SKU no esta en la comparacion,
+ * y vacio es lo que las demas formulas ya esperan: `IF(J7="";"";...)`. Un
+ * cero diria "vale cero", que es otra cosa.
  *
  * ===========================================================================
  *  COMO SE INSTALA (una sola vez)
@@ -31,61 +53,22 @@
  *
  *   1. En la planilla: Extensiones -> Apps Script.
  *   2. Pegar este archivo entero y guardar.
- *   3. Configuracion del proyecto -> Propiedades del script -> agregar dos:
+ *   3. Configuracion del proyecto -> Propiedades del script -> dos:
  *        TABLERO_URL    https://<el dominio del tablero>
  *        PLANILLA_TOKEN el mismo valor que PLANILLA_PRECIOS_TOKEN en Vercel
  *   4. Recargar la planilla. Aparece el menu "Precios TN".
  *
- * El token va en las propiedades del script y NO escrito acá adentro: este
- * archivo vive en el repositorio y cualquiera que lo lea veria la llave.
+ * El token va en las propiedades y NO escrito aca: este archivo vive en el
+ * repositorio y cualquiera que lo lea veria la llave.
  */
 
-var HOJA = "PRODUCTOS";
-var FILA_ENCABEZADO = 6;      // los datos arrancan en la 7
+var HOJA_DATOS = "PRECIOS TN";
 
-/**
- * LAS COLUMNAS SE BUSCAN POR SU ENCABEZADO, NO POR SU LETRA.
- *
- * La primera version las tenia fijas --A, I, N-- y duro una semana: se
- * agregaron columnas, "Precio de venta actual" se corrio de I a J y "Precio
- * de la competencia" de N a O. Con numeros fijos eso no falla con un error:
- * escribe los precios en la columna de al lado, encima de otra cosa, y hay
- * que darse cuenta mirando.
- *
- * Buscandolas por el titulo, mover o agregar columnas no rompe nada. Y si
- * alguna no aparece, el script se planta y lo dice, en vez de escribir en el
- * lugar equivocado.
- */
-var TITULOS = {
-  sku: ["sku"],
-  nuestro: ["precio de venta actual"],
-  competencia: ["precio de la competencia"],
-};
-
-/** Sin acentos, sin mayusculas y sin espacios de mas, para poder comparar. */
-function normalizar(texto) {
-  return String(texto == null ? "" : texto)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/**
- * En que columna esta el encabezado que empieza con alguno de estos textos.
- * Devuelve 0 si no esta: quien llama decide que hacer, y lo unico correcto
- * es plantarse.
- */
-function columnaDe(encabezados, posibles) {
-  for (var c = 0; c < encabezados.length; c++) {
-    var titulo = normalizar(encabezados[c]);
-    for (var p = 0; p < posibles.length; p++) {
-      if (titulo.indexOf(posibles[p]) === 0) return c + 1;
-    }
-  }
-  return 0;
-}
+var ENCABEZADOS = [
+  "SKU",
+  "Precio de venta actual (con IVA)",
+  "Precio de la competencia (con IVA)",
+];
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -110,20 +93,11 @@ function actualizarPrecios() {
     return;
   }
 
-  var hoja = SpreadsheetApp.getActive().getSheetByName(HOJA);
-  if (!hoja) {
-    ui.alert("No encuentro la pestaña " + HOJA + " en esta planilla.");
-    return;
-  }
-
   var respuesta;
   try {
     respuesta = UrlFetchApp.fetch(
       url.replace(/\/+$/, "") + "/api/precios-tn/planilla",
-      {
-        headers: { Authorization: "Bearer " + token },
-        muteHttpExceptions: true,
-      }
+      { headers: { Authorization: "Bearer " + token }, muteHttpExceptions: true }
     );
   } catch (e) {
     ui.alert("No se pudo hablar con el tablero", String(e), ui.ButtonSet.OK);
@@ -131,165 +105,136 @@ function actualizarPrecios() {
   }
 
   if (respuesta.getResponseCode() !== 200) {
-    // EL CARTEL DICE CUAL DE LAS DOS COSAS ES, Y ANTES NO.
-    //
-    // Decia "el token no coincide" ante cualquier 401, y la primera vez que
-    // fallo de verdad la causa era la otra: la variable estaba cargada en
-    // Vercel pero no desplegada. Se reviso tres veces un token que estaba
-    // bien. Un mensaje que afirma una causa que no comprobó es peor que uno
-    // que dice "no se".
-    var cuerpo = respuesta.getContentText();
-    var motivo = "";
-    var detalle = "";
-    try {
-      var json = JSON.parse(cuerpo);
-      motivo = json.motivo || "";
-      detalle = json.detalle || "";
-    } catch (e) {
-      // El tablero no contesto JSON: lo mas probable es que ni siquiera haya
-      // llegado a la ruta (404 de Vercel, una URL mal escrita, un login de
-      // por medio). Se muestra crudo, que es lo unico honesto.
-    }
-
-    var titulo = "El tablero contesto " + respuesta.getResponseCode();
-    var texto;
-    if (motivo === "sin_configurar") {
-      titulo = "Al tablero le falta el token";
-      texto = detalle;
-    } else if (motivo === "token_invalido") {
-      titulo = "El token no coincide";
-      texto =
-        "El PLANILLA_TOKEN de este script no es igual al " +
-        "PLANILLA_PRECIOS_TOKEN del tablero. Ojo con los espacios o el salto " +
-        "de linea al final cuando se copia y pega.";
-    } else if (respuesta.getResponseCode() === 404) {
-      texto =
-        "La direccion existe pero no esa ruta. Revisa TABLERO_URL, y que el " +
-        "tablero ya se haya desplegado con la ruta /api/precios-tn/planilla.";
-    } else {
-      texto = cuerpo.slice(0, 300);
-    }
-    ui.alert(titulo, texto, ui.ButtonSet.OK);
+    mostrarError(ui, respuesta);
     return;
   }
 
   var datos = JSON.parse(respuesta.getContentText());
-  var porSku = {};
+
+  // SE ARMA TODO EN MEMORIA Y SE ESCRIBE DE UNA. Apps Script cobra cada
+  // llamada a la hoja: fila por fila, miles de filas se van de los 6 minutos
+  // que dura un script y queda a medio escribir.
+  var filas = [];
+  var conCompetencia = 0;
   for (var i = 0; i < datos.precios.length; i++) {
-    porSku[String(datos.precios[i].sku).trim()] = datos.precios[i];
+    var p = datos.precios[i];
+    var sku = String(p.sku == null ? "" : p.sku).trim();
+
+    // SE SALTEA EL SKU VACIO Y EL "0". El vacio es obvio; el cero no.
+    // En PRODUCTOS la columna A es `=FUENTES!D2`, y una formula sobre una
+    // celda vacia no da vacio: da 0. Asi que TODAS las filas de PRODUCTOS que
+    // sobran tienen A = 0. Si en esta hoja existiera una fila con SKU 0, el
+    // BUSCARV de cada una de esas filas vacias la encontraria y se llenarian
+    // de precios de la nada. Por eso tambien la formula pregunta por el 0:
+    // alcanza con que falle uno de los dos lados.
+    if (!sku || sku === "0") continue;
+    var comp = p.competencia == null ? "" : p.competencia;
+    if (comp !== "") conCompetencia++;
+    filas.push([sku, p.nuestro == null ? "" : p.nuestro, comp]);
   }
 
-  // DONDE ESTA CADA COLUMNA, SEGUN EL ENCABEZADO DE HOY.
-  var encabezados = hoja
-    .getRange(FILA_ENCABEZADO, 1, 1, hoja.getLastColumn())
-    .getValues()[0];
-  var COL_SKU = columnaDe(encabezados, TITULOS.sku);
-  var COL_NUESTRO = columnaDe(encabezados, TITULOS.nuestro);
-  var COL_COMPETENCIA = columnaDe(encabezados, TITULOS.competencia);
-
-  var faltan = [];
-  if (!COL_SKU) faltan.push("SKU");
-  if (!COL_NUESTRO) faltan.push("Precio de venta actual");
-  if (!COL_COMPETENCIA) faltan.push("Precio de la competencia");
-  if (faltan.length) {
-    // NO SE ADIVINA. Escribir en la columna de al lado pisa datos buenos y no
-    // se nota hasta que alguien mira.
+  if (!filas.length) {
     ui.alert(
-      "No encuentro las columnas",
-      "En la fila " + FILA_ENCABEZADO + " de " + HOJA + " no esta: " +
-      faltan.join(", ") + ".\n\nSi les cambiaste el nombre, avisame cual es " +
-      "el nuevo y lo ajusto en el script.",
+      "El tablero no devolvio ningun precio",
+      "La ultima comparacion no dejo propuestas. No se toco la hoja " +
+      HOJA_DATOS + ".",
       ui.ButtonSet.OK
     );
     return;
   }
 
-  var ultima = hoja.getLastRow();
-  if (ultima <= FILA_ENCABEZADO) {
-    ui.alert("La pestaña " + HOJA + " no tiene filas de datos.");
-    return;
-  }
-  var cuantas = ultima - FILA_ENCABEZADO;
+  var libro = SpreadsheetApp.getActive();
+  var hoja = libro.getSheetByName(HOJA_DATOS);
+  if (!hoja) hoja = libro.insertSheet(HOJA_DATOS);
 
-  // SE LEE TODO DE UNA Y SE ESCRIBE TODO DE UNA. Apps Script cobra cada
-  // llamada a la hoja: fila por fila, 7.000 filas se van de los 6 minutos que
-  // dura un script y queda a medio escribir.
-  var skus = hoja.getRange(FILA_ENCABEZADO + 1, COL_SKU, cuantas, 1).getValues();
-  var nuestros = hoja.getRange(FILA_ENCABEZADO + 1, COL_NUESTRO, cuantas, 1).getValues();
-  var competencias = hoja.getRange(FILA_ENCABEZADO + 1, COL_COMPETENCIA, cuantas, 1).getValues();
+  // BORRAR ANTES DE ESCRIBIR, Y LA HOJA ENTERA. Si solo se escribiera encima,
+  // una corrida con menos SKU que la anterior dejaria los viejos abajo: la
+  // hoja mostraria precios de articulos que ya no se comparan, mezclados con
+  // los de ahora, y el BUSCARV de PRODUCTOS los encontraria igual.
+  hoja.clearContents();
 
-  var conNuestro = 0, conCompetencia = 0, sinDato = 0;
+  hoja.getRange(1, 1, 1, ENCABEZADOS.length).setValues([ENCABEZADOS]);
 
-  for (var f = 0; f < cuantas; f++) {
-    var sku = String(skus[f][0] || "").trim();
-    // EL "0" TAMBIEN ES VACIO ACA. La columna del SKU ahora es una formula
-    // --`=FUENTES!D2`-- y una formula que apunta a una celda vacia devuelve
-    // 0, no "". Sin esto, cada fila sobrante de la planilla contaria como un
-    // SKU que el comparador no conoce, y el cartel informaria de mas.
-    if (!sku || sku === "0") continue;
-    var fila = porSku[sku];
-    if (!fila) {
-      sinDato++;
-      continue;   // no lo conocemos: se deja como esta
-    }
-    if (fila.nuestro !== null && fila.nuestro !== undefined) {
-      nuestros[f][0] = fila.nuestro;
-      conNuestro++;
-    }
-    if (fila.competencia !== null && fila.competencia !== undefined) {
-      competencias[f][0] = fila.competencia;
-      conCompetencia++;
-    }
-  }
+  // LA COLUMNA DEL SKU VA FORMATEADA COMO TEXTO, Y ESTO NO ES COSMETICO.
+  //
+  // `setValues` con el string "7795001" no deja texto: la hoja lo interpreta
+  // igual que si alguien lo tipeara, y queda el NUMERO 7795001. En PRODUCTOS
+  // el SKU es texto (viene de FUENTES, que lo trae como texto). Y BUSCARV no
+  // cruza el texto "7795001" con el numero 7795001: no los considera iguales.
+  // Serian 8.291 filas de #N/A, o sea la columna vacia de nuevo -- el mismo
+  // sintoma de las dos veces anteriores, por una causa distinta.
+  //
+  // Con el formato "@" puesto ANTES de escribir, el string entra como string.
+  hoja.getRange(2, 1, filas.length, 1).setNumberFormat("@");
+  hoja.getRange(2, 1, filas.length, ENCABEZADOS.length).setValues(filas);
+  hoja.setFrozenRows(1);
+  hoja.getRange(1, 1, 1, ENCABEZADOS.length).setFontWeight("bold");
 
-  hoja.getRange(FILA_ENCABEZADO + 1, COL_NUESTRO, cuantas, 1).setValues(nuestros);
-  hoja.getRange(FILA_ENCABEZADO + 1, COL_COMPETENCIA, cuantas, 1).setValues(competencias);
-  SpreadsheetApp.flush();
-
-  // SE MUESTRA CUANDO CORRIO LA COMPARACION, no cuando contesto el tablero.
-  // Antes decia la hora de la respuesta --siempre "ahora"-- al lado de unos
-  // precios que podian ser de hace tres dias.
-  var cuando = datos.comparadoEn
-    ? new Date(datos.comparadoEn).toLocaleString("es-AR")
-    : null;
-  var dias = cuando
-    ? Math.floor((new Date() - new Date(datos.comparadoEn)) / 86400000)
-    : null;
-
-  var pie;
-  if (!cuando) {
-    pie = "No se sabe de cuando es la comparacion.";
-  } else if (dias >= 1) {
-    // SE AVISA CUANDO EL DATO NO ES DE HOY. Una comparacion vieja se pega
-    // igual de prolija que una de hoy: sin esto, la planilla se ve recien
-    // actualizada y los precios de la competencia son de la semana pasada.
-    pie =
-      "OJO: la competencia es de la comparacion del " + cuando +
-      " (" + dias + (dias === 1 ? " dia" : " dias") + " atras). " +
-      "Para traer la de hoy hay que correr la comparacion primero.";
-  } else {
-    pie = "Comparacion del " + cuando + ".";
-  }
-
-  ui.alert(
-    "Listo",
-    "Precio de venta actual (columna " + letra(COL_NUESTRO) + ") escrito en " +
-    conNuestro + " articulos.\n" +
-    "Precio de la competencia (columna " + letra(COL_COMPETENCIA) + ") escrito en " +
-    conCompetencia + ".\n" +
-    sinDato + " SKU de la planilla no estan en la ultima comparacion y " +
-    "quedaron como estaban.\n\n" + pie,
-    ui.ButtonSet.OK
+  // CUANDO CORRIO LA COMPARACION, al lado y no en una columna: es un dato de
+  // la hoja entera, no de cada fila.
+  var cuando = datos.comparadoEn ? new Date(datos.comparadoEn) : null;
+  hoja.getRange(1, ENCABEZADOS.length + 2).setValue(
+    cuando
+      ? "Comparacion del " + cuando.toLocaleString("es-AR") +
+        " · actualizado el " + new Date().toLocaleString("es-AR")
+      : "Sin fecha de comparacion"
   );
+
+  SpreadsheetApp.flush();
+  ui.alert("Listo", resumen(filas.length, conCompetencia, cuando), ui.ButtonSet.OK);
 }
 
-/** El numero de columna como letra, para que el cartel hable como la hoja. */
-function letra(n) {
-  var s = "";
-  while (n > 0) {
-    var r = (n - 1) % 26;
-    s = String.fromCharCode(65 + r) + s;
-    n = Math.floor((n - 1) / 26);
+/** El texto del cartel final. */
+function resumen(cuantas, conCompetencia, cuando) {
+  var texto =
+    cuantas + " articulos escritos en la hoja " + HOJA_DATOS + ".\n" +
+    conCompetencia + " con precio de la competencia.\n\n" +
+    "PRODUCTOS los toma de ahi por SKU, asi que ya deberia verse actualizada.\n\n";
+
+  if (!cuando) return texto + "No se sabe de cuando es la comparacion.";
+
+  var dias = Math.floor((new Date() - cuando) / 86400000);
+  if (dias >= 1) {
+    // SE AVISA CUANDO EL DATO NO ES DE HOY. Una comparacion vieja se pega
+    // igual de prolija que una de hoy.
+    return texto +
+      "OJO: la competencia es de la comparacion del " + cuando.toLocaleString("es-AR") +
+      " (" + dias + (dias === 1 ? " dia" : " dias") + " atras). " +
+      "Para traer la de hoy hay que correr la comparacion primero.";
   }
-  return s;
+  return texto + "Comparacion del " + cuando.toLocaleString("es-AR") + ".";
+}
+
+/** Por que no contesto el tablero, en castellano y sin afirmar de mas. */
+function mostrarError(ui, respuesta) {
+  var cuerpo = respuesta.getContentText();
+  var motivo = "";
+  var detalle = "";
+  try {
+    var json = JSON.parse(cuerpo);
+    motivo = json.motivo || "";
+    detalle = json.detalle || "";
+  } catch (e) {
+    // No contesto JSON: lo mas probable es que ni siquiera se haya llegado a
+    // la ruta. Se muestra crudo, que es lo unico honesto.
+  }
+
+  var titulo = "El tablero contesto " + respuesta.getResponseCode();
+  var texto;
+  if (motivo === "sin_configurar") {
+    titulo = "Al tablero le falta el token";
+    texto = detalle;
+  } else if (motivo === "token_invalido") {
+    titulo = "El token no coincide";
+    texto =
+      "El PLANILLA_TOKEN de este script no es igual al PLANILLA_PRECIOS_TOKEN " +
+      "del tablero. Ojo con los espacios o el salto de linea al copiar.";
+  } else if (respuesta.getResponseCode() === 404) {
+    texto =
+      "La direccion existe pero no esa ruta. Revisa TABLERO_URL, y que el " +
+      "tablero ya se haya desplegado con /api/precios-tn/planilla.";
+  } else {
+    texto = cuerpo.slice(0, 300);
+  }
+  ui.alert(titulo, texto, ui.ButtonSet.OK);
 }

@@ -1055,6 +1055,10 @@ export default function DashboardPreciosTn() {
   const [confirmandoEscritura, setConfirmandoEscritura] = useState(false);
   const [confirmandoDesautorizar, setConfirmandoDesautorizar] = useState(false);
   const [bajando, setBajando] = useState<"xlsx" | "pdf" | null>(null);
+  // La planilla de PVP de las marcas que importamos. Ver `lib/pvp.ts`.
+  const [pvpOcupado, setPvpOcupado] = useState<"bajando" | "subiendo" | null>(null);
+  const [pvpResumen, setPvpResumen] = useState<string | null>(null);
+  const archivoPvp = useRef<HTMLInputElement | null>(null);
   const [recarga, setRecarga] = useState(0);
   // Dos vistas: la cola de lo que falta decidir, y el registro de lo que ya se
   // escribió. Separadas porque se usan en momentos distintos: una es trabajo
@@ -1325,6 +1329,79 @@ export default function DashboardPreciosTn() {
       setAviso(e instanceof Error ? e.message : "No se pudo armar el archivo");
     } finally {
       setBajando(null);
+    }
+  }
+
+  /**
+   * Bajar la planilla de PVP de las marcas que importamos.
+   *
+   * VIENE ARMADA DEL SERVIDOR y no se construye acá. Quién es "marca propia"
+   * sale de `precios.politica` --las que tienen `repreciar = false`-- y esa
+   * pregunta no se puede contestar con lo que esta pantalla tiene cargado,
+   * que son las propuestas de la última corrida. Justamente estas marcas no
+   * generan propuestas: ese es el motivo por el que existe la planilla.
+   */
+  async function bajarPlanillaPvp() {
+    setPvpOcupado("bajando");
+    setPvpResumen(null);
+    try {
+      const r = await fetch("/api/precios-tn/pvp?que=planilla", { cache: "no-store" });
+      if (!r.ok) throw new Error("No se pudo armar la planilla");
+      const texto = await r.text();
+      bajarArchivo(
+        texto,
+        "pvp-" + new Date().toISOString().slice(0, 10) + ".csv",
+        "text/csv;charset=utf-8",
+      );
+    } catch (e) {
+      setAviso(e instanceof Error ? e.message : "No se pudo bajar la planilla");
+    } finally {
+      setPvpOcupado(null);
+    }
+  }
+
+  /**
+   * Subir la planilla editada.
+   *
+   * SE CUENTA LO QUE SE ENTENDIÓ Y LO QUE NO, con las primeras filas a la
+   * vista. Un "listo" a secas sobre un archivo de 242 renglones no deja ver
+   * que una coma decimal se leyó como separador de miles, que es el error que
+   * multiplica un precio por cien sin que nada se queje.
+   */
+  async function subirPlanillaPvp(archivo: File) {
+    setPvpOcupado("subiendo");
+    setPvpResumen(null);
+    setAviso(null);
+    try {
+      const csv = await archivo.text();
+      const r = await fetch("/api/precios-tn/pvp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ nombre: archivo.name, csv }),
+      });
+      const datos = await r.json().catch(() => null);
+      if (!r.ok) {
+        const detalle = (datos?.errores ?? [])
+          .slice(0, 3)
+          .map((e: { fila: number; motivo: string }) => "fila " + e.fila + ": " + e.motivo)
+          .join(" · ");
+        throw new Error([datos?.error ?? "No se pudo leer el archivo", detalle].filter(Boolean).join(" — "));
+      }
+      const muestra = (datos.muestra ?? [])
+        .map((m: { sku: string; precio: number }) => m.sku + " " + fmtMoneda(m.precio))
+        .join(", ");
+      setPvpResumen(
+        datos.guardadas +
+          " precios guardados" +
+          (datos.descartadas ? ", " + datos.descartadas + " filas descartadas" : "") +
+          ". Se aplican en la próxima comparación." +
+          (muestra ? " Primeras filas: " + muestra : ""),
+      );
+    } catch (e) {
+      setAviso(e instanceof Error ? e.message : "No se pudo subir la planilla");
+    } finally {
+      setPvpOcupado(null);
+      if (archivoPvp.current) archivoPvp.current.value = "";
     }
   }
 
@@ -1782,6 +1859,23 @@ export default function DashboardPreciosTn() {
         <p className="border-c3/40 bg-c3/10 text-c3 rounded-lg border px-3 py-2 text-sm">{aviso}</p>
       )}
 
+      {/* EL RESULTADO DE LA CARGA, con las primeras filas como se entendieron.
+          No usa `aviso` porque no es un error ni se pisa con uno: es la unica
+          oportunidad de ver que una coma decimal se leyo bien antes de que
+          esos precios lleguen a una propuesta. */}
+      {pvpResumen && (
+        <p className="border-c1/40 bg-c1/5 text-ink flex items-start gap-2 rounded-lg border px-3 py-2 text-sm">
+          <span className="flex-1">{pvpResumen}</span>
+          <button
+            onClick={() => setPvpResumen(null)}
+            className="text-muted hover:text-ink text-xs"
+            aria-label="Cerrar"
+          >
+            ✕
+          </button>
+        </p>
+      )}
+
       {/* LA UNICA CONFIRMACION QUE PROTEGE ALGO IRREVERSIBLE.
           Autorizar se deshace cambiando un estado en una fila; un precio
           escrito en Tienda Nube ya lo vio un cliente. Por eso esta pantalla
@@ -1977,6 +2071,40 @@ export default function DashboardPreciosTn() {
             title="Abre la vista de impresión: elegí «Guardar como PDF» en el diálogo"
           >
             {bajando === "pdf" ? "Armando…" : "↓ PDF"}
+          </button>
+
+          {/* LA PLANILLA DE PVP: marcas que importamos.
+              NO respeta el filtro de la pantalla, a diferencia de los dos
+              botones de arriba, y el título lo dice. Son dos cosas distintas:
+              los de arriba bajan lo que estás mirando; éste baja los artículos
+              cuyo precio ponemos nosotros, que justamente no aparecen en esta
+              lista porque el motor no les hace propuesta. */}
+          <span className="border-line/60 mx-1 h-5 border-l" aria-hidden />
+          <button
+            onClick={bajarPlanillaPvp}
+            disabled={pvpOcupado !== null}
+            className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1.5 text-xs disabled:opacity-50"
+            title="Baja el CSV con los artículos de marca propia (HOLA, DIAPER GENIE, SUAVINEX) y su precio de hoy, para editarlo. No depende del filtro."
+          >
+            {pvpOcupado === "bajando" ? "Armando…" : "↓ PVP marcas propias"}
+          </button>
+          <input
+            ref={archivoPvp}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(e) => {
+              const archivo = e.target.files?.[0];
+              if (archivo) subirPlanillaPvp(archivo);
+            }}
+          />
+          <button
+            onClick={() => archivoPvp.current?.click()}
+            disabled={pvpOcupado !== null}
+            className="border-line hover:bg-panel-2 text-muted hover:text-ink rounded-lg border px-2.5 py-1.5 text-xs disabled:opacity-50"
+            title="Sube la planilla editada. No cambia ningún precio: los deja cargados y la próxima comparación los convierte en propuestas para aprobar."
+          >
+            {pvpOcupado === "subiendo" ? "Leyendo…" : "↑ Subir PVP"}
           </button>
 
           {/* TILDAR TODO LO VISIBLE. Vive acá y no en el encabezado de la tabla
