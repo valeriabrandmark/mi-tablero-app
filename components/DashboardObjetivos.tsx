@@ -125,11 +125,15 @@ export default function DashboardObjetivosPage({
 
   const resumen = data?.resumen ?? [];
   const vencido = data?.vencido ?? null;
+  // Cliente o buscador: recortan las ventas, y con ellas los objetivos que se
+  // muestran (solo a los que esas ventas aportan). Ver recorteVentas.
+  const recorteVentas = !sinValores(filtros.cliente) || !!filtros.buscar;
+
   const sinCambios =
     filtros.mes?.length === 1 &&
     filtros.mes[0] === mesInicial &&
     sinValores(filtros.grupo) &&
-    sinValores(filtros.cliente);
+    !recorteVentas;
 
   const porProducto =
     data?.porGrupo.filter((g) => g.metrica === "unidades") ?? [];
@@ -137,10 +141,10 @@ export default function DashboardObjetivosPage({
     data?.porGrupo.filter((g) => g.metrica !== "unidades") ?? [];
 
   // La nota es lo único que dice qué se está viendo, así que tiene que nombrar
-  // los dos recortes. Y el del cliente lleva la advertencia pegada: recorta las
-  // VENTAS pero no el objetivo, así que el avance deja de ser "cuánto llevo" y
-  // pasa a ser "cuánto de la meta puso este cliente". Sin decirlo, un 8 % se
-  // lee como que el vendedor está muy atrasado.
+  // todos los recortes. Y el de las ventas lleva la advertencia pegada: el
+  // objetivo sigue siendo el del mes, así que el avance deja de ser "cuánto
+  // llevo" y pasa a ser "cuánto de la meta puso este recorte". Sin decirlo, un
+  // 8 % se lee como que el vendedor está muy atrasado.
   const recortes = [
     sinValores(filtros.grupo)
       ? null
@@ -148,15 +152,24 @@ export default function DashboardObjetivosPage({
     sinValores(filtros.cliente)
       ? null
       : `las ventas a ${filtros.cliente!.join(", ")}`,
+    filtros.buscar ? `lo que coincide con «${filtros.buscar}»` : null,
   ].filter(Boolean);
 
   const notaRecorte =
     recortes.length === 0
       ? "Todas las ventas mayoristas del mes"
       : `Solo ${recortes.join(" y ")}` +
-        (sinValores(filtros.cliente)
-          ? ""
-          : " — el objetivo sigue siendo el del mes entero");
+        (recorteVentas ? " — el objetivo sigue siendo el del mes entero" : "");
+
+  // Los paneles de objetivos también se recortan: con un comprobante buscado
+  // muestran solo los objetivos a los que ese comprobante aporta.
+  const notaObjetivos = (base: string) =>
+    recorteVentas
+      ? "Solo los objetivos a los que aportan estas ventas · cuánto pusieron de la meta del mes"
+      : base;
+  const vacioObjetivos = recorteVentas
+    ? "Estas ventas no aportan a ningún objetivo de este grupo."
+    : undefined;
 
   return (
     <div className="space-y-4">
@@ -219,7 +232,7 @@ export default function DashboardObjetivosPage({
               cambiar({ ...filtros, buscar: buscado.trim() || undefined })
             }
             placeholder="Cliente o comprobante"
-            title="Busca en las dos columnas a la vez. Recorta las ventas, no el objetivo."
+            title="Busca en las dos columnas a la vez. Los objetivos quedan solo los que esas ventas tocan, medidos contra la meta del mes."
             className="border-line bg-panel-2 text-ink placeholder:text-muted focus:border-c1 w-52 rounded-lg border px-2.5 py-1.5 text-xs outline-none"
           />
         </form>
@@ -316,24 +329,26 @@ export default function DashboardObjetivosPage({
           <div className="grid gap-4 xl:grid-cols-2">
             <Panel
               titulo="Objetivos por empresa"
-              nota="Brandmark y NOA · click para filtrar"
+              nota={notaObjetivos("Brandmark y NOA · click para filtrar")}
             >
               <ListaAvance
                 filas={porEmpresa}
                 etiqueta={(f) => f.grupo ?? "—"}
                 seleccionados={filtros.grupo}
                 onSeleccionar={alternarGrupo}
+                vacio={vacioObjetivos}
               />
             </Panel>
             <Panel
               titulo="Objetivos de producto"
-              nota="En unidades · click para filtrar"
+              nota={notaObjetivos("En unidades · click para filtrar")}
             >
               <ListaAvance
                 filas={porProducto}
                 etiqueta={(f) => f.grupo ?? "—"}
                 seleccionados={filtros.grupo}
                 onSeleccionar={alternarGrupo}
+                vacio={vacioObjetivos}
               />
             </Panel>
           </div>
@@ -346,11 +361,11 @@ export default function DashboardObjetivosPage({
             titulo="Comprobantes involucrados"
             nota={`${data.comprobantes.length} comprobantes · ${notaRecorte.toLowerCase()}`}
           >
-            {/* Click en una fila filtra por su CLIENTE. Ojo con lo que eso
-                significa acá: recorta las VENTAS, no el objetivo. El objetivo
-                del mes es el mismo tenga uno o veinte clientes, así que el
-                avance pasa a leerse como "cuánto de la meta puso este cliente".
-                Es un dato útil y por eso el chip lo dice explícitamente. */}
+            {/* Click en una fila filtra por su CLIENTE, y con él los paneles
+                de objetivos: quedan solo aquellos a los que ese cliente aporta.
+                La meta de cada uno sigue siendo la del mes, así que el avance
+                se lee como "cuánto de la meta puso este cliente". Por eso la
+                nota lo dice explícitamente. */}
             <Tabla
               filas={data.comprobantes}
               columnas={columnasComprobantes(data.comprobantes)}
