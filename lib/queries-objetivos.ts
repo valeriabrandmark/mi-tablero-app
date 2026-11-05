@@ -81,18 +81,54 @@ function whereObjetivos(
 }
 
 /**
+ * El recorte de VENTAS: cliente y buscador. Agrega sus condiciones sobre
+ * `fv` (gold.fact_ventas) a `params` y devuelve el SQL.
+ *
+ * Una sola definición para las dos puntas de la página: las líneas (gráfico y
+ * comprobantes) y el avance contra el objetivo. Antes el recorte solo llegaba
+ * a las líneas, así que al buscar un comprobante la tabla mostraba ese
+ * comprobante y los paneles de objetivos seguían mostrando el mes entero, sin
+ * decir a cuáles aportaba.
+ *
+ * EL BUSCADOR VA CONTRA LAS DOS COLUMNAS A LA VEZ. Quien busca tiene el nombre
+ * del cliente o el número del comprobante a mano, y no quiere elegir contra
+ * cuál compara antes de escribir. Es el mismo criterio que el buscador de
+ * Ventas Mayoristas.
+ */
+function recorteVentas(f: FiltrosObjetivos, params: unknown[]): string[] {
+  const clauses: string[] = [];
+  agregarFiltro(clauses, params, "fv.cliente", f.cliente);
+  if (f.buscar) {
+    params.push(`%${f.buscar}%`);
+    clauses.push(
+      `(fv.cliente ilike $${params.length} or fv.comprobante ilike $${params.length})`,
+    );
+  }
+  return clauses;
+}
+
+/**
  * Avance por par (mes, grupo): el grano más fino que existe para un vendedor.
  * Todo lo demás sale de agregar esto.
  *
  * El `left join` contra las ventas es deliberado: sin él, un objetivo sin
  * ventas no daría fila y el avance se leería como si no existiera.
  *
+ * CON UN RECORTE DE VENTAS (cliente o buscador) cambia lo que se mide. Las
+ * ventas son solo las del recorte, y quedan solo los objetivos a los que esas
+ * ventas aportan: buscar un comprobante contesta "a qué objetivos suma este
+ * comprobante y cuánto". El objetivo de cada uno sigue siendo el del mes
+ * entero, así que el avance se lee como la parte de la meta que puso ese
+ * recorte. Un objetivo al que no aporta no se muestra en cero: no es que esté
+ * atrasado, es que el comprobante no tiene nada que ver con él.
+ *
  * Ojo con `clientes`: a nivel grupo es un `count(distinct)`, pero al agregar
  * varios grupos se SUMAN esos conteos en vez de recontar. Es lo correcto acá,
  * porque cada grupo es un objetivo separado (Brandmark 40 y NOA 10 son dos
  * metas, no una sola de 50 clientes distintos).
  */
-function cteAvance(w: Where): string {
+function cteAvance(w: Where, ventas: string[] = []): string {
+  const recorte = ventas.map((c) => `\n      and ${c}`).join("");
   return `with mapa as (
     select g.grupo, g.criterio, g.metrica, i.valor
     from gold.objetivos_grupo g
@@ -105,7 +141,7 @@ function cteAvance(w: Where): string {
       on (m.criterio = 'sku'     and m.valor = fv.sku)
       or (m.criterio = 'marca'   and m.valor = fv.marca)
       or (m.criterio = 'empresa' and m.valor = fv.empresa)
-    where fv.canal = '${CANAL_MAYORISTA}'
+    where fv.canal = '${CANAL_MAYORISTA}'${recorte}
   ),
   avance as (
     select o.mes_comercial,
@@ -125,7 +161,9 @@ function cteAvance(w: Where): string {
      and v.mes_comercial = o.mes_comercial
      and v.vendedor = o.vendedor
     where ${w.sql}
-    group by o.mes_comercial, o.grupo, g.metrica, g.orden, o.cantidad
+    group by o.mes_comercial, o.grupo, g.metrica, g.orden, o.cantidad${
+      ventas.length > 0 ? "\n    having count(v.grupo) > 0" : ""
+    }
   )`;
 }
 
@@ -138,8 +176,9 @@ function cteAvance(w: Where): string {
  */
 function getResumen(f: FiltrosObjetivos): Promise<ResumenMetrica[]> {
   const w = whereObjetivos(f);
+  const ventas = recorteVentas(f, w.params);
   return query<ResumenMetrica>(
-    `${cteAvance(w)}
+    `${cteAvance(w, ventas)}
      select metrica,
             coalesce(sum(objetivo), 0)::float8 as objetivo,
             coalesce(sum(vendido), 0)::float8 as vendido,
@@ -173,8 +212,9 @@ function getResumen(f: FiltrosObjetivos): Promise<ResumenMetrica[]> {
  */
 function getPorGrupo(f: FiltrosObjetivos): Promise<FilaObjetivo[]> {
   const w = whereObjetivos(f, ["grupo"]);
+  const ventas = recorteVentas(f, w.params);
   return query<FilaObjetivo>(
-    `${cteAvance(w)}
+    `${cteAvance(w, ventas)}
      select grupo,
             null::text as vendedor,
             metrica,
@@ -221,23 +261,8 @@ function cteLineas(f: FiltrosObjetivos): Where {
   const clauses = [`fv.canal = '${CANAL_MAYORISTA}'`, "fv.vendedor = $1"];
 
   agregarFiltro(clauses, params, "fv.mes_comercial", f.mes);
-  // El cliente recorta las ventas y no el objetivo: va acá, en las líneas, y
-  // NO en `whereObjetivos`, que es el que arma la meta contra la que se compara.
-  agregarFiltro(clauses, params, "fv.cliente", f.cliente);
-
-  // EL BUSCADOR VA CONTRA LAS DOS COLUMNAS A LA VEZ. Quien busca tiene el
-  // nombre del cliente o el número del comprobante a mano, y no quiere elegir
-  // contra cuál compara antes de escribir. Es el mismo criterio que el buscador
-  // de Ventas Mayoristas.
-  //
-  // Recorta las VENTAS y no el objetivo, igual que el filtro de cliente: el
-  // objetivo del mes es el mismo se mire un comprobante o todos.
-  if (f.buscar) {
-    params.push(`%${f.buscar}%`);
-    clauses.push(
-      `(fv.cliente ilike $${params.length} or fv.comprobante ilike $${params.length})`,
-    );
-  }
+  // Cliente y buscador: el mismo recorte que usa el avance (ver recorteVentas).
+  clauses.push(...recorteVentas(f, params));
 
   let join = "";
   if (!vacio(f.grupo)) {

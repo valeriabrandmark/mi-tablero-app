@@ -517,15 +517,16 @@ export type FiltrosObjetivos = {
   grupo?: string[];
   /**
    * Filtro cruzado: sale de hacer click en una fila de la tabla de
-   * comprobantes. Recorta las VENTAS del vendedor a ese cliente, pero NO el
-   * objetivo: el objetivo del mes es el mismo tenga uno o veinte clientes. Por
-   * eso el avance sigue midiéndose contra la meta entera y la pantalla lo dice.
+   * comprobantes. Recorta las VENTAS del vendedor a ese cliente, y deja solo
+   * los objetivos a los que esas ventas aportan. La meta de cada uno NO se
+   * recorta: el objetivo del mes es el mismo tenga uno o veinte clientes, así
+   * que el avance se mide contra la meta entera y la pantalla lo dice.
    */
   cliente?: string[];
   /**
    * Texto libre. Va contra el nombre del cliente Y el número de comprobante a
    * la vez, porque quien busca tiene uno de los dos a mano y no quiere elegir
-   * contra cuál compara. Recorta las VENTAS, igual que `cliente`.
+   * contra cuál compara. Recorta las ventas y los objetivos igual que `cliente`.
    */
   buscar?: string;
 };
