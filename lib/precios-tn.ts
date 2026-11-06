@@ -133,6 +133,28 @@ export const ALERTAS = [
     tono: "neutro",
   },
   {
+    // "ASÍ LO DEFINIMOS" NO ES "FALTA UN DATO", Y ESTABAN JUNTOS.
+    //
+    // Los 105 artículos de HOLA, DIAPER GENIE y SUAVINEX caían en "No se
+    // pueden evaluar", una tarjeta que dice "el motor no pudo decidir sobre
+    // estos" y lista como causas sin precio, sin costo o sin margen posible.
+    // Ninguna es cierta acá: el motor SÍ decidió, y lo que decidió es que el
+    // precio de estas marcas no lo pone él.
+    //
+    // Mezclarlas manda a alguien a buscar el costo de un SUAVINEX que no
+    // falta. Y al revés: esconde un problema real detrás de 105 filas que no
+    // lo son, que es justo lo que esa tarjeta vino a evitar.
+    clave: "marca_propia",
+    titulo: "Marcas propias",
+    detalle:
+      "Las importamos nosotros, así que el PVP lo ponemos nosotros y el motor no las repricia. " +
+      "No hay nada roto acá: para cambiarles el precio se baja la planilla con «PVP marcas " +
+      "propias», se edita y se sube con «Subir PVP». La próxima comparación las convierte en " +
+      "propuestas como cualquier otra. Si una tiene oferta del proveedor, el descuento se " +
+      "traslada al precio de venta y el PVP queda tachado.",
+    tono: "neutro",
+  },
+  {
     // LA RED QUE IMPIDE QUE EL AGUJERO VUELVA.
     //
     // Con esta tarjeta la clasificación es TOTAL: cada propuesta cae en alguna,
@@ -235,6 +257,7 @@ export const GRUPOS_INFORMATIVOS: readonly ClaveAlerta[] = [
   "en_precio",
   "corregidos_sin_competir",
   "sin_stock",
+  "marca_propia",
   "no_evaluable",
 ];
 

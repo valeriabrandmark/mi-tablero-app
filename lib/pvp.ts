@@ -18,7 +18,13 @@
 /** Una fila ya entendida, lista para guardar. */
 export type FilaPvp = {
   sku: string;
-  /** Precio final con IVA, lo que paga el cliente. */
+  /**
+   * El PVP CON IVA: el precio de LISTA, el que va tachado.
+   *
+   * No es lo que paga el cliente cuando hay descuento. El motor cobra
+   * `pvp * (1 - oferta)` y publica este numero tachado. Si no hay oferta,
+   * los dos son el mismo.
+   */
   precio: number;
   /** Descuento a publicar, en FRACCIÓN (0,20 = 20 %). `null` = sin tachado. */
   oferta: number | null;
@@ -35,7 +41,7 @@ export type LecturaPvp = {
   separador: string;
 };
 
-export const CABECERAS_PVP = ["sku", "nombre", "precio", "oferta_%"] as const;
+export const CABECERAS_PVP = ["sku", "nombre", "pvp_lista", "oferta_%"] as const;
 
 /**
  * El separador del CSV.
@@ -165,7 +171,9 @@ function indices(cabecera: string[]): Record<string, number> {
   cabecera.forEach((titulo, i) => {
     const t = norm(titulo);
     if (t.startsWith("sku")) mapa.sku ??= i;
-    else if (t.startsWith("precio")) mapa.precio ??= i;
+    // Se acepta `pvp_lista` y tambien `precio`, que es como se llamaba la
+    // columna antes: una planilla bajada ayer tiene que seguir subiendo.
+    else if (t.startsWith("pvp") || t.startsWith("precio")) mapa.precio ??= i;
     else if (t.startsWith("oferta") || t.startsWith("descuento")) mapa.oferta ??= i;
   });
   return mapa;
@@ -200,7 +208,7 @@ export function leerCsvPvp(texto: string): LecturaPvp {
       filas: [],
       errores: [{
         fila: 1, sku: "",
-        motivo: "no se encontraron las columnas 'sku' y 'precio' en la primera fila",
+        motivo: "no se encontraron las columnas 'sku' y 'pvp_lista' en la primera fila",
       }],
       separador,
     };

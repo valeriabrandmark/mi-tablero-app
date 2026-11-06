@@ -49,7 +49,16 @@ export async function getFilasParaPvp(): Promise<FilaPlanillaPvp[]> {
             and parametros->>'repreciar' = 'false'
      ),
      ultimo_precio as (
-         select distinct on (sku) sku, precio_vigente
+         -- EL PRECIO DE LISTA, NO EL VIGENTE, y la diferencia importa desde
+         -- que el PVP es el precio de lista. precio_vigente es lo que se
+         -- cobra hoy: con una promo puesta, es el precio YA con descuento.
+         -- Exportar eso como PVP y volver a subirlo aplicaria el descuento
+         -- dos veces, y cada vuelta lo aplicaria de nuevo.
+         --
+         -- Hoy no se nota porque ningun SUAVINEX tiene promo. Se nota la
+         -- primera vez que una se publique, que es justamente lo que este
+         -- cambio viene a hacer.
+         select distinct on (sku) sku, coalesce(precio_lista, precio_vigente) as precio
            from precios.precio_propio
           where sku is not null
           order by sku, dia desc, id desc
@@ -62,7 +71,7 @@ export async function getFilasParaPvp(): Promise<FilaPlanillaPvp[]> {
      select a.id                                     as sku,
             coalesce(a.descripcion, a.id)            as nombre,
             coalesce(a.marca, a."attributes.marca")  as marca,
-            up.precio_vigente::float8                as precio,
+            up.precio::float8                        as precio,
             pv.oferta_pct::float8                    as oferta
        from bronze.sigma_articulos a
        join congeladas c

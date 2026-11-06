@@ -139,6 +139,13 @@ const CLASIFICACION = `
     -- referencia, ni piso, ni nada contra que compararse.
     when p.accion = 'omitir' and p.motivos::text like '%sin stock vendible%'
       then 'sin_stock'
+    -- EL PVP LO PONEMOS NOSOTROS: es una decision, no un dato que falta.
+    --
+    -- VA DESPUES DE SIN STOCK porque el motor mira el stock antes que la
+    -- marca: un SUAVINEX sin unidades omite por stock, y su motivo dice eso.
+    -- Clasificarlo como marca propia contradiria el texto de su propia fila.
+    when p.accion = 'omitir' and p.motivos::text like '%el PVP lo fijamos nosotros%'
+      then 'marca_propia'
     -- SIN COMPETIDOR PERO CON PRECIO PROPUESTO: la corrida al margen minimo.
     --
     -- Solo entran SUBAS: el motor omite los que ya rinden mas que el margen
