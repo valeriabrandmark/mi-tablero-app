@@ -29,18 +29,88 @@ import type { ArticuloParaCostear } from "@/lib/costos-snapshot";
  * copia, de cuándo es y por qué no se pudo pedir en vivo.
  *
  * ---------------------------------------------------------------------------
- * UN SOLO INTENTO
+ * SE REINTENTA LO QUE FALLA RAPIDO, Y NADA MAS
  *
- * `sigma.py` reintenta los 429 esperando lo que diga `X-Retry-After-ms`, y los
- * 403 por saturación con esperas de 60s, 120s, 180s. Eso sirve en un proceso de
- * fondo; acá hay alguien mirando la pantalla. Un intento, y si Sigma está
- * saturado se lo dice con esas palabras para que vuelva a apretar en un rato.
+ * Antes era un solo intento, y para un 429 eso era muy poco: Sigma se satura
+ * por segundos y contesta el 429 en milisegundos, así que un rebote de nada
+ * mandaba la pantalla al plan B y a la copia del día anterior. El 06/11/2026
+ * pasó con costos cambiados una hora antes.
+ *
+ * Pero reintentar TODO sería peor. Hay dos formas de fallar y no se parecen:
+ *
+ *   LAS RAPIDAS --429, 403 por saturación, 502/503/504-- vuelven enseguida y
+ *   casi siempre se van solas. Esas se reintentan.
+ *
+ *   LA LENTA --el timeout-- ya se comió el presupuesto entero. Reintentarla
+ *   duplicaría la espera y la ruta tiene `maxDuration = 60`: el segundo
+ *   intento no terminaría, y en vez de "Sigma está lento" la pantalla daría
+ *   un error pelado. Esa NO se reintenta.
+ *
+ * Por eso el presupuesto es de los 30 s PARA TODOS LOS INTENTOS, y cada uno
+ * corta con lo que queda. Con dos reintentos cortos, el peor caso sigue
+ * entrando en los 30 s de siempre y la ruta conserva sus 30 s de aire.
+ *
+ * LA ESPERA LA DICE SIGMA. Si manda `X-Retry-After-ms` --que es lo que lee
+ * `sigma.py`-- se respeta, con un techo: en un proceso de fondo se puede
+ * esperar tres minutos, acá hay alguien esperando la pantalla.
+ *
+ * Y si después de todo sigue saturado, se dice igual que antes: que vuelva a
+ * apretar en un rato. Lo que no cambia es el final; cambia cuántas veces se
+ * llega a él.
  */
 
 const ENDPOINT = "ExportArticulos";
 
-/** Lo que tarda en cortar. Entre los 30 s de las facturas y los 60 s de la OC. */
-const TIMEOUT_MS = 30_000;
+/**
+ * El tiempo para TODOS los intentos juntos, no para cada uno.
+ *
+ * Entre los 30 s de las facturas y los 60 s de la OC, y la mitad del
+ * `maxDuration` de la ruta: la otra mitad es para la consulta a la base y el
+ * armado de la foto.
+ */
+const PRESUPUESTO_MS = 30_000;
+
+/** Un intento y dos reintentos. */
+const INTENTOS = 3;
+
+/** Lo máximo que se espera entre intentos, diga lo que diga Sigma. */
+const ESPERA_TOPE_MS = 4_000;
+
+/** Cuánto esperar cuando Sigma no dice nada. Crece, pero poco. */
+const ESPERAS_POR_DEFECTO = [700, 2_000];
+
+/**
+ * Los HTTP que vuelven rápido y suelen irse solos.
+ *
+ * El 403 está acá porque Sigma lo usa para saturación y no sólo para permisos
+ * --`sigma.py` lo trata igual--. Si fuera un token mal, el reintento cuesta dos
+ * segundos y el mensaje final es el mismo.
+ */
+const SE_REINTENTA = new Set([403, 429, 502, 503, 504]);
+
+/**
+ * Cuánto esperar antes del próximo intento, según lo que haya dicho Sigma.
+ *
+ * Mira `X-Retry-After-ms` primero --es el que manda Sigma y el que lee
+ * `sigma.py`-- y después el `Retry-After` estándar, que viene en SEGUNDOS. Lo
+ * que pida se respeta sólo hasta el tope: un `Retry-After: 120` es correcto
+ * para un proceso de fondo y acá sería dejar la pantalla colgada dos minutos.
+ */
+export function esperaAntesDeReintentar(
+  cabeceras: Headers,
+  intento: number,
+): number {
+  const ms = Number(cabeceras.get("X-Retry-After-ms"));
+  if (Number.isFinite(ms) && ms > 0) return Math.min(ms, ESPERA_TOPE_MS);
+
+  const seg = Number(cabeceras.get("Retry-After"));
+  if (Number.isFinite(seg) && seg > 0) return Math.min(seg * 1000, ESPERA_TOPE_MS);
+
+  return ESPERAS_POR_DEFECTO[Math.min(intento, ESPERAS_POR_DEFECTO.length - 1)];
+}
+
+const dormirDeVerdad = (ms: number) =>
+  new Promise<void>((listo) => setTimeout(listo, ms));
 
 export type EntornoSigma = {
   cliente?: string;
@@ -122,25 +192,54 @@ export function articulosDeLaRespuesta(datos: unknown): ArticuloParaCostear[] {
 export async function pedirArticulosASigma(
   traer: typeof fetch = fetch,
   entorno: EntornoSigma = entornoDeSigma(),
+  reloj: { dormir?: (ms: number) => Promise<void>; ahora?: () => number } = {},
 ): Promise<RespuestaSigma> {
   const { cliente, alias, id, token } = entorno;
   if (!cliente || !alias || !id || !token) return { estado: "sin_conectar" };
 
+  const dormir = reloj.dormir ?? dormirDeVerdad;
+  const ahora = reloj.ahora ?? Date.now;
+  const limite = ahora() + PRESUPUESTO_MS;
+
   let respuesta: Response;
-  try {
-    respuesta = await traer(url(entorno), {
-      headers: { "X-Auth-Token": token },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch (error) {
-    const e = error as Error;
-    if (e?.name === "TimeoutError" || e?.name === "AbortError") {
+  let intentos = 0;
+
+  for (;;) {
+    const queda = limite - ahora();
+    // Sin tiempo no se intenta: un fetch con timeout 0 falla igual, pero con
+    // un error que no explica nada.
+    if (queda <= 0) {
       return {
         estado: "falla",
-        motivo: `Sigma no contestó en ${TIMEOUT_MS / 1000} s.`,
+        motivo: `Sigma no contestó en ${PRESUPUESTO_MS / 1000} s.`,
       };
     }
-    return { estado: "falla", motivo: `No se pudo llegar a Sigma: ${e?.message ?? e}` };
+
+    intentos++;
+    try {
+      respuesta = await traer(url(entorno), {
+        headers: { "X-Auth-Token": token },
+        signal: AbortSignal.timeout(queda),
+      });
+    } catch (error) {
+      const e = error as Error;
+      // EL TIMEOUT NO SE REINTENTA: ya se comió el presupuesto. Ver arriba.
+      if (e?.name === "TimeoutError" || e?.name === "AbortError") {
+        return {
+          estado: "falla",
+          motivo: `Sigma no contestó en ${PRESUPUESTO_MS / 1000} s.`,
+        };
+      }
+      return { estado: "falla", motivo: `No se pudo llegar a Sigma: ${e?.message ?? e}` };
+    }
+
+    if (!SE_REINTENTA.has(respuesta.status)) break;
+
+    const espera = esperaAntesDeReintentar(respuesta.headers, intentos - 1);
+    // No se empieza un intento que no va a llegar a terminar: si lo único que
+    // queda alcanza para la espera y nada más, se corta acá y se avisa.
+    if (intentos >= INTENTOS || limite - ahora() <= espera) break;
+    await dormir(espera);
   }
 
   // 429 Y 403 SON SATURACION, NO UN ERROR DE LO QUE SE PIDIO. Se nombran
@@ -150,7 +249,8 @@ export async function pedirArticulosASigma(
     return {
       estado: "falla",
       motivo:
-        `Sigma está saturado (HTTP ${respuesta.status}). ` +
+        `Sigma está saturado (HTTP ${respuesta.status}) ` +
+        `después de ${intentos} ${intentos === 1 ? "intento" : "intentos"}. ` +
         "Probá de nuevo en un par de minutos.",
     };
   }
