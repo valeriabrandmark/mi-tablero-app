@@ -836,6 +836,14 @@ export type LineaVentaMeli = ArticuloMeli & {
    * bronze.
    */
   fechaHora: string | null;
+  /**
+   * Cómo se despachó: el valor CRUDO de ML (`fulfillment`, `self_service`…).
+   *
+   * Se traduce en `lib/logistica-meli.ts` y no acá a propósito; ahí está
+   * explicado por qué. `null` si el envío todavía no se bajó, o si la orden no
+   * tiene envío.
+   */
+  logistica: string | null;
 };
 
 export type OpcionesMeli = {
@@ -862,6 +870,14 @@ export type DashboardMeli = {
   /** Los SKUs que más plata dejaron, que no son los que más vendieron. */
   topRentabilidad: ArticuloMeli[];
   articulos: LineaVentaMeli[];
+  /**
+   * Cuántas órdenes salieron por cada modo de envío: Full, Flex, Colecta…
+   *
+   * `total` son ÓRDENES DISTINTAS y no líneas ni unidades: la pregunta es
+   * cuántas ventas se despacharon de cada manera, y una orden de tres productos
+   * se despachó una sola vez.
+   */
+  porLogistica: PuntoProveedor[];
   /** Denominador de la torta: venta de TODOS los proveedores, sin filtro cruzado. */
   ventaTotalProveedores: number;
   /** La última orden cargada: es la medida real del atraso del tablero. */
@@ -886,6 +902,8 @@ export type FilaCancelacionMeli = {
   unidades: number;
   /** Monto c/IVA que se habría facturado. No hay costo ni margen: no fue venta. */
   monto: number;
+  /** Cómo se iba a despachar. Crudo de ML; ver `lib/logistica-meli.ts`. */
+  logistica: string | null;
 };
 
 /**

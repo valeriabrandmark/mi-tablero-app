@@ -8,6 +8,11 @@ import TortaProveedores from "@/components/charts/TortaProveedores";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import BarraFiltrosMeli from "@/components/FiltrosMeli";
 import {
+  colorLogistica,
+  etiquetaLogistica,
+  SIN_DATO,
+} from "@/lib/logistica-meli";
+import {
   promedioPonderado,
   sumar,
   Tabla,
@@ -85,6 +90,34 @@ function celdaOrden(nroOrden: string | null) {
   );
 }
 
+/**
+ * Cómo se despachó, con el punto del color que tiene en el gráfico.
+ *
+ * El punto no es decoración: la tabla y la torta hablan de lo mismo, y tener
+ * que acordarse de qué color era Flex para cruzar una con la otra es justo la
+ * clase de fricción que hace que nadie cruce nada.
+ */
+function CeldaLogistica({ crudo }: { crudo: string | null }) {
+  const etiqueta = etiquetaLogistica(crudo);
+  const esHueco = etiqueta === SIN_DATO;
+  return (
+    <span className="flex items-center gap-1.5 whitespace-nowrap">
+      <span
+        className="size-2 shrink-0 rounded-full"
+        style={{ background: colorLogistica(etiqueta) }}
+      />
+      <span className={esHueco ? "text-muted" : undefined}>{etiqueta}</span>
+    </span>
+  );
+}
+
+const AYUDA_LOGISTICA =
+  "Cómo se despachó esa orden: Full, Flex, Colecta o un punto de despacho. " +
+  "Sale del ENVÍO de Mercado Libre y no de la publicación, que es otra cosa: " +
+  "una publicación de Full que se queda sin stock se despacha desde el " +
+  "depósito y sigue figurando como Full. “Sin dato” es que el envío todavía " +
+  "no se bajó, o que la orden no tiene envío.";
+
 function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
   return [
     {
@@ -122,6 +155,15 @@ function columnasArticulos(filas: LineaVentaMeli[]): Columna<LineaVentaMeli>[] {
         </span>
       ),
       orden: (a) => a.marca,
+    },
+    {
+      titulo: "Logística",
+      ayuda: AYUDA_LOGISTICA,
+      celda: (a) => <CeldaLogistica crudo={a.logistica} />,
+      // Se ordena por la ETIQUETA y no por el crudo: en pantalla dice "Colecta"
+      // y "Full", y ordenar por `cross_docking` / `fulfillment` daría un orden
+      // que no es el alfabético de lo que se está leyendo.
+      orden: (a) => etiquetaLogistica(a.logistica),
     },
     {
       titulo: "Unid.",
@@ -264,6 +306,17 @@ function columnasCancelaciones(
         </span>
       ),
       orden: (c) => c.marca,
+    },
+    {
+      titulo: "Logística",
+      ayuda:
+        AYUDA_LOGISTICA +
+        " En las canceladas falta seguido, y es esperable: el envío se baja " +
+        "para las órdenes pagadas, así que una cancelada lo tiene sólo si se " +
+        "pagó y se cayó después, o si viajaba en un carrito con otra que sí " +
+        "se pagó.",
+      celda: (c) => <CeldaLogistica crudo={c.logistica} />,
+      orden: (c) => etiquetaLogistica(c.logistica),
     },
     // Los tres totales vienen del servidor y NO de sumar las filas. Las órdenes
     // porque una orden de tres productos ocupa tres filas y sumarlas la contaría
@@ -602,6 +655,17 @@ export default function DashboardMeliPage({
   const unidadesMostradas = (k?.unidades ?? 0) + extra.unidades;
   const ticketMostrado =
     ordenesMostradas === 0 ? null : ventaMostrada / ordenesMostradas;
+
+  // El denominador de la torta de logística: TODAS las órdenes del recorte,
+  // incluidas las que no tienen el dato. Si "Sin dato" quedara afuera del
+  // total, los porcentajes de Full y Flex se calcularían sobre lo que sí
+  // sabemos y darían más alto de lo que corresponde -- justo el error que hace
+  // creer que la cobertura es completa cuando no lo es.
+  const porLogistica = data?.porLogistica ?? [];
+  const totalOrdenesLogistica = porLogistica.reduce((acc, p) => acc + p.total, 0);
+  const ordenesSinLogistica =
+    porLogistica.find((p) => p.label === SIN_DATO)?.total ?? 0;
+  const ordenesConLogistica = totalOrdenesLogistica - ordenesSinLogistica;
   const sinCambios =
     filtros.desde === diaInicial &&
     filtros.hasta === diaInicial &&
@@ -1032,6 +1096,37 @@ export default function DashboardMeliPage({
               />
             </Panel>
           </div>
+
+          <Panel
+            titulo="Cómo se despachó"
+            nota={`${fmtNumero(ordenesConLogistica)} de ${fmtNumero(totalOrdenesLogistica)} órdenes con el dato`}
+          >
+            <TortaProveedores
+              datos={porLogistica}
+              totalGeneral={totalOrdenesLogistica}
+              color={colorLogistica}
+              // CUENTA ÓRDENES, NO PESOS. Sin esto el tooltip las escribiría
+              // con signo de pesos.
+              formato={(n) => `${fmtNumero(n)} órdenes`}
+              // Sin `onSeleccionar`: no hay filtro por logística en la pantalla,
+              // y una torta que parece clickeable y no hace nada es peor que una
+              // que no lo parece.
+            />
+            <p className="text-muted mt-3 text-[11px] leading-relaxed">
+              Son <strong>órdenes</strong>, no líneas ni unidades: una orden de
+              tres productos se despachó una sola vez. Sale del envío de cada
+              orden y no de la publicación —una publicación de Full sin stock se
+              despacha desde el depósito y sigue figurando como Full—.
+            </p>
+            {ordenesSinLogistica > 0 && (
+              <p className="text-muted mt-1 text-[11px] leading-relaxed">
+                <strong>Sin dato</strong> son las órdenes cuyo envío todavía no
+                se bajó de Mercado Libre, o que no tienen envío. No es un modo
+                de despacho: si esa porción crece, lo que pasa es que el
+                pipeline se está quedando atrás.
+              </p>
+            )}
+          </Panel>
 
           <Panel
             titulo="Artículos"
