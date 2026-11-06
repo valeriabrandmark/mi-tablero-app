@@ -119,15 +119,78 @@ export const COSTOS_VIGENTES_POR_MES = `
            ${DESEMPATE}`;
 
 /**
+ * LOS MESES COMERCIALES QUE TIENEN LISTA CARGADA.
+ *
+ * Distingue las dos formas de no encontrar un costo, que no se parecen en
+ * nada: "la lista del mes existe y este SKU no está en ella" --el artículo
+ * salió del catálogo, sigue sin costo-- y "la lista del mes todavía no se
+ * cargó", que no dice nada del artículo. Ver `MES_A_MIRAR`.
+ *
+ * ES LA MISMA REGLA QUE `costo_del_mes` EN modelo.py Y LAS DOS TIENEN QUE
+ * DECIR LO MISMO. Allá decide con qué costo se estampa cada venta en
+ * `gold.fact_ventas`; acá, qué oferta muestra la columna al lado. Si discrepan,
+ * la pantalla muestra un margen calculado con un costo y una oferta que no es
+ * la de ese costo. Verificado sobre las 1.298 líneas del 04 al 06/11/2026:
+ * cero diferencias entre el costo que resuelve esto y el que estampó el modelo.
+ *
+ * Va como subconsulta NO CORRELACIONADA a propósito: así Postgres la resuelve
+ * UNA vez por consulta y la hashea (sale como "hashed SubPlan" en el EXPLAIN).
+ * Correlacionándola --un `exists` que mire la fila de ventas-- se ejecuta por
+ * cada línea y la consulta pasa de 40 ms a 642.
+ */
+const MESES_CON_LISTA = `select mes_comercial
+                           from bronze.costos_historicos
+                          group by mes_comercial`;
+
+/**
+ * En qué mes comercial buscar el costo de una venta.
+ *
+ * El suyo, salvo que ese mes todavía no tenga lista: entonces el anterior, que
+ * es donde está el cierre con el que hay que valuar mientras la lista nueva no
+ * esté. El mes comercial cierra el 5, así que sin esto cada día 6 las ventas
+ * del día se quedaban sin costo --y sin costo el margen no sale vacío, sale
+ * ALTO, porque `COSTO` es `coalesce(costo_unitario, 0)`. El 06/11/2026 la
+ * rentabilidad del día dio ~60 % en vez de ~13 %.
+ *
+ * SE HEREDA UN MES Y NO MÁS. El `case` mira exactamente el mes anterior; si
+ * ése tampoco tiene lista, no hay fila y la pantalla vuelve a mostrar un guión.
+ * Un mes de gracia cubre la lista que falta subir y le pone techo: si nadie
+ * carga una lista por dos meses, los costos se caen y eso grita, en vez de
+ * valuar diciembre con los costos de septiembre para siempre.
+ *
+ * ES UN VALOR Y NO UNA CONDICION, y eso no es estilo. Escrito como
+ * `mes = el suyo or mes = el anterior`, Postgres pierde la igualdad sobre
+ * `mes_comercial` y con ella el índice `(sku, mes_comercial, vigente_desde)`:
+ * medido, 642 ms contra 78. Resolviendo primero CUÁL mes, la condición sigue
+ * siendo una igualdad y el índice se usa igual que antes.
+ */
+function mesAMirar(t: string): string {
+  return `case
+                 when ${t}.mes_comercial in (${MESES_CON_LISTA})
+                   then ${t}.mes_comercial
+                 else to_char(to_date(${t}.mes_comercial || '-01', 'YYYY-MM-DD')
+                                - interval '1 month', 'YYYY-MM')
+               end`;
+}
+
+/**
  * El tramo vigente EL DÍA DE LA VENTA, para colgar de una tabla de ventas.
  *
  * Es un LATERAL y no un join común porque la condición mira una columna de la
  * fila de ventas (`fecha`), y porque así devuelve UNA fila o ninguna: es la
  * forma de que el join no multiplique.
  *
- * Se queda dentro del mismo mes comercial a propósito. Un SKU que salió del
- * catálogo no hereda el costo de hace tres meses: sigue sin costo, como antes,
- * y la pantalla muestra un guión en vez de un número inventado.
+ * NO SE SALE DEL MES COMERCIAL, salvo que ese mes no tenga lista todavía: ver
+ * `mesAMirar`. Un SKU que salió del catálogo sigue sin costo —la pantalla
+ * muestra un guión en vez de un número inventado— porque su mes SÍ tiene lista
+ * y él no está en ella.
+ *
+ * LO QUE CUESTA: 78 ms contra los 40 de antes, sobre tres días de ventas de
+ * Mercado Libre. Los 38 de diferencia son el barrido que resuelve
+ * `MESES_CON_LISTA`, una vez por consulta. Hay seis llamadas en el tablero. Si
+ * alguna vez molesta, lo que hay que hacer es pasarle los meses ya resueltos
+ * desde TypeScript --la lista cambia una vez por mes y el tablero ya tiene
+ * caché-- y no volver a escribir la condición con un `or`.
  *
  * `t` es la tabla de ventas. `cols` son las columnas que se quieren de
  * `costos_historicos`, que adentro del lateral se llama `c`; el resultado
@@ -138,7 +201,7 @@ export function joinCostoDelDia(t: string, cols: string): string {
        select ${cols}
        from bronze.costos_historicos c
        where c.sku = ${t}.sku
-         and c.mes_comercial = ${t}.mes_comercial
+         and c.mes_comercial = ${mesAMirar(t)}
          and c.vigente_desde <= ${t}.fecha
        order by c.vigente_desde desc, (c.origen = 'tablero') desc
        limit 1
