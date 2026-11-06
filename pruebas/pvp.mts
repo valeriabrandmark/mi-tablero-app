@@ -97,7 +97,7 @@ test("un precio vacío o roto no pasa", () => {
 
 test("sin las columnas que hacen falta se dice cuál falta", () => {
   const { errores } = leerCsvPvp("codigo;valor\nHO3130;100\n");
-  assert.match(errores[0].motivo, /sku.*precio/);
+  assert.match(errores[0].motivo, /sku.*pvp_lista/);
 });
 
 test("el archivo arranca con BOM para que Excel no rompa los acentos", () => {
