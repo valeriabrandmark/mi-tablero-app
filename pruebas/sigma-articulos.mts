@@ -1,4 +1,8 @@
-import { articulosDeLaRespuesta, pedirArticulosASigma } from "@/lib/sigma-articulos";
+import {
+  articulosDeLaRespuesta,
+  esperaAntesDeReintentar,
+  pedirArticulosASigma,
+} from "@/lib/sigma-articulos";
 
 /* ===========================================================================
    PEDIRLE EL MAESTRO A SIGMA EN EL MOMENTO
@@ -51,6 +55,27 @@ function contesta(cuerpo: unknown, status = 200, comoTexto?: string): typeof fet
       status,
       headers: { "Content-Type": "application/json" },
     })) as unknown as typeof fetch;
+}
+
+/** Un reloj que no espera nada: las pruebas no tienen por qué tardar. */
+const SIN_ESPERAR = { dormir: async () => {} };
+
+/**
+ * Un fetch que contesta una cosa distinta por intento, y cuenta cuántas veces
+ * lo llamaron. Es lo que deja probar los reintentos.
+ */
+function porIntento(...respuestas: Array<[unknown, number, string?]>) {
+  const llamadas = { n: 0 };
+  const traer = (async () => {
+    const i = Math.min(llamadas.n, respuestas.length - 1);
+    llamadas.n++;
+    const [cuerpo, status, texto] = respuestas[i]!;
+    return new Response(texto ?? JSON.stringify(cuerpo), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+  return { traer, llamadas };
 }
 
 /** Un fetch que explota, como cuando no hay red o se acaba el tiempo. */
@@ -140,7 +165,10 @@ function explota(error: Error): typeof fetch {
 // que esperar. sigma.py los reintenta hasta tres minutos; acá hay alguien
 // esperando la pantalla, así que se le dice que vuelva a apretar.
 for (const status of [429, 403]) {
-  const r = await pedirArticulosASigma(contesta(null, status, "nope"), ENTORNO);
+  // SIN DORMIR DE VERDAD. Desde que hay reintentos, estos dos casos agotan los
+  // tres intentos; con las esperas reales la prueba tardaría casi tres
+  // segundos por status sin fijar nada más.
+  const r = await pedirArticulosASigma(contesta(null, status, "nope"), ENTORNO, SIN_ESPERAR);
   revisar(`${status} se explica como saturación`, r.estado === "falla" && r.motivo.includes("saturado"), true);
   revisar(`${status} dice qué hacer`, r.estado === "falla" && r.motivo.includes("de nuevo"), true);
 }
@@ -252,6 +280,153 @@ for (const status of [429, 403]) {
 
 revisar("algo que no es una lista no rompe", articulosDeLaRespuesta({ error: 1 }), []);
 revisar("ni null", articulosDeLaRespuesta(null), []);
+
+/* ===========================================================================
+   LOS REINTENTOS
+
+   POR QUE EXISTEN. Sigma se satura por SEGUNDOS y contesta el 429 en
+   milisegundos. Con un solo intento, un rebote de nada mandaba la pantalla a
+   la copia del dia anterior -- y el 06/11/2026 eso significo mirar costos de
+   22 horas antes, una hora despues de haberlos cambiado en Sigma.
+
+   Y POR QUE NO SE REINTENTA TODO. El timeout ya se comio el presupuesto; un
+   segundo intento no entraria en el `maxDuration` de la ruta y la pantalla
+   daria un error pelado en vez de "Sigma esta lento". Esa es la prueba que
+   hay que mirar si alguien alguna vez "mejora" esto reintentando siempre.
+   ========================================================================= */
+
+{
+  const { traer, llamadas } = porIntento(
+    [null, 429, "saturado"],
+    [[UNO], 200],
+  );
+  const r = await pedirArticulosASigma(traer, ENTORNO, SIN_ESPERAR);
+  revisar("un 429 que despues anda termina bien", r.estado, "ok");
+  revisar("y se hicieron dos llamadas", llamadas.n, 2);
+}
+
+{
+  const { traer, llamadas } = porIntento([null, 503, "upa"], [[UNO], 200]);
+  const r = await pedirArticulosASigma(traer, ENTORNO, SIN_ESPERAR);
+  revisar("un 503 tambien se reintenta", r.estado, "ok");
+  revisar("en dos llamadas", llamadas.n, 2);
+}
+
+{
+  const { traer, llamadas } = porIntento([null, 429, "saturado"]);
+  const r = await pedirArticulosASigma(traer, ENTORNO, SIN_ESPERAR);
+  revisar("si sigue saturado, falla", r.estado, "falla");
+  revisar("despues de tres intentos y no mas", llamadas.n, 3);
+  revisar(
+    "y el mensaje dice cuantos fueron",
+    r.estado === "falla" && r.motivo.includes("3 intentos"),
+    true,
+  );
+}
+
+// LA PRUEBA QUE IMPORTA: el timeout NO se reintenta.
+{
+  const tiempo = new Error("se acabo");
+  tiempo.name = "TimeoutError";
+  let n = 0;
+  const traer = (async () => {
+    n++;
+    throw tiempo;
+  }) as unknown as typeof fetch;
+  const r = await pedirArticulosASigma(traer, ENTORNO, SIN_ESPERAR);
+  revisar("un timeout no se reintenta", n, 1);
+  revisar(
+    "y se dice que no contesto",
+    r.estado === "falla" && r.motivo.includes("no contestó en 30 s"),
+    true,
+  );
+}
+
+// Un 500 es un error de verdad, no saturacion: no se reintenta.
+{
+  const { traer, llamadas } = porIntento([null, 500, "boom"]);
+  await pedirArticulosASigma(traer, ENTORNO, SIN_ESPERAR);
+  revisar("un 500 no se reintenta", llamadas.n, 1);
+}
+
+// Tampoco se reintenta una respuesta buena que no sirve: el problema no se
+// arregla preguntando de nuevo.
+{
+  const { traer, llamadas } = porIntento([[], 200]);
+  await pedirArticulosASigma(traer, ENTORNO, SIN_ESPERAR);
+  revisar("una lista vacia no se reintenta", llamadas.n, 1);
+}
+
+/* --- EL PRESUPUESTO ES PARA TODOS LOS INTENTOS JUNTOS -------------------- */
+
+// Con un reloj que salta 29 segundos en el primer intento, el segundo no se
+// empieza: no entraria. Sin esto, tres intentos de 30 s serian 90.
+{
+  let t = 0;
+  const { traer, llamadas } = porIntento([null, 429, "saturado"]);
+  const r = await pedirArticulosASigma(traer, ENTORNO, {
+    dormir: async () => {},
+    ahora: () => {
+      const v = t;
+      t += 29_000;
+      return v;
+    },
+  });
+  revisar("sin tiempo no se reintenta", llamadas.n, 1);
+  revisar("y falla igual", r.estado, "falla");
+}
+
+/* --- CUANTO SE ESPERA ---------------------------------------------------- */
+
+const cab = (h: Record<string, string>) => new Headers(h);
+
+revisar(
+  "respeta el X-Retry-After-ms de Sigma",
+  esperaAntesDeReintentar(cab({ "X-Retry-After-ms": "1500" }), 0),
+  1500,
+);
+
+// UN TECHO. `sigma.py` puede esperar tres minutos porque corre solo; aca hay
+// alguien mirando la pantalla.
+revisar(
+  "pero no mas de cuatro segundos",
+  esperaAntesDeReintentar(cab({ "X-Retry-After-ms": "180000" }), 0),
+  4000,
+);
+
+// El estandar viene en SEGUNDOS, no en milisegundos. Confundirlos seria
+// esperar 2 ms donde Sigma pidio 2 s, o 120 s donde pidio 120 ms.
+revisar(
+  "el Retry-After estandar viene en segundos",
+  esperaAntesDeReintentar(cab({ "Retry-After": "2" }), 0),
+  2000,
+);
+revisar(
+  "y tambien tiene techo",
+  esperaAntesDeReintentar(cab({ "Retry-After": "600" }), 0),
+  4000,
+);
+
+revisar(
+  "sin cabeceras, la espera por defecto",
+  esperaAntesDeReintentar(cab({}), 0),
+  700,
+);
+revisar(
+  "y crece en el segundo reintento",
+  esperaAntesDeReintentar(cab({}), 1) > esperaAntesDeReintentar(cab({}), 0),
+  true,
+);
+revisar(
+  "una cabecera con basura no rompe",
+  esperaAntesDeReintentar(cab({ "Retry-After": "a-la-tarde" }), 0),
+  700,
+);
+revisar(
+  "ni un valor negativo",
+  esperaAntesDeReintentar(cab({ "X-Retry-After-ms": "-5" }), 0),
+  700,
+);
 
 console.log(FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK");
 process.exit(FALLOS.length ? 1 : 0);
