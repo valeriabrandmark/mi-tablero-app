@@ -3,6 +3,7 @@ import { buscadorDeArticulo } from "@/lib/sql-codigos";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro, vacio } from "@/lib/filtros";
 import { hoyArgentina, sumarDias } from "@/lib/rangos";
+import { armarPorLogistica } from "@/lib/logistica-meli";
 import {
   DESCUENTOS_DE_LINEA,
   descuentosAgrupados,
@@ -794,6 +795,10 @@ async function getArticulos(f: FiltrosMeli): Promise<LineaVentaMeli[]> {
             coalesce(sum(${COMISION}), 0)     as comision,
             coalesce(sum(${ENVIO}), 0)        as envio,
             coalesce(sum(${RENTABILIDAD}), 0) as rentabilidad,
+            -- Es una propiedad del ENVÍO, así que todas las líneas de la misma
+            -- orden traen el mismo valor: el max() es sólo para poder
+            -- agruparlas, no una elección entre valores distintos.
+            max(fv.logistica)                 as logistica,
             ${descuentosAgrupados("fv")}
      from gold.fact_ventas fv
      ${joinCostos("fv")}
@@ -818,8 +823,49 @@ async function getArticulos(f: FiltrosMeli): Promise<LineaVentaMeli[]> {
     // arreglarlo es el tipo de la columna en modelo.py, no aca.
     nroOrden: r.nro_orden == null ? null : String(BigInt(Math.trunc(Number(r.nro_orden)))),
     fechaHora: r.fecha_hora ?? null,
+    logistica: r.logistica ?? null,
   }));
 }
+
+/**
+ * Cuántas ÓRDENES salieron por cada modo de envío.
+ *
+ * ---------------------------------------------------------------------------
+ * CUENTA ÓRDENES, NO LÍNEAS NI UNIDADES
+ *
+ * La pregunta es cuántas ventas se despacharon de cada manera, y una orden de
+ * tres productos se despachó UNA vez. Contando líneas, los carritos grandes
+ * pesarían el triple y el gráfico diría más "Full" del que hay sólo porque en
+ * Full se arman carritos más grandes.
+ *
+ * ---------------------------------------------------------------------------
+ * NO SE CUENTA SOBRE LA TABLA DE ARTÍCULOS
+ *
+ * Sería gratis contar las filas que ya bajan a la tabla, pero esa tabla está
+ * recortada a TOPE_ARTICULOS y ordenada por venta: el gráfico contaría los
+ * modos de las órdenes más grandes y no los del recorte entero.
+ *
+ * ---------------------------------------------------------------------------
+ * SE AGRUPA POR EL CRUDO Y SE TRADUCE AFUERA
+ *
+ * La base agrupa por `logistica` tal como la guardó el modelo, y el `null`
+ * vuelve como null. Decidir qué etiqueta le toca a cada valor —y qué hacer con
+ * uno que no conocemos— es cosa de `lib/logistica-meli.ts`: acá sólo se cuenta.
+ */
+async function getPorLogistica(
+  f: FiltrosMeli,
+): Promise<{ logistica: string | null; ordenes: string | null }[]> {
+  const w = whereBase(f);
+  return query<{ logistica: string | null; ordenes: string | null }>(
+    `select fv.logistica                 as logistica,
+            count(distinct fv.nro_orden) as ordenes
+     from gold.fact_ventas fv
+     where ${w.sql}
+     group by fv.logistica`,
+    w.params,
+  );
+}
+
 
 /**
  * La última orden que entró a la base, con su hora y su número.
@@ -966,6 +1012,7 @@ async function getDashboardMeliDirecto(f: FiltrosMeli): Promise<DashboardMeli> {
     ultimaCarga,
     cancelaciones,
     canceladasPorHora,
+    logisticaCruda,
     kpisAnterior,
   ] = await Promise.all([
     getKpis(f),
@@ -979,6 +1026,7 @@ async function getDashboardMeliDirecto(f: FiltrosMeli): Promise<DashboardMeli> {
     getUltimaCarga(),
     getCancelacionesMeli(f),
     getCanceladasPorHora(f),
+    getPorLogistica(f),
     // El período anterior mantiene TODOS los otros filtros: comparar "esta
     // semana de ALGABO" contra "la semana pasada de todo" no diría nada.
     anterior ? getKpis({ ...f, ...anterior }, corteHora) : Promise.resolve(null),
@@ -1006,6 +1054,7 @@ async function getDashboardMeliDirecto(f: FiltrosMeli): Promise<DashboardMeli> {
     porProveedor,
     topRentabilidad,
     articulos,
+    porLogistica: armarPorLogistica(logisticaCruda),
     ventaTotalProveedores,
     ultimaCarga,
     cancelaciones,
@@ -1242,6 +1291,9 @@ const LINEAS_CANCELADAS_BASE = `
             at time zone 'America/Argentina/Buenos_Aires'))::int   as hora,
          it->'item'->>'seller_sku'                                 as sku,
          it->'item'->>'title'                                      as producto,
+         -- Para cruzar contra bronze.ml_envios y saber cómo se iba a despachar.
+         -- Puede venir null: no toda orden tiene envío.
+         v."shipping.id"::bigint::text                             as shipping_id,
          (it->>'quantity')::numeric                                as cantidad,
          (it->>'unit_price')::numeric * (it->>'quantity')::numeric as monto
   from bronze.ml_ventas v,
@@ -1325,9 +1377,21 @@ export async function getCancelacionesMeli(
             max(a."proveedorNombre")    as proveedor,
             max(a."attributes.marca")   as marca,
             sum(l.cantidad)             as unidades,
-            sum(l.monto)                as monto
+            sum(l.monto)                as monto,
+            max(e.logistica)            as logistica
      from lineas l
      left join bronze.sigma_articulos a on trim(a.id::text) = trim(l.sku)
+     -- QUE UNA CANCELADA NO TENGA LOGÍSTICA ES ESPERABLE, NO UN ERROR.
+     --
+     -- El orquestador baja los envíos de las órdenes PAGADAS, así que una
+     -- cancelada tiene su envío sólo si se pagó y se canceló después, o si
+     -- viajaba en un carrito con otra que sí se pagó. Medido en octubre: 1.318
+     -- de 2.072. Las demás muestran "Sin dato", que es la verdad --no sabemos
+     -- cómo iba a salir-- y no un cero disfrazado.
+     --
+     -- (Sin acentos graves en este comentario: el SQL va dentro de un template
+     -- literal y uno solo lo corta en dos. Ver el mismo aviso en sql-costos.ts.)
+     left join bronze.ml_envios e on e.shipping_id = l.shipping_id
      ${w.sql}
      group by l.sku, l.nro_orden
      order by monto desc
@@ -1343,6 +1407,7 @@ export async function getCancelacionesMeli(
     nroOrden: r.nro_orden,
     unidades: num(r.unidades),
     monto: num(r.monto),
+    logistica: r.logistica,
   }));
 
   // Los totales NO se suman de las filas. Dos razones distintas:

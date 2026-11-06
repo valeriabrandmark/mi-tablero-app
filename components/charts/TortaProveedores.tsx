@@ -13,10 +13,12 @@ function Contenido({
   active,
   payload,
   total = 0,
+  formato = fmtMoneda,
 }: {
   active?: boolean;
   payload?: ItemTooltip[];
   total?: number;
+  formato?: (n: number) => string;
 }) {
   const item = payload?.[0]?.payload;
   if (!active || !item) return null;
@@ -25,7 +27,7 @@ function Contenido({
       <FilaTooltip
         color={item.fill ?? TEMA.muted}
         label={item.label}
-        valor={fmtMoneda(item.total)}
+        valor={formato(item.total)}
       />
       <p className="text-muted text-right">
         {total > 0 ? fmtPct(item.total / total) : "—"} del total
@@ -40,6 +42,8 @@ export default function TortaProveedores({
   seleccionados,
   onSeleccionar,
   color,
+  formato = fmtMoneda,
+  etiquetaResto = "Resto de proveedores",
 }: {
   datos: PuntoProveedor[];
   /** Facturación neta de TODOS los proveedores, no solo los del top 12:
@@ -57,6 +61,17 @@ export default function TortaProveedores({
    * sería azul un día y verde al otro según cuánta plata tenga.
    */
   color?: (label: string) => string;
+  /**
+   * Cómo se escribe el valor de cada porción en el tooltip. Por defecto pesos,
+   * que es lo que mide esta torta en casi todos los paneles; el de logística
+   * cuenta ÓRDENES, y "$ 5.182 órdenes" sería un número con la unidad mal.
+   */
+  formato?: (n: number) => string;
+  /**
+   * Qué dice la fila de cierre cuando los datos no cubren el total. Por defecto
+   * "Resto de proveedores".
+   */
+  etiquetaResto?: string;
 }) {
   if (datos.length === 0) {
     return (
@@ -104,7 +119,7 @@ export default function TortaProveedores({
                 />
               ))}
             </Pie>
-            <Tooltip content={<Contenido total={total} />} />
+            <Tooltip content={<Contenido total={total} formato={formato} />} />
           </PieChart>
         </ResponsiveContainer>
       </div>
@@ -151,7 +166,7 @@ export default function TortaProveedores({
         {total > cubierto && (
           <p className="text-muted border-line flex shrink-0 items-center gap-2 border-t pt-1.5 text-xs">
             <span className="size-2.5 shrink-0" />
-            <span>Resto de proveedores</span>
+            <span>{etiquetaResto}</span>
             <span className="ml-auto shrink-0 tabular-nums">
               {fmtPct((total - cubierto) / total)}
             </span>
