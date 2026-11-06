@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { permisoDelUsuario } from "@/lib/permisos";
 import { aplicarCostos, prepararCostos } from "@/lib/queries-costos";
+import { problemaDelDestino } from "@/lib/destino-costos";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
 
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
   }
 
-  let cuerpo: { nota?: unknown; fotoId?: unknown };
+  let cuerpo: { nota?: unknown; fotoId?: unknown; mes?: unknown; vigenteDesde?: unknown };
   try {
     cuerpo = await request.json();
   } catch {
@@ -75,12 +76,32 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // A DONDE VA EL TRAMO. Los NUMEROS siguen saliendo de la base (ver abajo);
+  // lo unico que viaja del navegador es el destino -- mes comercial y desde
+  // cuando rige -- que es una decision de quien aplica y no un dato.
+  //
+  // Se valida igual, y no por desconfianza: una vigencia posterior al cierre
+  // del mes escribe un tramo que no rige para ninguna venta, la pantalla dice
+  // "listo" y los costos no cambian. Es la clase de error que nadie encuentra
+  // despues. Ver `problemaDelDestino`.
+  const destino =
+    typeof cuerpo.mes === "string" && typeof cuerpo.vigenteDesde === "string"
+      ? { mes: cuerpo.mes, vigenteDesde: cuerpo.vigenteDesde }
+      : undefined;
+
+  if (destino) {
+    const problema = problemaDelDestino(destino);
+    if (problema) {
+      return NextResponse.json({ error: problema }, { status: 400 });
+    }
+  }
+
   try {
     // LA FOTO SE VUELVE A ARMAR ACA Y NO SE RECIBE DEL NAVEGADOR. Lo que se
     // escribe tiene que salir de la base, no de lo que alguien mande: con el
     // snapshot viajando en el cuerpo, cualquiera podría fijar el costo de
     // cualquier artículo desde la consola.
-    const preparado = await prepararCostos();
+    const preparado = await prepararCostos(new Date(), destino);
 
     // LO QUE SE APLICA TIENE QUE SER LO QUE SE MIRO.
     //

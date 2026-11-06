@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Aviso, Panel, TarjetaKpi } from "@/components/ui";
-import { fmtMoneda, fmtNumero } from "@/lib/format";
+import { fmtFechaCortaConAnio, fmtMoneda, fmtNumero } from "@/lib/format";
+import { limitesMesComercial } from "@/lib/constantes";
+import { problemaDelDestino } from "@/lib/destino-costos";
 import type { Snapshot } from "@/lib/costos-snapshot";
 
 /* -------------------------------------------------------------------------
@@ -37,6 +39,7 @@ type Preparado = {
   teorico: FuenteTeorico;
   mes: string;
   vigenteDesde: string;
+  limites: { desde: string; hasta: string };
   tramoVigente: { mes: string; vigenteDesde: string; nota: string | null } | null;
   tramos: TramoGuardado[];
 };
@@ -107,6 +110,22 @@ export default function ActualizarCostos() {
    * anunciarlo, la hora de la foto ya lo dice.
    */
   const [pedido, setPedido] = useState<ResultadoDelPedido | null>(null);
+  /**
+   * A DÓNDE VA EL TRAMO, cuando se elige a mano.
+   *
+   * `null` quiere decir "lo que propone el servidor" —el mes vigente y hoy—,
+   * que es lo que hacía antes de que se pudiera elegir. Se guarda así, y no
+   * copiando la propuesta al estado en un efecto, porque sembrar estado desde
+   * un efecto dispara renders en cascada (`react-hooks/set-state-in-effect`) y
+   * además pisaría la elección cada vez que se rearma la foto.
+   *
+   * Al editar cualquiera de los dos campos se fijan LOS DOS: a partir de ahí
+   * la pantalla manda, y rearmar la foto no mueve lo que se eligió.
+   */
+  const [destino, setDestino] = useState<{
+    mes: string;
+    vigenteDesde: string;
+  } | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -155,6 +174,28 @@ export default function ActualizarCostos() {
 
   const datos = traido?.clave === recargas ? traido.datos : null;
 
+  // El destino efectivo: lo elegido si se eligió, y si no lo que propuso el
+  // servidor. Se deriva en vez de guardarse, por lo que dice `destino`.
+  const mesElegido = destino?.mes ?? datos?.mes ?? "";
+  const vigenciaElegida = destino?.vigenteDesde ?? datos?.vigenteDesde ?? "";
+  // Los límites se recalculan acá y no se usan los del servidor: si se cambió
+  // el mes en pantalla, los del servidor son los del mes que él propuso.
+  const limites = mesElegido ? limitesMesComercial(mesElegido) : null;
+  const problemaDestino =
+    datos && mesElegido && vigenciaElegida
+      ? problemaDelDestino({ mes: mesElegido, vigenteDesde: vigenciaElegida })
+      : null;
+  // Cuántos días para atrás se van a recalcular. Lo que la hace una decisión y
+  // no un campo más: una vigencia vieja reescribe el margen de esos días.
+  const diasHaciaAtras =
+    datos && vigenciaElegida && vigenciaElegida < datos.vigenteDesde
+      ? Math.round(
+          (Date.parse(`${datos.vigenteDesde}T12:00:00Z`) -
+            Date.parse(`${vigenciaElegida}T12:00:00Z`)) /
+            86_400_000,
+        )
+      : 0;
+
   const aplicar = async () => {
     setAplicando(true);
     setError(null);
@@ -164,7 +205,14 @@ export default function ActualizarCostos() {
         headers: { "Content-Type": "application/json" },
         // EL ID DE LA FOTO QUE SE MIRO. Si para cuando llega llegó otra, el
         // servidor corta: lo que se escribiría no sería lo que se vio.
-        body: JSON.stringify({ nota, fotoId: datos?.foto?.id ?? null }),
+        body: JSON.stringify({
+          nota,
+          fotoId: datos?.foto?.id ?? null,
+          // A DONDE VA. Los numeros los rearma el servidor; esto es lo unico
+          // que decide la pantalla, y alla se vuelve a validar.
+          mes: mesElegido,
+          vigenteDesde: vigenciaElegida,
+        }),
       });
       const j = await r.json();
       if (!r.ok) {
@@ -186,7 +234,11 @@ export default function ActualizarCostos() {
   };
 
   const s = datos?.snapshot;
-  const sePuede = !!s && s.problemas.length === 0 && nota.trim().length > 0;
+  const sePuede =
+    !!s &&
+    s.problemas.length === 0 &&
+    nota.trim().length > 0 &&
+    problemaDestino === null;
 
   return (
     <div className="max-w-4xl space-y-4">
@@ -318,16 +370,114 @@ export default function ActualizarCostos() {
               />
             </div>
 
-            <p className="text-muted mt-3 text-xs">
-              Va al mes comercial <strong className="text-ink">{datos.mes}</strong>,
-              vigente desde el <strong className="text-ink">{datos.vigenteDesde}</strong>.
-              {datos.tramoVigente && (
-                <>
-                  {" "}Hoy rige el tramo del {datos.tramoVigente.vigenteDesde}
-                  {datos.tramoVigente.nota ? ` — ${datos.tramoVigente.nota}` : ""}.
-                </>
+            {/* A DONDE VA EL TRAMO.
+                Antes esto era una línea informativa: mes vigente y hoy, sin
+                opción. Y el día que la lista del mes nuevo llega tarde —el 6 o
+                el 7— eso deja los días ya pasados costeados con la lista
+                vieja, porque el tramo arranca el día en que se cargó y no el
+                día en que empieza a valer. Son dos fechas distintas y ahora se
+                dicen por separado. */}
+            <div className="border-line mt-3 border-t pt-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="text-muted block space-y-1 text-xs">
+                  <span className="block">Mes comercial</span>
+                  <input
+                    className={`${CAMPO} w-28`}
+                    value={mesElegido}
+                    placeholder="2026-11"
+                    disabled={aplicando}
+                    onChange={(e) =>
+                      setDestino({
+                        mes: e.target.value.trim(),
+                        vigenteDesde: vigenciaElegida,
+                      })
+                    }
+                  />
+                </label>
+                <label className="text-muted block space-y-1 text-xs">
+                  <span className="block">Vigente desde</span>
+                  <input
+                    type="date"
+                    className={`${CAMPO} w-40`}
+                    value={vigenciaElegida}
+                    disabled={aplicando}
+                    onChange={(e) =>
+                      setDestino({
+                        mes: mesElegido,
+                        vigenteDesde: e.target.value,
+                      })
+                    }
+                  />
+                </label>
+                {/* EL ATAJO DEL CASO MAS COMUN. Cargar la lista del mes es
+                    "desde el primer día del mes comercial", y ese día no es
+                    siempre el 6: cuando un cierre se mueve, se corre. Que lo
+                    calcule el botón y no la cabeza de quien lo usa. */}
+                {limites && vigenciaElegida !== limites.desde && (
+                  <button
+                    type="button"
+                    className={BOTON}
+                    disabled={aplicando}
+                    onClick={() =>
+                      setDestino({ mes: mesElegido, vigenteDesde: limites.desde })
+                    }
+                  >
+                    Desde el 1er día del mes ({fmtFechaCortaConAnio(limites.desde)})
+                  </button>
+                )}
+                {destino && (
+                  <button
+                    type="button"
+                    className={BOTON}
+                    disabled={aplicando}
+                    onClick={() => setDestino(null)}
+                  >
+                    Volver a hoy
+                  </button>
+                )}
+              </div>
+
+              {problemaDestino ? (
+                <p className="mt-2 text-xs text-amber-300">{problemaDestino}</p>
+              ) : (
+                <p className="text-muted mt-2 text-xs">
+                  Va al mes comercial{" "}
+                  <strong className="text-ink">{mesElegido}</strong>
+                  {limites && (
+                    <>
+                      {" "}
+                      ({fmtFechaCortaConAnio(limites.desde)} al{" "}
+                      {fmtFechaCortaConAnio(limites.hasta)})
+                    </>
+                  )}
+                  , vigente desde el{" "}
+                  <strong className="text-ink">
+                    {fmtFechaCortaConAnio(vigenciaElegida)}
+                  </strong>
+                  .
+                  {datos.tramoVigente && (
+                    <>
+                      {" "}Hoy rige el tramo del {datos.tramoVigente.vigenteDesde}
+                      {datos.tramoVigente.nota
+                        ? ` — ${datos.tramoVigente.nota}`
+                        : ""}
+                      .
+                    </>
+                  )}
+                </p>
               )}
-            </p>
+
+              {/* QUE SE VEA QUE REESCRIBE EL PASADO. Una vigencia vieja no es
+                  sólo una fecha distinta: manda a recalcular el margen de esos
+                  días, y el número que alguien miró ayer va a cambiar. */}
+              {diasHaciaAtras > 0 && !problemaDestino && (
+                <p className="mt-2 text-xs text-amber-300">
+                  Es una fecha pasada: se van a recalcular las ventas de los
+                  últimos {diasHaciaAtras}{" "}
+                  {diasHaciaAtras === 1 ? "día" : "días"} con estos costos.
+                </p>
+              )}
+            </div>
 
             {/* BAJARLA ANTES DE APLICAR. Ocho mil filas se revisan en Excel y
                 no en una pantalla: ordenar por diferencia, filtrar un

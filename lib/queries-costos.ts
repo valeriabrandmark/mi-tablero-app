@@ -1,5 +1,6 @@
 import { enTransaccion, query, queryOne } from "@/lib/db";
-import { mesComercialActual } from "@/lib/constantes";
+import { limitesMesComercial, mesComercialActual } from "@/lib/constantes";
+import { hoyEnArgentina, type Destino } from "@/lib/destino-costos";
 import { armarSnapshot, type ArticuloParaCostear, type Snapshot } from "@/lib/costos-snapshot";
 import { pedirArticulosASigma } from "@/lib/sigma-articulos";
 import { leerOfertas, type OfertasDeLaPlanilla } from "@/lib/ofertas-planilla";
@@ -57,8 +58,10 @@ export type Preparado = {
   teorico: FuenteTeorico;
   /** El mes comercial al que va a parar el tramo. */
   mes: string;
-  /** Desde cuándo rige. Hoy: es cuando se supo. */
+  /** Desde cuándo rige. Por omisión hoy; se puede elegir. Ver `Destino`. */
   vigenteDesde: string;
+  /** Primer y último día del mes comercial elegido, para la pantalla. */
+  limites: { desde: string; hasta: string };
   /** El tramo que rige ahora mismo, para decir contra qué se compara. */
   tramoVigente: { mes: string; vigenteDesde: string; nota: string | null } | null;
   /** Las fotos ya guardadas, para poder bajarlas. */
@@ -217,7 +220,7 @@ async function leerCostoActual(): Promise<Map<string, number>> {
  * muestra lo de Sigma. Dos fuentes para la misma foto es justo lo que no puede
  * pasar.
  */
-async function prepararConMaestro(ahora: Date): Promise<{
+async function prepararConMaestro(ahora: Date, destino?: Destino): Promise<{
   preparado: Preparado;
   articulos: ArticuloParaCostear[];
   costoActual: Map<string, number>;
@@ -244,13 +247,9 @@ async function prepararConMaestro(ahora: Date): Promise<{
 
   const tramos = await listarTramos(12);
 
-  const mes = mesComercialActual(ahora);
-  const vigenteDesde = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Argentina/Buenos_Aires",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(ahora);
+  const mes = destino?.mes ?? mesComercialActual(ahora);
+  const vigenteDesde = destino?.vigenteDesde ?? hoyEnArgentina(ahora);
+  const limites = limitesMesComercial(mes);
 
   const costoActual = await leerCostoActual();
 
@@ -279,6 +278,7 @@ async function prepararConMaestro(ahora: Date): Promise<{
         : null,
       mes,
       vigenteDesde,
+      limites,
       tramoVigente: tramo
         ? { mes: tramo.mes, vigenteDesde: tramo.vigente, nota: tramo.nota }
         : null,
@@ -288,8 +288,11 @@ async function prepararConMaestro(ahora: Date): Promise<{
 }
 
 /** La foto sola, que es lo que necesita la pantalla. */
-export async function prepararCostos(ahora: Date = new Date()): Promise<Preparado> {
-  return (await prepararConMaestro(ahora)).preparado;
+export async function prepararCostos(
+  ahora: Date = new Date(),
+  destino?: Destino,
+): Promise<Preparado> {
+  return (await prepararConMaestro(ahora, destino)).preparado;
 }
 
 /**
