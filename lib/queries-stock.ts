@@ -4,7 +4,6 @@ import { agregarFiltro } from "@/lib/filtros";
 import { buscadorDeArticulo } from "@/lib/sql-codigos";
 import {
   COBERTURA_OBJETIVO_DIAS,
-  DIAS_MINIMOS_DE_RITMO,
   DEPOSITO_POR_DEFECTO,
   GRUPO_PROVEEDOR_POR_DEFECTO,
   PLAZO_REPOSICION_DIAS,
@@ -14,6 +13,17 @@ import {
 } from "@/lib/stock";
 import { ANTIGUEDAD_VIGENTE, FULL_POR_SKU, POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import { ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
+import {
+  columnasRitmo,
+  ctesRitmo,
+  expresionRitmo,
+  joinsRitmo,
+} from "@/lib/sql-ritmo";
+import {
+  parametrosPorDefecto,
+  type ParametrosCompras,
+} from "@/lib/compras-parametros";
+import { getHayDiasConStock } from "@/lib/queries-parametros-compras";
 import type {
   DashboardStock,
   FilaStock,
@@ -50,7 +60,13 @@ import type {
  *
  * $1 es la ventana en días del ritmo de venta y $3 el depósito que se mira.
  */
-const BASE = `
+/**
+ * EL RITMO ES EL MISMO QUE EN COMPRAS: sale de lib/sql-ritmo.ts con las mismas
+ * reglas (`p`, editables en "Reglas del sugerido" de Compras). Por eso esto es
+ * una función: las reglas y si existe gold.dias_con_stock cambian el SQL.
+ */
+function base(p: ParametrosCompras, hayDiasConStock: boolean): string {
+  return `
 with por_inv as (
   -- Un renglón por INVENTARIO y no por publicación: varias publicaciones
   -- comparten el mismo stock físico, y sumarlas lo contaría de más.
@@ -126,6 +142,7 @@ ventas as (
   from gold.fact_ventas
   group by sku
 ),
+${ctesRitmo(hayDiasConStock)}
 stock as (
   -- FULL OUTER: hay SKU que sólo están en Tucumán y SKU que sólo están en Full.
   -- Un inner join perdería justo los que están en un solo depósito, que son los
@@ -171,26 +188,11 @@ base as (
          ant.dias                                       as dias_en_full,
          coalesce(ant.u_mas_120, 0)                     as u_mas_120,
          coalesce(ant.u_mas_120, 0) * coalesce(c.costo_real, 0) as valor_mas_120,
-         -- SOBRE CUANTOS DIAS SE MIDE EL RITMO.
-         --
-         -- La ventana entera, salvo que el artículo haya empezado a venderse
-         -- adentro de ella: ahí son los días que lleva vendiendo. Uno dado de
-         -- alta hace 30 días que vendió 20 unidades no vende 20/120 = 0,17 por
-         -- día, vende 0,67, y con la cuenta vieja aparecía con una cobertura
-         -- enorme --como si sobrara-- justo cuando está por quebrarse.
-         --
-         -- ES LA MISMA CUENTA QUE HACE COMPRAS (lib/queries-compras.ts). Tiene
-         -- que serlo: las dos pantallas muestran la cobertura del mismo
-         -- artículo, y que una diga 40 días y la otra 140 no es un matiz, es
-         -- una de las dos mintiendo.
-         --
-         -- El piso de ${DIAS_MINIMOS_DE_RITMO} días evita el otro extremo: sin
-         -- él, tres unidades vendidas ayer darían un ritmo de 3 por día.
-         case when v.primera_venta is null then $1::int
-              else least($1::int,
-                         greatest(${DIAS_MINIMOS_DE_RITMO},
-                                  current_date - v.primera_venta::date))
-         end                                            as dias_ritmo
+         -- El ritmo: ver lib/sql-ritmo.ts. ES LA MISMA CUENTA QUE HACE
+         -- COMPRAS, y tiene que serlo: las dos pantallas muestran la cobertura
+         -- del mismo artículo, y que una diga 40 días y la otra 140 no es un
+         -- matiz, es una de las dos mintiendo.
+         ${columnasRitmo(p).trim()}
   from stock s
   left join bronze.sigma_articulos a on trim(a.id) = s.sku
   left join bronze.proveedores_grupo pg on pg.proveedor = a."proveedorNombre"
@@ -200,6 +202,7 @@ base as (
   -- Sólo si hoy hay stock disponible en Full: ver la misma regla en
   -- lib/queries-stock-antiguedad.ts.
   left join antiguedad ant on ant.sku = s.sku and s.full_ml > 0
+  ${joinsRitmo("s.sku").trim()}
   where s.total > 0
     and coalesce(a."proveedorNombre", '') <> all($2::text[])
 ),
@@ -210,13 +213,17 @@ con_ritmo as (
   select b.*,
          -- El ritmo es unidades por DÍA. La planilla lo guardaba mensual y lo
          -- llamaba "STOCK MAX", que es lo que hacía leer un ritmo como un tope.
-         b.uds::numeric / b.dias_ritmo                  as ritmo_diario,
+         ${expresionRitmo(p)}                           as ritmo_diario
+  from base b
+),
+con_cobertura as (
+  select b.*,
          -- Sin ventas no hay cobertura: es null y no un número enorme. Son dos
          -- situaciones distintas y la planilla las mezclaba en un #DIV/0!.
-         case when b.uds = 0 then null
-              else b.total / (b.uds::numeric / b.dias_ritmo)
+         case when b.uds = 0 or b.ritmo_diario = 0 then null
+              else b.total / b.ritmo_diario
          end                                            as cobertura
-  from base b
+  from con_ritmo b
 ),
 -- El exceso y el sugerido salen del ritmo, así que van en su propio nivel para
 -- no repetir la expresión entera en cada uno.
@@ -228,8 +235,13 @@ calculada as (
          -- mientras la reposición viaja. Sin sumar el plazo, el pedido llega
          -- justo cuando el artículo ya se quebró.
          ceil(greatest(0, b.ritmo_diario * ${COBERTURA_OBJETIVO_DIAS + PLAZO_REPOSICION_DIAS} - b.total)) as sugerido
-  from con_ritmo b
+  from con_cobertura b
 )`;
+}
+
+/** Las reglas del ritmo y si existe la tabla de días con stock. */
+type Reglas = { p: ParametrosCompras; hayDiasConStock: boolean };
+const SIN_REGLAS: Reglas = { p: parametrosPorDefecto(), hayDiasConStock: false };
 
 type Where = { sql: string; params: unknown[] };
 
@@ -271,10 +283,10 @@ function where(f: FiltrosStock): Where {
 
 const num = (v: unknown): number => Number(v ?? 0);
 
-async function getKpis(f: FiltrosStock): Promise<KpisStock> {
+async function getKpis(f: FiltrosStock, r: Reglas): Promise<KpisStock> {
   const w = where(f);
   const fila = await queryOne<Record<string, string>>(
-    `${BASE}
+    `${base(r.p, r.hayDiasConStock)}
      select count(*)                                                as skus,
             coalesce(sum(total), 0)                                 as unidades,
             coalesce(sum(valor), 0)                                 as valor,
@@ -311,10 +323,10 @@ async function getKpis(f: FiltrosStock): Promise<KpisStock> {
  * cortes escritos en los dos lados, el día que se muevan van a quedar
  * distintos en cada uno y nadie lo va a notar hasta que los números no cierren.
  */
-async function getTramos(f: FiltrosStock): Promise<TramoStock[]> {
+async function getTramos(f: FiltrosStock, r: Reglas): Promise<TramoStock[]> {
   const w = where(f);
   const filas = await query<Record<string, string | null>>(
-    `${BASE}
+    `${base(r.p, r.hayDiasConStock)}
      select cobertura, total, valor
      from calculada ${w.sql}`,
     w.params,
@@ -332,10 +344,10 @@ async function getTramos(f: FiltrosStock): Promise<TramoStock[]> {
   return [...mapa.values()];
 }
 
-async function getProveedores(f: FiltrosStock): Promise<ProveedorStock[]> {
+async function getProveedores(f: FiltrosStock, r: Reglas): Promise<ProveedorStock[]> {
   const w = where(f);
   const filas = await query<Record<string, string | null>>(
-    `${BASE}
+    `${base(r.p, r.hayDiasConStock)}
      select coalesce(proveedor, 'Sin dato') as proveedor,
             count(*)                        as skus,
             coalesce(sum(valor), 0)         as valor,
@@ -356,14 +368,15 @@ async function getProveedores(f: FiltrosStock): Promise<ProveedorStock[]> {
 /** Tope de filas que bajan al navegador. Son ~3.300 SKU con stock. */
 const TOPE = 500;
 
-async function getFilas(f: FiltrosStock): Promise<FilaStock[]> {
+async function getFilas(f: FiltrosStock, r: Reglas): Promise<FilaStock[]> {
   const w = where(f);
   const filas = await query<Record<string, string | null>>(
-    `${BASE}
+    `${base(r.p, r.hayDiasConStock)}
      select sku, producto, proveedor, marca,
             tuc, full_ml, full_en_camino, total, costo, valor,
             uds, uds_meli, uds_tn, uds_may,
             ritmo_diario, cobertura, exceso_u, exceso, sugerido,
+            ritmo_sobre_stock, uds_tuc, uds_full, dias_stock_tuc, dias_stock_full,
             to_char(ultima_venta, 'YYYY-MM-DD') as ultima_venta,
             ultima_compra,
             dias_en_full, u_mas_120, valor_mas_120
@@ -375,37 +388,42 @@ async function getFilas(f: FiltrosStock): Promise<FilaStock[]> {
     w.params,
   );
 
-  return filas.map((r) => ({
-    sku: r.sku as string,
-    producto: r.producto,
-    proveedor: r.proveedor,
-    marca: r.marca,
-    tuc: num(r.tuc),
-    full: num(r.full_ml),
-    fullEnCamino: num(r.full_en_camino),
-    total: num(r.total),
-    costo: num(r.costo),
-    valor: num(r.valor),
-    uds: num(r.uds),
-    udsMeli: num(r.uds_meli),
-    udsTn: num(r.uds_tn),
-    udsMayorista: num(r.uds_may),
-    ritmoDiario: num(r.ritmo_diario),
-    cobertura: r.cobertura == null ? null : num(r.cobertura),
-    excesoU: num(r.exceso_u),
-    exceso: num(r.exceso),
-    sugerido: num(r.sugerido),
-    ultimaVenta: r.ultima_venta,
-    ultimaCompra: r.ultima_compra,
-    diasEnFull: r.dias_en_full == null ? null : num(r.dias_en_full),
-    uMas120: num(r.u_mas_120),
-    valorMas120: num(r.valor_mas_120),
+  return filas.map((x) => ({
+    sku: x.sku as string,
+    producto: x.producto,
+    proveedor: x.proveedor,
+    marca: x.marca,
+    tuc: num(x.tuc),
+    full: num(x.full_ml),
+    fullEnCamino: num(x.full_en_camino),
+    total: num(x.total),
+    costo: num(x.costo),
+    valor: num(x.valor),
+    uds: num(x.uds),
+    udsMeli: num(x.uds_meli),
+    udsTn: num(x.uds_tn),
+    udsMayorista: num(x.uds_may),
+    ritmoDiario: num(x.ritmo_diario),
+    ritmoSobreStock: (x.ritmo_sobre_stock as unknown) === true,
+    udsTuc: num(x.uds_tuc),
+    udsFull: num(x.uds_full),
+    diasStockTuc: x.dias_stock_tuc == null ? null : num(x.dias_stock_tuc),
+    diasStockFull: x.dias_stock_full == null ? null : num(x.dias_stock_full),
+    cobertura: x.cobertura == null ? null : num(x.cobertura),
+    excesoU: num(x.exceso_u),
+    exceso: num(x.exceso),
+    sugerido: num(x.sugerido),
+    ultimaVenta: x.ultima_venta,
+    ultimaCompra: x.ultima_compra,
+    diasEnFull: x.dias_en_full == null ? null : num(x.dias_en_full),
+    uMas120: num(x.u_mas_120),
+    valorMas120: num(x.valor_mas_120),
   }));
 }
 
 async function getOpcionesStockDirecto() {
   const params = [VENTANA_POR_DEFECTO, PROVEEDORES_NO_MERCADERIA, DEPOSITO_POR_DEFECTO];
-  // UNA sola consulta y no tres. `BASE` es cara --cruza ocho fuentes-- y antes
+  // UNA sola consulta y no tres. La base es cara --cruza ocho fuentes-- y antes
   // se la corría una vez por cada selector, encima de las cuatro que ya hace el
   // tablero: siete pasadas por pantalla para llenar tres desplegables.
   //
@@ -417,7 +435,7 @@ async function getOpcionesStockDirecto() {
     marcas: string[] | null;
     grupos: string[] | null;
   }>(
-    `${BASE}
+    `${base(SIN_REGLAS.p, SIN_REGLAS.hayDiasConStock)}
      select array_agg(distinct proveedor) filter (where proveedor is not null) as proveedores,
             array_agg(distinct marca)     filter (where marca is not null)     as marcas,
             array_agg(distinct grupo)     filter (where grupo is not null)     as grupos
@@ -467,13 +485,22 @@ async function getAntiguedadAl(): Promise<string | null> {
   }
 }
 
-async function getDashboardStockDirecto(f: FiltrosStock): Promise<DashboardStock> {
+async function getDashboardStockDirecto(
+  f: FiltrosStock,
+  /**
+   * Las reglas del ritmo (las mismas de Compras). Van COMO ARGUMENTO para que
+   * el caché arme la clave con ellas: cambiar una regla en Compras cambia
+   * también la clave de Stock, y las dos pantallas siguen diciendo lo mismo.
+   */
+  p: ParametrosCompras = parametrosPorDefecto(),
+): Promise<DashboardStock> {
+  const r: Reglas = { p, hayDiasConStock: await getHayDiasConStock() };
   const [kpis, tramos, proveedores, filas, comprasHasta, antiguedadAl] =
     await Promise.all([
-      getKpis(f),
-      getTramos(f),
-      getProveedores(f),
-      getFilas(f),
+      getKpis(f, r),
+      getTramos(f, r),
+      getProveedores(f, r),
+      getFilas(f, r),
       getComprasHasta(),
       getAntiguedadAl(),
     ]);
@@ -488,6 +515,7 @@ async function getDashboardStockDirecto(f: FiltrosStock): Promise<DashboardStock
     deposito: f.deposito ?? DEPOSITO_POR_DEFECTO,
     comprasHasta,
     antiguedadAl,
+    ritmoSobreStock: p.ritmo_sobre_dias_con_stock >= 1 && r.hayDiasConStock,
     generadoEn: new Date().toISOString(),
   };
 }

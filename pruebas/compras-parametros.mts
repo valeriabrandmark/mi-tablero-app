@@ -69,6 +69,7 @@ revisar("una clave inventada no aparece", "clave_inventada" in mezclado, false);
 // --- La explicación del ritmo sobre días con stock --------------------------
 // El caso de compras: 12 que entraron y se vendieron en 2 días por Full.
 const fila = {
+  diasRitmo: 120,
   ritmoSobreStock: true,
   udsTuc: 0,
   udsFull: 12,
@@ -81,6 +82,8 @@ revisar("explica Full y no Tucumán (que no vendió)", lineas.length, 2);
 revisar("usa el piso de días y lo dice",
   lineas[1]?.includes("en 7 días con stock (tuvo stock 2; se toma el mínimo de 7)"), true);
 revisar("y el ritmo que da", lineas[1]?.endsWith("= 1.71 por día"), true);
+revisar("nunca más días que la regla de la ventana",
+  ritmoPorDeposito({ ...fila, diasStockFull: 101, diasRitmo: 19 }, def)[1]?.includes("en 19 días con stock"), true);
 revisar("sin la regla, no explica nada",
   ritmoPorDeposito({ ...fila, ritmoSobreStock: false }, def), []);
 
