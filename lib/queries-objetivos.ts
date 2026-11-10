@@ -440,38 +440,13 @@ async function getOpcionesObjetivosDirecto(): Promise<OpcionesObjetivos> {
     `select distinct mes_comercial as valor from gold.objetivos order by valor desc`,
   );
 
-  return { meses: meses.map((r) => r.valor) };
-}
-
-/**
- * Mes con el que abre la página: el mes comercial vigente si ya tiene objetivos
- * cargados, y si no el último que sí los tenga.
- *
- * El fallback existe para que al pasar de mes la página no abra vacía mientras
- * nadie cargó los objetivos nuevos. No queda escondido: el selector muestra el
- * mes que quedó elegido, y el usuario lo puede cambiar.
- *
- * Si la base no responde devuelve el mes vigente igual, así el error lo muestra
- * el dashboard con su propio cartel en vez de romper la página entera.
- */
-async function getMesInicialObjetivosDirecto(
-  vendedor: string,
-): Promise<string> {
+  // EL MES VIGENTE ESTÁ SIEMPRE, tenga objetivos o no. La página abre en él
+  // (ver la página de objetivos), y un mes que no figura en el selector no se
+  // puede volver a elegir después de mirar otro.
   const vigente = mesComercialActual();
-  try {
-    const filas = await query<{ valor: string }>(
-      `select mes_comercial as valor
-       from gold.objetivos
-       where vendedor = $1
-       group by mes_comercial
-       order by (mes_comercial = $2) desc, mes_comercial desc
-       limit 1`,
-      [vendedor, vigente],
-    );
-    return filas[0]?.valor ?? vigente;
-  } catch {
-    return vigente;
-  }
+  const valores = meses.map((r) => r.valor);
+  if (!valores.includes(vigente)) valores.push(vigente);
+  return { meses: valores.sort().reverse() };
 }
 
 // --- Dashboard completo ------------------------------------------------------
@@ -519,10 +494,6 @@ async function getDashboardObjetivosDirecto(
 export const getOpcionesObjetivos = cacheado(
   "objetivos:opciones",
   getOpcionesObjetivosDirecto,
-);
-export const getMesInicialObjetivos = cacheado(
-  "objetivos:mes-inicial",
-  getMesInicialObjetivosDirecto,
 );
 export const getDashboardObjetivos = cacheado(
   "objetivos:dashboard",

@@ -90,7 +90,7 @@ export default function DashboardObjetivosPage({
   mesInicial,
 }: {
   vendedor: string;
-  /** Mes con el que abre, resuelto en el servidor (ver getMesInicialObjetivos). */
+  /** Mes con el que abre: el mes comercial vigente, resuelto en el servidor. */
   mesInicial: string;
 }) {
   const [filtros, setFiltros] = useState<FiltrosObjetivos>({
@@ -125,6 +125,23 @@ export default function DashboardObjetivosPage({
 
   const resumen = data?.resumen ?? [];
   const vencido = data?.vencido ?? null;
+
+  // No es un objetivo sino una alerta, y sobre todo NO es del mes: es una foto
+  // de la cartera al momento de la última carga. Por eso dice la fecha, no se
+  // mueve al cambiar el filtro de mes, y se muestra aunque el mes no tenga
+  // objetivos cargados.
+  const tarjetaVencido = (
+    <TarjetaKpi
+      titulo="% facturación vencida"
+      valor={vencido ? fmtPct(vencido.pctVencida) : "—"}
+      detalle={
+        vencido && vencido.deudaTotal !== 0
+          ? `${fmtMoneda(vencido.deudaVencida)} de ${fmtMoneda(vencido.deudaTotal)} · foto al ${vencido.fechaCarga ?? "—"}`
+          : "Sin cuenta corriente cargada"
+      }
+      acento={vencido?.pctVencida != null ? TEMA.negativo : undefined}
+    />
+  );
   // Cliente o buscador: recortan las ventas, y con ellas los objetivos que se
   // muestran (solo a los que esas ventas aportan). Ver recorteVentas.
   const recorteVentas = !sinValores(filtros.cliente) || !!filtros.buscar;
@@ -262,11 +279,42 @@ export default function DashboardObjetivosPage({
       {/* Con error no se dibuja ninguna tarjeta: si no, quedaba la de "%
           facturación vencida" sola con un guión, que se lee como un dato real
           y no como lo que es (no se pudo consultar nada). */}
-      {error ? null : resumen.length === 0 ? (
+      {error ? null : !data ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }, (_, i) => (
             <Esqueleto key={i} className="h-[86px]" />
           ))}
+        </div>
+      ) : resumen.length === 0 ? (
+        // SIN OBJETIVOS, DICHO Y NO ESQUELETO. Antes un mes sin objetivos
+        // dejaba las tarjetas "cargando" para siempre, y por eso la página
+        // abría en el último mes que sí los tuviera: el 10/11/2026 SILVIO veía
+        // octubre en pleno noviembre. Ahora abre en el mes vigente y lo dice.
+        <div
+          className={`grid grid-cols-2 gap-3 transition-opacity sm:grid-cols-2 lg:grid-cols-4 ${cargando ? "opacity-50" : ""}`}
+        >
+          <div className="col-span-2 lg:col-span-3">
+            {recorteVentas ? (
+              <Aviso tono="info">
+                Estas ventas no aportan a ningún objetivo del mes.
+              </Aviso>
+            ) : (
+              <Aviso tono="alerta">
+                <p className="font-medium">
+                  Objetivos de{" "}
+                  {filtros.mes?.length
+                    ? filtros.mes.map(fmtMes).join(", ")
+                    : "este período"}{" "}
+                  pendientes de cargar
+                </p>
+                <p className="mt-1 text-xs opacity-80">
+                  Las ventas del mes ya se ven abajo; el avance aparece apenas
+                  se carguen los objetivos.
+                </p>
+              </Aviso>
+            )}
+          </div>
+          {tarjetaVencido}
         </div>
       ) : (
         // Una tarjeta por métrica: sumar pesos con unidades no significaría nada.
@@ -306,19 +354,7 @@ export default function DashboardObjetivosPage({
             );
           })}
 
-          {/* No es un objetivo sino una alerta, y sobre todo NO es del mes: es
-              una foto de la cartera al momento de la última carga. Por eso dice
-              la fecha y no se mueve al cambiar el filtro de mes. */}
-          <TarjetaKpi
-            titulo="% facturación vencida"
-            valor={vencido ? fmtPct(vencido.pctVencida) : "—"}
-            detalle={
-              vencido && vencido.deudaTotal !== 0
-                ? `${fmtMoneda(vencido.deudaVencida)} de ${fmtMoneda(vencido.deudaTotal)} · foto al ${vencido.fechaCarga ?? "—"}`
-                : "Sin cuenta corriente cargada"
-            }
-            acento={vencido?.pctVencida != null ? TEMA.negativo : undefined}
-          />
+          {tarjetaVencido}
         </div>
       )}
 
