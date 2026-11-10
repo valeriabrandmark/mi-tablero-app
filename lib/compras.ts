@@ -17,9 +17,12 @@
 import {
   COBERTURA_OBJETIVO_DIAS,
   GRUPO_PROVEEDOR_POR_DEFECTO,
-  PLAZO_REPOSICION_DIAS,
 } from "@/lib/stock";
 import type { CeldaXlsx, ColumnaXlsx, LibroXlsx } from "@/lib/xlsx";
+import {
+  parametrosPorDefecto,
+  type ParametrosCompras,
+} from "@/lib/compras-parametros";
 import type {
   FilaCompra,
   FiltrosCompras,
@@ -152,17 +155,36 @@ export const DIAS_ARTICULO_NUEVO = 90;
  *
  * No hay un campo para esto en Sigma, así que la convención del negocio es
  * escribirlo adelante del nombre: "DF - ADERMICINA CREMA...", "DD PRIME
- * PRESERVATIVO...". Hoy son 841 artículos (776 con DF y 65 con DD), y los dos
- * prefijos vienen SIEMPRE con un espacio detrás --verificado contra la base--
- * así que pedir el espacio evita llevarse puesta una marca que empiece con
- * esas letras.
+ * PRESERVATIVO...". Al 10/11/2026 son 888 artículos (823 con DF y 65 con DD).
+ *
+ * SE RECONOCE EL PREFIJO COMO PALABRA SUELTA, sin importar cómo se escriba:
+ * mayúsculas o minúsculas, con espacios adelante, y seguido de un espacio, un
+ * guión, un punto o nada ("DF - ...", "df ...", "DF-...", "DD."). Lo que NO
+ * cuenta es el prefijo pegado a una letra o número: "DFENSE" o "DD2000" son
+ * nombres, no la marca de discontinuo. Hoy todos vienen como "DF " / "DD "
+ * --verificado contra la base--, pero es texto libre que se carga a mano y
+ * mañana puede escribirse distinto: un discontinuo que se escapa vuelve a
+ * aparecer con sugerido.
  *
  * A un discontinuo no se le sugiere comprar: el proveedor lo está dando de
  * baja. Pero se lo tiene que poder encontrar, porque a veces lo ofrece a
  * liquidación y ahí sí conviene cargar cantidad a mano. Para eso está el
  * recorte "Discontinuos" de acá abajo.
  */
-export const PREFIJOS_DISCONTINUO = ["DF ", "DD "] as const;
+export const PREFIJOS_DISCONTINUO = ["DF", "DD"] as const;
+
+/**
+ * La misma regla que `es_discontinuo` en el SQL de Compras, para poder
+ * probarla sin base. Si se cambia una, se cambia la otra (ver
+ * CONDICION_DISCONTINUO en lib/queries-compras.ts).
+ */
+export const REGEX_DISCONTINUO = new RegExp(
+  `^(${PREFIJOS_DISCONTINUO.join("|")})([^A-Z0-9]|$)`,
+);
+
+export function esDescripcionDiscontinua(descripcion: string | null | undefined): boolean {
+  return REGEX_DISCONTINUO.test((descripcion ?? "").trimStart().toUpperCase());
+}
 
 /**
  * Los grupos de artículos que se pueden mostrar, como van en la lista.
@@ -1118,6 +1140,27 @@ export function nombreArchivo(proveedor: string, extension: string): string {
    ------------------------------------------------------------------------- */
 
 /**
+ * Cómo se armó el ritmo cuando se midió sobre los DÍAS CON STOCK: una línea
+ * por depósito que vendió. Es lo que contesta "¿por qué me sugiere 70 si la
+ * última vez compré 12?": porque esas 12 se vendieron en 3 días.
+ */
+export function ritmoPorDeposito(f: FilaCompra, p: ParametrosCompras): string[] {
+  if (!f.ritmoSobreStock) return [];
+  const linea = (nombre: string, uds: number, dias: number | null) => {
+    const usados = Math.max(p.dias_minimos_con_stock, dias ?? 0);
+    const piso = (dias ?? 0) < p.dias_minimos_con_stock
+      ? ` (tuvo stock ${dias ?? 0}; se toma el mínimo de ${p.dias_minimos_con_stock})`
+      : "";
+    return `  · ${nombre}: ${Math.round(uds)} u. en ${usados} días con stock${piso}` +
+      ` = ${(uds / usados).toFixed(2)} por día`;
+  };
+  const l = ["Medido sobre los días que hubo stock, cada depósito por separado:"];
+  if (f.udsTuc > 0) l.push(linea("Tucumán", f.udsTuc, f.diasStockTuc));
+  if (f.udsFull > 0) l.push(linea("Full", f.udsFull, f.diasStockFull));
+  return l;
+}
+
+/**
  * El renglón por renglón de cómo se llegó al sugerido, para el tooltip.
  *
  * Devuelve LÍNEAS y no una frase armada: el `title` de una celda las separa con
@@ -1139,6 +1182,11 @@ export function porQueSugerido(
    * uno sin explicar.
    */
   coberturaDias: number,
+  /**
+   * Las reglas con las que se calculó (las que devuelve la API en
+   * `parametros`). Por defecto, los valores de siempre.
+   */
+  p: ParametrosCompras = parametrosPorDefecto(),
 ): string[] {
   // LOS DOS FRENOS DUROS VAN PRIMERO, antes incluso de mirar si hay ritmo:
   // con cualquiera de los dos puesto no hay compra que sugerir, y lo único
@@ -1221,8 +1269,9 @@ export function porQueSugerido(
         ? ` (medido sobre ${f.diasRitmo} días: empezó a venderse hace poco)`
         : "") +
       ` y hay ${Math.round(f.total)} u.`,
+    ...ritmoPorDeposito(f, p),
     `Alcanza para ${Math.round(f.cobertura)} días.`,
-    `Para cubrir ${coberturaDias} días de compra + ${PLAZO_REPOSICION_DIAS}` +
+    `Para cubrir ${coberturaDias} días de compra + ${p.plazo_reposicion_dias}` +
       ` de reposición faltan ${Math.ceil(f.sugeridoBase)} u.`,
   ];
 
@@ -1241,10 +1290,10 @@ export function porQueSugerido(
     ];
   }
 
-  if (f.cobertura > COBERTURA_SIN_INFLAR_DIAS) {
+  if (f.cobertura > p.cobertura_sin_inflar_dias) {
     l.push(
       "",
-      `Ya hay más de ${COBERTURA_SIN_INFLAR_DIAS} días de cobertura, así que la` +
+      `Ya hay más de ${p.cobertura_sin_inflar_dias} días de cobertura, así que la` +
         " oferta no infla la compra: comprar más sería plata quieta.",
     );
     return l;
@@ -1261,7 +1310,7 @@ export function porQueSugerido(
     );
   } else if (
     f.factorOferta <= 1 &&
-    (f.rentabilidad ?? 0) < RENTABILIDAD_COMPRA_DISCRETA / 100 &&
+    (f.rentabilidad ?? 0) < p.rentabilidad_compra_discreta / 100 &&
     vigente > habitual
   ) {
     // EL CASO NUEVO, Y EL QUE MÁS FALTA HACE EXPLICAR. Sin esto el tooltip
@@ -1271,12 +1320,12 @@ export function porQueSugerido(
       "",
       `El descuento de este mes es ${vigente.toFixed(1)} % contra ${habitual.toFixed(1)} %` +
         ` habitual, pero el artículo rinde ${((f.rentabilidad ?? 0) * 100).toFixed(1)} %,` +
-        ` por debajo del ${RENTABILIDAD_COMPRA_DISCRETA} %.`,
+        ` por debajo del ${p.rentabilidad_compra_discreta} %.`,
       "COMPRA DISCRETA: sólo lo necesario. Comprar de más un artículo que no" +
         " rinde es plata quieta, por buena que esté la oferta.",
       `Se adelantaría compra si el descuento fuera al menos` +
-        ` ${VECES_SOBRE_LO_HABITUAL_PARA_INFLAR} veces el habitual` +
-        ` (${(habitual * VECES_SOBRE_LO_HABITUAL_PARA_INFLAR).toFixed(1)} %),` +
+        ` ${p.veces_sobre_lo_habitual_para_inflar} veces el habitual` +
+        ` (${(habitual * p.veces_sobre_lo_habitual_para_inflar).toFixed(1)} %),` +
         " o sea uno que antes no teníamos.",
     );
   } else if (f.factorOferta <= 1) {
@@ -1292,7 +1341,7 @@ export function porQueSugerido(
         ` habitual (el promedio de los meses en que hubo oferta):` +
         ` ${(vigente - habitual).toFixed(1)} puntos de ventaja.`,
       `Por eso se multiplica por ${f.factorOferta.toFixed(2)}` +
-        ` (${PUNTOS_OFERTA_PARA_DUPLICAR} puntos = el doble, tope ${FACTOR_OFERTA_MAX}x).`,
+        ` (${p.puntos_oferta_para_duplicar} puntos = el doble, tope ${p.factor_oferta_max}x).`,
     );
   }
 
@@ -1301,7 +1350,7 @@ export function porQueSugerido(
   const sinTope = Math.ceil(f.sugeridoBase * f.factorOferta);
   if (f.sugerido < sinTope) {
     l.push(
-      `Daría ${sinTope} u., pero el techo de ${COBERTURA_MAXIMA_COMPRA_DIAS} días` +
+      `Daría ${sinTope} u., pero el techo de ${p.cobertura_maxima_compra_dias} días` +
         ` de cobertura lo baja a ${f.sugerido}.`,
     );
   }

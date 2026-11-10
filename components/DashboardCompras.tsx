@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import BotonActualizar from "@/components/BotonActualizar";
+import ParametrosCompras from "@/components/ParametrosCompras";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { contarSkus, sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
@@ -138,6 +139,36 @@ function sinCero(n: number | undefined): number | string {
  * de la pantalla.
  */
 const RECALCULADOS_A_LA_VISTA = 12;
+
+/**
+ * TAB SALTA DE CANTIDAD EN CANTIDAD.
+ *
+ * Lo pidió compras (10/11/2026): al cargar una orden se va renglón por
+ * renglón escribiendo cantidades, y con el Tab de siempre el foco pasaba por
+ * la unidad, los dos descuentos y lo que hubiera en el medio: cuatro Tab por
+ * fila para llegar a la siguiente cantidad.
+ *
+ * Tab va a la Cantidad de la fila de abajo y Shift+Tab a la de arriba, en el
+ * orden en que la tabla se ve (ordenada como esté). En la última fila el Tab
+ * sigue su camino normal, para poder salir de la tabla con el teclado. Los
+ * otros campos siguen ahí: se llega con el mouse, o con Tab desde ellos.
+ *
+ * Se busca por un atributo y no por índice de fila porque la tabla se reordena
+ * y se filtra sola: el DOM es lo único que sabe qué fila está debajo de cuál.
+ */
+function saltarDeCantidad(e: React.KeyboardEvent<HTMLInputElement>) {
+  if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey) return;
+  const todas = Array.from(
+    document.querySelectorAll<HTMLInputElement>("input[data-cantidad-compra]"),
+  );
+  const i = todas.indexOf(e.currentTarget);
+  const destino = todas[e.shiftKey ? i - 1 : i + 1];
+  if (i < 0 || !destino) return;
+  e.preventDefault();
+  destino.focus();
+  // Seleccionado, para escribir encima sin tener que borrar el sugerido.
+  destino.select();
+}
 
 const CLASE_CELDA_EDITABLE =
   "border-line bg-panel-2 text-ink focus:border-c1 w-16 rounded-md border px-1.5 py-1 text-right text-xs tabular-nums outline-none";
@@ -333,6 +364,11 @@ export default function DashboardComprasPage({
       } satisfies Record<keyof FiltrosCompras, string | string[] | undefined>,
       { conOpciones: "1" },
     );
+
+  // El plazo con el que se calculó (puede venir cambiado desde "Reglas del
+  // sugerido"). Mientras no llegan datos, el de siempre.
+  const plazoReposicion =
+    data?.parametros?.plazo_reposicion_dias ?? PLAZO_REPOSICION_DIAS;
 
   const filas = useMemo(() => data?.filas ?? [], [data]);
 
@@ -1029,7 +1065,7 @@ export default function DashboardComprasPage({
         ) : (
           <span
             style={
-              f.cobertura < PLAZO_REPOSICION_DIAS
+              f.cobertura < plazoReposicion
                 ? { color: TEMA.negativo }
                 : undefined
             }
@@ -1053,6 +1089,10 @@ export default function DashboardComprasPage({
         const texto = porQueSugerido(
           f,
           data?.cobertura ?? coberturaElegida,
+          // Las reglas con las que se calcularon ESTAS filas, no las de
+          // siempre: si alguien cambió el techo a 120, el tooltip tiene que
+          // decir 120.
+          data?.parametros,
         ).join("\n");
         // EL FRENO SE VE, no sólo se lee en el tooltip. Un "—" a secas en un
         // artículo que se venía comprando se lee como "no hace falta", y acá
@@ -1209,6 +1249,9 @@ export default function DashboardComprasPage({
                 cantidad: Math.max(0, Math.floor(Number(e.target.value) || 0)),
               })
             }
+            // TAB VA A LA CANTIDAD DE LA FILA SIGUIENTE. Ver saltarDeCantidad.
+            data-cantidad-compra=""
+            onKeyDown={saltarDeCantidad}
             className={`${CLASE_CELDA_EDITABLE} ${
               aviso ? "border-amber-500/70 bg-amber-500/5" : ""
             }`}
@@ -1568,6 +1611,7 @@ export default function DashboardComprasPage({
             {cargando ? "Recargando…" : "Recargar"}
           </button>
           <BotonActualizar onDatosNuevos={recargar} conSellIn />
+          <ParametrosCompras onGuardado={recargar} />
         </div>
       </div>
 
@@ -1817,11 +1861,18 @@ export default function DashboardComprasPage({
 
         <span className="text-muted text-[11px] leading-tight">
           El <strong>sugerido</strong> es lo que falta para cubrir{" "}
-          {(data?.cobertura ?? coberturaElegida) + PLAZO_REPOSICION_DIAS} días
+          {(data?.cobertura ?? coberturaElegida) + plazoReposicion} días
           de venta ({data?.cobertura ?? coberturaElegida} que elegiste comprar
-          más {PLAZO_REPOSICION_DIAS} que tarda la reposición) al ritmo de los
-          últimos {filtros.ventana ?? VENTANA_POR_DEFECTO} días, contando el
-          stock de <strong>los dos depósitos</strong>. El{" "}
+          más {plazoReposicion} que tarda la reposición) al ritmo de los
+          últimos {filtros.ventana ?? VENTANA_POR_DEFECTO} días
+          {data?.parametros?.ritmo_sobre_dias_con_stock ? (
+            <>
+              {" "}— medido <strong>sólo sobre los días que hubo stock</strong>,
+              Tucumán y Full por separado
+              {data.hayDiasConStock ? "" : " (todavía sin la cuenta de días: se usa la ventana entera)"}
+            </>
+          ) : null}
+          , contando el stock de <strong>los dos depósitos</strong>. El{" "}
           <strong>descuento</strong> es el{" "}
           <strong>sell in vigente del proveedor</strong> del mes elegido y se
           puede corregir fila por fila.
@@ -2857,7 +2908,10 @@ export default function DashboardComprasPage({
               <strong>
                 Un artículo que no rinde no se compra de más por una oferta.
               </strong>{" "}
-              Por debajo del {RENTABILIDAD_COMPRA_DISCRETA} % de rentabilidad
+              Por debajo del{" "}
+              {data?.parametros?.rentabilidad_compra_discreta ??
+                RENTABILIDAD_COMPRA_DISCRETA}{" "}
+              % de rentabilidad (3 meses, todos los canales)
               —el cuartil de abajo del catálogo— el sugerido es sólo lo
               necesario, por buena que esté la oferta: comprar más es plata
               quieta en algo que ya no la devuelve. La excepción es un descuento
