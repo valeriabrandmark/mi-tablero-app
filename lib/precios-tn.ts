@@ -126,10 +126,24 @@ export const ALERTAS = [
     // no quita que tenga que verse.
     clave: "sin_stock",
     titulo: "Sin stock",
+    // DESDE LA MIGRACIÓN 016 ESTA TARJETA DA CERO, y es el resultado buscado.
+    //
+    // El motor ya no descarta por stock: `stock_minimo` pasó a 0, así que los
+    // artículos sin unidades caen en las tarjetas que corresponden a su precio
+    // —bajo el piso, más caros, en precio— en vez de en una bolsa aparte. Eran
+    // los peor precificados del catálogo (4,1 % de margen contra 12,5 %)
+    // justamente porque este filtro los sacaba de cada corrida.
+    //
+    // La tarjeta queda porque la puerta queda: `stock_minimo` sigue siendo un
+    // parámetro, y el día que alguien lo vuelva a poner en 1 estas filas
+    // tienen que aparecer en algún lado en vez de desaparecer. Para ver el
+    // stock de un artículo está el filtro «con y sin stock» de abajo, que es
+    // una pregunta distinta de ésta.
     detalle:
-      "No hay unidades para vender, así que el motor ni siquiera los compara: cambiarles el " +
-      "precio no cambia nada hasta que entre mercadería. Se listan para poder verlos —sirve " +
-      "para saber qué parte del catálogo está dormida— pero no hay nada que decidir acá.",
+      "El motor ya no descarta por stock: estos artículos se reprecian igual y aparecen en la " +
+      "tarjeta que les corresponde por precio. Si acá hay algo, es porque la política volvió a " +
+      "pedir un mínimo de unidades. Para ver sólo lo que tiene (o no tiene) stock, usá el " +
+      "filtro «con y sin stock».",
     tono: "neutro",
   },
   {
@@ -391,6 +405,11 @@ export function leerFiltros(params: URLSearchParams): FiltrosPreciosTn {
     // ("farmacias_del_pueblo", 20) con el doble de margen.
     competidor: texto("competidor", 40),
     marca: texto("marca", 120),
+    // SE VALIDA CONTRA LOS DOS VALORES y no se pasa crudo: cualquier otra cosa
+    // cae en `null`, que es "las dos mitades". Un valor inventado que llegara
+    // al SQL filtraría por nada y mostraría la pantalla vacía.
+    stock:
+      params.get("stock") === "con" ? "con" : params.get("stock") === "sin" ? "sin" : null,
     busqueda: texto("q", 60),
   };
 }

@@ -460,6 +460,19 @@ function condicionesDeFiltro(
     params.push(filtros.marca);
     partes.push(`and coalesce(a.marca, a."attributes.marca") = $${params.length}`);
   }
+  if (filtros.stock) {
+    // SALE DE `entradas`, que es la foto con la que el motor decidio, igual
+    // que el filtro de competidor de abajo. El stock de ahora puede ser otro,
+    // y la pregunta aca es que miro el motor cuando propuso esto.
+    //
+    // Va sin parametrizar porque no hay nada que parametrizar: `leerFiltros`
+    // ya redujo el valor a uno de dos literales nuestros.
+    partes.push(
+      filtros.stock === "con"
+        ? "and coalesce((p.entradas->>'stock')::numeric, 0) > 0"
+        : "and coalesce((p.entradas->>'stock')::numeric, 0) <= 0",
+    );
+  }
   if (filtros.competidor) {
     // SE MIRA `entradas`, QUE ES LA FOTO CON LA QUE EL MOTOR DECIDIÓ, y no
     // `precios.observacion` en vivo. Filtrar por "lo que se comparó contra
@@ -623,6 +636,7 @@ export async function getCatalogosPreciosTn(): Promise<CatalogosPreciosTn> {
     proveedor: null,
     marca: null,
     competidor: null,
+    stock: null,
     busqueda: null,
   };
   const params: unknown[] = [corrida.id];
