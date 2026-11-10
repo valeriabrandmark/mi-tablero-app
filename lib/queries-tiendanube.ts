@@ -1,7 +1,10 @@
 import { cacheado } from "@/lib/cache";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
-import { CARGA_IMPOSITIVA } from "@/lib/impuestos";
+import {
+  IMPUESTOS_SOBRE_COBRADO,
+  IMPUESTOS_SOBRE_NETA,
+} from "@/lib/impuestos";
 import { hoyArgentina } from "@/lib/rangos";
 import { CANAL_TIENDA_NUBE } from "@/lib/tiendanube";
 import type {
@@ -66,10 +69,32 @@ const COMISION = "coalesce(comision, 0) * cantidad";
  * entera. Sumadas, esa diferencia queda escondida.
  */
 const COSTO_TRANSACCION = "coalesce(costo_transaccion, 0) * cantidad";
-const RENTABILIDAD = `(${VENTA_SIVA}) - (${COSTO}) - (${ENVIO}) - (${COMISION}) - (${COSTO_TRANSACCION})`;
+/**
+ * Lo que costó ofrecer las cuotas sin interés de esa venta.
+ *
+ * FALTABA ENTERO, y no es poco: ofrecer 6 cuotas cuesta 14 % de lo cobrado
+ * contra 0 % de un pago único. Una venta en cuotas se medía igual de rentable
+ * que una al contado.
+ *
+ * Sale de `modelo.py`, que cruza la pasarela, el medio y las CUOTAS REALES del
+ * pedido contra `bronze.costo_cuotas`. Son las cuotas de cada venta y no el
+ * peor caso: el motor de precios usa el peor caso para *poner* un precio
+ * —apostar sobre lo que no pasó— pero medir lo que ya se vendió con el peor
+ * caso sería inventar un costo que no se pagó.
+ *
+ * `coalesce` a 0 para las filas viejas, de antes de que la columna existiera:
+ * quedan como estaban hasta que el ETL las reescriba.
+ */
+const COSTO_CUOTAS = "coalesce(costo_cuotas, 0) * cantidad";
+const RENTABILIDAD = `(${VENTA_SIVA}) - (${COSTO}) - (${ENVIO}) - (${COMISION}) - (${COSTO_TRANSACCION}) - (${COSTO_CUOTAS})`;
 
-/** Rentabilidad neta de la línea: la bruta menos los impuestos sobre venta s/IVA. */
-const RENT_NETA = `(${RENTABILIDAD}) - (${VENTA_SIVA}) * ${CARGA_IMPOSITIVA}`;
+/**
+ * Rentabilidad neta de la línea: la bruta menos los impuestos.
+ *
+ * LAS DOS BASES. IIBB y municipal sobre la venta s/IVA; el cheque sobre lo
+ * COBRADO, con IVA adentro, que es donde se paga. Ver `lib/impuestos.ts`.
+ */
+const RENT_NETA = `(${RENTABILIDAD}) - (${VENTA_SIVA}) * ${IMPUESTOS_SOBRE_NETA} - (${VENTA_CIVA}) * ${IMPUESTOS_SOBRE_COBRADO}`;
 
 type Where = { sql: string; params: unknown[] };
 
@@ -161,7 +186,8 @@ async function getKpis(f: FiltrosTiendaNube): Promise<KpisTiendaNube> {
             coalesce(sum(${COSTO}), 0)      as costo,
             coalesce(sum(${ENVIO}), 0)      as envio,
             coalesce(sum(${COMISION}), 0)   as comision,
-            coalesce(sum(${COSTO_TRANSACCION}), 0) as costo_transaccion
+            coalesce(sum(${COSTO_TRANSACCION}), 0) as costo_transaccion,
+            coalesce(sum(${COSTO_CUOTAS}), 0) as costo_cuotas
      from gold.fact_ventas
      where ${w.sql}`,
     w.params,
@@ -174,6 +200,7 @@ async function getKpis(f: FiltrosTiendaNube): Promise<KpisTiendaNube> {
   const pedidos = num(fila?.pedidos);
   const comision = num(fila?.comision);
   const costoTransaccion = num(fila?.costo_transaccion);
+  const costoCuotas = num(fila?.costo_cuotas);
 
   // OJO: la resta tiene que ser la MISMA que la de `RENTABILIDAD`, que es la
   // que usan las tablas. Acá se calcula en TypeScript y allá en SQL, asi que
@@ -182,8 +209,15 @@ async function getKpis(f: FiltrosTiendaNube): Promise<KpisTiendaNube> {
   // linea, con lo cual la tarjeta y el total de la tabla de Pedidos daban
   // distinto por el total de comisiones. Si se suma un componente nuevo, va
   // en los dos lados.
-  const rentabilidad = ventaSiva - costo - envio - comision - costoTransaccion;
-  const impuestos = ventaSiva * CARGA_IMPOSITIVA;
+  const rentabilidad =
+    ventaSiva - costo - envio - comision - costoTransaccion - costoCuotas;
+
+  // LAS DOS BASES, Y NO UNA. IIBB y municipal sobre la venta neta; el cheque
+  // sobre lo COBRADO, que es donde se paga. Ver `lib/impuestos.ts`: juntarlos
+  // en un 7,4 % sobre neta --como sigue haciendo Mercado Libre-- subestima el
+  // cheque en un 21 %.
+  const impuestos =
+    ventaSiva * IMPUESTOS_SOBRE_NETA + ventaCiva * IMPUESTOS_SOBRE_COBRADO;
 
   return {
     ventaCiva,
@@ -202,12 +236,22 @@ async function getKpis(f: FiltrosTiendaNube): Promise<KpisTiendaNube> {
     // publicada, y no esta mal -- son dos bases distintas.
     comisionPct: pct(comision, ventaCiva),
     costoTransaccion,
+    costoCuotas,
     rentabilidad,
     // Denominador c/IVA en toda la sección minorista (ver DENOMINADOR).
     margenPct: pct(rentabilidad, ventaCiva),
     impuestos,
     rentabilidadNeta: rentabilidad - impuestos,
     margenNetoPct: pct(rentabilidad - impuestos, ventaCiva),
+    // EL MISMO MARGEN SOBRE LA VENTA NETA, que es el número con el que el
+    // motor decide los precios.
+    //
+    // Van los dos porque contestan preguntas distintas y las dos se hacen. El
+    // c/IVA compara contra Mercado Libre y contra los umbrales de alerta; el
+    // s/IVA se compara contra el piso del motor, que se despeja sobre venta
+    // neta. Antes había que acordarse de dividir por 1,21, y nadie se
+    // acordaba: la pantalla decía 14,5 % y el motor 17,6 % de la misma venta.
+    margenNetoSivaPct: pct(rentabilidad - impuestos, ventaSiva),
     ticketPromedio: pct(ventaCiva, pedidos),
   };
 }

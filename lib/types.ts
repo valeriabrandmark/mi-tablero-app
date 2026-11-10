@@ -1041,7 +1041,12 @@ export type KpisTiendaNube = {
    * entera. No se suma a `comision`: las dos salen de partir la misma tarifa.
    */
   costoTransaccion: number;
-  /** Venta s/IVA − costo − envío − comisión. */
+  /**
+   * Lo que costó ofrecer las cuotas sin interés, con las cuotas REALES de cada
+   * pedido. Ofrecer 6 cuotas cuesta 14 % de lo cobrado; un pago único, 0.
+   */
+  costoCuotas: number;
+  /** Venta s/IVA − costo − envío − comisión − plataforma − cuotas. */
   rentabilidad: number;
   /** Fracción, sobre venta c/IVA. */
   margenPct: number | null;
@@ -1049,6 +1054,17 @@ export type KpisTiendaNube = {
   impuestos: number;
   rentabilidadNeta: number;
   margenNetoPct: number | null;
+  /**
+   * El MISMO margen neto, pero sobre la venta s/IVA.
+   *
+   * Es el número con el que el motor de precios decide: su piso se despeja
+   * sobre venta neta. Va al lado del de c/IVA porque contestan preguntas
+   * distintas —uno compara contra Mercado Libre y los umbrales de alerta, el
+   * otro contra el piso del motor— y tenerlos juntos evita el error de leer
+   * el 14,5 % de la pantalla contra el 17,6 % del motor como si fueran el
+   * mismo número.
+   */
+  margenNetoSivaPct: number | null;
   ticketPromedio: number | null;
 };
 

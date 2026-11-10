@@ -843,14 +843,21 @@ export default function DashboardTiendaNubePage({
               }
               acento={(k.margenPct ?? 0) < 0 ? TEMA.negativo : undefined}
             />
-            {/* La neta al lado de la bruta a propósito: la diferencia entre las dos
-              es el 7,4 % de impuestos, y verlas separadas es lo que hace que una
-              venta "con margen" se lea como lo que es. */}
+            {/* La neta al lado de la bruta a propósito: la diferencia entre las
+              dos son los impuestos, y verlas separadas es lo que hace que una
+              venta "con margen" se lea como lo que es.
+
+              VAN LOS DOS PORCENTAJES, y no es redundancia. El de venta c/IVA
+              compara contra Mercado Libre y contra los umbrales de alerta; el
+              de venta s/IVA es el que usa el motor de precios para despejar
+              el piso. Son la misma plata sobre dos bases que se llevan un
+              21 %, y tenerlos juntos evita leer el 14,2 % de esta pantalla
+              contra el 17,1 % del motor como si no cerraran. */}
             <TarjetaKpi
               compacta
               titulo="Rentabilidad neta"
               valor={fmtMoneda(k.rentabilidadNeta)}
-              detalle={`${fmtPct(k.margenNetoPct)} sobre venta c/IVA · ${fmtMoneda(k.impuestos)} de impuestos`}
+              detalle={`${fmtPct(k.margenNetoPct)} s/ venta c/IVA · ${fmtPct(k.margenNetoSivaPct)} s/ venta neta · ${fmtMoneda(k.impuestos)} de impuestos`}
               acento={k.rentabilidadNeta < 0 ? TEMA.negativo : undefined}
             />
 
