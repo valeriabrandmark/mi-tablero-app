@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import BotonActualizar from "@/components/BotonActualizar";
+import ParametrosCompras from "@/components/ParametrosCompras";
 import { BotonLimpiar, SelectorMultiple } from "@/components/SelectorFiltro";
 import { contarSkus, sumar, Tabla, type Columna } from "@/components/Tabla";
 import { Aviso, Esqueleto, Panel, TarjetaKpi } from "@/components/ui";
@@ -333,6 +334,11 @@ export default function DashboardComprasPage({
       } satisfies Record<keyof FiltrosCompras, string | string[] | undefined>,
       { conOpciones: "1" },
     );
+
+  // El plazo con el que se calculó (puede venir cambiado desde "Reglas del
+  // sugerido"). Mientras no llegan datos, el de siempre.
+  const plazoReposicion =
+    data?.parametros?.plazo_reposicion_dias ?? PLAZO_REPOSICION_DIAS;
 
   const filas = useMemo(() => data?.filas ?? [], [data]);
 
@@ -1029,7 +1035,7 @@ export default function DashboardComprasPage({
         ) : (
           <span
             style={
-              f.cobertura < PLAZO_REPOSICION_DIAS
+              f.cobertura < plazoReposicion
                 ? { color: TEMA.negativo }
                 : undefined
             }
@@ -1053,6 +1059,10 @@ export default function DashboardComprasPage({
         const texto = porQueSugerido(
           f,
           data?.cobertura ?? coberturaElegida,
+          // Las reglas con las que se calcularon ESTAS filas, no las de
+          // siempre: si alguien cambió el techo a 120, el tooltip tiene que
+          // decir 120.
+          data?.parametros,
         ).join("\n");
         // EL FRENO SE VE, no sólo se lee en el tooltip. Un "—" a secas en un
         // artículo que se venía comprando se lee como "no hace falta", y acá
@@ -1568,6 +1578,7 @@ export default function DashboardComprasPage({
             {cargando ? "Recargando…" : "Recargar"}
           </button>
           <BotonActualizar onDatosNuevos={recargar} conSellIn />
+          <ParametrosCompras onGuardado={recargar} />
         </div>
       </div>
 
@@ -1817,11 +1828,18 @@ export default function DashboardComprasPage({
 
         <span className="text-muted text-[11px] leading-tight">
           El <strong>sugerido</strong> es lo que falta para cubrir{" "}
-          {(data?.cobertura ?? coberturaElegida) + PLAZO_REPOSICION_DIAS} días
+          {(data?.cobertura ?? coberturaElegida) + plazoReposicion} días
           de venta ({data?.cobertura ?? coberturaElegida} que elegiste comprar
-          más {PLAZO_REPOSICION_DIAS} que tarda la reposición) al ritmo de los
-          últimos {filtros.ventana ?? VENTANA_POR_DEFECTO} días, contando el
-          stock de <strong>los dos depósitos</strong>. El{" "}
+          más {plazoReposicion} que tarda la reposición) al ritmo de los
+          últimos {filtros.ventana ?? VENTANA_POR_DEFECTO} días
+          {data?.parametros?.ritmo_sobre_dias_con_stock ? (
+            <>
+              {" "}— medido <strong>sólo sobre los días que hubo stock</strong>,
+              Tucumán y Full por separado
+              {data.hayDiasConStock ? "" : " (todavía sin la cuenta de días: se usa la ventana entera)"}
+            </>
+          ) : null}
+          , contando el stock de <strong>los dos depósitos</strong>. El{" "}
           <strong>descuento</strong> es el{" "}
           <strong>sell in vigente del proveedor</strong> del mes elegido y se
           puede corregir fila por fila.
@@ -2857,7 +2875,10 @@ export default function DashboardComprasPage({
               <strong>
                 Un artículo que no rinde no se compra de más por una oferta.
               </strong>{" "}
-              Por debajo del {RENTABILIDAD_COMPRA_DISCRETA} % de rentabilidad
+              Por debajo del{" "}
+              {data?.parametros?.rentabilidad_compra_discreta ??
+                RENTABILIDAD_COMPRA_DISCRETA}{" "}
+              % de rentabilidad (3 meses, todos los canales)
               —el cuartil de abajo del catálogo— el sugerido es sólo lo
               necesario, por buena que esté la oferta: comprar más es plata
               quieta en algo que ya no la devuelve. La excepción es un descuento

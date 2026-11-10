@@ -17,9 +17,12 @@
 import {
   COBERTURA_OBJETIVO_DIAS,
   GRUPO_PROVEEDOR_POR_DEFECTO,
-  PLAZO_REPOSICION_DIAS,
 } from "@/lib/stock";
 import type { CeldaXlsx, ColumnaXlsx, LibroXlsx } from "@/lib/xlsx";
+import {
+  parametrosPorDefecto,
+  type ParametrosCompras,
+} from "@/lib/compras-parametros";
 import type {
   FilaCompra,
   FiltrosCompras,
@@ -1118,6 +1121,27 @@ export function nombreArchivo(proveedor: string, extension: string): string {
    ------------------------------------------------------------------------- */
 
 /**
+ * Cómo se armó el ritmo cuando se midió sobre los DÍAS CON STOCK: una línea
+ * por depósito que vendió. Es lo que contesta "¿por qué me sugiere 70 si la
+ * última vez compré 12?": porque esas 12 se vendieron en 3 días.
+ */
+export function ritmoPorDeposito(f: FilaCompra, p: ParametrosCompras): string[] {
+  if (!f.ritmoSobreStock) return [];
+  const linea = (nombre: string, uds: number, dias: number | null) => {
+    const usados = Math.max(p.dias_minimos_con_stock, dias ?? 0);
+    const piso = (dias ?? 0) < p.dias_minimos_con_stock
+      ? ` (tuvo stock ${dias ?? 0}; se toma el mínimo de ${p.dias_minimos_con_stock})`
+      : "";
+    return `  · ${nombre}: ${Math.round(uds)} u. en ${usados} días con stock${piso}` +
+      ` = ${(uds / usados).toFixed(2)} por día`;
+  };
+  const l = ["Medido sobre los días que hubo stock, cada depósito por separado:"];
+  if (f.udsTuc > 0) l.push(linea("Tucumán", f.udsTuc, f.diasStockTuc));
+  if (f.udsFull > 0) l.push(linea("Full", f.udsFull, f.diasStockFull));
+  return l;
+}
+
+/**
  * El renglón por renglón de cómo se llegó al sugerido, para el tooltip.
  *
  * Devuelve LÍNEAS y no una frase armada: el `title` de una celda las separa con
@@ -1139,6 +1163,11 @@ export function porQueSugerido(
    * uno sin explicar.
    */
   coberturaDias: number,
+  /**
+   * Las reglas con las que se calculó (las que devuelve la API en
+   * `parametros`). Por defecto, los valores de siempre.
+   */
+  p: ParametrosCompras = parametrosPorDefecto(),
 ): string[] {
   // LOS DOS FRENOS DUROS VAN PRIMERO, antes incluso de mirar si hay ritmo:
   // con cualquiera de los dos puesto no hay compra que sugerir, y lo único
@@ -1221,8 +1250,9 @@ export function porQueSugerido(
         ? ` (medido sobre ${f.diasRitmo} días: empezó a venderse hace poco)`
         : "") +
       ` y hay ${Math.round(f.total)} u.`,
+    ...ritmoPorDeposito(f, p),
     `Alcanza para ${Math.round(f.cobertura)} días.`,
-    `Para cubrir ${coberturaDias} días de compra + ${PLAZO_REPOSICION_DIAS}` +
+    `Para cubrir ${coberturaDias} días de compra + ${p.plazo_reposicion_dias}` +
       ` de reposición faltan ${Math.ceil(f.sugeridoBase)} u.`,
   ];
 
@@ -1241,10 +1271,10 @@ export function porQueSugerido(
     ];
   }
 
-  if (f.cobertura > COBERTURA_SIN_INFLAR_DIAS) {
+  if (f.cobertura > p.cobertura_sin_inflar_dias) {
     l.push(
       "",
-      `Ya hay más de ${COBERTURA_SIN_INFLAR_DIAS} días de cobertura, así que la` +
+      `Ya hay más de ${p.cobertura_sin_inflar_dias} días de cobertura, así que la` +
         " oferta no infla la compra: comprar más sería plata quieta.",
     );
     return l;
@@ -1261,7 +1291,7 @@ export function porQueSugerido(
     );
   } else if (
     f.factorOferta <= 1 &&
-    (f.rentabilidad ?? 0) < RENTABILIDAD_COMPRA_DISCRETA / 100 &&
+    (f.rentabilidad ?? 0) < p.rentabilidad_compra_discreta / 100 &&
     vigente > habitual
   ) {
     // EL CASO NUEVO, Y EL QUE MÁS FALTA HACE EXPLICAR. Sin esto el tooltip
@@ -1271,12 +1301,12 @@ export function porQueSugerido(
       "",
       `El descuento de este mes es ${vigente.toFixed(1)} % contra ${habitual.toFixed(1)} %` +
         ` habitual, pero el artículo rinde ${((f.rentabilidad ?? 0) * 100).toFixed(1)} %,` +
-        ` por debajo del ${RENTABILIDAD_COMPRA_DISCRETA} %.`,
+        ` por debajo del ${p.rentabilidad_compra_discreta} %.`,
       "COMPRA DISCRETA: sólo lo necesario. Comprar de más un artículo que no" +
         " rinde es plata quieta, por buena que esté la oferta.",
       `Se adelantaría compra si el descuento fuera al menos` +
-        ` ${VECES_SOBRE_LO_HABITUAL_PARA_INFLAR} veces el habitual` +
-        ` (${(habitual * VECES_SOBRE_LO_HABITUAL_PARA_INFLAR).toFixed(1)} %),` +
+        ` ${p.veces_sobre_lo_habitual_para_inflar} veces el habitual` +
+        ` (${(habitual * p.veces_sobre_lo_habitual_para_inflar).toFixed(1)} %),` +
         " o sea uno que antes no teníamos.",
     );
   } else if (f.factorOferta <= 1) {
@@ -1292,7 +1322,7 @@ export function porQueSugerido(
         ` habitual (el promedio de los meses en que hubo oferta):` +
         ` ${(vigente - habitual).toFixed(1)} puntos de ventaja.`,
       `Por eso se multiplica por ${f.factorOferta.toFixed(2)}` +
-        ` (${PUNTOS_OFERTA_PARA_DUPLICAR} puntos = el doble, tope ${FACTOR_OFERTA_MAX}x).`,
+        ` (${p.puntos_oferta_para_duplicar} puntos = el doble, tope ${p.factor_oferta_max}x).`,
     );
   }
 
@@ -1301,7 +1331,7 @@ export function porQueSugerido(
   const sinTope = Math.ceil(f.sugeridoBase * f.factorOferta);
   if (f.sugerido < sinTope) {
     l.push(
-      `Daría ${sinTope} u., pero el techo de ${COBERTURA_MAXIMA_COMPRA_DIAS} días` +
+      `Daría ${sinTope} u., pero el techo de ${p.cobertura_maxima_compra_dias} días` +
         ` de cobertura lo baja a ${f.sugerido}.`,
     );
   }

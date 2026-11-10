@@ -5,30 +5,27 @@ import { agregarFiltro } from "@/lib/filtros";
 import { buscadorDeArticulo } from "@/lib/sql-codigos";
 import { COSTOS_VIGENTES_POR_MES, ULTIMO_COSTO_VIGENTE } from "@/lib/sql-costos";
 import {
-  COBERTURA_MAXIMA_COMPRA_DIAS,
-  COBERTURA_SIN_INFLAR_DIAS,
-  RENTABILIDAD_COMPRA_DISCRETA,
   DIAS_ARTICULO_NUEVO,
   PREFIJOS_DISCONTINUO,
   MESES_SIN_SELL_IN_PARA_SUGERIR,
-  VECES_SOBRE_LO_HABITUAL_PARA_INFLAR,
   recortesValidos,
-  FACTOR_OFERTA_MAX,
   MESES_HISTORIA_SELL_IN,
   MESES_RENTABILIDAD,
-  PUNTOS_OFERTA_PARA_DUPLICAR,
   coberturaValida,
   opcionesSellInDesde,
 } from "@/lib/compras";
 import {
   COBERTURA_OBJETIVO_DIAS,
-  DIAS_MINIMOS_DE_RITMO,
   GRUPO_PROVEEDOR_POR_DEFECTO,
-  PLAZO_REPOSICION_DIAS,
   PROVEEDORES_NO_MERCADERIA,
   VENTANA_POR_DEFECTO,
 } from "@/lib/stock";
 import { FULL_POR_SKU, POR_INVENTARIO_SKU } from "@/lib/sql-meli";
+import {
+  parametrosPorDefecto,
+  type ParametrosCompras,
+} from "@/lib/compras-parametros";
+import { getParametrosCompras } from "@/lib/queries-parametros-compras";
 import type { ArticuloParaOrden } from "@/lib/sigma-orden";
 import type {
   ArticuloSinFicha,
@@ -38,6 +35,27 @@ import type {
   FiltrosCompras,
   RecorteCompras,
 } from "@/lib/types";
+
+/**
+ * QUÉ VENTA SALE DEL DEPÓSITO DE FULL, en SQL sobre gold.fact_ventas.
+ *
+ * Mercado Libre con logística `fulfillment`. Hasta septiembre de 2026 la venta
+ * de Meli no traía logística (null) y desde octubre el 99 % es fulfillment, así
+ * que un null cuenta como Full. Todo lo demás (mayorista, Tienda Nube, Meli
+ * con otra logística) sale de Tucumán.
+ *
+ * LA MISMA REGLA vive en tablero_quo/stock_diario.py, que cuenta los días con
+ * stock de cada depósito: si se cambia acá, se cambia allá.
+ */
+export const LOGISTICAS_NO_FULL = [
+  "cross_docking",
+  "self_service",
+  "xd_drop_off",
+  "drop_off",
+  "custom",
+  "not_specified",
+] as const;
+const VENTA_DESDE_FULL = `(canal = 'Mercado Libre' and coalesce(logistica, 'fulfillment') not in (${LOGISTICAS_NO_FULL.map((l) => `'${l}'`).join(", ")}))`;
 
 /**
  * Cómo se reconoce un discontinuo en SQL.
@@ -79,8 +97,22 @@ const CONDICION_DISCONTINUO = PREFIJOS_DISCONTINUO.map(
  * filas --las de la promo tienen el mes vacío-- y la pantalla mostraba todos
  * los descuentos en blanco.
  * $4 días de cobertura que se quieren comprar
+ *
+ * ---------------------------------------------------------------------------
+ * LAS REGLAS LLEGAN EN `p` Y SE INTERPOLAN, como antes las constantes: son
+ * números que ya pasaron por `normalizarParametros` (finitos y adentro de su
+ * rango), así que no hay texto de nadie que pueda entrar al SQL. Ir como
+ * parámetros `$N` obligaría a renumerar todo y a tocar la cuenta de
+ * pruebas/parametros-compras.mts, sin ganar seguridad.
+ *
+ * `hayDiasConStock` dice si existe gold.dias_con_stock: sin la tabla (el paso
+ * de tablero_quo todavía no corrió nunca) se usa una vacía y el ritmo cae a la
+ * regla de la ventana, en vez de tirar la pantalla.
  */
-const BASE = `
+function base(p: ParametrosCompras, hayDiasConStock = true): string {
+  const n = (v: number) => String(Number(v));
+  const ritmoSobreStock = p.ritmo_sobre_dias_con_stock >= 1;
+  return `
 with por_inv as (
   -- Un renglón por INVENTARIO y no por publicación: varias publicaciones
   -- comparten el mismo stock físico, y sumarlas lo contaría de más.
@@ -340,6 +372,34 @@ ventas as (
   from gold.fact_ventas
   group by sku
 ),
+-- LO VENDIDO DE CADA DEPOSITO, para medir el ritmo sobre los días que cada
+-- uno tuvo stock (ver ritmo_diario más abajo). La regla de qué venta sale de
+-- Full es la misma que usa tablero_quo/stock_diario.py: si se cambia en un
+-- lado, se cambia en el otro.
+ventas_deposito as (
+  select sku,
+         coalesce(sum(cantidad) filter (where ${VENTA_DESDE_FULL}), 0)       as uds_full,
+         coalesce(sum(cantidad) filter (where not (${VENTA_DESDE_FULL})), 0) as uds_tuc
+  from gold.fact_ventas
+  where fecha >= current_date - $1::int
+  group by sku
+),
+-- Cuántos días de la ventana tuvo stock cada depósito. Lo calcula tablero_quo
+-- (stock_diario.py) con las fotos diarias y, donde no hay foto, reconstruyendo
+-- el stock con compras, ventas y envíos a Full.
+dias_stock as (
+  ${
+    hayDiasConStock
+      ? `select sku,
+         max(dias_con_stock) filter (where deposito = 'tuc')  as dias_tuc,
+         max(dias_con_stock) filter (where deposito = 'full') as dias_full
+  from gold.dias_con_stock
+  where ventana = $1::int
+  group by sku`
+      : `select null::text as sku, null::int as dias_tuc, null::int as dias_full
+  where false`
+  }
+),
 stock as (
   -- Los DOS depósitos siempre: se compra para la empresa, no para un depósito.
   select coalesce(t.sku, f.sku)                          as sku,
@@ -425,16 +485,25 @@ base as (
          -- Hoy son 1.718 artículos con primera venta dentro de la ventana; 75
          -- de ellos no dan ningún sugerido por esto.
          --
-         -- EL PISO DE ${DIAS_MINIMOS_DE_RITMO} DIAS NO ES DECORATIVO. Sin él,
+         -- EL PISO DE ${n(p.dias_minimos_de_ritmo)} DIAS NO ES DECORATIVO. Sin él,
          -- un artículo que vendió 3 unidades ayer daría un ritmo de 3 por día
          -- y pediría cientos: medido, el peor caso sin piso sugería 800
          -- unidades, y con el piso queda en 58. Dos semanas es lo mínimo para
          -- que un promedio diario signifique algo.
          case when v.primera_venta is null then $1::int
               else least($1::int,
-                         greatest(${DIAS_MINIMOS_DE_RITMO},
+                         greatest(${n(p.dias_minimos_de_ritmo)},
                                   current_date - v.primera_venta::date))
-         end                                            as dias_ritmo
+         end                                            as dias_ritmo,
+         coalesce(vd.uds_tuc, 0)                        as uds_tuc,
+         coalesce(vd.uds_full, 0)                       as uds_full,
+         ds.dias_tuc                                    as dias_stock_tuc,
+         ds.dias_full                                   as dias_stock_full,
+         -- EL RITMO SE MIDE SOBRE LOS DIAS CON STOCK sólo si está prendida la
+         -- regla Y el artículo tiene la cuenta hecha. Sin fila en
+         -- gold.dias_con_stock (artículo sin ningún movimiento, o el paso de
+         -- tablero_quo no corrió) se usa la regla de la ventana de siempre.
+         (${ritmoSobreStock ? "true" : "false"} and ds.sku is not null) as ritmo_sobre_stock
   from stock s
   left join bronze.sigma_articulos a on trim(a.id) = s.sku
   left join bronze.proveedores_grupo pg on pg.proveedor = a."proveedorNombre"
@@ -448,16 +517,35 @@ base as (
   left join proveedores_con_sell_in pcsi on pcsi.proveedor = a."proveedorNombre"
   left join hist_sell_in hs on hs.sku = s.sku
   left join hist_calculado hc on hc.sku = s.sku
+  left join ventas_deposito vd on vd.sku = s.sku
+  left join dias_stock ds on ds.sku = s.sku
   where coalesce(a."proveedorNombre", '') <> all($2::text[])
 ),
 -- El ritmo y la cobertura salen aca y no de base porque los dos dependen de
 -- dias_ritmo, que se calcula ahi: en SQL una columna no se puede usar en la
 -- misma lista de select donde se define. (Sin backticks: template literal.)
+ritmo_medido as (
+  select b.*,
+         -- EL RITMO, DE DOS MANERAS. Ver lib/compras-parametros.ts.
+         --
+         -- Sobre los días con stock: cada depósito vende lo suyo en los días
+         -- que tuvo, y los dos ritmos se suman. Con un piso de
+         -- ${n(p.dias_minimos_con_stock)} días para que 12 unidades vendidas en una
+         -- tarde no pasen por un ritmo de 12 por día, y nunca más días que la
+         -- ventana.
+         --
+         -- Si no, la ventana (recortada a la primera venta) como siempre.
+         case when b.ritmo_sobre_stock then
+                b.uds_tuc::numeric / least($1::int, greatest(${n(p.dias_minimos_con_stock)}, coalesce(b.dias_stock_tuc, 0)))
+              + b.uds_full::numeric / least($1::int, greatest(${n(p.dias_minimos_con_stock)}, coalesce(b.dias_stock_full, 0)))
+              else b.uds::numeric / b.dias_ritmo
+         end                                            as ritmo_diario
+  from base b
+),
 con_ritmo as (
   select b.*,
-         b.uds::numeric / b.dias_ritmo                  as ritmo_diario,
-         case when b.uds = 0 then null
-              else b.total / (b.uds::numeric / b.dias_ritmo)
+         case when b.uds = 0 or b.ritmo_diario = 0 then null
+              else b.total / b.ritmo_diario
          end                                            as cobertura,
          -- Vendió por primera vez DENTRO de la ventana, o sea que el ritmo de
          -- arriba se midió sobre menos días que los demás. La pantalla lo dice:
@@ -468,8 +556,8 @@ con_ritmo as (
          -- artículo puede ser viejo y haber empezado a venderse recién ahora
          -- (ritmo recortado, alta vieja), o ser nuevo y no haber vendido nunca
          -- (alta reciente, sin ritmo que recortar).
-         (b.dias_ritmo < $1::int)                       as ritmo_recortado
-  from base b
+         (not b.ritmo_sobre_stock and b.dias_ritmo < $1::int) as ritmo_recortado
+  from ritmo_medido b
 ),
 con_base as (
   select b.*,
@@ -478,7 +566,7 @@ con_base as (
          -- mientras la reposición viaja. Es "cuánto necesito".
          -- $4 son los días que se eligieron en pantalla; por defecto
          -- ${COBERTURA_OBJETIVO_DIAS}, el objetivo de siempre.
-         greatest(0, b.ritmo_diario * ($4::numeric + ${PLAZO_REPOSICION_DIAS}) - b.total) as sugerido_base,
+         greatest(0, b.ritmo_diario * ($4::numeric + ${n(p.plazo_reposicion_dias)}) - b.total) as sugerido_base,
          -- El techo duro: nunca pasar de esta cobertura, por buena que esté la
          -- oferta. Separa "aprovechar un descuento" de "comprar un año".
          --
@@ -487,8 +575,8 @@ con_base as (
          -- a una persona que eligió comprar para 90 días: si lo dejáramos fijo,
          -- elegir 90 o 120 no cambiaría nada y el selector se leería roto.
          greatest(0, b.ritmo_diario * greatest(
-           ${COBERTURA_MAXIMA_COMPRA_DIAS},
-           $4::numeric + ${PLAZO_REPOSICION_DIAS}
+           ${n(p.cobertura_maxima_compra_dias)},
+           $4::numeric + ${n(p.plazo_reposicion_dias)}
          ) - b.total)                                                                     as sugerido_tope,
          -- Cuánto está EL DESCUENTO DE ESTE MES por encima de lo habitual, en
          -- puntos. Sin sell in vigente cargado no hay ventaja que medir: queda
@@ -516,17 +604,17 @@ con_base as (
 con_factor as (
   select c.*,
          -- 1 = comprar lo que hace falta. 2 = el doble. Entre medio, lineal:
-         -- ${PUNTOS_OFERTA_PARA_DUPLICAR} puntos de ventaja llevan el factor a ${FACTOR_OFERTA_MAX}.
+         -- ${n(p.puntos_oferta_para_duplicar)} puntos de ventaja llevan el factor a ${n(p.factor_oferta_max)}.
          --
          -- NO SE INFLA LO QUE YA SOBRA: pasado el borde de "Excedido", una
          -- oferta no es una oportunidad, es más plata quieta. Y sin ventas no
          -- hay ritmo, así que tampoco hay nada que adelantar.
          case
            when c.cobertura is null then 1::numeric
-           when c.cobertura > ${COBERTURA_SIN_INFLAR_DIAS} then 1::numeric
+           when c.cobertura > ${n(p.cobertura_sin_inflar_dias)} then 1::numeric
            -- UN ARTÍCULO QUE NO RINDE NO SE COMPRA DE MÁS POR UNA OFERTA.
            --
-           -- Por debajo de ${RENTABILIDAD_COMPRA_DISCRETA} % de rentabilidad,
+           -- Por debajo de ${n(p.rentabilidad_compra_discreta)} % de rentabilidad,
            -- comprar más es más plata quieta en algo que ya no la devuelve. Los
            -- cuatro Almond Breeze son el caso: sell in del 50 %, y rentabilidad
            -- de -28 %, -9,6 %, -8,1 % y 5,2 %.
@@ -539,14 +627,14 @@ con_factor as (
            -- les da eso SIEMPRE--, y el Scotch-Brite está 40 puntos sobre una
            -- mediana de 0. Mediana 0 es "nunca hubo oferta", así que cualquier
            -- descuento de hoy es nuevo y pasa.
-           when coalesce(c.rentabilidad, 0) < ${RENTABILIDAD_COMPRA_DISCRETA} / 100.0
+           when coalesce(c.rentabilidad, 0) < ${n(p.rentabilidad_compra_discreta)} / 100.0
                 and not (coalesce(c.sell_in_pct, 0)
                          >= greatest(coalesce(c.habitual_sell_in, 0), 0.0001)
-                            * ${VECES_SOBRE_LO_HABITUAL_PARA_INFLAR})
+                            * ${n(p.veces_sobre_lo_habitual_para_inflar)})
              then 1::numeric
            else least(
-             ${FACTOR_OFERTA_MAX}::numeric,
-             1 + c.ventaja_pp / ${PUNTOS_OFERTA_PARA_DUPLICAR}::numeric
+             ${n(p.factor_oferta_max)}::numeric,
+             1 + c.ventaja_pp / ${n(p.puntos_oferta_para_duplicar)}::numeric
            )
          end as factor_oferta
   from con_base c
@@ -602,6 +690,7 @@ calculada as (
           and f.uds = 0 and f.total = 0)                as sugerido_minimo
   from con_factor f
 )`;
+}
 
 /**
  * SÓLO LO QUE TIENE OFERTA DEL PROVEEDOR ESTE MES.
@@ -783,7 +872,7 @@ async function getSinFichaDeStock(
   termino: string,
 ): Promise<ArticuloSinFicha[]> {
   return query<ArticuloSinFicha>(
-    `${BASE}
+    `${base(parametrosPorDefecto(), false)}
      select trim(a.id)                            as sku,
             a.descripcion                         as producto,
             a."proveedorNombre"                   as proveedor,
@@ -800,9 +889,12 @@ async function getSinFichaDeStock(
   );
 }
 
-async function contarDelFiltro(w: Where): Promise<number> {
+/** Las reglas del sugerido y si existe la tabla de días con stock. */
+type Reglas = { p: ParametrosCompras; hayDiasConStock: boolean };
+
+async function contarDelFiltro(w: Where, r: Reglas): Promise<number> {
   const fila = await queryOne<{ v: string }>(
-    `${BASE} select count(*) as v from calculada ${w.sqlEstructural}`,
+    `${base(r.p, r.hayDiasConStock)} select count(*) as v from calculada ${w.sqlEstructural}`,
     w.params,
   );
   return Number(fila?.v ?? 0);
@@ -813,14 +905,16 @@ async function getFilas(
   mesColumna: string,
   evento: string,
   mesCostos: string,
+  r: Reglas,
 ): Promise<Listado> {
   const w = where(f, mesColumna, evento, mesCostos);
   const filas = await query<Record<string, unknown>>(
-    `${BASE}
+    `${base(r.p, r.hayDiasConStock)}
      select sku, producto, proveedor, grupo, marca, codigo_compra, ean, u_bulto,
             tuc, full_ml, full_en_camino, total, costo, valor, costo_lista,
             sell_in_pct,
             uds, ritmo_diario, dias_ritmo, ritmo_recortado, cobertura, sugerido,
+            ritmo_sobre_stock, uds_tuc, uds_full, dias_stock_tuc, dias_stock_full,
             es_nuevo, sugerido_minimo, es_discontinuo,
             sell_in_vendido_pct, sell_in_vendido_cobertura,
             to_char(alta, 'YYYY-MM-DD') as alta,
@@ -854,7 +948,7 @@ async function getFilas(
   // recorte que pueda ser el culpable: sin ninguno, cero filas es cero
   // artículos y no hay nada más que decir. Ver `contarDelFiltro`.
   const articulosDelFiltro =
-    filas.length === 0 && w.recortes.length > 0 ? await contarDelFiltro(w) : 0;
+    filas.length === 0 && w.recortes.length > 0 ? await contarDelFiltro(w, r) : 0;
 
   // Y si además se estaba buscando algo, puede que el artículo exista en Sigma
   // y lo que falte sea su ficha de stock. Ver `getSinFichaDeStock`.
@@ -882,6 +976,11 @@ async function getFilas(
     ritmoDiario: num(r.ritmo_diario),
     diasRitmo: num(r.dias_ritmo),
     ritmoRecortado: r.ritmo_recortado === true,
+    ritmoSobreStock: r.ritmo_sobre_stock === true,
+    udsTuc: num(r.uds_tuc),
+    udsFull: num(r.uds_full),
+    diasStockTuc: r.dias_stock_tuc == null ? null : num(r.dias_stock_tuc),
+    diasStockFull: r.dias_stock_full == null ? null : num(r.dias_stock_full),
     esNuevo: r.es_nuevo === true,
     alta: (r.alta as string | null) ?? null,
     cobertura: r.cobertura == null ? null : num(r.cobertura),
@@ -1039,7 +1138,10 @@ async function getOpcionesComprasDirecto() {
     grupo: string | null;
     proveedor: string | null;
     marca: string | null;
-  }>(`${BASE} select distinct grupo, proveedor, marca from calculada`, params);
+  }>(
+    `${base(parametrosPorDefecto(), false)} select distinct grupo, proveedor, marca from calculada`,
+    params,
+  );
 
   const unicos = (valores: (string | null)[]) =>
     [...new Set(valores.filter((v): v is string => !!v))].sort((a, b) =>
@@ -1064,10 +1166,33 @@ async function getComprasHasta(): Promise<string | null> {
   return fila?.v ?? null;
 }
 
+/**
+ * Si ya existe gold.dias_con_stock. La crea el paso de tablero_quo (y la
+ * migración compras_parametros.sql); hasta entonces el ritmo usa la ventana.
+ */
+async function hayDiasConStock(): Promise<boolean> {
+  const fila = await queryOne<{ v: boolean }>(
+    `select to_regclass('gold.dias_con_stock') is not null as v`,
+  );
+  return fila?.v === true;
+}
+
 async function getDashboardComprasDirecto(
   f: FiltrosCompras,
+  /**
+   * Las reglas del sugerido. Van COMO ARGUMENTO y no se leen acá adentro a
+   * propósito: el caché arma la clave con los argumentos, así que cambiar una
+   * regla en el panel cambia la clave y el próximo pedido ya calcula con ella.
+   * Leídas adentro, el cambio no se vería hasta la próxima corrida del
+   * pipeline.
+   */
+  p: ParametrosCompras = parametrosPorDefecto(),
 ): Promise<DashboardCompras> {
-  const opcionesSellIn = await getOpcionesSellIn();
+  const [opcionesSellIn, hay] = await Promise.all([
+    getOpcionesSellIn(),
+    hayDiasConStock(),
+  ]);
+  const reglas: Reglas = { p, hayDiasConStock: hay };
   // La columna pedida sólo vale si existe: una inventada dejaría todos los
   // descuentos en cero sin decir por qué. Sin nada elegido va la primera, que
   // es la más nueva.
@@ -1079,7 +1204,7 @@ async function getDashboardComprasDirecto(
   const evento = elegida?.evento ?? "";
 
   const [listado, comprasHasta, sellInCargado, sellInFoto] = await Promise.all([
-    getFilas(f, mesColumna, evento, mesCostos),
+    getFilas(f, mesColumna, evento, mesCostos, reglas),
     getComprasHasta(),
     getSellInCargado(mesColumna, evento),
     getSellInFoto(),
@@ -1111,9 +1236,14 @@ async function getDashboardComprasDirecto(
     sellInCargado,
     sellInFoto,
     comprasHasta,
+    parametros: p,
+    hayDiasConStock: hay,
     generadoEn: new Date().toISOString(),
   };
 }
+
+/** Las reglas vigentes, para que la ruta las pase a `getDashboardCompras`. */
+export { getParametrosCompras };
 
 /* -------------------------------------------------------------------------
    LOS DATOS PARA MANDAR LA ORDEN AL ERP

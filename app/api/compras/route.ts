@@ -8,6 +8,7 @@ import {
   puedeVerBorradores,
 } from "@/lib/permisos";
 import { getDashboardCompras, getOpcionesCompras } from "@/lib/queries-compras";
+import { getParametrosCompras } from "@/lib/queries-parametros-compras";
 import { VENTANAS_RITMO, VENTANA_POR_DEFECTO } from "@/lib/stock";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
@@ -62,8 +63,12 @@ export async function GET(request: NextRequest) {
   };
 
   try {
+    // Las reglas se leen SIN caché (es una tabla de diez filas) y van como
+    // argumento: así un cambio en el panel cambia la clave del caché del
+    // dashboard y se ve en el próximo pedido. Ver getDashboardComprasDirecto.
+    const parametros = await getParametrosCompras();
     const [data, opciones] = await Promise.all([
-      getDashboardCompras(filtros),
+      getDashboardCompras(filtros, parametros),
       sp.get("conOpciones") ? getOpcionesCompras() : Promise.resolve(null),
     ]);
     return NextResponse.json({ ...data, opciones });

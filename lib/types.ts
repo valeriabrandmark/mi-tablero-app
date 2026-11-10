@@ -1960,6 +1960,19 @@ export type FilaCompra = {
    * y uno medido sobre 120 no se leen igual aunque el número sea el mismo.
    */
   ritmoRecortado: boolean;
+  /**
+   * `true` si el ritmo se midió sobre los DÍAS CON STOCK de cada depósito y no
+   * sobre la ventana. Ver lib/compras-parametros.ts.
+   */
+  ritmoSobreStock: boolean;
+  /** Vendido en la ventana desde Tucumán (todo lo que no es Meli Full). */
+  udsTuc: number;
+  /** Vendido en la ventana desde Full. */
+  udsFull: number;
+  /** Días de la ventana con stock en Tucumán. `null` = sin la cuenta. */
+  diasStockTuc: number | null;
+  /** Días de la ventana con stock en Full. `null` = sin la cuenta. */
+  diasStockFull: number | null;
   /** Cuándo se dio de alta en Sigma (`YYYY-MM-DD`). */
   alta: string | null;
   /**
@@ -2178,6 +2191,14 @@ export type DashboardCompras = {
    */
   sinFichaDeStock: ArticuloSinFicha[];
   comprasHasta: string | null;
+  /**
+   * Las reglas con las que se calculó el sugerido (ver
+   * lib/compras-parametros.ts). Viajan para que el tooltip explique la cuenta
+   * con los números que se usaron y no con los valores por defecto.
+   */
+  parametros: import("@/lib/compras-parametros").ParametrosCompras;
+  /** Si ya existe gold.dias_con_stock. Sin ella el ritmo usa la ventana. */
+  hayDiasConStock: boolean;
   generadoEn: string;
 };
 
