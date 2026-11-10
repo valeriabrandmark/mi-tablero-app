@@ -73,6 +73,7 @@ const SIN_FILTRO: FiltrosPreciosTn = {
   proveedor: null,
   marca: null,
   competidor: null,
+  stock: null,
   busqueda: null,
 };
 
@@ -98,6 +99,7 @@ const CLAVE_EN_URL: Record<keyof FiltrosPreciosTn, string> = {
   proveedor: "proveedor",
   marca: "marca",
   competidor: "competidor",
+  stock: "stock",
   // El buscador viaja como `q`, que es lo que ya leía `leerFiltros`.
   busqueda: "q",
 };
@@ -2043,6 +2045,29 @@ export default function DashboardPreciosTn() {
               {nombreFuente(c)}
             </option>
           ))}
+        </select>
+        {/* CON STOCK Y SIN STOCK SON DOS TRABAJOS DISTINTOS.
+            Desde que el motor repricia también lo que no tiene unidades
+            (migración 016), la cola mezcla lo urgente con lo preventivo: un
+            artículo con stock se está vendiendo mal AHORA, uno sin stock se va
+            a vender mal cuando entre mercadería.
+            ARRANCA EN "los dos" a propósito. Un filtro puesto por omisión que
+            esconde dos mil filas es exactamente el recorte silencioso del que
+            esta pantalla se cuida en todos lados: el que mira tiene que elegir
+            qué deja afuera. */}
+        <select
+          value={filtros.stock ?? ""}
+          onChange={(e) =>
+            cambiarFiltro({
+              stock: e.target.value === "con" ? "con" : e.target.value === "sin" ? "sin" : null,
+            })
+          }
+          className={CLASE_SELECT}
+          title="Separar lo que se está vendiendo mal ahora de lo que se va a vender mal cuando entre mercadería"
+        >
+          <option value="">Con y sin stock</option>
+          <option value="con">Sólo con stock</option>
+          <option value="sin">Sólo sin stock</option>
         </select>
         {hayFiltro && (
           <button

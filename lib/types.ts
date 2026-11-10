@@ -2384,6 +2384,15 @@ export type FiltrosPreciosTn = {
   marca: string | null;
   /** Código de fuente: muestra sólo lo que se comparó contra ese competidor. */
   competidor: string | null;
+  /**
+   * Si tiene unidades para vender. `null` = las dos cosas.
+   *
+   * Desde que el motor repricia también lo que no tiene stock (migración 016)
+   * las dos mitades son trabajos distintos: las que tienen stock se están
+   * vendiendo mal AHORA, las que no se van a vender mal cuando entre
+   * mercadería. Mezcladas, lo urgente queda enterrado abajo de lo preventivo.
+   */
+  stock: "con" | "sin" | null;
   busqueda: string | null;
 };
 
