@@ -721,10 +721,14 @@ El nav además esconde los links que el proxy le va a rebotar igual.
 
 ### Con qué mes abre
 
-Abre en el **mes comercial vigente**. Si ese mes todavía no tiene objetivos
-cargados, cae al último que sí los tenga (`getMesInicialObjetivos`), así al
-pasar de mes la página no abre vacía. El selector muestra cuál quedó elegido y
-se puede cambiar a cualquier otro mes.
+Abre **siempre en el mes comercial vigente**, tenga objetivos cargados o no.
+Si no los tiene, en lugar de las tarjetas dice «Objetivos de … pendientes de
+cargar», y el gráfico y los comprobantes muestran igual las ventas del mes. El
+selector incluye siempre el mes vigente y se puede cambiar a cualquier otro.
+
+Antes, sin objetivos cargados, caía al último mes que sí los tuviera. El
+10/11/2026 eso dejó la página de SILVIO mostrando octubre en pleno noviembre, y
+se leía como si el mes no hubiera cambiado.
 
 Se resuelve en el servidor y la página va `force-dynamic`: si se prerenderizara,
 el mes quedaría congelado en el del build. La fecha se lee en hora argentina,

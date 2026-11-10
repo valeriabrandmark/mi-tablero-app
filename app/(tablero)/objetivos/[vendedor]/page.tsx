@@ -1,10 +1,9 @@
 import { notFound } from "next/navigation";
 import DashboardObjetivos from "@/components/DashboardObjetivos";
-import { vendedorDesdeSlug } from "@/lib/constantes";
+import { mesComercialActual, vendedorDesdeSlug } from "@/lib/constantes";
 import { permisoDelUsuario, puedeVerVendedor } from "@/lib/permisos";
 import { authConfigurada } from "@/lib/supabase/env";
 import { getUsuario } from "@/lib/supabase/server";
-import { getMesInicialObjetivos } from "@/lib/queries-objetivos";
 
 /**
  * Una página de objetivos por vendedor, para poder dar permiso sobre una sola
@@ -37,5 +36,7 @@ export default async function ObjetivosVendedorPage(props: PageProps<"/objetivos
     if (!puedeVerVendedor(permiso, nombre)) notFound();
   }
 
-  return <DashboardObjetivos vendedor={nombre} mesInicial={await getMesInicialObjetivos(nombre)} />;
+  // Siempre el mes vigente, tenga objetivos o no: si no los tiene, la página
+  // lo dice. Ver "Con qué mes abre" en el README.
+  return <DashboardObjetivos vendedor={nombre} mesInicial={mesComercialActual()} />;
 }
