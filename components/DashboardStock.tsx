@@ -55,6 +55,25 @@ function textoCobertura(dias: number | null): string {
   return `${fmtNumero(Math.round(dias))} d`;
 }
 
+/**
+ * De dónde sale el ritmo de una fila, para el tooltip. Los días son los que
+ * calculó tablero_quo; la cuenta exacta (pisos y topes) está en
+ * lib/sql-ritmo.ts y es la misma de Compras.
+ */
+function detalleRitmo(f: FilaStock): string {
+  if (!f.ritmoSobreStock) {
+    return `${fmtNumero(f.uds)} u. vendidas en la ventana elegida.`;
+  }
+  const l = ["Medido sobre los días que hubo stock, cada depósito por separado:"];
+  if (f.udsTuc > 0) {
+    l.push(`· Tucumán: ${fmtNumero(f.udsTuc)} u. en ${f.diasStockTuc ?? 0} días con stock`);
+  }
+  if (f.udsFull > 0) {
+    l.push(`· Full: ${fmtNumero(f.udsFull)} u. en ${f.diasStockFull ?? 0} días con stock`);
+  }
+  return l.join("\n");
+}
+
 function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
   return [
     { titulo: "SKU", celda: (f) => f.sku, orden: (f) => f.sku },
@@ -153,8 +172,13 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
     {
       titulo: "Por día",
       ayuda:
-        "Las unidades vendidas divididas por los días de la ventana. Es el ritmo con el que se calcula todo lo demás.",
-      celda: (f) => (f.ritmoDiario > 0 ? f.ritmoDiario.toFixed(2) : "—"),
+        "El ritmo de venta, con el que se calcula todo lo demás. Es la MISMA cuenta que Compras: lo vendido por cada depósito dividido los días que ese depósito tuvo stock (si no, los días de la ventana). Pasá el mouse por el número para ver de dónde sale.",
+      celda: (f) =>
+        f.ritmoDiario > 0 ? (
+          <span title={detalleRitmo(f)}>{f.ritmoDiario.toFixed(2)}</span>
+        ) : (
+          "—"
+        ),
       numerica: true,
       orden: (f) => f.ritmoDiario,
     },
@@ -474,7 +498,11 @@ export default function DashboardStockPage() {
 
         <span className="text-muted text-[11px] leading-tight">
           La <strong>cobertura</strong> es cuántos días dura el stock al ritmo
-          de los últimos {ventana} días. El objetivo es{" "}
+          de los últimos {ventana} días
+          {data?.ritmoSobreStock
+            ? ", medido sólo sobre los días que cada depósito tuvo stock (la misma cuenta que Compras)"
+            : ""}
+          . El objetivo es{" "}
           <strong>{COBERTURA_OBJETIVO_DIAS} días</strong> y la reposición tarda{" "}
           <strong>{PLAZO_REPOSICION_DIAS}</strong>, así que{" "}
           <strong>Comprar u.</strong> es lo que falta para cubrir los{" "}

@@ -124,3 +124,15 @@ export async function guardarParametrosCompras(
   });
   return getParametrosCompras();
 }
+
+/**
+ * Si ya existe gold.dias_con_stock. La crea el paso de tablero_quo (y la
+ * migración compras_parametros.sql); sin ella el ritmo usa la ventana. Lo
+ * usan Compras y Stock.
+ */
+export async function getHayDiasConStock(): Promise<boolean> {
+  const filas = await query<{ v: boolean }>(
+    `select to_regclass('gold.dias_con_stock') is not null as v`,
+  );
+  return filas[0]?.v === true;
+}

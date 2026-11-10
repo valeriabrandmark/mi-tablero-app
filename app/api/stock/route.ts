@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { lista } from "@/lib/filtros";
 import { enConstruccion, permisoDelUsuario, puedeVer, puedeVerBorradores } from "@/lib/permisos";
 import { getDashboardStock, getOpcionesStock } from "@/lib/queries-stock";
+import { getParametrosCompras } from "@/lib/queries-parametros-compras";
 import {
   DEPOSITOS,
   DEPOSITO_POR_DEFECTO,
@@ -57,8 +58,12 @@ export async function GET(request: NextRequest) {
   };
 
   try {
+    // Las reglas del ritmo son las de Compras: van como argumento para que el
+    // caché cambie de clave cuando alguien las cambia (ver
+    // getDashboardStockDirecto).
+    const parametros = await getParametrosCompras();
     const [data, opciones] = await Promise.all([
-      getDashboardStock(filtros),
+      getDashboardStock(filtros, parametros),
       sp.get("conOpciones") ? getOpcionesStock() : Promise.resolve(null),
     ]);
     return NextResponse.json({ ...data, opciones });

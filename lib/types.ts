@@ -1610,8 +1610,16 @@ export type FilaStock = {
   udsMeli: number;
   udsTn: number;
   udsMayorista: number;
-  /** Unidades por día. `0` si no vendió. */
+  /** Unidades por día. `0` si no vendió. Ver lib/sql-ritmo.ts. */
   ritmoDiario: number;
+  /** Si el ritmo se midió sobre los días con stock de cada depósito. */
+  ritmoSobreStock: boolean;
+  /** Vendido en la ventana desde Tucumán / desde Full. */
+  udsTuc: number;
+  udsFull: number;
+  /** Días de la ventana con stock en cada depósito. `null` = sin la cuenta. */
+  diasStockTuc: number | null;
+  diasStockFull: number | null;
   /** Días que dura el stock al ritmo actual. `null` si no vendió. */
   cobertura: number | null;
   /** Unidades por encima de la cobertura objetivo, y su costo. */
@@ -1686,6 +1694,11 @@ export type DashboardStock = {
    * por eso.
    */
   comprasHasta: string | null;
+  /**
+   * Si el ritmo se está midiendo sobre los días con stock (la regla prendida
+   * y la tabla de tablero_quo existe). Para que la leyenda lo diga.
+   */
+  ritmoSobreStock: boolean;
   generadoEn: string;
 };
 

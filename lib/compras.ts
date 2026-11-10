@@ -1146,11 +1146,17 @@ export function nombreArchivo(proveedor: string, extension: string): string {
  */
 export function ritmoPorDeposito(f: FilaCompra, p: ParametrosCompras): string[] {
   if (!f.ritmoSobreStock) return [];
+  // La misma cuenta que expresionRitmo en lib/sql-ritmo.ts: los días con
+  // stock, con el piso, y nunca más que los de la regla de la ventana.
   const linea = (nombre: string, uds: number, dias: number | null) => {
-    const usados = Math.max(p.dias_minimos_con_stock, dias ?? 0);
-    const piso = (dias ?? 0) < p.dias_minimos_con_stock
-      ? ` (tuvo stock ${dias ?? 0}; se toma el mínimo de ${p.dias_minimos_con_stock})`
-      : "";
+    const conPiso = Math.max(p.dias_minimos_con_stock, dias ?? 0);
+    const usados = Math.min(f.diasRitmo, conPiso);
+    const piso =
+      usados < conPiso
+        ? ` (tuvo stock ${dias ?? 0}; no se usan más días que los ${f.diasRitmo} desde que se vende)`
+        : (dias ?? 0) < p.dias_minimos_con_stock
+          ? ` (tuvo stock ${dias ?? 0}; se toma el mínimo de ${p.dias_minimos_con_stock})`
+          : "";
     return `  · ${nombre}: ${Math.round(uds)} u. en ${usados} días con stock${piso}` +
       ` = ${(uds / usados).toFixed(2)} por día`;
   };

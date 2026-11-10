@@ -22,10 +22,19 @@ import {
 } from "@/lib/stock";
 import { FULL_POR_SKU, POR_INVENTARIO_SKU } from "@/lib/sql-meli";
 import {
+  columnasRitmo,
+  ctesRitmo,
+  expresionRitmo,
+  joinsRitmo,
+} from "@/lib/sql-ritmo";
+import {
   parametrosPorDefecto,
   type ParametrosCompras,
 } from "@/lib/compras-parametros";
-import { getParametrosCompras } from "@/lib/queries-parametros-compras";
+import {
+  getHayDiasConStock,
+  getParametrosCompras,
+} from "@/lib/queries-parametros-compras";
 import type { ArticuloParaOrden } from "@/lib/sigma-orden";
 import type {
   ArticuloSinFicha,
@@ -36,26 +45,6 @@ import type {
   RecorteCompras,
 } from "@/lib/types";
 
-/**
- * QUÉ VENTA SALE DEL DEPÓSITO DE FULL, en SQL sobre gold.fact_ventas.
- *
- * Mercado Libre con logística `fulfillment`. Hasta septiembre de 2026 la venta
- * de Meli no traía logística (null) y desde octubre el 99 % es fulfillment, así
- * que un null cuenta como Full. Todo lo demás (mayorista, Tienda Nube, Meli
- * con otra logística) sale de Tucumán.
- *
- * LA MISMA REGLA vive en tablero_quo/stock_diario.py, que cuenta los días con
- * stock de cada depósito: si se cambia acá, se cambia allá.
- */
-export const LOGISTICAS_NO_FULL = [
-  "cross_docking",
-  "self_service",
-  "xd_drop_off",
-  "drop_off",
-  "custom",
-  "not_specified",
-] as const;
-const VENTA_DESDE_FULL = `(canal = 'Mercado Libre' and coalesce(logistica, 'fulfillment') not in (${LOGISTICAS_NO_FULL.map((l) => `'${l}'`).join(", ")}))`;
 
 /**
  * Cómo se reconoce un discontinuo en SQL: el prefijo DF o DD como palabra
@@ -111,7 +100,6 @@ const CONDICION_DISCONTINUO = `coalesce(upper(ltrim(a.descripcion)), '') ~ '^(${
  */
 function base(p: ParametrosCompras, hayDiasConStock = true): string {
   const n = (v: number) => String(Number(v));
-  const ritmoSobreStock = p.ritmo_sobre_dias_con_stock >= 1;
   return `
 with por_inv as (
   -- Un renglón por INVENTARIO y no por publicación: varias publicaciones
@@ -372,34 +360,7 @@ ventas as (
   from gold.fact_ventas
   group by sku
 ),
--- LO VENDIDO DE CADA DEPOSITO, para medir el ritmo sobre los días que cada
--- uno tuvo stock (ver ritmo_diario más abajo). La regla de qué venta sale de
--- Full es la misma que usa tablero_quo/stock_diario.py: si se cambia en un
--- lado, se cambia en el otro.
-ventas_deposito as (
-  select sku,
-         coalesce(sum(cantidad) filter (where ${VENTA_DESDE_FULL}), 0)       as uds_full,
-         coalesce(sum(cantidad) filter (where not (${VENTA_DESDE_FULL})), 0) as uds_tuc
-  from gold.fact_ventas
-  where fecha >= current_date - $1::int
-  group by sku
-),
--- Cuántos días de la ventana tuvo stock cada depósito. Lo calcula tablero_quo
--- (stock_diario.py) con las fotos diarias y, donde no hay foto, reconstruyendo
--- el stock con compras, ventas y envíos a Full.
-dias_stock as (
-  ${
-    hayDiasConStock
-      ? `select sku,
-         max(dias_con_stock) filter (where deposito = 'tuc')  as dias_tuc,
-         max(dias_con_stock) filter (where deposito = 'full') as dias_full
-  from gold.dias_con_stock
-  where ventana = $1::int
-  group by sku`
-      : `select null::text as sku, null::int as dias_tuc, null::int as dias_full
-  where false`
-  }
-),
+${ctesRitmo(hayDiasConStock)}
 stock as (
   -- Los DOS depósitos siempre: se compra para la empresa, no para un depósito.
   select coalesce(t.sku, f.sku)                          as sku,
@@ -473,37 +434,8 @@ base as (
          coalesce(hs.oferta_reciente, false)            as oferta_reciente,
          (pcsi.proveedor is not null)                   as proveedor_mando_sell_in,
          hc.historia                                    as hist_calculado,
-         -- SOBRE CUANTOS DIAS SE MIDE EL RITMO.
-         --
-         -- Era siempre la ventana entera, y para un artículo nuevo eso es una
-         -- cuenta mal hecha: uno que se dio de alta hace 30 días y vendió 20
-         -- unidades no vende 20/120 = 0,17 por día, vende 0,67. Dividido por
-         -- 120 el ritmo queda por debajo de lo que hace falta para que el
-         -- sugerido dé algo, y el artículo que MAS necesita reposición --el
-         -- que recién arranca y se está vendiendo-- es justo el que no aparece.
-         --
-         -- Hoy son 1.718 artículos con primera venta dentro de la ventana; 75
-         -- de ellos no dan ningún sugerido por esto.
-         --
-         -- EL PISO DE ${n(p.dias_minimos_de_ritmo)} DIAS NO ES DECORATIVO. Sin él,
-         -- un artículo que vendió 3 unidades ayer daría un ritmo de 3 por día
-         -- y pediría cientos: medido, el peor caso sin piso sugería 800
-         -- unidades, y con el piso queda en 58. Dos semanas es lo mínimo para
-         -- que un promedio diario signifique algo.
-         case when v.primera_venta is null then $1::int
-              else least($1::int,
-                         greatest(${n(p.dias_minimos_de_ritmo)},
-                                  current_date - v.primera_venta::date))
-         end                                            as dias_ritmo,
-         coalesce(vd.uds_tuc, 0)                        as uds_tuc,
-         coalesce(vd.uds_full, 0)                       as uds_full,
-         ds.dias_tuc                                    as dias_stock_tuc,
-         ds.dias_full                                   as dias_stock_full,
-         -- EL RITMO SE MIDE SOBRE LOS DIAS CON STOCK sólo si está prendida la
-         -- regla Y el artículo tiene la cuenta hecha. Sin fila en
-         -- gold.dias_con_stock (artículo sin ningún movimiento, o el paso de
-         -- tablero_quo no corrió) se usa la regla de la ventana de siempre.
-         (${ritmoSobreStock ? "true" : "false"} and ds.sku is not null) as ritmo_sobre_stock
+         -- El ritmo: ver lib/sql-ritmo.ts, que es la misma cuenta que usa Stock.
+         ${columnasRitmo(p).trim()}
   from stock s
   left join bronze.sigma_articulos a on trim(a.id) = s.sku
   left join bronze.proveedores_grupo pg on pg.proveedor = a."proveedorNombre"
@@ -517,8 +449,7 @@ base as (
   left join proveedores_con_sell_in pcsi on pcsi.proveedor = a."proveedorNombre"
   left join hist_sell_in hs on hs.sku = s.sku
   left join hist_calculado hc on hc.sku = s.sku
-  left join ventas_deposito vd on vd.sku = s.sku
-  left join dias_stock ds on ds.sku = s.sku
+  ${joinsRitmo("s.sku").trim()}
   where coalesce(a."proveedorNombre", '') <> all($2::text[])
 ),
 -- El ritmo y la cobertura salen aca y no de base porque los dos dependen de
@@ -526,20 +457,10 @@ base as (
 -- misma lista de select donde se define. (Sin backticks: template literal.)
 ritmo_medido as (
   select b.*,
-         -- EL RITMO, DE DOS MANERAS. Ver lib/compras-parametros.ts.
-         --
-         -- Sobre los días con stock: cada depósito vende lo suyo en los días
-         -- que tuvo, y los dos ritmos se suman. Con un piso de
-         -- ${n(p.dias_minimos_con_stock)} días para que 12 unidades vendidas en una
-         -- tarde no pasen por un ritmo de 12 por día, y nunca más días que la
-         -- ventana.
-         --
-         -- Si no, la ventana (recortada a la primera venta) como siempre.
-         case when b.ritmo_sobre_stock then
-                b.uds_tuc::numeric / least($1::int, greatest(${n(p.dias_minimos_con_stock)}, coalesce(b.dias_stock_tuc, 0)))
-              + b.uds_full::numeric / least($1::int, greatest(${n(p.dias_minimos_con_stock)}, coalesce(b.dias_stock_full, 0)))
-              else b.uds::numeric / b.dias_ritmo
-         end                                            as ritmo_diario
+         -- EL RITMO, DE DOS MANERAS: sobre los días con stock de cada
+         -- depósito, o sobre la ventana. La cuenta vive en lib/sql-ritmo.ts y
+         -- es la misma que usa el tablero de Stock.
+         ${expresionRitmo(p)}                                            as ritmo_diario
   from base b
 ),
 con_ritmo as (
@@ -1166,17 +1087,6 @@ async function getComprasHasta(): Promise<string | null> {
   return fila?.v ?? null;
 }
 
-/**
- * Si ya existe gold.dias_con_stock. La crea el paso de tablero_quo (y la
- * migración compras_parametros.sql); hasta entonces el ritmo usa la ventana.
- */
-async function hayDiasConStock(): Promise<boolean> {
-  const fila = await queryOne<{ v: boolean }>(
-    `select to_regclass('gold.dias_con_stock') is not null as v`,
-  );
-  return fila?.v === true;
-}
-
 async function getDashboardComprasDirecto(
   f: FiltrosCompras,
   /**
@@ -1190,7 +1100,7 @@ async function getDashboardComprasDirecto(
 ): Promise<DashboardCompras> {
   const [opcionesSellIn, hay] = await Promise.all([
     getOpcionesSellIn(),
-    hayDiasConStock(),
+    getHayDiasConStock(),
   ]);
   const reglas: Reglas = { p, hayDiasConStock: hay };
   // La columna pedida sólo vale si existe: una inventada dejaría todos los
