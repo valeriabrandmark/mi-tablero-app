@@ -58,15 +58,15 @@ export const LOGISTICAS_NO_FULL = [
 const VENTA_DESDE_FULL = `(canal = 'Mercado Libre' and coalesce(logistica, 'fulfillment') not in (${LOGISTICAS_NO_FULL.map((l) => `'${l}'`).join(", ")}))`;
 
 /**
- * Cómo se reconoce un discontinuo en SQL.
+ * Cómo se reconoce un discontinuo en SQL: el prefijo DF o DD como palabra
+ * suelta, en cualquier caja y con espacios adelante. Ver PREFIJOS_DISCONTINUO
+ * y `esDescripcionDiscontinua` en lib/compras.ts, que es la misma regla.
  *
  * Se arma desde `PREFIJOS_DISCONTINUO` y no escrito a mano para que agregar un
  * prefijo sea una sola línea en un solo lugar. Los valores son constantes del
  * código, no entran por parámetro, así que interpolarlos es seguro.
  */
-const CONDICION_DISCONTINUO = PREFIJOS_DISCONTINUO.map(
-  (p) => `a.descripcion like '${p}%'`,
-).join(" or ");
+const CONDICION_DISCONTINUO = `coalesce(upper(ltrim(a.descripcion)), '') ~ '^(${PREFIJOS_DISCONTINUO.join("|")})([^A-Z0-9]|$)'`;
 
 /**
  * Consultas del panel de Compras.

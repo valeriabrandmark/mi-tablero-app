@@ -155,17 +155,36 @@ export const DIAS_ARTICULO_NUEVO = 90;
  *
  * No hay un campo para esto en Sigma, así que la convención del negocio es
  * escribirlo adelante del nombre: "DF - ADERMICINA CREMA...", "DD PRIME
- * PRESERVATIVO...". Hoy son 841 artículos (776 con DF y 65 con DD), y los dos
- * prefijos vienen SIEMPRE con un espacio detrás --verificado contra la base--
- * así que pedir el espacio evita llevarse puesta una marca que empiece con
- * esas letras.
+ * PRESERVATIVO...". Al 10/11/2026 son 888 artículos (823 con DF y 65 con DD).
+ *
+ * SE RECONOCE EL PREFIJO COMO PALABRA SUELTA, sin importar cómo se escriba:
+ * mayúsculas o minúsculas, con espacios adelante, y seguido de un espacio, un
+ * guión, un punto o nada ("DF - ...", "df ...", "DF-...", "DD."). Lo que NO
+ * cuenta es el prefijo pegado a una letra o número: "DFENSE" o "DD2000" son
+ * nombres, no la marca de discontinuo. Hoy todos vienen como "DF " / "DD "
+ * --verificado contra la base--, pero es texto libre que se carga a mano y
+ * mañana puede escribirse distinto: un discontinuo que se escapa vuelve a
+ * aparecer con sugerido.
  *
  * A un discontinuo no se le sugiere comprar: el proveedor lo está dando de
  * baja. Pero se lo tiene que poder encontrar, porque a veces lo ofrece a
  * liquidación y ahí sí conviene cargar cantidad a mano. Para eso está el
  * recorte "Discontinuos" de acá abajo.
  */
-export const PREFIJOS_DISCONTINUO = ["DF ", "DD "] as const;
+export const PREFIJOS_DISCONTINUO = ["DF", "DD"] as const;
+
+/**
+ * La misma regla que `es_discontinuo` en el SQL de Compras, para poder
+ * probarla sin base. Si se cambia una, se cambia la otra (ver
+ * CONDICION_DISCONTINUO en lib/queries-compras.ts).
+ */
+export const REGEX_DISCONTINUO = new RegExp(
+  `^(${PREFIJOS_DISCONTINUO.join("|")})([^A-Z0-9]|$)`,
+);
+
+export function esDescripcionDiscontinua(descripcion: string | null | undefined): boolean {
+  return REGEX_DISCONTINUO.test((descripcion ?? "").trimStart().toUpperCase());
+}
 
 /**
  * Los grupos de artículos que se pueden mostrar, como van en la lista.

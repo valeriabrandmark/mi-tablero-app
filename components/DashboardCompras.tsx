@@ -140,6 +140,36 @@ function sinCero(n: number | undefined): number | string {
  */
 const RECALCULADOS_A_LA_VISTA = 12;
 
+/**
+ * TAB SALTA DE CANTIDAD EN CANTIDAD.
+ *
+ * Lo pidió compras (10/11/2026): al cargar una orden se va renglón por
+ * renglón escribiendo cantidades, y con el Tab de siempre el foco pasaba por
+ * la unidad, los dos descuentos y lo que hubiera en el medio: cuatro Tab por
+ * fila para llegar a la siguiente cantidad.
+ *
+ * Tab va a la Cantidad de la fila de abajo y Shift+Tab a la de arriba, en el
+ * orden en que la tabla se ve (ordenada como esté). En la última fila el Tab
+ * sigue su camino normal, para poder salir de la tabla con el teclado. Los
+ * otros campos siguen ahí: se llega con el mouse, o con Tab desde ellos.
+ *
+ * Se busca por un atributo y no por índice de fila porque la tabla se reordena
+ * y se filtra sola: el DOM es lo único que sabe qué fila está debajo de cuál.
+ */
+function saltarDeCantidad(e: React.KeyboardEvent<HTMLInputElement>) {
+  if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey) return;
+  const todas = Array.from(
+    document.querySelectorAll<HTMLInputElement>("input[data-cantidad-compra]"),
+  );
+  const i = todas.indexOf(e.currentTarget);
+  const destino = todas[e.shiftKey ? i - 1 : i + 1];
+  if (i < 0 || !destino) return;
+  e.preventDefault();
+  destino.focus();
+  // Seleccionado, para escribir encima sin tener que borrar el sugerido.
+  destino.select();
+}
+
 const CLASE_CELDA_EDITABLE =
   "border-line bg-panel-2 text-ink focus:border-c1 w-16 rounded-md border px-1.5 py-1 text-right text-xs tabular-nums outline-none";
 
@@ -1219,6 +1249,9 @@ export default function DashboardComprasPage({
                 cantidad: Math.max(0, Math.floor(Number(e.target.value) || 0)),
               })
             }
+            // TAB VA A LA CANTIDAD DE LA FILA SIGUIENTE. Ver saltarDeCantidad.
+            data-cantidad-compra=""
+            onKeyDown={saltarDeCantidad}
             className={`${CLASE_CELDA_EDITABLE} ${
               aviso ? "border-amber-500/70 bg-amber-500/5" : ""
             }`}
