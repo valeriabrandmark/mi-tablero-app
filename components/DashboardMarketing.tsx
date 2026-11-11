@@ -1,0 +1,972 @@
+"use client";
+
+import { useState, type ReactNode } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Legend,
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { Panel, TarjetaKpi } from "@/components/ui";
+import { CajaTooltip, FilaTooltip } from "@/components/charts/TooltipOscuro";
+import { fmtMoneda, fmtNumero } from "@/lib/format";
+import { TEMA } from "@/lib/paleta";
+import {
+  AVANCE_MES,
+  CANALES,
+  COLABORACIONES,
+  CORTE,
+  HITOS,
+  INDICADORES,
+  MARCAS,
+  META_INFLUENCERS_MES,
+  META_PUBLICACIONES_SEMANA,
+  META_TIENDAS_NUEVAS,
+  TIENDAS_NUEVAS_MES,
+  gastoTotal,
+  proyectar,
+  ventaAcumulada,
+  ventaTotal,
+  type ClaveMarca,
+  type EstadoFuente,
+  type EstadoHito,
+  type Marca,
+} from "@/lib/marketing-demo";
+
+/**
+ * TABLERO DE MARCA — PROTOTIPO.
+ *
+ * Arma, sobre datos de ejemplo (`lib/marketing-demo.ts`), lo que va a mirar
+ * Agatina como responsable de marca: presupuesto, gastos, deadlines, y los
+ * KPIs del acuerdo de rol en sus tres niveles (marca → demanda → venta).
+ *
+ * Dos vistas: CONSOLIDADO, que es la que sirve para medirla a ella (scorecard,
+ * presupuesto de las cuatro marcas, entregas), y UNA POR MARCA, que es la que
+ * ella usa para mover la demanda (embudo, pauta, contenido, influencers).
+ */
+
+const COLOR_CANAL: Record<string, string> = {
+  "Meta Ads": "#3b82f6",
+  "Google Ads": "#f59e0b",
+  Influencers: "#f472b6",
+  Contenido: "#a78bfa",
+  Ferias: "#22d3ee",
+};
+
+const pct0 = new Intl.NumberFormat("es-AR", { style: "percent", maximumFractionDigits: 0 });
+const pct1 = new Intl.NumberFormat("es-AR", { style: "percent", maximumFractionDigits: 1 });
+const dec1 = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+/**
+ * Moneda corta CON un decimal en millones. La de lib/format redondea a entero
+ * y acá los presupuestos son de $2,5MM: "$ 3 M" decía otra cosa.
+ */
+function fmtMonedaCorta(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `$ ${dec1.format(n / 1_000_000).replace(/,0$/, "")} M`;
+  if (abs >= 1_000) return `$ ${Math.round(n / 1_000)} k`;
+  return `$ ${Math.round(n)}`;
+}
+const p0 = (n: number) => (Number.isFinite(n) ? pct0.format(n) : "—");
+const p1 = (n: number) => (Number.isFinite(n) ? pct1.format(n) : "—");
+
+const VERDE = "#22c55e";
+const AMBAR = "#f59e0b";
+const ROJO = TEMA.negativo;
+
+/** Verde si cumple, ámbar si está cerca, rojo si está lejos. */
+function semaforo(cumplimiento: number): string {
+  if (cumplimiento >= 0.95) return VERDE;
+  if (cumplimiento >= 0.7) return AMBAR;
+  return ROJO;
+}
+
+// ---------------------------------------------------------------------------
+// Piezas chicas
+// ---------------------------------------------------------------------------
+
+function Chip({ color, children }: { color: string; children: ReactNode }) {
+  return (
+    <span
+      className="inline-block rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap"
+      style={{ color, borderColor: `${color}55`, background: `${color}1a` }}
+    >
+      {children}
+    </span>
+  );
+}
+
+const ESTADO_HITO: Record<EstadoHito, { label: string; color: string }> = {
+  hecho: { label: "Entregado", color: VERDE },
+  en_curso: { label: "En curso", color: "#3b82f6" },
+  pendiente: { label: "Pendiente", color: TEMA.muted },
+  atrasado: { label: "Atrasado", color: ROJO },
+};
+
+const ESTADO_FUENTE: Record<EstadoFuente, { label: string; color: string }> = {
+  listo: { label: "Listo", color: VERDE },
+  verificar: { label: "Pendiente de verificar", color: AMBAR },
+  montar: { label: "A montar", color: ROJO },
+};
+
+function Barrita({ valor, color }: { valor: number; color: string }) {
+  return (
+    <div className="bg-panel-2 h-1.5 w-full overflow-hidden rounded-full">
+      <div
+        className="h-full rounded-full"
+        style={{ width: `${Math.min(Math.max(valor, 0), 1) * 100}%`, background: color }}
+      />
+    </div>
+  );
+}
+
+function TooltipSimple({
+  active,
+  payload,
+  label,
+  formato,
+}: {
+  active?: boolean;
+  payload?: { name?: string; value?: number; color?: string; fill?: string; stroke?: string }[];
+  label?: string | number;
+  formato: (n: number) => string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <CajaTooltip titulo={label}>
+      {payload.map((p, i) => (
+        <FilaTooltip
+          key={`${p.name}-${i}`}
+          color={p.color ?? p.fill ?? p.stroke ?? TEMA.muted}
+          label={String(p.name ?? "")}
+          valor={formato(Number(p.value ?? 0))}
+        />
+      ))}
+    </CajaTooltip>
+  );
+}
+
+const ejes = {
+  stroke: TEMA.muted,
+  fontSize: 11,
+  tickLine: false,
+  axisLine: false,
+} as const;
+
+function Leyenda() {
+  return <Legend wrapperStyle={{ fontSize: 11, color: TEMA.muted }} iconSize={8} />;
+}
+
+function Tabla({ cabecera, children }: { cabecera: string[]; children: ReactNode }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-muted border-line border-b text-left text-xs">
+            {cabecera.map((c) => (
+              <th key={c} className="px-2 py-2 font-medium whitespace-nowrap">
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-line divide-y">{children}</tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scorecard: cómo se mide a Agatina
+// ---------------------------------------------------------------------------
+
+type FilaScore = {
+  grupo: "Actividad" | "Venta" | "Gestión";
+  meta: string;
+  objetivo: string;
+  real: string;
+  cumplimiento: number;
+  peso: number;
+};
+
+function armarScorecard(): FilaScore[] {
+  const propias = MARCAS.filter((m) => m.foco);
+  const dg = MARCAS.find((m) => m.clave === "diaper_genie")!;
+  const ht = MARCAS.find((m) => m.clave === "hola_toys")!;
+
+  const pautaDias = propias.reduce((s, m) => s + m.diasPautaActiva, 0) / propias.length;
+  const pubs = propias.flatMap((m) => m.publicacionesPorSemana);
+  const pubsProm = pubs.reduce((s, v) => s + v, 0) / pubs.length;
+  const navidad = HITOS.find((h) => h.que.startsWith("Campaña de Navidad"))!;
+  const revistas = HITOS.filter((h) => h.que.startsWith("Revista") && h.entregado);
+  const presupuesto = propias.reduce((s, m) => s + (m.presupuestoMes ?? 0), 0);
+  const gastado = propias.reduce((s, m) => s + gastoTotal(m), 0);
+  const ejec = gastado / presupuesto;
+  const medibles = INDICADORES.filter((i) => i.estado === "listo").length / INDICADORES.length;
+
+  return [
+    {
+      grupo: "Actividad",
+      meta: "Colaboraciones con influencers",
+      objetivo: `${META_INFLUENCERS_MES} / mes`,
+      real: `${COLABORACIONES.length}`,
+      cumplimiento: COLABORACIONES.length / META_INFLUENCERS_MES,
+      peso: 0.1,
+    },
+    {
+      grupo: "Actividad",
+      meta: "Pauta activa todos los días",
+      objetivo: `${CORTE.dia} de ${CORTE.dia} días`,
+      real: `${dec1.format(pautaDias)} días`,
+      cumplimiento: pautaDias / CORTE.dia,
+      peso: 0.1,
+    },
+    {
+      grupo: "Actividad",
+      meta: "Publicaciones por semana por marca",
+      objetivo: `${META_PUBLICACIONES_SEMANA} mínimo`,
+      real: dec1.format(pubsProm),
+      cumplimiento: pubsProm / META_PUBLICACIONES_SEMANA,
+      peso: 0.1,
+    },
+    {
+      grupo: "Actividad",
+      meta: "Campaña de Navidad publicada",
+      objetivo: `antes del ${navidad.vence}`,
+      real: ESTADO_HITO[navidad.estado].label,
+      cumplimiento: navidad.estado === "hecho" ? 1 : navidad.estado === "en_curso" ? 0.5 : 0,
+      peso: 0.1,
+    },
+    {
+      grupo: "Actividad",
+      meta: "Revista entregada antes del día 5",
+      objetivo: "100 % a tiempo",
+      real: `${revistas.length} de ${revistas.length}`,
+      cumplimiento: 1,
+      peso: 0.1,
+    },
+    {
+      grupo: "Venta",
+      meta: "Venta Diaper Genie (proyectada)",
+      objetivo: fmtMonedaCorta(dg.ventaObjetivoMes),
+      real: fmtMonedaCorta(proyectar(ventaTotal(dg))),
+      cumplimiento: proyectar(ventaTotal(dg)) / dg.ventaObjetivoMes!,
+      peso: 0.15,
+    },
+    {
+      grupo: "Venta",
+      meta: "Venta Hola Toys (proyectada)",
+      objetivo: fmtMonedaCorta(ht.ventaObjetivoMes),
+      real: fmtMonedaCorta(proyectar(ventaTotal(ht))),
+      cumplimiento: proyectar(ventaTotal(ht)) / ht.ventaObjetivoMes!,
+      peso: 0.15,
+    },
+    {
+      grupo: "Venta",
+      meta: "Tiendas nuevas que abren cuenta",
+      objetivo: `${META_TIENDAS_NUEVAS.min} a ${META_TIENDAS_NUEVAS.max}`,
+      real: `${TIENDAS_NUEVAS_MES} (proy. ${Math.round(proyectar(TIENDAS_NUEVAS_MES))})`,
+      cumplimiento: proyectar(TIENDAS_NUEVAS_MES) / META_TIENDAS_NUEVAS.min,
+      peso: 0.1,
+    },
+    {
+      grupo: "Gestión",
+      meta: "Presupuesto al ritmo del mes",
+      objetivo: `≤ ${p0(AVANCE_MES + 0.1)} ejecutado`,
+      real: `${p0(ejec)} ejecutado`,
+      cumplimiento: ejec <= AVANCE_MES + 0.1 ? 1 : (AVANCE_MES + 0.1) / ejec,
+      peso: 0.05,
+    },
+    {
+      grupo: "Gestión",
+      meta: "Indicadores medidos y cargados",
+      objetivo: "100 %",
+      real: p0(medibles),
+      cumplimiento: medibles,
+      peso: 0.05,
+    },
+  ];
+}
+
+function Scorecard() {
+  const filas = armarScorecard();
+  const total = filas.reduce((s, f) => s + f.peso * Math.min(f.cumplimiento, 1), 0);
+  const porGrupo = (["Actividad", "Venta", "Gestión"] as const).map((g) => {
+    const fs = filas.filter((f) => f.grupo === g);
+    const peso = fs.reduce((s, f) => s + f.peso, 0);
+    const logrado = fs.reduce((s, f) => s + f.peso * Math.min(f.cumplimiento, 1), 0);
+    return { grupo: g, peso, cumplimiento: logrado / peso };
+  });
+
+  return (
+    <Panel
+      titulo="Scorecard — cómo se mide a Agatina"
+      nota="Actividad depende solo de ella · Venta es compartida con Alejandro"
+    >
+      <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
+        <div className="bg-panel-2 flex flex-col items-center justify-center rounded-xl p-4">
+          <p className="text-muted text-xs">Puntaje del mes</p>
+          <p
+            className="mt-1 text-5xl font-semibold tabular-nums"
+            style={{ color: semaforo(total) }}
+          >
+            {Math.round(total * 100)}
+          </p>
+          <p className="text-muted text-xs">de 100</p>
+          <div className="mt-4 w-full space-y-2">
+            {porGrupo.map((g) => (
+              <div key={g.grupo}>
+                <div className="flex justify-between text-[11px]">
+                  <span>
+                    {g.grupo} <span className="text-muted">({p0(g.peso)})</span>
+                  </span>
+                  <span className="tabular-nums">{p0(g.cumplimiento)}</span>
+                </div>
+                <Barrita valor={g.cumplimiento} color={semaforo(g.cumplimiento)} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <Tabla cabecera={["Nivel", "Meta", "Objetivo", "Real", "Cumplimiento", "Peso"]}>
+          {filas.map((f) => (
+            <tr key={f.meta}>
+              <td className="text-muted px-2 py-2 text-xs">{f.grupo}</td>
+              <td className="px-2 py-2">{f.meta}</td>
+              <td className="text-muted px-2 py-2 whitespace-nowrap">{f.objetivo}</td>
+              <td className="px-2 py-2 whitespace-nowrap tabular-nums">{f.real}</td>
+              <td className="w-40 px-2 py-2">
+                <div className="flex items-center gap-2">
+                  <Barrita valor={f.cumplimiento} color={semaforo(f.cumplimiento)} />
+                  <span className="w-10 text-right text-xs tabular-nums">
+                    {p0(f.cumplimiento)}
+                  </span>
+                </div>
+              </td>
+              <td className="text-muted px-2 py-2 text-xs tabular-nums">{p0(f.peso)}</td>
+            </tr>
+          ))}
+        </Tabla>
+      </div>
+    </Panel>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Vista consolidada
+// ---------------------------------------------------------------------------
+
+function VistaConsolidada() {
+  const asignado = MARCAS.reduce((s, m) => s + (m.presupuestoMes ?? 0), 0);
+  const gastado = MARCAS.reduce((s, m) => s + gastoTotal(m), 0);
+  const venta = MARCAS.reduce((s, m) => s + ventaTotal(m), 0);
+  const propias = MARCAS.filter((m) => m.foco);
+  const objetivoPropias = propias.reduce((s, m) => s + (m.ventaObjetivoMes ?? 0), 0);
+  const proyPropias = propias.reduce((s, m) => s + proyectar(ventaTotal(m)), 0);
+  const entregas = HITOS.filter((h) => h.entregado);
+  const aTiempo = entregas.filter((h) => h.estado === "hecho").length;
+  const atrasados = HITOS.filter((h) => h.estado === "atrasado").length;
+  const costoInf = COLABORACIONES.reduce((s, c) => s + c.costo, 0);
+  const ventaInf = COLABORACIONES.reduce((s, c) => s + c.ventaAtribuida, 0);
+
+  const presupuestoPorMarca = MARCAS.map((m) => ({
+    marca: m.nombre,
+    Asignado: m.presupuestoMes ?? 0,
+    Gastado: gastoTotal(m),
+    "Ritmo esperado": (m.presupuestoMes ?? 0) * AVANCE_MES,
+  }));
+
+  const ventaPorMarca = MARCAS.map((m) => ({
+    marca: m.nombre,
+    "Venta al corte": ventaTotal(m),
+    Proyección: proyectar(ventaTotal(m)),
+    Objetivo: m.ventaObjetivoMes ?? m.ventaBase,
+  }));
+
+  const canalPorMarca = MARCAS.map((m) => ({ marca: m.nombre, ...m.gastoPorCanal }));
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <TarjetaKpi
+          titulo="Presupuesto ejecutado"
+          valor={fmtMonedaCorta(gastado)}
+          acento={semaforo(gastado / asignado <= AVANCE_MES + 0.1 ? 1 : 0.8)}
+          detalle={`${p0(gastado / asignado)} de ${fmtMonedaCorta(asignado)} · mes al ${p0(AVANCE_MES)}`}
+        />
+        <TarjetaKpi
+          titulo="Venta del mes (4 marcas)"
+          valor={fmtMonedaCorta(venta)}
+          detalle={`Proyección ${fmtMonedaCorta(proyectar(venta))}`}
+        />
+        <TarjetaKpi
+          titulo="Marcas propias vs objetivo"
+          valor={p0(proyPropias / objetivoPropias)}
+          acento={semaforo(proyPropias / objetivoPropias)}
+          detalle={`${fmtMonedaCorta(proyPropias)} proy. / ${fmtMonedaCorta(objetivoPropias)}`}
+        />
+        <TarjetaKpi
+          titulo="Retorno (venta ÷ inversión)"
+          valor={`${dec1.format(venta / gastado)}x`}
+          detalle="MER del mes, todas las marcas"
+        />
+        <TarjetaKpi
+          titulo="Influencers"
+          valor={`${COLABORACIONES.length} / ${META_INFLUENCERS_MES}`}
+          acento={semaforo(COLABORACIONES.length / META_INFLUENCERS_MES)}
+          detalle={`ROI ${dec1.format(ventaInf / costoInf)}x · ${fmtMonedaCorta(costoInf)} invertidos`}
+        />
+        <TarjetaKpi
+          titulo="Deadlines"
+          valor={`${aTiempo} / ${entregas.length} a tiempo`}
+          acento={atrasados ? ROJO : VERDE}
+          detalle={atrasados ? `${atrasados} atrasado(s)` : "Sin atrasos"}
+        />
+      </div>
+
+      <Scorecard />
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Panel titulo="Presupuesto por marca" nota="Asignado vs gastado vs ritmo del mes">
+          <div className="h-72">
+            <ResponsiveContainer>
+              <BarChart data={presupuestoPorMarca} barGap={2}>
+                <CartesianGrid stroke={TEMA.line} vertical={false} />
+                <XAxis dataKey="marca" {...ejes} />
+                <YAxis {...ejes} tickFormatter={(v) => fmtMonedaCorta(v)} width={60} />
+                <Tooltip
+                  cursor={{ fill: "#ffffff08" }}
+                  content={<TooltipSimple formato={fmtMoneda} />}
+                />
+                <Leyenda />
+                <Bar dataKey="Asignado" fill="#3b4250" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Ritmo esperado" fill="#3b82f655" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Gastado" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <p className="text-muted mt-2 text-xs">
+            Unibrandco y Litter Genie no tienen presupuesto asignado (a definir): todo lo que se
+            gasta ahí es un desvío a consultar con Alejandro.
+          </p>
+        </Panel>
+
+        <Panel titulo="Venta por marca" nota="Al corte, proyectada y objetivo (o línea de base)">
+          <div className="h-72">
+            <ResponsiveContainer>
+              <BarChart data={ventaPorMarca} barGap={2}>
+                <CartesianGrid stroke={TEMA.line} vertical={false} />
+                <XAxis dataKey="marca" {...ejes} />
+                <YAxis {...ejes} tickFormatter={(v) => fmtMonedaCorta(v)} width={60} />
+                <Tooltip
+                  cursor={{ fill: "#ffffff08" }}
+                  content={<TooltipSimple formato={fmtMoneda} />}
+                />
+                <Leyenda />
+                <Bar dataKey="Venta al corte" fill="#22c55e" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Proyección" fill="#22c55e66" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Objetivo" fill="#3b4250" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+
+        <Panel titulo="Gasto por canal y marca" nota="Pauta, influencers, contenido, ferias">
+          <div className="h-72">
+            <ResponsiveContainer>
+              <BarChart data={canalPorMarca}>
+                <CartesianGrid stroke={TEMA.line} vertical={false} />
+                <XAxis dataKey="marca" {...ejes} />
+                <YAxis {...ejes} tickFormatter={(v) => fmtMonedaCorta(v)} width={60} />
+                <Tooltip
+                  cursor={{ fill: "#ffffff08" }}
+                  content={<TooltipSimple formato={fmtMoneda} />}
+                />
+                <Leyenda />
+                {CANALES.map((c) => (
+                  <Bar key={c} dataKey={c} stackId="g" fill={COLOR_CANAL[c]} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+
+        <Panel titulo="Resumen por marca" nota={CORTE.mes}>
+          <Tabla cabecera={["Marca", "Estado", "Gastado", "Venta", "Retorno", "Seguidores", "Leads"]}>
+            {MARCAS.map((m) => (
+              <tr key={m.clave}>
+                <td className="px-2 py-2 whitespace-nowrap">
+                  <span
+                    className="mr-2 inline-block size-2 rounded-full"
+                    style={{ background: m.color }}
+                  />
+                  {m.nombre}
+                </td>
+                <td className="text-muted px-2 py-2 text-xs">{m.estado}</td>
+                <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMonedaCorta(gastoTotal(m))}</td>
+                <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMonedaCorta(ventaTotal(m))}</td>
+                <td className="px-2 py-2 tabular-nums">
+                  {dec1.format(ventaTotal(m) / gastoTotal(m))}x
+                </td>
+                <td className="px-2 py-2 tabular-nums">
+                  {fmtNumero(m.seguidores)}{" "}
+                  <span className="text-xs" style={{ color: VERDE }}>
+                    +{p1(m.seguidores / m.seguidoresMesAnterior - 1)}
+                  </span>
+                </td>
+                <td className="px-2 py-2 tabular-nums">{m.leadsMayoristas}</td>
+              </tr>
+            ))}
+          </Tabla>
+        </Panel>
+      </div>
+
+      <Deadlines marca={null} />
+      <Indicadores />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Vista por marca
+// ---------------------------------------------------------------------------
+
+function VistaMarca({ m }: { m: Marca }) {
+  const gastado = gastoTotal(m);
+  const venta = ventaTotal(m);
+  const proy = proyectar(venta);
+  const objetivo = m.ventaObjetivoMes;
+  const ejec = m.presupuestoMes ? gastado / m.presupuestoMes : null;
+  const colabs = COLABORACIONES.filter((c) => c.marca === m.clave);
+  const costoPauta = m.gastoPorCanal["Meta Ads"] + m.gastoPorCanal["Google Ads"];
+  const cac = (costoPauta + m.gastoPorCanal.Influencers) / m.pedidosTienda;
+  const conversion = m.pedidosTienda / m.visitasTienda;
+  const ticket = m.ventaTiendas / m.pedidosTienda;
+  const interaccion = m.interacciones30d / m.alcance30d;
+
+  const acumulado = ventaAcumulada(m);
+  const metaMes = objetivo ?? m.ventaBase;
+  const serieVenta = Array.from({ length: CORTE.diasMes }, (_, i) => ({
+    dia: i + 1,
+    Real: i < acumulado.length ? Math.round(acumulado[i]) : null,
+    [objetivo ? "Ritmo objetivo" : "Ritmo línea de base"]: Math.round(
+      (metaMes / CORTE.diasMes) * (i + 1),
+    ),
+  }));
+  const claveRitmo = objetivo ? "Ritmo objetivo" : "Ritmo línea de base";
+
+  const canales = CANALES.map((c) => ({ canal: c, Gasto: m.gastoPorCanal[c] }));
+  const historia = m.historia.map((h) => ({ ...h, Retorno: h.venta / h.inversion }));
+  const publicaciones = m.publicacionesPorSemana.map((v, i) => ({
+    semana: `Sem ${i + 1}`,
+    Publicaciones: v,
+  }));
+  const embudo = [
+    { paso: "Alcance (30 d)", valor: m.alcance30d },
+    { paso: "Visitas tienda", valor: m.visitasTienda },
+    { paso: "Clics de pauta", valor: m.clicsPauta },
+    { paso: "Pedidos", valor: m.pedidosTienda },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Chip color={m.color}>{m.estado}</Chip>
+        {m.margen && (
+          <Chip color={TEMA.muted}>
+            Margen ~{p1(m.margen)} · punto de equilibrio{" "}
+            {fmtMonedaCorta((m.presupuestoMes ?? 0) / m.margen)} de venta
+          </Chip>
+        )}
+      </div>
+
+      <h3 className="text-muted text-xs font-medium tracking-wide uppercase">
+        Presupuesto y venta
+      </h3>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <TarjetaKpi
+          titulo="Presupuesto del mes"
+          valor={m.presupuestoMes ? fmtMonedaCorta(m.presupuestoMes) : "A definir"}
+          detalle="Pauta, contenido, producciones, influencers y ferias"
+        />
+        <TarjetaKpi
+          titulo="Gastado"
+          valor={fmtMonedaCorta(gastado)}
+          acento={ejec === null ? AMBAR : semaforo(ejec <= AVANCE_MES + 0.1 ? 1 : 0.8)}
+          detalle={
+            ejec === null
+              ? "Sin presupuesto asignado"
+              : `${p0(ejec)} ejecutado · mes al ${p0(AVANCE_MES)}`
+          }
+        />
+        <TarjetaKpi
+          titulo="Venta al corte"
+          valor={fmtMonedaCorta(venta)}
+          detalle={`Tiendas ${fmtMonedaCorta(m.ventaTiendas)} · Mayorista ${fmtMonedaCorta(m.ventaMayorista)}`}
+        />
+        <TarjetaKpi
+          titulo={objetivo ? "Proyección vs objetivo" : "Proyección vs línea de base"}
+          valor={p0(proy / metaMes)}
+          acento={semaforo(proy / metaMes)}
+          detalle={`${fmtMonedaCorta(proy)} / ${fmtMonedaCorta(metaMes)}`}
+        />
+        <TarjetaKpi
+          titulo="Retorno (venta ÷ inversión)"
+          valor={`${dec1.format(venta / gastado)}x`}
+          detalle="MER del mes"
+        />
+        <TarjetaKpi
+          titulo="Costo de adquisición"
+          valor={fmtMoneda(cac)}
+          detalle="(Pauta + influencers) ÷ pedidos"
+        />
+      </div>
+
+      <h3 className="text-muted text-xs font-medium tracking-wide uppercase">
+        Marca y demanda
+      </h3>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <TarjetaKpi
+          titulo="Seguidores"
+          valor={fmtNumero(m.seguidores)}
+          detalle={`+${p1(m.seguidores / m.seguidoresMesAnterior - 1)} vs mes anterior`}
+        />
+        <TarjetaKpi
+          titulo="Alcance 30 días"
+          valor={fmtNumero(m.alcance30d)}
+          detalle={`Interacción ${p1(interaccion)}`}
+        />
+        <TarjetaKpi
+          titulo="Mensajes recibidos"
+          valor={fmtNumero(m.mensajes30d)}
+          acento={m.tiempoRespuestaMin <= 120 ? VERDE : AMBAR}
+          detalle={`1ª respuesta en ${m.tiempoRespuestaMin} min promedio`}
+        />
+        <TarjetaKpi
+          titulo="Puntaje tienda"
+          valor={`${dec1.format(m.puntajeTienda)} ★`}
+          detalle={`${fmtNumero(m.resenas)} reseñas`}
+        />
+        <TarjetaKpi
+          titulo="Conversión tienda"
+          valor={p1(conversion)}
+          detalle={`Ticket promedio ${fmtMonedaCorta(ticket)}`}
+        />
+        <TarjetaKpi
+          titulo="Leads mayoristas"
+          valor={fmtNumero(m.leadsMayoristas)}
+          detalle={`Pauta activa ${m.diasPautaActiva} de ${CORTE.dia} días`}
+          acento={m.diasPautaActiva === CORTE.dia ? VERDE : AMBAR}
+        />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Panel titulo="Venta acumulada del mes" nota={`vs ${claveRitmo.toLowerCase()}`}>
+          <div className="h-72">
+            <ResponsiveContainer>
+              <LineChart data={serieVenta}>
+                <CartesianGrid stroke={TEMA.line} vertical={false} />
+                <XAxis dataKey="dia" {...ejes} />
+                <YAxis {...ejes} tickFormatter={(v) => fmtMonedaCorta(v)} width={60} />
+                <Tooltip content={<TooltipSimple formato={fmtMoneda} />} />
+                <Leyenda />
+                <Line
+                  dataKey={claveRitmo}
+                  stroke={TEMA.muted}
+                  strokeDasharray="4 4"
+                  dot={false}
+                  strokeWidth={1.5}
+                />
+                <Line
+                  dataKey="Real"
+                  stroke={m.color}
+                  strokeWidth={2.5}
+                  dot={false}
+                  connectNulls={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+
+        <Panel titulo="Gasto por canal" nota={m.presupuestoMes ? `de ${fmtMoneda(m.presupuestoMes)}` : "Presupuesto a definir"}>
+          <div className="h-72">
+            <ResponsiveContainer>
+              <BarChart data={canales} layout="vertical" margin={{ left: 10 }}>
+                <CartesianGrid stroke={TEMA.line} horizontal={false} />
+                <XAxis type="number" {...ejes} tickFormatter={(v) => fmtMonedaCorta(v)} />
+                <YAxis type="category" dataKey="canal" {...ejes} width={80} />
+                <Tooltip
+                  cursor={{ fill: "#ffffff08" }}
+                  content={<TooltipSimple formato={fmtMoneda} />}
+                />
+                <Bar dataKey="Gasto" radius={[0, 3, 3, 0]}>
+                  {canales.map((c) => (
+                    <Cell key={c.canal} fill={COLOR_CANAL[c.canal]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+
+        <Panel titulo="Inversión vs venta" nota="Últimos 4 meses · *noviembre proyectado">
+          <div className="h-72">
+            <ResponsiveContainer>
+              <ComposedChart data={historia}>
+                <CartesianGrid stroke={TEMA.line} vertical={false} />
+                <XAxis dataKey="mes" {...ejes} />
+                <YAxis yAxisId="m" {...ejes} tickFormatter={(v) => fmtMonedaCorta(v)} width={60} />
+                <YAxis
+                  yAxisId="r"
+                  orientation="right"
+                  {...ejes}
+                  tickFormatter={(v) => `${v}x`}
+                  width={35}
+                />
+                <Tooltip
+                  cursor={{ fill: "#ffffff08" }}
+                  content={
+                    <TooltipSimple
+                      formato={(n) => (n < 100 ? `${dec1.format(n)}x` : fmtMoneda(n))}
+                    />
+                  }
+                />
+                <Leyenda />
+                <Bar yAxisId="m" dataKey="inversion" name="Inversión" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+                <Bar yAxisId="m" dataKey="venta" name="Venta" fill={m.color} radius={[3, 3, 0, 0]} />
+                <Line yAxisId="r" dataKey="Retorno" stroke={AMBAR} strokeWidth={2} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+
+        <Panel titulo="Contenido publicado" nota={`Meta: ${META_PUBLICACIONES_SEMANA} por semana`}>
+          <div className="h-72">
+            <ResponsiveContainer>
+              <BarChart data={publicaciones}>
+                <CartesianGrid stroke={TEMA.line} vertical={false} />
+                <XAxis dataKey="semana" {...ejes} />
+                <YAxis {...ejes} allowDecimals={false} width={30} />
+                <Tooltip
+                  cursor={{ fill: "#ffffff08" }}
+                  content={<TooltipSimple formato={fmtNumero} />}
+                />
+                <ReferenceLine
+                  y={META_PUBLICACIONES_SEMANA}
+                  stroke={AMBAR}
+                  strokeDasharray="4 4"
+                  label={{ value: "Meta", fill: AMBAR, fontSize: 11, position: "right" }}
+                />
+                <Bar dataKey="Publicaciones" radius={[3, 3, 0, 0]}>
+                  {publicaciones.map((p) => (
+                    <Cell
+                      key={p.semana}
+                      fill={p.Publicaciones >= META_PUBLICACIONES_SEMANA ? VERDE : ROJO}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+
+        <Panel titulo="Embudo de demanda" nota="Del alcance al pedido">
+          <div className="space-y-3">
+            {embudo.map((e, i) => (
+              <div key={e.paso}>
+                <div className="flex justify-between text-xs">
+                  <span>{e.paso}</span>
+                  <span className="tabular-nums">
+                    {fmtNumero(e.valor)}
+                    {i > 0 && (
+                      <span className="text-muted ml-2">
+                        {p1(e.valor / embudo[i - 1].valor)} del paso anterior
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <div className="bg-panel-2 mt-1 h-5 overflow-hidden rounded">
+                  <div
+                    className="h-full rounded"
+                    style={{
+                      width: `${Math.max(Math.sqrt(e.valor / embudo[0].valor) * 100, 2)}%`,
+                      background: m.color,
+                      opacity: 1 - i * 0.18,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+            <p className="text-muted text-[11px]">
+              Ancho en escala raíz para que los pasos chicos se vean. Visitas y conversión quedan
+              firmes cuando se verifique Google Analytics.
+            </p>
+          </div>
+        </Panel>
+
+        <Panel titulo="Origen del tráfico" nota="Google Analytics · pendiente de verificar">
+          <div className="h-60">
+            <ResponsiveContainer>
+              <BarChart data={m.traficoOrigen} layout="vertical" margin={{ left: 10 }}>
+                <CartesianGrid stroke={TEMA.line} horizontal={false} />
+                <XAxis type="number" {...ejes} tickFormatter={(v) => fmtNumero(v)} />
+                <YAxis type="category" dataKey="origen" {...ejes} width={70} />
+                <Tooltip
+                  cursor={{ fill: "#ffffff08" }}
+                  content={<TooltipSimple formato={fmtNumero} />}
+                />
+                <Bar dataKey="visitas" name="Visitas" fill={m.color} radius={[0, 3, 3, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+      </div>
+
+      <Panel titulo="Influencers" nota="Un cupón único por colaboración">
+        {colabs.length === 0 ? (
+          <p className="text-muted text-sm">Sin colaboraciones este mes.</p>
+        ) : (
+          <Tabla cabecera={["Influencer", "Fecha", "Cupón", "Costo", "Canjes", "Venta atribuida", "ROI", "CAC"]}>
+            {colabs.map((c) => (
+              <tr key={c.cupon}>
+                <td className="px-2 py-2">{c.influencer}</td>
+                <td className="text-muted px-2 py-2">{c.fecha}</td>
+                <td className="px-2 py-2 font-mono text-xs">{c.cupon}</td>
+                <td className="px-2 py-2 tabular-nums">{fmtMoneda(c.costo)}</td>
+                <td className="px-2 py-2 tabular-nums">{c.canjes}</td>
+                <td className="px-2 py-2 tabular-nums">{fmtMoneda(c.ventaAtribuida)}</td>
+                <td className="px-2 py-2 tabular-nums" style={{ color: semaforo(c.ventaAtribuida / c.costo / 3) }}>
+                  {dec1.format(c.ventaAtribuida / c.costo)}x
+                </td>
+                <td className="px-2 py-2 tabular-nums">{fmtMoneda(c.costo / c.canjes)}</td>
+              </tr>
+            ))}
+          </Tabla>
+        )}
+      </Panel>
+
+      <Deadlines marca={m.clave} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Deadlines e indicadores
+// ---------------------------------------------------------------------------
+
+function Deadlines({ marca }: { marca: ClaveMarca | null }) {
+  const hitos = HITOS.filter((h) => marca === null || h.marca === marca || h.marca === "todas");
+  const nombre = (k: ClaveMarca | "todas") =>
+    k === "todas" ? "Todas" : (MARCAS.find((m) => m.clave === k)?.nombre ?? k);
+  return (
+    <Panel titulo="Deadlines y entregas" nota="Fecha comprometida vs fecha real · meta 100 % a tiempo">
+      <Tabla cabecera={["Entrega", "Marca", "Vence", "Entregado", "Presupuesto", "Responsable", "Estado"]}>
+        {hitos.map((h) => (
+          <tr key={h.que}>
+            <td className="px-2 py-2">{h.que}</td>
+            <td className="text-muted px-2 py-2 text-xs whitespace-nowrap">{nombre(h.marca)}</td>
+            <td className="px-2 py-2 tabular-nums">{h.vence}</td>
+            <td className="px-2 py-2 tabular-nums">{h.entregado ?? "—"}</td>
+            <td className="px-2 py-2 tabular-nums">
+              {h.presupuesto ? fmtMonedaCorta(h.presupuesto) : "—"}
+            </td>
+            <td className="text-muted px-2 py-2 text-xs whitespace-nowrap">{h.responsable}</td>
+            <td className="px-2 py-2">
+              <Chip color={ESTADO_HITO[h.estado].color}>{ESTADO_HITO[h.estado].label}</Chip>
+            </td>
+          </tr>
+        ))}
+      </Tabla>
+    </Panel>
+  );
+}
+
+const NIVELES = { 1: "Marca", 2: "Demanda", 3: "Venta" } as const;
+
+function Indicadores() {
+  return (
+    <Panel
+      titulo="KPIs: de dónde sale cada uno"
+      nota="Los marcados con + se suman a los del acuerdo de rol para poder medirla"
+    >
+      <Tabla cabecera={["Nivel", "Indicador", "Cómo se calcula", "Fuente", "¿Listo?"]}>
+        {INDICADORES.map((i) => (
+          <tr key={i.nombre}>
+            <td className="text-muted px-2 py-2 text-xs whitespace-nowrap">
+              {i.nivel} · {NIVELES[i.nivel]}
+            </td>
+            <td className="px-2 py-2">{i.nombre}</td>
+            <td className="text-muted px-2 py-2 text-xs">{i.formula}</td>
+            <td className="px-2 py-2 text-xs whitespace-nowrap">{i.fuente}</td>
+            <td className="px-2 py-2">
+              <Chip color={ESTADO_FUENTE[i.estado].color}>{ESTADO_FUENTE[i.estado].label}</Chip>
+            </td>
+          </tr>
+        ))}
+      </Tabla>
+    </Panel>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Página
+// ---------------------------------------------------------------------------
+
+export default function DashboardMarketing() {
+  const [vista, setVista] = useState<ClaveMarca | "todas">("todas");
+  const marca = MARCAS.find((m) => m.clave === vista) ?? null;
+
+  const opciones: { clave: ClaveMarca | "todas"; nombre: string; color: string }[] = [
+    { clave: "todas", nombre: "Consolidado", color: TEMA.ink },
+    ...MARCAS.map((m) => ({ clave: m.clave, nombre: m.nombre, color: m.color })),
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Tablero de Marca</h1>
+          <p className="text-muted text-sm">
+            Agatina · responsable de marca · {CORTE.mes}, datos al {CORTE.fecha} (día {CORTE.dia}{" "}
+            de {CORTE.diasMes})
+          </p>
+        </div>
+        <Chip color={AMBAR}>Prototipo · datos de ejemplo</Chip>
+      </div>
+
+      <nav className="border-line -mx-1 flex gap-1 overflow-x-auto border-b px-1">
+        {opciones.map((o) => {
+          const activa = vista === o.clave;
+          return (
+            <button
+              key={o.clave}
+              type="button"
+              onClick={() => setVista(o.clave)}
+              className={`flex items-center gap-2 border-b-2 px-3 py-2 text-sm whitespace-nowrap transition-colors ${
+                activa ? "text-ink" : "text-muted hover:text-ink border-transparent"
+              }`}
+              style={activa ? { borderColor: o.color } : undefined}
+            >
+              {o.clave !== "todas" && (
+                <span className="size-2 rounded-full" style={{ background: o.color }} />
+              )}
+              {o.nombre}
+            </button>
+          );
+        })}
+      </nav>
+
+      {marca ? <VistaMarca key={marca.clave} m={marca} /> : <VistaConsolidada />}
+    </div>
+  );
+}

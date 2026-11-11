@@ -440,6 +440,9 @@ const PAGINAS_EN_CONSTRUCCION = [
   // documenta. Publicarla antes de verificarlos sería ofrecer botones que
   // pueden llevar a una página en blanco.
   "/venta-minorista/mercado-libre/posventa",
+  // Prototipo del tablero de la responsable de marca, sobre datos de ejemplo.
+  // Se publica cuando se conecten las fuentes reales (ver la página).
+  "/marketing",
 ];
 
 /**
