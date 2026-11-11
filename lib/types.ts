@@ -493,6 +493,12 @@ export type DashboardVentasMayoristas = {
   articulos: FilaArticulo[];
   comprobantes: FilaComprobanteVenta[];
   serieDiaria: SerieDiaria;
+  /**
+   * El stock del depósito de Tucumán, día por día, sobre EL MISMO rango de
+   * fechas que `serieDiaria`: así los dos gráficos se leen uno debajo del otro
+   * sin que las fechas se corran.
+   */
+  stockTucuman: PuntoStockTucuman[];
   /** Null si no hay un solo mes elegido: sin eso no hay "mes anterior". */
   comparacion: ComparacionMayorista | null;
   generadoEn: string;
@@ -771,6 +777,22 @@ export type PuntoStockDia = {
   skus: number;
   /** Inventarios distintos, que es la unidad real de stock en Full. */
   publicaciones: number;
+};
+
+/**
+ * El stock del depósito de Tucumán un día.
+ *
+ * `unidades` y `skus` son `null` cuando ese día NO HAY FOTO, y eso es
+ * deliberado: cero significa "el depósito estaba vacío" y null significa "no
+ * miramos". La serie de Tucumán empieza el 10/11/2026, así que cualquier rango
+ * anterior es todo null -- y dibujarlo en cero diría que no hubo mercadería
+ * durante meses.
+ */
+export type PuntoStockTucuman = {
+  fecha: string;
+  unidades: number | null;
+  /** Artículos distintos con al menos una unidad. */
+  skus: number | null;
 };
 
 export type PuntoDiaMeli = {
