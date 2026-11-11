@@ -7,6 +7,8 @@ import EncabezadoPagina from "@/components/EncabezadoPagina";
 import BarrasCategoria from "@/components/charts/BarrasCategoria";
 import BarrasMargen from "@/components/charts/BarrasMargen";
 import LineasPorVendedor from "@/components/charts/LineasPorVendedor";
+import StockTucumanPorDia from "@/components/charts/StockTucumanPorDia";
+import { resumenStockTucuman } from "@/lib/stock-tucuman";
 import TortaProveedores from "@/components/charts/TortaProveedores";
 import {
   promedioPonderado,
@@ -22,7 +24,13 @@ import {
   Panel,
   TarjetaKpi,
 } from "@/components/ui";
-import { fmtFechaCorta, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
+import {
+  fmtFechaCorta,
+  fmtFechaCortaConAnio,
+  fmtMoneda,
+  fmtNumero,
+  fmtPct,
+} from "@/lib/format";
 import { alternar as alternarValor, type ClaveLista } from "@/lib/filtros";
 import {
   CRUZADOS,
@@ -42,6 +50,7 @@ import type {
   DashboardVentasMayoristas,
   Filtros,
   OpcionesFiltro,
+  PuntoStockTucuman,
 } from "@/lib/types";
 
 /**
@@ -105,6 +114,32 @@ function notaClientes(filas: RentabilidadCliente[]): string {
  */
 function notaResaltado(elegidos?: string[]): string {
   return elegidos?.length ? " · lo elegido resaltado, la lista sigue completa" : "";
+}
+
+/**
+ * La bajada del panel de stock de Tucumán.
+ *
+ * DICE CUANTOS DIAS DEL RANGO TIENEN FOTO, y eso no es un detalle: la serie
+ * arranca el 10/11/2026, así que durante meses lo normal va a ser un eje largo
+ * con la línea sólo al final. Sin esta línea, el gráfico se lee como "el
+ * depósito estuvo vacío medio año y se llenó ayer".
+ *
+ * La variación compara las dos últimas FOTOS y nombra sus fechas, porque
+ * pueden no ser días consecutivos: con foto el lunes y el jueves, decir
+ * "−2.874" a secas se leería como lo que se movió ayer.
+ */
+function notaStockTucuman(datos: PuntoStockTucuman[]): string {
+  const { conFoto, dias, ultima, variacion } = resumenStockTucuman(datos);
+  if (conFoto === 0) return "sin registro en el recorte · empieza el 10/11/26";
+
+  const cobertura = `${fmtNumero(conFoto)} de ${fmtNumero(dias)} días con registro`;
+  const foto = `última ${fmtFechaCortaConAnio(ultima!.fecha)}: ${fmtNumero(ultima!.unidades)} u`;
+  const cambio =
+    variacion == null
+      ? ""
+      : ` · ${variacion >= 0 ? "+" : "−"}${fmtNumero(Math.abs(variacion))} vs. la anterior`;
+
+  return `${cobertura} · ${foto}${cambio}`;
 }
 
 function colArticulos(filas: FilaArticulo[]): Columna<FilaArticulo>[] {
@@ -696,6 +731,18 @@ export default function Dashboard() {
                 })
               }
             />
+          </Panel>
+
+          {/* EL STOCK VA PEGADO ABAJO DE LA VENTA Y COMPARTE EL EJE DE FECHAS.
+              Son unidades contra pesos: meterlas en el mismo gráfico pide dos
+              escalas, y con dos escalas el pico de stock y el de venta se
+              dibujan del mismo alto aunque no tengan nada que ver. Apilados
+              dicen lo mismo sin esa mentira. */}
+          <Panel
+            titulo="Stock en Tucumán por día"
+            nota={notaStockTucuman(data.stockTucuman)}
+          >
+            <StockTucumanPorDia datos={data.stockTucuman} />
           </Panel>
 
           <div className="grid gap-4 xl:grid-cols-2">

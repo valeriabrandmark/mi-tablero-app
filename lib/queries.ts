@@ -18,6 +18,7 @@ import type {
   OpcionesFiltro,
   PuntoDiaVendedor,
   PuntoProveedor,
+  PuntoStockTucuman,
   SerieDiaria,
 } from "@/lib/types";
 import { agregarFiltro, vacio, type ClaveLista } from "@/lib/filtros";
@@ -530,6 +531,113 @@ async function getComprobantesVenta(f: Filtros): Promise<FilaComprobanteVenta[]>
 
 type FilaDiaria = { fecha: string; vendedor: string; total: number };
 
+/**
+ * El stock del depósito de Tucumán, día por día.
+ *
+ * ---------------------------------------------------------------------------
+ * PARA QUE ESTA DEBAJO DE LAS VENTAS
+ *
+ * Es la misma pregunta que contesta el panel de stock de Full en Mercado
+ * Libre: un artículo que no vendió pudo no vender porque nadie lo quiso o
+ * porque no había. En el gráfico de ventas las dos se ven igual --una línea
+ * baja-- y llevan a decisiones opuestas.
+ *
+ * ---------------------------------------------------------------------------
+ * EL RANGO SALE DE LAS VENTAS, NO DEL STOCK
+ *
+ * Los días los pone `generate_series` entre el primer y el último día que
+ * quedó dentro del filtro, calculados con el MISMO `whereBase` que la serie de
+ * ventas. Es a propósito: los dos paneles van uno debajo del otro, y si cada
+ * uno armara su eje con los días que él tiene, un gráfico de mayo a octubre
+ * quedaría arriba de uno de dos días y las fechas no coincidirían en la
+ * vertical.
+ *
+ * Por eso también los días sin foto viajan como `null` en vez de no viajar: el
+ * eje tiene que llegar hasta el final del rango aunque la línea no.
+ *
+ * ---------------------------------------------------------------------------
+ * QUE FILTROS SE APLICAN AL STOCK, Y CUALES NO
+ *
+ * SKU, proveedor y marca sí: son propiedades del artículo y recortan el stock
+ * igual que recortan la venta.
+ *
+ * Cliente, vendedor, provincia y comprobante NO, y no es un olvido: el stock
+ * de un depósito no es de nadie en particular. Filtrar "lo que le vendimos a
+ * este cliente" no tiene un stock asociado, y aplicarlo dejaría la serie en
+ * cero haciendo creer que no hay mercadería. Esos filtros siguen recortando el
+ * RANGO de fechas --porque el rango sale de las ventas-- pero no las unidades.
+ *
+ * El proveedor y la marca salen de `sigma_articulos`, que es el mismo maestro
+ * del que `modelo.py` copia `fact_ventas.proveedor` y `.marca`. Si salieran de
+ * otro lado, filtrar por proveedor podría mover un gráfico y no el otro.
+ */
+async function getStockPorDiaTucuman(f: Filtros): Promise<PuntoStockTucuman[]> {
+  const w = whereBase(f, ["fv.fecha is not null"]);
+
+  // Los filtros que SI recortan el stock. Van sobre el maestro de artículos y
+  // no sobre las ventas: un artículo puede tener stock sin haber vendido nunca
+  // en el recorte, y tiene que seguir contando.
+  const params = [...w.params];
+  const delArticulo: string[] = [];
+  const necesitaMaestro = !!(f.proveedor?.length || f.marca?.length);
+
+  if (f.sku?.length) {
+    params.push(f.sku);
+    delArticulo.push(`h.sku = any($${params.length}::text[])`);
+  }
+  if (f.proveedor?.length) {
+    params.push(f.proveedor);
+    delArticulo.push(`a."proveedorNombre" = any($${params.length}::text[])`);
+  }
+  if (f.marca?.length) {
+    params.push(f.marca);
+    delArticulo.push(
+      `upper(trim(coalesce(a."attributes.marca", ''))) = any(
+         select upper(trim(x)) from unnest($${params.length}::text[]) x)`,
+    );
+  }
+
+  const filas = await query<Record<string, string | null>>(
+    `with rango as (
+       select min(fv.fecha) as desde, max(fv.fecha) as hasta
+         from gold.fact_ventas fv
+        where ${w.sql}
+     ),
+     dias as (
+       select generate_series(r.desde, r.hasta, interval '1 day')::date as fecha
+         from rango r
+        where r.desde is not null
+     ),
+     foto as (
+       select h.fecha,
+              sum(h.disponible)                        as unidades,
+              count(*) filter (where h.disponible > 0) as skus
+         from bronze.digip_stock_historico h
+         -- EL MAESTRO SOLO SE JOINEA SI HACE FALTA. Es de donde salen el
+         -- proveedor y la marca, y sin esos filtros es un recorrido de 8.300
+         -- filas por cada carga del tablero para no mirar ni una columna.
+         ${necesitaMaestro ? "left join bronze.sigma_articulos a on trim(a.id::text) = trim(h.sku)" : ""}
+        where h.fecha between (select desde from rango) and (select hasta from rango)
+          ${delArticulo.length ? `and ${delArticulo.join(" and ")}` : ""}
+        group by h.fecha
+     )
+     select to_char(d.fecha, 'YYYY-MM-DD') as fecha,
+            f.unidades,
+            f.skus
+       from dias d
+       left join foto f on f.fecha = d.fecha
+      order by d.fecha`,
+    params,
+  );
+
+  return filas.map((r) => ({
+    fecha: r.fecha as string,
+    // El null se conserva: ver el comentario del tipo. `num()` lo volvería 0.
+    unidades: r.unidades == null ? null : Number(r.unidades),
+    skus: r.skus == null ? null : Number(r.skus),
+  }));
+}
+
 async function getSerieDiaria(f: Filtros): Promise<SerieDiaria> {
   const w = whereBase(f, ["fv.fecha is not null"]);
   const filas = await query<FilaDiaria>(
@@ -711,6 +819,7 @@ async function getDashboardVentasMayoristasDirecto(
     facturacionPorProveedor,
     margenPorProveedor,
     serieDiaria,
+    stockTucuman,
     fletes,
     rentabilidadPorCliente,
     articulos,
@@ -722,6 +831,7 @@ async function getDashboardVentasMayoristasDirecto(
     getFacturacionPorProveedor(f),
     getMargenPorProveedor(f, conFlete),
     getSerieDiaria(f),
+    getStockPorDiaTucuman(f),
     getFletes(f),
     getRentabilidadPorCliente(f, conFlete),
     getArticulos(f, conFlete),
@@ -751,6 +861,7 @@ async function getDashboardVentasMayoristasDirecto(
     articulos,
     comprobantes,
     serieDiaria,
+    stockTucuman,
     comparacion:
       comparar && totalesAnterior && totalesAnterior.cantidadPedidos > 0
         ? {
