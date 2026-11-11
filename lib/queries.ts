@@ -23,6 +23,10 @@ import type {
 } from "@/lib/types";
 import { agregarFiltro, vacio, type ClaveLista } from "@/lib/filtros";
 import { joinCostoDelDia } from "@/lib/sql-costos";
+import {
+  clausulasDeStockTucuman,
+  stockTucumanNecesitaMaestro,
+} from "@/lib/stock-tucuman";
 
 type Where = { sql: string; params: unknown[] };
 
@@ -574,28 +578,9 @@ type FilaDiaria = { fecha: string; vendedor: string; total: number };
 async function getStockPorDiaTucuman(f: Filtros): Promise<PuntoStockTucuman[]> {
   const w = whereBase(f, ["fv.fecha is not null"]);
 
-  // Los filtros que SI recortan el stock. Van sobre el maestro de artículos y
-  // no sobre las ventas: un artículo puede tener stock sin haber vendido nunca
-  // en el recorte, y tiene que seguir contando.
   const params = [...w.params];
-  const delArticulo: string[] = [];
-  const necesitaMaestro = !!(f.proveedor?.length || f.marca?.length);
-
-  if (f.sku?.length) {
-    params.push(f.sku);
-    delArticulo.push(`h.sku = any($${params.length}::text[])`);
-  }
-  if (f.proveedor?.length) {
-    params.push(f.proveedor);
-    delArticulo.push(`a."proveedorNombre" = any($${params.length}::text[])`);
-  }
-  if (f.marca?.length) {
-    params.push(f.marca);
-    delArticulo.push(
-      `upper(trim(coalesce(a."attributes.marca", ''))) = any(
-         select upper(trim(x)) from unnest($${params.length}::text[]) x)`,
-    );
-  }
+  const delArticulo = clausulasDeStockTucuman(f, params);
+  const necesitaMaestro = stockTucumanNecesitaMaestro(f);
 
   const filas = await query<Record<string, string | null>>(
     `with rango as (

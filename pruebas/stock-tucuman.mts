@@ -1,4 +1,9 @@
-import { resumenStockTucuman } from "@/lib/stock-tucuman";
+import {
+  clausulasDeStockTucuman,
+  resumenStockTucuman,
+  stockTucumanNecesitaMaestro,
+} from "@/lib/stock-tucuman";
+import type { Filtros } from "@/lib/types";
 import type { PuntoStockTucuman } from "@/lib/types";
 
 /* ===========================================================================
@@ -143,6 +148,126 @@ const foto = (
   const r = resumenStockTucuman([foto("2026-11-10", 700), foto("2026-11-11", 700)]);
   revisar("sin movimiento la variacion es 0 y no null", r.variacion, 0);
 }
+
+/* ===========================================================================
+   QUE FILTROS RECORTAN EL STOCK
+
+   EL BUG QUE MOTIVO ESTE BLOQUE. La primera version aplicaba sku, proveedor y
+   marca y SE OLVIDO DEL BUSCADOR DE TEXTO. Filtrando `AL05006` en el buscador,
+   el resto de la pantalla hablaba de un articulo y el panel de stock seguia
+   mostrando las 131.294 unidades del deposito entero.
+
+   No fallo nada. Devolvio un numero creible y equivocado, y lo encontro ANA
+   mirando el grafico -- que es el peor lugar donde encontrarlo, porque invita
+   a comparar la venta de un SKU contra el stock de todo.
+
+   Por eso estas pruebas no miran el resultado sino LA DECISION: para cada
+   filtro de la pantalla, si recorta el stock o si no. Las dos respuestas son
+   validas; lo que no puede pasar es que no haya respuesta.
+   ========================================================================= */
+
+/** Los parametros que ya trae `whereBase` antes de estas clausulas. */
+const base = () => ["Mayorista", ["GERMAN", "SILVIO"]] as unknown[];
+
+function clausulas(f: Filtros): string[] {
+  return clausulasDeStockTucuman(f, base());
+}
+
+/* --- LOS QUE SI RECORTAN -------------------------------------------------- */
+
+revisar("el sku recorta", clausulas({ sku: ["AL05006"] }).length, 1);
+revisar(
+  "y lo hace contra el stock, no contra las ventas",
+  clausulas({ sku: ["AL05006"] })[0]!.includes("h.sku"),
+  true,
+);
+
+revisar("el proveedor recorta", clausulas({ proveedor: ["ALGABO S. A."] }).length, 1);
+revisar("la marca recorta", clausulas({ marca: ["ALGABO"] }).length, 1);
+
+// LA PRUEBA DEL BUG. Si alguien saca esta clausula, el panel vuelve a mostrar
+// el deposito entero mientras la pantalla habla de un articulo.
+revisar("el buscador recorta", clausulas({ buscar: "AL05006" }).length, 1);
+{
+  const c = clausulas({ buscar: "AL05006" })[0]!;
+  revisar("el buscador pega contra el sku del stock", c.includes("h.sku ilike"), true);
+  revisar(
+    "y resuelve el termino contra las ventas",
+    c.includes("gold.fact_ventas"),
+    true,
+  );
+  // Un termino de una sola letra o con espacios no tiene que colarse vacio.
+  revisar("un buscador en blanco no recorta", clausulas({ buscar: "   " }).length, 0);
+  revisar("ni uno vacio", clausulas({ buscar: "" }).length, 0);
+}
+
+/* --- LOS QUE NO RECORTAN, Y ES A PROPOSITO -------------------------------- */
+
+// El stock de un deposito no es de nadie en particular. Aplicar estos dejaria
+// la serie en cero haciendo creer que no hay mercaderia.
+const NO_RECORTAN: [string, Filtros][] = [
+  ["cliente", { cliente: ["QUISPE ANGEL BENITO"] }],
+  ["vendedor", { vendedor: ["SILVIO"] }],
+  ["empresa", { empresa: ["QUO"] }],
+  ["provincia", { provincia: ["TUCUMAN"] }],
+  ["comprobante", { comprobante: ["FA-0001"] }],
+  ["mes", { mes: ["2026-10"] }],
+];
+
+for (const [nombre, f] of NO_RECORTAN) {
+  revisar(`${nombre} NO recorta el stock`, clausulas(f).length, 0);
+}
+
+/* --- SE COMBINAN EN AND --------------------------------------------------- */
+
+{
+  const f: Filtros = { sku: ["AL05006"], proveedor: ["ALGABO S. A."], buscar: "algabo" };
+  revisar("los tres juntos dan tres clausulas", clausulas(f).length, 3);
+}
+
+// Y los filtros que no recortan no agregan nada aunque esten puestos junto a
+// los que si.
+{
+  const f: Filtros = { sku: ["AL05006"], cliente: ["X"], vendedor: ["SILVIO"] };
+  revisar("los que no recortan no suman clausulas", clausulas(f).length, 1);
+}
+
+revisar("sin filtros no hay clausulas", clausulas({}).length, 0);
+
+/* --- LOS PARAMETROS SE NUMERAN SOBRE LOS QUE YA HABIA ---------------------- */
+
+// `whereBase` ya dejo dos parametros puestos. Si estas clausulas numeraran
+// desde $1, la consulta compararia el sku contra el nombre del canal.
+{
+  const params = base();
+  const c = clausulasDeStockTucuman({ sku: ["AL05006"] }, params);
+  revisar("el primer parametro propio es el $3", c[0]!.includes("$3"), true);
+  revisar("y queda empujado en el arreglo", params.length, 3);
+  revisar("con su valor", params[2], ["AL05006"]);
+}
+
+{
+  const params = base();
+  clausulasDeStockTucuman({ buscar: "algabo" }, params);
+  // termino + canal + vendedores
+  revisar("el buscador empuja tres parametros", params.length, 5);
+  revisar("el termino va con comodines", params[2], "%algabo%");
+}
+
+/* --- EL MAESTRO SOLO SE JOINEA CUANDO HACE FALTA -------------------------- */
+
+revisar("sin filtros no hace falta el maestro", stockTucumanNecesitaMaestro({}), false);
+revisar(
+  "con sku tampoco: el sku esta en la tabla de stock",
+  stockTucumanNecesitaMaestro({ sku: ["AL05006"] }),
+  false,
+);
+revisar(
+  "con proveedor si",
+  stockTucumanNecesitaMaestro({ proveedor: ["ALGABO S. A."] }),
+  true,
+);
+revisar("con marca tambien", stockTucumanNecesitaMaestro({ marca: ["ALGABO"] }), true);
 
 console.log(
   FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK",
