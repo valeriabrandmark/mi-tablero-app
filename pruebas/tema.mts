@@ -7,7 +7,7 @@ import {
   otroTema,
   temaGuardado,
 } from "@/lib/tema";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 /* ===========================================================================
    EL TEMA DEL TABLERO
@@ -143,6 +143,43 @@ const sinVersionClara = enOscuro.filter((v) => !enClaro.includes(v));
 revisar("ninguna variable de color se quedo sin version clara", sinVersionClara, []);
 revisar("y el claro no inventa variables que el oscuro no tenga",
   enClaro.filter((v) => !enOscuro.includes(v)), []);
+
+/* --- NINGUN AVISO SE QUEDA INVISIBLE SOBRE EL CREMA ---------------------- */
+
+// EL BUG DEL 12/11/2026. El tablero usa ~120 `text-amber-300`, `text-rose-300`,
+// `text-emerald-300` para los avisos. Son tonos 100-400 de Tailwind, elegidos
+// para brillar sobre casi negro, y sobre el crema desaparecen: el panel de
+// fechas de Marketing quedo con el titulo y las dos fechas ilegibles, amarillo
+// claro sobre amarillo claro.
+//
+// El CSS los remapea dentro del tema claro. Esta prueba es lo que hace que ese
+// remapeo no se despegue solo: recorre los componentes, junta cada tono claro
+// que se este usando de verdad y falla si alguno no esta cubierto. Una pantalla
+// nueva que estrene `text-amber-500` rompe acá y no en la cara de quien la abra.
+
+function archivos(dir: string): string[] {
+  const salida: string[] = [];
+  for (const entrada of readdirSync(dir, { withFileTypes: true })) {
+    const camino = `${dir}/${entrada.name}`;
+    if (entrada.isDirectory()) salida.push(...archivos(camino));
+    else if (/\.tsx?$/.test(entrada.name)) salida.push(camino);
+  }
+  return salida;
+}
+
+const TONO_CLARO = /\btext-(amber|rose|emerald|sky|yellow|red|orange|green|blue|violet|cyan|pink|teal|indigo|purple|lime|fuchsia|neutral|slate|zinc|gray|stone)-(50|100|200|300|400)\b/g;
+
+const usados = new Set<string>();
+for (const archivo of [...archivos("components"), ...archivos("app")]) {
+  for (const m of readFileSync(archivo, "utf8").matchAll(TONO_CLARO)) usados.add(m[0]);
+}
+
+// Que la prueba sirva de algo: si el grep no encuentra nada es que el patron se
+// rompio, no que el tablero dejo de usar colores.
+revisar("hay tonos claros que cubrir", usados.size > 5, true);
+
+const sinCubrir = [...usados].filter((clase) => !css.includes(`.${clase},`) && !css.includes(`.${clase})`));
+revisar("ningun tono claro quedo sin remapear en el tema claro", sinCubrir.sort(), []);
 
 console.log(
   FALLOS.length ? `\n${FALLOS.length} FALLARON: ${FALLOS.join(", ")}` : "\nTODO OK",
