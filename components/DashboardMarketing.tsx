@@ -21,7 +21,10 @@ import { CajaTooltip, FilaTooltip } from "@/components/charts/TooltipOscuro";
 import { fmtMoneda, fmtNumero } from "@/lib/format";
 import { TEMA } from "@/lib/paleta";
 import type { DatosTablero } from "@/lib/marketing-fuentes";
+import { avance, proyectar as proyectarP, type Periodo } from "@/lib/marketing-periodo";
+import FiltroPeriodo from "@/components/FiltroPeriodoMarketing";
 import {
+  costoPorResultado,
   costoPorCompra,
   cpc,
   cpm,
@@ -33,10 +36,8 @@ import {
   type MetaAdsMarca,
 } from "@/lib/meta-ads-tipos";
 import {
-  AVANCE_MES,
   CANALES,
   COLABORACIONES,
-  CORTE,
   HITOS,
   INDICADORES,
   MARCAS,
@@ -45,7 +46,6 @@ import {
   META_TIENDAS_NUEVAS,
   TIENDAS_NUEVAS_MES,
   gastoTotal,
-  proyectar,
   ventaAcumulada,
   ventaTotal,
   type ClaveMarca,
@@ -106,11 +106,15 @@ function semaforo(cumplimiento: number): string {
  * Las fuentes reales, para cualquier panel que necesite saber de dónde salió
  * su número. Va por contexto porque la consultan paneles a varios niveles.
  */
-const Fuentes = createContext<DatosTablero | null>(null);
-function useFuentes(): DatosTablero {
+const Fuentes = createContext<(DatosTablero & { periodo: Periodo }) | null>(null);
+function useFuentes() {
   const f = useContext(Fuentes);
   if (!f) throw new Error("Falta el proveedor de fuentes");
   return f;
+}
+/** El período elegido en el filtro, para los ritmos y las proyecciones. */
+function usePeriodo(): Periodo {
+  return useFuentes().periodo;
 }
 
 function fechaCorta(iso: string): string {
@@ -232,7 +236,11 @@ type FilaScore = {
   peso: number;
 };
 
-function armarScorecard(marcas: Marca[], tiendasNuevasReal: number | null): FilaScore[] {
+function armarScorecard(marcas: Marca[], tiendasNuevasReal: number | null, P: Periodo): FilaScore[] {
+  const proyectar = (v: number) => proyectarP(v, P);
+  const AVANCE_MES = avance(P);
+  const metaInfluencers = Math.max(1, Math.round(META_INFLUENCERS_MES * P.factor));
+  const metaTiendas = Math.max(1, Math.round(META_TIENDAS_NUEVAS.min * P.factor));
   const tiendasNuevas = tiendasNuevasReal ?? TIENDAS_NUEVAS_MES;
   const propias = marcas.filter((m) => m.foco);
   const dg = marcas.find((m) => m.clave === "diaper_genie")!;
@@ -252,17 +260,17 @@ function armarScorecard(marcas: Marca[], tiendasNuevasReal: number | null): Fila
     {
       grupo: "Actividad",
       meta: "Colaboraciones con influencers",
-      objetivo: `${META_INFLUENCERS_MES} / mes`,
+      objetivo: P.factor === 1 ? `${META_INFLUENCERS_MES} / mes` : `${metaInfluencers} en el período`,
       real: `${COLABORACIONES.length}`,
-      cumplimiento: COLABORACIONES.length / META_INFLUENCERS_MES,
+      cumplimiento: COLABORACIONES.length / metaInfluencers,
       peso: 0.1,
     },
     {
       grupo: "Actividad",
       meta: "Pauta activa todos los días (Meta Ads)",
-      objetivo: `${CORTE.dia} de ${CORTE.dia} días`,
+      objetivo: `${P.transcurridos} de ${P.transcurridos} días`,
       real: `${dec1.format(pautaDias)} días`,
-      cumplimiento: pautaDias / CORTE.dia,
+      cumplimiento: P.transcurridos ? pautaDias / P.transcurridos : 0,
       peso: 0.1,
     },
     {
@@ -308,14 +316,17 @@ function armarScorecard(marcas: Marca[], tiendasNuevasReal: number | null): Fila
     {
       grupo: "Venta",
       meta: "Tiendas nuevas que abren cuenta",
-      objetivo: `${META_TIENDAS_NUEVAS.min} a ${META_TIENDAS_NUEVAS.max}`,
+      objetivo:
+        P.factor === 1
+          ? `${META_TIENDAS_NUEVAS.min} a ${META_TIENDAS_NUEVAS.max}`
+          : `${metaTiendas} en el período`,
       real: `${tiendasNuevas} (proy. ${Math.round(proyectar(tiendasNuevas))})${tiendasNuevasReal === null ? " · ejemplo" : ""}`,
-      cumplimiento: proyectar(tiendasNuevas) / META_TIENDAS_NUEVAS.min,
+      cumplimiento: proyectar(tiendasNuevas) / metaTiendas,
       peso: 0.1,
     },
     {
       grupo: "Gestión",
-      meta: "Presupuesto al ritmo del mes",
+      meta: "Presupuesto al ritmo del período",
       objetivo: `≤ ${p0(AVANCE_MES + 0.1)} ejecutado`,
       real: `${p0(ejec)} ejecutado`,
       cumplimiento: ejec <= AVANCE_MES + 0.1 ? 1 : (AVANCE_MES + 0.1) / ejec,
@@ -333,8 +344,8 @@ function armarScorecard(marcas: Marca[], tiendasNuevasReal: number | null): Fila
 }
 
 function Scorecard({ marcas }: { marcas: Marca[] }) {
-  const { venta } = useFuentes();
-  const filas = armarScorecard(marcas, venta.tiendasNuevas.cantidad);
+  const { venta, periodo } = useFuentes();
+  const filas = armarScorecard(marcas, venta.tiendasNuevas.cantidad, periodo);
   const total = filas.reduce((s, f) => s + f.peso * Math.min(f.cumplimiento, 1), 0);
   const porGrupo = (["Actividad", "Venta", "Gestión"] as const).map((g) => {
     const fs = filas.filter((f) => f.grupo === g);
@@ -350,7 +361,7 @@ function Scorecard({ marcas }: { marcas: Marca[] }) {
     >
       <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
         <div className="bg-panel-2 flex flex-col items-center justify-center rounded-xl p-4">
-          <p className="text-muted text-xs">Puntaje del mes</p>
+          <p className="text-muted text-xs">Puntaje del período</p>
           <p
             className="mt-1 text-5xl font-semibold tabular-nums"
             style={{ color: semaforo(total) }}
@@ -402,6 +413,9 @@ function Scorecard({ marcas }: { marcas: Marca[] }) {
 // ---------------------------------------------------------------------------
 
 function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) {
+  const P = usePeriodo();
+  const proyectar = (v: number) => proyectarP(v, P);
+  const AVANCE_MES = avance(P);
   const asignado = marcas.reduce((s, m) => s + (m.presupuestoMes ?? 0), 0);
   const gastado = marcas.reduce((s, m) => s + gastoTotal(m), 0);
   const venta = marcas.reduce((s, m) => s + ventaTotal(m), 0);
@@ -437,23 +451,23 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
           titulo="Presupuesto ejecutado"
           valor={fmtMonedaCorta(gastado)}
           acento={semaforo(gastado / asignado <= AVANCE_MES + 0.1 ? 1 : 0.8)}
-          detalle={`${p0(gastado / asignado)} de ${fmtMonedaCorta(asignado)} · mes al ${p0(AVANCE_MES)}`}
+          detalle={`${p0(gastado / asignado)} de ${fmtMonedaCorta(asignado)} · período al ${p0(AVANCE_MES)}`}
         />
         <TarjetaKpi
-          titulo="Venta del mes (4 marcas)"
+          titulo="Venta del período (4 marcas)"
           valor={fmtMonedaCorta(venta)}
-          detalle={`Proyección ${fmtMonedaCorta(proyectar(venta))}`}
+          detalle={P.enCurso ? `Proyección ${fmtMonedaCorta(proyectar(venta))}` : "Período cerrado"}
         />
         <TarjetaKpi
           titulo="Marcas propias vs objetivo"
           valor={p0(proyPropias / objetivoPropias)}
           acento={semaforo(proyPropias / objetivoPropias)}
-          detalle={`${fmtMonedaCorta(proyPropias)} proy. / ${fmtMonedaCorta(objetivoPropias)}`}
+          detalle={`${fmtMonedaCorta(proyPropias)}${P.enCurso ? " proy." : ""} / ${fmtMonedaCorta(objetivoPropias)}`}
         />
         <TarjetaKpi
           titulo="Retorno (venta ÷ inversión)"
           valor={`${dec1.format(venta / gastado)}x`}
-          detalle="MER del mes, todas las marcas"
+          detalle="MER del período, todas las marcas"
         />
         <TarjetaKpi
           titulo="Influencers"
@@ -474,7 +488,7 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
       <Scorecard marcas={marcas} />
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Panel titulo="Presupuesto por marca" nota="Asignado vs gastado vs ritmo del mes">
+        <Panel titulo="Presupuesto por marca" nota="Asignado vs gastado vs ritmo del período">
           <div className="h-72">
             <ResponsiveContainer>
               <BarChart data={presupuestoPorMarca} barGap={2}>
@@ -538,7 +552,7 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
           </div>
         </Panel>
 
-        <Panel titulo="Resumen por marca" nota={CORTE.mes}>
+        <Panel titulo="Resumen por marca" nota={P.etiqueta}>
           <Tabla cabecera={["Marca", "Estado", "Gastado", "Venta", "Retorno", "Seguidores", "Leads"]}>
             {marcas.map((m) => (
               <tr key={m.clave}>
@@ -581,6 +595,9 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
 // ---------------------------------------------------------------------------
 
 function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
+  const P = usePeriodo();
+  const proyectar = (v: number) => proyectarP(v, P);
+  const AVANCE_MES = avance(P);
   const gastado = gastoTotal(m);
   const venta = ventaTotal(m);
   const proy = proyectar(venta);
@@ -604,11 +621,11 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
 
   const acumulado = ventaAcumulada(m);
   const metaMes = objetivo ?? m.ventaBase;
-  const serieVenta = Array.from({ length: CORTE.diasMes }, (_, i) => ({
+  const serieVenta = Array.from({ length: P.dias }, (_, i) => ({
     dia: i + 1,
     Real: i < acumulado.length ? Math.round(acumulado[i]) : null,
     [objetivo ? "Ritmo objetivo" : "Ritmo línea de base"]: Math.round(
-      (metaMes / CORTE.diasMes) * (i + 1),
+      (metaMes / P.dias) * (i + 1),
     ),
   }));
   const claveRitmo = objetivo ? "Ritmo objetivo" : "Ritmo línea de base";
@@ -643,7 +660,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
       </h3>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <TarjetaKpi
-          titulo="Presupuesto del mes"
+          titulo={P.factor === 1 ? "Presupuesto del mes" : "Presupuesto del período"}
           valor={m.presupuestoMes ? fmtMonedaCorta(m.presupuestoMes) : "A definir"}
           detalle="Pauta, contenido, producciones, influencers y ferias"
         />
@@ -654,7 +671,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           detalle={
             ejec === null
               ? "Sin presupuesto asignado"
-              : `${p0(ejec)} ejecutado · mes al ${p0(AVANCE_MES)}`
+              : `${p0(ejec)} ejecutado · período al ${p0(AVANCE_MES)}`
           }
         />
         <TarjetaKpi
@@ -663,7 +680,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           detalle={`Tiendas ${fmtMonedaCorta(m.ventaTiendas)} · Mayorista ${fmtMonedaCorta(m.ventaMayorista)}`}
         />
         <TarjetaKpi
-          titulo={objetivo ? "Proyección vs objetivo" : "Proyección vs línea de base"}
+          titulo={`${P.enCurso ? "Proyección" : "Venta"} vs ${objetivo ? "objetivo" : "línea de base"}`}
           valor={p0(proy / metaMes)}
           acento={semaforo(proy / metaMes)}
           detalle={`${fmtMonedaCorta(proy)} / ${fmtMonedaCorta(metaMes)}`}
@@ -671,7 +688,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         <TarjetaKpi
           titulo="Retorno (venta ÷ inversión)"
           valor={`${dec1.format(venta / gastado)}x`}
-          detalle="MER del mes"
+          detalle="MER del período"
         />
         <TarjetaKpi
           titulo="Costo de adquisición"
@@ -696,10 +713,10 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         <TarjetaKpi
           titulo="Seguidores"
           valor={fmtNumero(m.seguidores)}
-          detalle={`+${fmtNumero(m.seguidores - m.seguidoresMesAnterior)} en el mes (${p1(m.seguidores / m.seguidoresMesAnterior - 1)})`}
+          detalle={`+${fmtNumero(m.seguidores - m.seguidoresMesAnterior)} en el período (${p1(m.seguidores / m.seguidoresMesAnterior - 1)})`}
         />
         <TarjetaKpi
-          titulo={ig.fuente === "meta" ? "Alcance del mes" : "Alcance 30 días"}
+          titulo={ig.fuente === "meta" ? "Alcance del período" : "Alcance 30 días"}
           valor={fmtNumero(m.alcance30d)}
           detalle={`Interacción ${p1(interaccion)}`}
         />
@@ -724,10 +741,10 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           valor={fmtNumero(may ? may.tiendasNuevas : m.leadsMayoristas)}
           detalle={
             may
-              ? "Primera compra a SIGMA este mes"
-              : `Pauta activa ${m.diasPautaActiva} de ${CORTE.dia} días`
+              ? "Primera compra a SIGMA en el período"
+              : `Pauta activa ${m.diasPautaActiva} de ${P.transcurridos} días`
           }
-          acento={may ? undefined : m.diasPautaActiva === CORTE.dia ? VERDE : AMBAR}
+          acento={may ? undefined : m.diasPautaActiva === P.transcurridos ? VERDE : AMBAR}
         />
       </div>
 
@@ -736,7 +753,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
       <SeccionMeta m={m} meta={meta} />
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Panel titulo="Venta acumulada del mes" nota={`vs ${claveRitmo.toLowerCase()}`}>
+        <Panel titulo="Venta acumulada del período" nota={`vs ${claveRitmo.toLowerCase()}`}>
           <div className="h-72">
             <ResponsiveContainer>
               <LineChart data={serieVenta}>
@@ -986,7 +1003,8 @@ function PanelMetaConsolidado({ marcas, meta }: { marcas: Marca[]; meta: MetaAds
           "CPM",
           "Compras",
           "Costo por compra",
-          "ROAS",
+          "ROAS (venta)",
+          "Activas hoy",
           "Días sin pauta",
           "Fuente",
         ]}
@@ -995,6 +1013,7 @@ function PanelMetaConsolidado({ marcas, meta }: { marcas: Marca[]; meta: MetaAds
           const x = meta[m.clave];
           const t = x.totales;
           const cortes = x.diario.length - diasConPauta(x.diario);
+          const v = deVenta(x);
           return (
             <tr key={m.clave}>
               <td className="px-2 py-2 whitespace-nowrap">
@@ -1008,8 +1027,14 @@ function PanelMetaConsolidado({ marcas, meta }: { marcas: Marca[]; meta: MetaAds
               <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(cpm(t))}</td>
               <td className="px-2 py-2 tabular-nums">{fmtNumero(t.compras)}</td>
               <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(costoPorCompra(t))}</td>
-              <td className="px-2 py-2 tabular-nums" style={{ color: semaforo(roas(t) / 3) }}>
-                {dec1.format(roas(t))}x
+              <td
+                className="px-2 py-2 tabular-nums"
+                style={v.hay ? { color: semaforo(roas(v) / 3) } : undefined}
+              >
+                {v.hay ? `${dec1.format(roas(v))}x` : <span className="text-muted">No aplica</span>}
+              </td>
+              <td className="px-2 py-2 tabular-nums" style={{ color: x.campanasActivas ? VERDE : ROJO }}>
+                {x.campanasActivas}
               </td>
               <td className="px-2 py-2 tabular-nums" style={{ color: cortes ? ROJO : VERDE }}>
                 {cortes}
@@ -1022,7 +1047,8 @@ function PanelMetaConsolidado({ marcas, meta }: { marcas: Marca[]; meta: MetaAds
         })}
       </Tabla>
       <p className="text-muted mt-2 text-xs">
-        ROAS de Meta = valor de compras atribuidas por el píxel ÷ inversión. Atribuye con su
+        ROAS de Meta = valor de compras atribuidas por el píxel ÷ inversión, sólo de las campañas
+        de venta (las de alcance o visitas al perfil no buscan compras). Atribuye con su
         propia ventana (7 días clic / 1 día vista), así que suele dar más que el retorno total de
         la tienda: sirve para comparar campañas entre sí, no para sumar contra la venta.
       </p>
@@ -1030,8 +1056,20 @@ function PanelMetaConsolidado({ marcas, meta }: { marcas: Marca[]; meta: MetaAds
   );
 }
 
+/** Las campañas de venta del período sumadas: el único lugar donde el ROAS dice algo. */
+function deVenta(meta: MetaAdsMarca) {
+  const v = meta.campanas.filter((c) => c.esVenta);
+  return {
+    hay: v.length > 0,
+    gasto: v.reduce((s, c) => s + c.gasto, 0),
+    valorCompras: v.reduce((s, c) => s + c.valorCompras, 0),
+  };
+}
+
 function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
+  const P = usePeriodo();
   const t = meta.totales;
+  const venta = deVenta(meta);
   const dias = diasConPauta(meta.diario);
   const cortes = meta.diario.length - dias;
   const diario = meta.diario.map((d) => ({
@@ -1051,7 +1089,7 @@ function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <TarjetaKpi
-          titulo="Inversión del mes"
+          titulo="Inversión del período"
           valor={fmtMonedaCorta(t.gasto)}
           detalle={
             m.presupuestoMes ? `${p0(t.gasto / m.presupuestoMes)} del presupuesto de la marca` : "Presupuesto a definir"
@@ -1061,7 +1099,21 @@ function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           titulo="Pauta activa"
           valor={`${dias} de ${meta.diario.length} días`}
           acento={cortes ? ROJO : VERDE}
-          detalle={cortes ? `${cortes} día(s) sin gasto: corte de pauta` : "Sin cortes"}
+          detalle={
+            <>
+              {cortes ? `${cortes} día(s) sin gasto` : "Sin cortes"}
+              {P.enCurso && (
+                <>
+                  {" · "}
+                  <span style={{ color: meta.campanasActivas ? VERDE : ROJO }}>
+                    {meta.campanasActivas
+                      ? `${meta.campanasActivas} campaña(s) activa(s) hoy`
+                      : "ninguna campaña activa hoy"}
+                  </span>
+                </>
+              )}
+            </>
+          }
         />
         <TarjetaKpi
           titulo="Alcance · frecuencia"
@@ -1079,12 +1131,20 @@ function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           valor={fmtNumero(t.compras)}
           detalle={`${fmtMonedaCorta(t.valorCompras)} · ${fmtMoneda(costoPorCompra(t))} c/u`}
         />
-        <TarjetaKpi
-          titulo="ROAS Meta"
-          valor={`${dec1.format(roas(t))}x`}
-          acento={semaforo(roas(t) / 3)}
-          detalle={`${fmtNumero(t.conversaciones)} conversaciones por mensaje`}
-        />
+        {venta.hay ? (
+          <TarjetaKpi
+            titulo="ROAS de las campañas de venta"
+            valor={`${dec1.format(roas(venta))}x`}
+            acento={semaforo(roas(venta) / 3)}
+            detalle={`${fmtNumero(t.conversaciones)} conversaciones por mensaje`}
+          />
+        ) : (
+          <TarjetaKpi
+            titulo="ROAS Meta"
+            valor="No aplica"
+            detalle="Ninguna campaña de venta en el período: se miden por su resultado"
+          />
+        )}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -1112,28 +1172,49 @@ function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           </div>
         </Panel>
 
-        <Panel titulo="Campañas de Meta" nota="Mes en curso, de mayor a menor inversión">
+        <Panel titulo="Campañas de Meta" nota="Con inversión en el período, de mayor a menor">
           {meta.campanas.length === 0 ? (
             <p className="text-muted text-sm">Sin campañas con gasto este mes.</p>
           ) : (
-            <Tabla cabecera={["Campaña", "Inversión", "CTR", "Compras", "Costo/compra", "ROAS"]}>
+            <Tabla cabecera={["Campaña", "Estado hoy", "Inversión", "Resultado", "Costo por resultado", "CTR", "ROAS"]}>
               {meta.campanas.map((c) => (
                 <tr key={c.nombre}>
                   <td className="px-2 py-2">{c.nombre}</td>
+                  <td className="px-2 py-2">
+                    {c.estado ? (
+                      <Chip color={c.activa ? VERDE : TEMA.muted}>{c.estado}</Chip>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                   <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMonedaCorta(c.gasto)}</td>
+                  <td className="px-2 py-2 tabular-nums">
+                    {c.resultado ? (
+                      <>
+                        {fmtNumero(c.resultado.valor)}{" "}
+                        <span className="text-muted text-xs">{c.resultado.nombre.toLowerCase()}</span>
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(costoPorResultado(c))}</td>
                   <td className="px-2 py-2 tabular-nums">{p1(ctr(c))}</td>
-                  <td className="px-2 py-2 tabular-nums">{fmtNumero(c.compras)}</td>
-                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(costoPorCompra(c))}</td>
-                  <td className="px-2 py-2 tabular-nums" style={{ color: semaforo(roas(c) / 3) }}>
-                    {dec1.format(roas(c))}x
+                  <td
+                    className="px-2 py-2 tabular-nums"
+                    style={c.esVenta ? { color: semaforo(roas(c) / 3) } : undefined}
+                  >
+                    {c.esVenta ? `${dec1.format(roas(c))}x` : <span className="text-muted">No aplica</span>}
                   </td>
                 </tr>
               ))}
             </Tabla>
           )}
           <p className="text-muted mt-2 text-xs">
-            ROAS bajo no siempre es malo: las campañas de alcance o de mensajes no buscan compras.
-            Ojo con las de venta por debajo de 3x.
+            Cada campaña se mide por lo que busca su objetivo (el mismo «Resultado» del
+            Administrador de anuncios). El ROAS sólo se calcula en las de venta; ojo con las que
+            estén por debajo de 3x. «Estado hoy» es la entrega actual: una campaña encendida con los
+            anuncios apagados no está activa.
           </p>
         </Panel>
 
@@ -1232,7 +1313,7 @@ function SeccionTiendaNube({ m }: { m: Marca }) {
         <TarjetaKpi
           titulo="Clientes nuevos"
           valor={fmtNumero(tn.clientesNuevos)}
-          detalle={total ? `${p0(tn.clientesNuevos / total)} de los compradores del mes` : "—"}
+          detalle={total ? `${p0(tn.clientesNuevos / total)} de los compradores del período` : "—"}
         />
         <TarjetaKpi
           titulo="Clientes que vuelven"
@@ -1451,9 +1532,14 @@ function Indicadores() {
 // Página
 // ---------------------------------------------------------------------------
 
-export default function DashboardMarketing({ datos }: { datos: DatosTablero }) {
+export default function DashboardMarketing({ datos, periodo }: { datos: DatosTablero; periodo: Periodo }) {
   const [vista, setVista] = useState<ClaveMarca | "todas">("todas");
   const { meta, instagram, venta: real } = datos;
+  const P = periodo;
+  const n = Math.max(P.transcurridos, 1);
+  // El EJEMPLO está escrito para 11 días de un mes: para otro período se
+  // estira parejo, así las proporciones se mantienen. Lo real no se toca.
+  const k = n / 11;
 
   // LO REAL PISA AL EJEMPLO, campo por campo. Así el presupuesto, el
   // scorecard y el retorno usan el mismo número que cada sección y no pueden
@@ -1464,7 +1550,22 @@ export default function DashboardMarketing({ datos }: { datos: DatosTablero }) {
     const may = real.mayorista.porMarca[m.clave];
     const r: Marca = {
       ...m,
-      gastoPorCanal: { ...m.gastoPorCanal, "Meta Ads": meta[m.clave].totales.gasto },
+      // LAS METAS SON MENSUALES: para otro período se ajustan por sus días.
+      presupuestoMes: m.presupuestoMes === null ? null : m.presupuestoMes * P.factor,
+      ventaObjetivoMes: m.ventaObjetivoMes === null ? null : m.ventaObjetivoMes * P.factor,
+      ventaBase: m.ventaBase * P.factor,
+      ventaTiendas: m.ventaTiendas * k,
+      ventaMayorista: m.ventaMayorista * k,
+      pedidosTienda: Math.round(m.pedidosTienda * k),
+      ventaDiaria: Array.from({ length: n }, (_, i) => m.ventaDiaria[i % m.ventaDiaria.length] ?? 0),
+      gastoPorCanal: {
+        ...m.gastoPorCanal,
+        "Google Ads": m.gastoPorCanal["Google Ads"] * k,
+        Influencers: m.gastoPorCanal.Influencers * k,
+        Contenido: m.gastoPorCanal.Contenido * k,
+        Ferias: m.gastoPorCanal.Ferias * k,
+        "Meta Ads": meta[m.clave].totales.gasto,
+      },
       diasPautaActiva: diasConPauta(meta[m.clave].diario),
       clicsPauta: meta[m.clave].totales.clics,
       conversionesPauta: meta[m.clave].totales.compras,
@@ -1477,6 +1578,8 @@ export default function DashboardMarketing({ datos }: { datos: DatosTablero }) {
       r.interacciones30d = d.interacciones;
       r.publicacionesPorSemana = d.publicacionesPorSemana;
     }
+    const ejemploTiendas = r.ventaTiendas;
+    const ejemploMayorista = r.ventaMayorista;
     if (tn) {
       r.ventaTiendas = tn.venta;
       r.pedidosTienda = tn.pedidos;
@@ -1485,9 +1588,9 @@ export default function DashboardMarketing({ datos }: { datos: DatosTablero }) {
     if (tn || may) {
       // La forma de la curva sale de lo real; lo que falte se completa con
       // el ejemplo repartido parejo, y `ventaAcumulada` escala al total.
-      r.ventaDiaria = Array.from({ length: CORTE.dia }, (_, i) =>
-        (tn ? (tn.diaria[i] ?? 0) : m.ventaTiendas / CORTE.dia) +
-        (may ? (may.diaria[i] ?? 0) : m.ventaMayorista / CORTE.dia),
+      r.ventaDiaria = Array.from({ length: n }, (_, i) =>
+        (tn ? (tn.diaria[i] ?? 0) : ejemploTiendas / n) +
+        (may ? (may.diaria[i] ?? 0) : ejemploMayorista / n),
       );
     }
     return r;
@@ -1505,12 +1608,15 @@ export default function DashboardMarketing({ datos }: { datos: DatosTablero }) {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Tablero de Marca</h1>
           <p className="text-muted text-sm">
-            Agatina · responsable de marca · {CORTE.mes}, datos al {CORTE.fecha} (día {CORTE.dia}{" "}
-            de {CORTE.diasMes})
+            Agatina · responsable de marca · {P.etiqueta}
+            {P.enCurso ? ` · día ${P.transcurridos} de ${P.dias}` : P.transcurridos === 0 ? " · todavía no empezó" : " · cerrado"}
+            {P.factor !== 1 && " · metas y presupuesto proporcionales a los días"}
           </p>
         </div>
         <Chip color={AMBAR}>Ámbar = dato de ejemplo hasta conectar su fuente</Chip>
       </div>
+
+      <FiltroPeriodo key={`${P.desde}-${P.hasta}`} periodo={P} />
 
       <nav className="border-line -mx-1 flex gap-1 overflow-x-auto border-b px-1">
         {opciones.map((o) => {
@@ -1534,7 +1640,7 @@ export default function DashboardMarketing({ datos }: { datos: DatosTablero }) {
         })}
       </nav>
 
-      <Fuentes.Provider value={datos}>
+      <Fuentes.Provider value={{ ...datos, periodo: P }}>
         {marca ? (
           <VistaMarca key={marca.clave} m={marca} meta={meta[marca.clave]} />
         ) : (

@@ -1,5 +1,6 @@
 
-import { CORTE, MARCAS, type ClaveMarca, type Marca } from "@/lib/marketing-demo";
+import { MARCAS, type ClaveMarca, type Marca } from "@/lib/marketing-demo";
+import { diasDelPeriodo, hastaConDatos, type Periodo } from "@/lib/marketing-periodo";
 import type { CampanaMeta, DiaMeta, MetaAds, MetaAdsMarca } from "@/lib/meta-ads-tipos";
 import type { DatosInstagram, InstagramMarca } from "@/lib/marketing-fuentes";
 
@@ -53,6 +54,8 @@ export type { MetaAds, MetaAdsMarca } from "@/lib/meta-ads-tipos";
 type Accion = { action_type: string; value: string };
 type FilaInsights = {
   date_start?: string;
+  campaign_id?: string;
+  results?: { indicator?: string; values?: { value?: string }[] }[];
   campaign_name?: string;
   ad_name?: string;
   objective?: string;
@@ -94,11 +97,12 @@ async function insights(
   cuenta: string,
   token: string,
   params: Record<string, string>,
+  p: Periodo,
 ): Promise<FilaInsights[]> {
   const version = process.env.META_ADS_API_VERSION?.trim() || "v23.0";
   const id = cuenta.startsWith("act_") ? cuenta : `act_${cuenta}`;
   const url = new URL(`https://graph.facebook.com/${version}/${id}/insights`);
-  url.searchParams.set("date_preset", "this_month");
+  url.searchParams.set("time_range", JSON.stringify({ since: p.desde, until: hastaConDatos(p) }));
   url.searchParams.set("limit", "500");
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
@@ -116,21 +120,30 @@ async function insights(
   return cuerpo.data ?? [];
 }
 
-async function leerMarca(marca: Marca, token: string, cuenta: string): Promise<MetaAdsMarca> {
+async function leerMarca(marca: Marca, token: string, cuenta: string, p: Periodo): Promise<MetaAdsMarca> {
   const filtro = variable("META_ADS_FILTRO", marca.clave);
   const filtering: Record<string, string> = filtro
     ? { filtering: JSON.stringify([{ field: "campaign.name", operator: "CONTAIN", value: filtro }]) }
     : {};
   const base = "spend,impressions,inline_link_clicks,actions,action_values";
+  const act = cuenta.startsWith("act_") ? cuenta : `act_${cuenta}`;
 
-  const [total, dias, campanas, anuncios, plataformas, edades] = await Promise.all([
-    insights(cuenta, token, { level: "account", fields: `${base},reach,frequency`, ...filtering }),
-    insights(cuenta, token, { level: "account", fields: base, time_increment: "1", ...filtering }),
-    insights(cuenta, token, { level: "campaign", fields: `campaign_name,objective,${base}`, ...filtering }),
-    insights(cuenta, token, { level: "ad", fields: `ad_name,${base}`, sort: "spend_descending", ...filtering }),
-    insights(cuenta, token, { level: "account", fields: base, breakdowns: "publisher_platform", ...filtering }),
-    insights(cuenta, token, { level: "account", fields: base, breakdowns: "age", ...filtering }),
+  const [total, dias, campanas, anuncios, plataformas, edades, estados, resultados] = await Promise.all([
+    insights(cuenta, token, { level: "account", fields: `${base},reach,frequency`, ...filtering }, p),
+    insights(cuenta, token, { level: "account", fields: base, time_increment: "1", ...filtering }, p),
+    insights(cuenta, token, { level: "campaign", fields: `campaign_id,campaign_name,objective,reach,${base}`, ...filtering }, p),
+    insights(cuenta, token, { level: "ad", fields: `ad_name,${base}`, sort: "spend_descending", ...filtering }, p),
+    insights(cuenta, token, { level: "account", fields: base, breakdowns: "publisher_platform", ...filtering }, p),
+    insights(cuenta, token, { level: "account", fields: base, breakdowns: "age", ...filtering }, p),
+    estadosDeCampanas(act, token),
+    // `results` es el "Resultados" del Administrador de anuncios, ya resuelto
+    // por Meta según el objetivo. Es un campo nuevo de la API: si la versión
+    // no lo tiene, se cae a deducirlo del objetivo (ver `resultadoPorObjetivo`).
+    insights(cuenta, token, { level: "campaign", fields: "campaign_id,results", ...filtering }, p).catch(
+      () => [] as FilaInsights[],
+    ),
   ]);
+  const resultadoMeta = new Map(resultados.map((r) => [r.campaign_id, r.results?.[0]]));
 
   const fila = (nombre: string, c: FilaInsights): CampanaMeta => ({
     nombre,
@@ -144,8 +157,26 @@ async function leerMarca(marca: Marca, token: string, cuenta: string): Promise<M
   const porGasto = (a: CampanaMeta, b: CampanaMeta) => b.gasto - a.gasto;
 
   const t = total[0] ?? {};
+  const listaCampanas = campanas
+    .map((c) => {
+      const e = estados.get(c.campaign_id ?? "");
+      const r = resultadoMeta.get(c.campaign_id);
+      const valorMeta = Number(r?.values?.[0]?.value);
+      return {
+        ...fila(c.campaign_name ?? "(sin nombre)", c),
+        estado: e?.estado ?? null,
+        activa: e?.activa ?? false,
+        esVenta: esDeVenta(c.objective),
+        resultado:
+          r?.indicator && Number.isFinite(valorMeta)
+            ? { nombre: nombreResultado(r.indicator), valor: valorMeta }
+            : resultadoPorObjetivo(c),
+      };
+    })
+    .sort(porGasto);
   return {
     fuente: "meta",
+    campanasActivas: listaCampanas.filter((c) => c.activa).length,
     totales: {
       gasto: num(t.spend),
       impresiones: num(t.impressions),
@@ -157,6 +188,7 @@ async function leerMarca(marca: Marca, token: string, cuenta: string): Promise<M
       conversaciones: accion(t.actions, [TIPO_CONVERSACION]),
     },
     diario: completarDias(
+      p,
       dias.map((d) => ({
         fecha: ddmm(d.date_start ?? ""),
         gasto: num(d.spend),
@@ -166,7 +198,7 @@ async function leerMarca(marca: Marca, token: string, cuenta: string): Promise<M
         valorCompras: accion(d.action_values, TIPOS_COMPRA),
       })),
     ),
-    campanas: campanas.map((c) => fila(c.campaign_name ?? "(sin nombre)", c)).sort(porGasto),
+    campanas: listaCampanas,
     anuncios: anuncios.map((c) => fila(c.ad_name ?? "(sin nombre)", c)).sort(porGasto).slice(0, 10),
     plataformas: plataformas
       .map((c) => fila(NOMBRE_PLATAFORMA[c.publisher_platform ?? ""] ?? c.publisher_platform ?? "Otra", c))
@@ -207,6 +239,7 @@ function combinar(partes: MetaAdsMarca[]): MetaAdsMarca {
   return {
     fuente: "meta",
     conversion,
+    campanasActivas: partes.reduce((s, x) => s + x.campanasActivas, 0),
     totales: {
       gasto: suma("gasto"),
       impresiones,
@@ -326,20 +359,137 @@ function ddmm(iso: string): string {
  * vería nunca — el gráfico quedaría continuo y el conteo de días daría
  * perfecto. Por eso se arma el mes entero hasta hoy y lo que falta va en cero.
  */
-function completarDias(dias: DiaMeta[]): DiaMeta[] {
-  const hoy = new Date();
-  const mes = String(hoy.getMonth() + 1).padStart(2, "0");
+function completarDias(p: Periodo, dias: DiaMeta[]): DiaMeta[] {
   const porFecha = new Map(dias.map((d) => [d.fecha, d]));
-  return Array.from({ length: hoy.getDate() }, (_, i) => {
-    const fecha = `${String(i + 1).padStart(2, "0")}/${mes}`;
+  return diasDelPeriodo(p).map((iso) => {
+    const fecha = ddmm(iso);
     return (
       porFecha.get(fecha) ?? { fecha, gasto: 0, impresiones: 0, clics: 0, compras: 0, valorCompras: 0 }
     );
   });
 }
 
+// ---------------------------------------------------------------------------
+// Estado y resultado de cada campaña
+// ---------------------------------------------------------------------------
+
+const ESTADO_CAMPANA: Record<string, string> = {
+  ACTIVE: "Activa",
+  PAUSED: "Pausada",
+  CAMPAIGN_PAUSED: "Pausada",
+  ADSET_PAUSED: "Conjunto pausado",
+  ARCHIVED: "Archivada",
+  DELETED: "Eliminada",
+  IN_PROCESS: "En proceso",
+  WITH_ISSUES: "Con problemas",
+  PENDING_REVIEW: "En revisión",
+  DISAPPROVED: "Rechazada",
+};
+
+/**
+ * El estado de entrega de HOY, con la misma lógica que el Administrador de
+ * anuncios. La campaña puede estar encendida y no entregar: "Lanzamiento
+ * Diaper Genie" tenía la campaña activa y los anuncios apagados, y Meta la
+ * muestra como "Anuncios desactivados". Por eso no alcanza con el estado de
+ * la campaña: se piden también los anuncios activos.
+ */
+async function estadosDeCampanas(
+  act: string,
+  token: string,
+): Promise<Map<string, { estado: string; activa: boolean }>> {
+  const [campanas, ads] = await Promise.all([
+    graph<{ data: { id: string; effective_status?: string; stop_time?: string }[] }>(`${act}/campaigns`, token, {
+      fields: "id,effective_status,stop_time",
+      limit: "500",
+    }),
+    graph<{ data: { campaign_id?: string }[] }>(`${act}/ads`, token, {
+      fields: "campaign_id",
+      filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE"] }]),
+      limit: "1000",
+    }),
+  ]);
+  const conAnuncioActivo = new Set(ads.data.map((a) => a.campaign_id));
+  const out = new Map<string, { estado: string; activa: boolean }>();
+  for (const c of campanas.data) {
+    const terminada = c.stop_time && Date.parse(c.stop_time) < Date.now();
+    let estado = ESTADO_CAMPANA[c.effective_status ?? ""] ?? c.effective_status ?? "—";
+    let activa = c.effective_status === "ACTIVE";
+    if (activa && terminada) {
+      estado = "Completada";
+      activa = false;
+    } else if (activa && !conAnuncioActivo.has(c.id)) {
+      estado = "Anuncios desactivados";
+      activa = false;
+    }
+    out.set(c.id, { estado, activa });
+  }
+  return out;
+}
+
+const OBJETIVOS_VENTA = ["OUTCOME_SALES", "CONVERSIONS", "PRODUCT_CATALOG_SALES"];
+function esDeVenta(objetivo: string | undefined): boolean {
+  return OBJETIVOS_VENTA.includes(objetivo ?? "");
+}
+
+const NOMBRE_ACCION: Record<string, string> = {
+  link_click: "Clics en el enlace",
+  landing_page_view: "Visitas a la página",
+  post_engagement: "Interacciones",
+  page_engagement: "Interacciones con la página",
+  video_view: "Reproducciones",
+  lead: "Clientes potenciales",
+  reach: "Alcance",
+  omni_purchase: "Compras",
+  purchase: "Compras",
+  "offsite_conversion.fb_pixel_purchase": "Compras",
+  "onsite_conversion.messaging_conversation_started_7d": "Conversaciones",
+};
+
+/** "actions:link_click" → "Clics en el enlace". Lo que no se conoce se muestra tal cual. */
+function nombreResultado(indicador: string): string {
+  const tipo = indicador.replace(/^actions:/, "");
+  if (/profile_visit/.test(tipo)) return "Visitas al perfil";
+  return NOMBRE_ACCION[tipo] ?? tipo.replace(/_/g, " ");
+}
+
+/** Si Meta no manda `results`, se deduce del objetivo. */
+function resultadoPorObjetivo(c: FilaInsights): { nombre: string; valor: number } | null {
+  const visitasPerfil = c.actions?.find((a) => /profile_visit/.test(a.action_type));
+  const de = (tipos: string[]) => {
+    const v = accion(c.actions, tipos);
+    return v ? { nombre: nombreResultado(tipos[0]), valor: v } : null;
+  };
+  switch (c.objective) {
+    case "OUTCOME_SALES":
+    case "CONVERSIONS":
+    case "PRODUCT_CATALOG_SALES":
+      return de(TIPOS_COMPRA) ?? { nombre: "Compras", valor: 0 };
+    case "OUTCOME_LEADS":
+    case "LEAD_GENERATION":
+      return de(["lead"]);
+    case "MESSAGES":
+      return de([TIPO_CONVERSACION]);
+    case "OUTCOME_AWARENESS":
+    case "REACH":
+    case "BRAND_AWARENESS":
+      return visitasPerfil
+        ? { nombre: "Visitas al perfil", valor: Number(visitasPerfil.value) }
+        : { nombre: "Alcance", valor: num(c.reach) };
+    case "OUTCOME_TRAFFIC":
+    case "LINK_CLICKS":
+    case "OUTCOME_ENGAGEMENT":
+    case "POST_ENGAGEMENT":
+      if (visitasPerfil) return { nombre: "Visitas al perfil", valor: Number(visitasPerfil.value) };
+      return c.objective?.includes("TRAFFIC") || c.objective === "LINK_CLICKS"
+        ? de(["link_click"])
+        : de(["post_engagement"]);
+    default:
+      return null;
+  }
+}
+
 /** Lee las cuatro marcas. Una que falla no tira abajo a las otras. */
-export async function leerMetaAds(): Promise<MetaAds> {
+export async function leerMetaAds(p: Periodo): Promise<MetaAds> {
   const token = process.env.META_ADS_TOKEN?.trim();
   const pares = await Promise.all(
     MARCAS.map(async (m): Promise<[ClaveMarca, MetaAdsMarca]> => {
@@ -349,17 +499,17 @@ export async function leerMetaAds(): Promise<MetaAds> {
         .split(",")
         .map((c) => c.trim())
         .filter(Boolean);
-      if (!token) return [m.clave, demoMeta(m, "Falta META_ADS_TOKEN")];
-      if (!cuentas.length) return [m.clave, demoMeta(m, `Falta META_ADS_CUENTA_${m.clave.toUpperCase()}`)];
+      if (!token) return [m.clave, demoMeta(m, "Falta META_ADS_TOKEN", p)];
+      if (!cuentas.length) return [m.clave, demoMeta(m, `Falta META_ADS_CUENTA_${m.clave.toUpperCase()}`, p)];
       try {
         const porCuenta = await Promise.all(
-          cuentas.map(async (c) => enPesos(await leerMarca(m, token, c), await monedaDe(c, token))),
+          cuentas.map(async (c) => enPesos(await leerMarca(m, token, c, p), await monedaDe(c, token))),
         );
         return [m.clave, combinar(porCuenta)];
       } catch (e) {
         const motivo = e instanceof Error ? e.message : String(e);
         console.error(`Meta Ads ${m.nombre}:`, motivo);
-        return [m.clave, demoMeta(m, `Meta devolvió un error: ${motivo}`)];
+        return [m.clave, demoMeta(m, `Meta devolvió un error: ${motivo}`, p)];
       }
     }),
   );
@@ -391,25 +541,28 @@ const CAMPANAS_DEMO: Record<ClaveMarca, [string, number, number][]> = {
   ],
 };
 
-function demoMeta(m: Marca, motivo: string): MetaAdsMarca {
-  const gastoMes = m.gastoPorCanal["Meta Ads"];
+function demoMeta(m: Marca, motivo: string, p: Periodo): MetaAdsMarca {
+  // El ejemplo está pensado para 11 días; para otro período se estira parejo.
+  const n = Math.max(p.transcurridos, 1);
+  const gastoMes = (m.gastoPorCanal["Meta Ads"] * n) / 11;
   // Los días sin pauta del ejemplo salen de `diasPautaActiva`, repartidos
   // hacia el final para que se vea cómo se marca un corte.
-  const cortes = Math.max(0, Math.min(CORTE.dia - 1, 11 - m.diasPautaActiva));
-  const sinPauta = new Set(Array.from({ length: cortes }, (_, i) => CORTE.dia - 1 - i * 2));
-  const pesos = Array.from({ length: CORTE.dia }, (_, i) =>
+  const cortes = Math.max(0, Math.min(n - 1, 11 - m.diasPautaActiva));
+  const sinPauta = new Set(Array.from({ length: cortes }, (_, i) => n - 1 - i * 2));
+  const fechas = diasDelPeriodo(p);
+  const pesos = Array.from({ length: n }, (_, i) =>
     sinPauta.has(i) ? 0 : 1 + ((i * 7) % 5) / 10 + (i < 4 ? 0.4 : 0),
   );
   const sumaPesos = pesos.reduce((s, p) => s + p, 0);
   const roasMedio = CAMPANAS_DEMO[m.clave].reduce((s, [, parte, r]) => s + parte * r, 0);
   const ticket = m.pedidosTienda ? m.ventaTiendas / m.pedidosTienda : 15_000;
 
-  const diario = pesos.map((p, i) => {
-    const gasto = Math.round((gastoMes * p) / sumaPesos);
+  const diario = pesos.map((peso, i) => {
+    const gasto = Math.round((gastoMes * peso) / sumaPesos);
     const impresiones = Math.round(gasto / 4.2);
     const valorCompras = Math.round(gasto * roasMedio * (0.8 + ((i * 3) % 5) / 10));
     return {
-      fecha: `${String(i + 1).padStart(2, "0")}/${CORTE.mm}`,
+      fecha: ddmm(fechas[i] ?? p.desde),
       gasto,
       impresiones,
       clics: Math.round(impresiones * 0.013),
@@ -422,8 +575,36 @@ function demoMeta(m: Marca, motivo: string): MetaAdsMarca {
   const impresiones = suma("impresiones");
   const alcance = Math.round(impresiones / 2.6);
 
+  // En el ejemplo, las de venta se nombran "Ventas"/"Catálogo"/"Remarketing";
+  // las de alcance y mensajes muestran su propio resultado, sin ROAS.
+  const campanasDemo: CampanaMeta[] = CAMPANAS_DEMO[m.clave].map(([nombre, parte, r], k) => {
+    const gasto = Math.round(gastoMes * parte);
+    const imp = Math.round(gasto / 4.2);
+    const clics = Math.round(imp * 0.013);
+    const esVenta = /Ventas|Catálogo|Remarketing|Boost/.test(nombre);
+    const compras = esVenta ? Math.round((gasto * r) / ticket) : 0;
+    return {
+      nombre,
+      objetivo: esVenta ? "OUTCOME_SALES" : /Mensajes/.test(nombre) ? "MESSAGES" : "OUTCOME_AWARENESS",
+      estado: k === CAMPANAS_DEMO[m.clave].length - 1 && k > 0 ? "Anuncios desactivados" : "Activa",
+      activa: !(k === CAMPANAS_DEMO[m.clave].length - 1 && k > 0),
+      esVenta,
+      resultado: esVenta
+        ? { nombre: "Compras", valor: compras }
+        : /Mensajes/.test(nombre)
+          ? { nombre: "Conversaciones", valor: Math.round(clics / 9) }
+          : { nombre: "Visitas al perfil", valor: Math.round(clics * 1.4) },
+      gasto,
+      impresiones: imp,
+      clics,
+      compras,
+      valorCompras: esVenta ? Math.round(gasto * r) : 0,
+    };
+  });
+
   return {
     fuente: "demo",
+    campanasActivas: campanasDemo.filter((c) => c.activa).length,
     motivo,
     diario,
     totales: {
@@ -436,18 +617,7 @@ function demoMeta(m: Marca, motivo: string): MetaAdsMarca {
       valorCompras: suma("valorCompras"),
       conversaciones: Math.round(m.mensajes30d * 0.35),
     },
-    campanas: CAMPANAS_DEMO[m.clave].map(([nombre, parte, r]) => {
-      const gasto = Math.round(gastoMes * parte);
-      const imp = Math.round(gasto / 4.2);
-      return {
-        nombre,
-        gasto,
-        impresiones: imp,
-        clics: Math.round(imp * 0.013),
-        compras: Math.round((gasto * r) / ticket),
-        valorCompras: Math.round(gasto * r),
-      };
-    }),
+    campanas: campanasDemo,
     anuncios: CAMPANAS_DEMO[m.clave].flatMap(([nombre, parte, r], k) =>
       ["Reel", "Carrusel"].map((tipo, n) => {
         const gasto = Math.round(gastoMes * parte * (n ? 0.4 : 0.6));
@@ -530,15 +700,15 @@ async function graph<T>(ruta: string, token: string, params: Record<string, stri
   return cuerpo;
 }
 
-/** Inicio del mes en curso, en hora argentina, como segundos Unix. */
-function inicioMesUnix(): number {
-  const ar = new Date(Date.now() - 3 * 3600_000);
-  return Date.UTC(ar.getUTCFullYear(), ar.getUTCMonth(), 1, 3) / 1000;
+/** Medianoche argentina de una fecha `YYYY-MM-DD`, en segundos Unix. */
+function unixAr(fecha: string): number {
+  return Date.parse(`${fecha}T00:00:00-03:00`) / 1000;
 }
 
-async function leerIgMarca(id: string, token: string): Promise<DatosInstagram> {
-  const desde = inicioMesUnix();
-  const hasta = Math.floor(Date.now() / 1000);
+async function leerIgMarca(id: string, token: string, p: Periodo): Promise<DatosInstagram> {
+  const desde = unixAr(p.desde);
+  // Hasta el final del último día con datos, sin pasarse de ahora.
+  const hasta = Math.min(unixAr(hastaConDatos(p)) + 86_400 - 1, Math.floor(Date.now() / 1000));
 
   const perfil = await graph<{ username?: string; followers_count?: number }>(id, token, {
     fields: "username,followers_count",
@@ -546,7 +716,7 @@ async function leerIgMarca(id: string, token: string): Promise<DatosInstagram> {
   const media = await graph<{ data: { timestamp: string; like_count?: number; comments_count?: number }[] }>(
     `${id}/media`,
     token,
-    { fields: "timestamp,like_count,comments_count", since: String(desde), limit: "100" },
+    { fields: "timestamp,like_count,comments_count", since: String(desde), until: String(hasta), limit: "100" },
   );
 
   // Las métricas de Insights cambian de nombre seguido (impressions pasó a
@@ -586,15 +756,17 @@ async function leerIgMarca(id: string, token: string): Promise<DatosInstagram> {
     nuevosSeguidores(),
   ]);
 
-  const publicadas = media.data.filter((p) => Date.parse(p.timestamp) / 1000 >= desde);
+  // Semana 1 = los primeros 7 días DEL PERÍODO, no del mes.
+  const publicadas = media.data.filter((x) => {
+    const t = Date.parse(x.timestamp) / 1000;
+    return t >= desde && t <= hasta;
+  });
   const porSemana: number[] = [];
-  for (const p of publicadas) {
-    const dia = new Date(Date.parse(p.timestamp) - 3 * 3600_000).getUTCDate();
-    const semana = Math.floor((dia - 1) / 7);
+  for (const x of publicadas) {
+    const semana = Math.floor((Date.parse(x.timestamp) / 1000 - desde) / (7 * 86_400));
     porSemana[semana] = (porSemana[semana] ?? 0) + 1;
   }
-  const hoy = new Date(Date.now() - 3 * 3600_000).getUTCDate();
-  const semanas = Math.floor((hoy - 1) / 7) + 1;
+  const semanas = Math.max(1, Math.ceil(p.transcurridos / 7));
 
   return {
     usuario: perfil.username ?? null,
@@ -610,7 +782,7 @@ async function leerIgMarca(id: string, token: string): Promise<DatosInstagram> {
   };
 }
 
-export async function leerInstagram(): Promise<Record<ClaveMarca, InstagramMarca>> {
+export async function leerInstagram(p: Periodo): Promise<Record<ClaveMarca, InstagramMarca>> {
   const token = process.env.META_ADS_TOKEN?.trim();
   const pares = await Promise.all(
     MARCAS.map(async (m): Promise<[ClaveMarca, InstagramMarca]> => {
@@ -618,7 +790,7 @@ export async function leerInstagram(): Promise<Record<ClaveMarca, InstagramMarca
       if (!token) return [m.clave, { fuente: "demo", motivo: "Falta META_ADS_TOKEN" }];
       if (!id) return [m.clave, { fuente: "demo", motivo: `Falta META_IG_CUENTA_${m.clave.toUpperCase()}` }];
       try {
-        return [m.clave, { fuente: "meta", datos: await leerIgMarca(id, token) }];
+        return [m.clave, { fuente: "meta", datos: await leerIgMarca(id, token, p) }];
       } catch (e) {
         const motivo = e instanceof Error ? e.message : String(e);
         console.error(`Instagram ${m.nombre}:`, motivo);
