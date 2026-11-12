@@ -68,6 +68,20 @@ const NAV: ItemNav[] = [
       { href: "/venta-minorista/tienda-nube", label: "Tienda Nube", icono: "tiendanube" },
     ],
   },
+  // Marketing: lo que hace que la gente pida las marcas. Es su propio grupo y
+  // no cuelga de Minoristas porque mide también la demanda mayorista (leads,
+  // tiendas nuevas, kit de venta) y el presupuesto de las cuatro marcas.
+  {
+    clave: "marketing",
+    label: "Marketing",
+    icono: "objetivos",
+    hijos: [
+      { href: "/marketing", label: "Tablero de Marca", icono: "objetivos" },
+      // Las tiendas de las marcas no tienen API (falta el plan Escala): los
+      // pedidos entran subiendo el CSV de Ventas que exporta Tienda Nube.
+      { href: "/marketing/importar", label: "Importar Tienda Nube", icono: "tiendanube" },
+    ],
+  },
   // Operaciones es la tercera pata, al lado de las dos de venta: lo que pasa
   // con la mercadería, no con la plata. Stock no cuelga de Mayoristas ni de
   // Minoristas porque la mercadería es UNA SOLA, se venda por donde se venda —

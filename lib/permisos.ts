@@ -212,6 +212,20 @@ function esDeCostos(pathname: string): boolean {
   return RUTAS_COSTOS.some((r) => pathname === r || pathname.startsWith(`${r}/`));
 }
 
+/**
+ * TABLERO DE MARCA: SOLO EL SUPERADMIN, por pedido de Ana (12/11/2026).
+ *
+ * Mide a una persona --la responsable de marca-- con su presupuesto y su
+ * puntaje: no es información para todos los administradores. No es un módulo
+ * de lib/modulos.ts a propósito, así que ningún permiso personalizado lo abre.
+ * Cuando se decida que Agatina vea su propio tablero, se abre acá.
+ */
+const RUTAS_MARKETING = ["/marketing", "/api/marketing"];
+
+function esDeMarketing(pathname: string): boolean {
+  return RUTAS_MARKETING.some((r) => pathname === r || pathname.startsWith(`${r}/`));
+}
+
 
 /** Raíz de la sección Venta minorista: la ven los admins y el responsable de Meli. */
 const RAIZ_MINORISTA = "/venta-minorista";
@@ -331,6 +345,7 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   // VA ACA ARRIBA, antes del `personalizado` y del `admin -> true`: ningún
   // módulo marcado y ningún rol amplio abren esto.
   if (esDeCostos(pathname)) return permiso.rol === "superadmin";
+  if (esDeMarketing(pathname)) return permiso.rol === "superadmin";
 
   // LA RAIZ DE "MIS TAREAS" NO TIENE CONTENIDO PROPIO: redirige a la primera
   // página de tareas que la persona pueda ver. Se abre si hay al menos una, y
