@@ -938,11 +938,29 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
 // ---------------------------------------------------------------------------
 
 function ChipFuente({ meta }: { meta: MetaAdsMarca }) {
-  return meta.fuente === "meta" ? (
-    <Chip color={VERDE}>Conectado a Meta Ads</Chip>
-  ) : (
-    <span title={meta.motivo}>
-      <Chip color={AMBAR}>Meta Ads: datos de ejemplo</Chip>
+  if (meta.fuente !== "meta") {
+    return (
+      <span title={meta.motivo}>
+        <Chip color={AMBAR}>Meta Ads: datos de ejemplo</Chip>
+      </span>
+    );
+  }
+  const c = meta.conversion;
+  if (c?.fuente === "sin convertir") {
+    // Se avisa en ámbar a propósito: el número es real, pero sumado con los
+    // pesos de las otras marcas (presupuesto, retorno) no es comparable.
+    return (
+      <span title={`La cuenta factura en ${c.moneda}. Los importes de Meta de esta marca están en ${c.moneda}, no en pesos.`}>
+        <Chip color={AMBAR}>Conectado · importes en {c.moneda}, sin convertir</Chip>
+      </span>
+    );
+  }
+  return (
+    <span title={c ? `Cuenta en ${c.moneda}: pasada a pesos con ${c.fuente} a $ ${c.tipoCambio}` : undefined}>
+      <Chip color={VERDE}>
+        Conectado a Meta Ads
+        {c && ` · ${c.moneda} a $ ${fmtNumero(c.tipoCambio)} (${c.fuente})`}
+      </Chip>
     </span>
   );
 }

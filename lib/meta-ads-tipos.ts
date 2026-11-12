@@ -43,6 +43,12 @@ export type MetaAdsMarca = {
   fuente: "meta" | "demo";
   /** Por qué esta marca no muestra datos reales, si no los muestra. */
   motivo?: string;
+  /**
+   * Si alguna cuenta factura en otra moneda (Hola Toys 2 está en USD). Con
+   * `fuente: "sin convertir"` los importes quedaron EN ESA MONEDA; si no, ya
+   * se pasaron a pesos con `tipoCambio`.
+   */
+  conversion?: { moneda: string; tipoCambio: number; fuente: string };
   diario: DiaMeta[];
   totales: TotalesMeta;
   campanas: CampanaMeta[];

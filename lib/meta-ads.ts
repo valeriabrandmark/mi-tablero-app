@@ -185,6 +185,7 @@ async function leerMarca(marca: Marca, token: string, cuenta: string): Promise<M
  */
 function combinar(partes: MetaAdsMarca[]): MetaAdsMarca {
   if (partes.length === 1) return partes[0];
+  const conversion = partes.find((p) => p.conversion)?.conversion;
   const sumar = (a: CampanaMeta, b: CampanaMeta): CampanaMeta => ({
     ...a,
     gasto: a.gasto + b.gasto,
@@ -205,6 +206,7 @@ function combinar(partes: MetaAdsMarca[]): MetaAdsMarca {
   const alcance = suma("alcance");
   return {
     fuente: "meta",
+    conversion,
     totales: {
       gasto: suma("gasto"),
       impresiones,
@@ -237,6 +239,71 @@ function combinar(partes: MetaAdsMarca[]): MetaAdsMarca {
     anuncios: partes.flatMap((p) => p.anuncios).sort(porGasto).slice(0, 10),
     plataformas: porNombre(partes.map((p) => p.plataformas)).sort(porGasto),
     edades: porNombre(partes.map((p) => p.edades)).sort((a, b) => a.nombre.localeCompare(b.nombre)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Moneda: cuentas publicitarias en dólares
+// ---------------------------------------------------------------------------
+//
+// Meta informa cada cuenta EN SU MONEDA, sin aviso: "spend": "101.44" en una
+// cuenta en USD son USD 101, no $101. Hola Toys 2 está en dólares, así que
+// sin esto la inversión de Hola Toys se leía unas mil veces más chica y el
+// retorno daba fantasía.
+//
+// Se convierte a pesos TODO lo que es plata (gasto y valor de compras), nunca
+// cantidades (impresiones, clics, compras).
+//
+// POR AHORA NO SE CONVIERTE (pedido de Ana, 12/11/2026): sin la variable
+// META_ADS_TIPO_CAMBIO cada cuenta queda en su moneda y la pantalla avisa
+// "importes en USD, sin convertir". Para convertir, cargar la variable:
+//   "tarjeta"                dólar tarjeta de dolarapi.com: es lo que se paga
+//                            de verdad cuando Meta cobra en USD a una tarjeta
+//                            argentina, con los impuestos incluidos.
+//   "oficial" | "blue" | "mep" | "cripto"  otra cotización de dolarapi.com.
+//   un número, ej. "1450"    valor fijo que definan Ana y Alejandro.
+
+async function monedaDe(cuenta: string, token: string): Promise<string> {
+  const id = cuenta.startsWith("act_") ? cuenta : `act_${cuenta}`;
+  const r = await graph<{ currency?: string }>(id, token, { fields: "currency" });
+  return (r.currency ?? "ARS").toUpperCase();
+}
+
+async function tipoDeCambio(moneda: string): Promise<{ valor: number; fuente: string }> {
+  if (moneda !== "USD") {
+    throw new Error(`La cuenta está en ${moneda} y sólo se sabe convertir USD`);
+  }
+  const conf = (process.env.META_ADS_TIPO_CAMBIO ?? "").trim().toLowerCase();
+  const fijo = Number(conf.replace(",", "."));
+  if (Number.isFinite(fijo) && fijo > 0) return { valor: fijo, fuente: "valor fijo" };
+  const res = await fetch(`https://dolarapi.com/v1/dolares/${encodeURIComponent(conf)}`, {
+    next: { revalidate: 3600 },
+  });
+  const j = (await res.json().catch(() => null)) as { venta?: number } | null;
+  if (!res.ok || !j?.venta) throw new Error(`No se pudo leer el dólar ${conf} de dolarapi.com`);
+  return { valor: j.venta, fuente: `dólar ${conf}` };
+}
+
+async function enPesos(d: MetaAdsMarca, moneda: string): Promise<MetaAdsMarca> {
+  if (moneda === "ARS") return d;
+  if (!process.env.META_ADS_TIPO_CAMBIO?.trim()) {
+    return { ...d, conversion: { moneda, tipoCambio: 1, fuente: "sin convertir" } };
+  }
+  const { valor: tc, fuente } = await tipoDeCambio(moneda);
+  const plata = <T extends { gasto: number; valorCompras: number }>(x: T): T => ({
+    ...x,
+    gasto: x.gasto * tc,
+    valorCompras: x.valorCompras * tc,
+  });
+  return {
+    ...d,
+    conversion: { moneda, tipoCambio: tc, fuente },
+    totales: plata(d.totales),
+    diario: d.diario.map(plata),
+    campanas: d.campanas.map(plata),
+    anuncios: d.anuncios.map(plata),
+    plataformas: d.plataformas.map(plata),
+    edades: d.edades.map(plata),
   };
 }
 
@@ -285,7 +352,9 @@ export async function leerMetaAds(): Promise<MetaAds> {
       if (!token) return [m.clave, demoMeta(m, "Falta META_ADS_TOKEN")];
       if (!cuentas.length) return [m.clave, demoMeta(m, `Falta META_ADS_CUENTA_${m.clave.toUpperCase()}`)];
       try {
-        const porCuenta = await Promise.all(cuentas.map((c) => leerMarca(m, token, c)));
+        const porCuenta = await Promise.all(
+          cuentas.map(async (c) => enPesos(await leerMarca(m, token, c), await monedaDe(c, token))),
+        );
         return [m.clave, combinar(porCuenta)];
       } catch (e) {
         const motivo = e instanceof Error ? e.message : String(e);
