@@ -1,11 +1,31 @@
-/** Paleta de gráficos: 6 colores que funcionan bien sobre fondo casi negro. */
+/**
+ * Paleta de gráficos: 6 colores.
+ *
+ * ---------------------------------------------------------------------------
+ * SON VARIABLES DE CSS Y NO HEX, DESDE QUE EXISTE EL MODO CLARO
+ *
+ * Los seis colores de siempre están pensados para brillar sobre casi negro y
+ * sobre el fondo crema del modo claro quedan lavados --el verde da 1,9:1, por
+ * debajo del 3:1 que necesita un elemento gráfico para verse--. En claro hay
+ * que usar los tonos 600/700: mismo color conceptual, otra tinta.
+ *
+ * Apuntando a la variable, el cambio lo hace el CSS y ningún gráfico se entera.
+ * La alternativa era que cada componente supiera en qué tema está, y son
+ * TREINTA Y TRES archivos: alcanzaba con que uno se olvidara para dejar una
+ * línea invisible sobre el crema, y nadie lo iba a ver hasta abrir ese panel.
+ *
+ * FUNCIONA EN SVG. Recharts pone estos valores en atributos de presentación
+ * (`stroke`, `fill`, `stop-color`), que resuelven `var()` como cualquier
+ * propiedad CSS. Lo que NO se puede es hacerles cuentas --aclarar, mezclar--:
+ * si algún día hace falta eso, se hace con `color-mix()` en el CSS, no acá.
+ */
 export const PALETA = [
-  "#3b82f6", // azul
-  "#22c55e", // verde
-  "#f59e0b", // ámbar
-  "#a78bfa", // violeta
-  "#22d3ee", // cian
-  "#f472b6", // rosa
+  "var(--color-c1)", // azul
+  "var(--color-c2)", // verde
+  "var(--color-c3)", // ámbar
+  "var(--color-c4)", // violeta
+  "var(--color-c5)", // cian
+  "var(--color-c6)", // rosa
 ] as const;
 
 export function colorSerie(indice: number): string {
@@ -14,11 +34,11 @@ export function colorSerie(indice: number): string {
 
 /** Tokens del tema oscuro reutilizados por los gráficos (recharts pide hex/rgb). */
 export const TEMA = {
-  ink: "#e7e9ee",
-  muted: "#8b93a1",
-  line: "#242a33",
-  panel: "#14171c",
-  negativo: "#f43f5e",
+  ink: "var(--color-ink)",
+  muted: "var(--color-muted)",
+  line: "var(--color-line)",
+  panel: "var(--color-panel)",
+  negativo: "var(--color-negativo)",
 } as const;
 
 /* ---------------------------------------------------------------------------
@@ -69,16 +89,16 @@ export const CATEGORIAS_RIESGO = [
 ] as const;
 
 export const COLOR_CATEGORIA: Record<string, string> = {
-  BUENO: "#15803d",
-  "AL DÍA": "#34d399",
-  OBSERVACIÓN: "#fde047",
-  RIESGOSO: "#fb923c",
-  CRÍTICO: "#dc2626",
+  BUENO: "var(--color-r-bueno)",
+  "AL DÍA": "var(--color-r-aldia)",
+  OBSERVACIÓN: "var(--color-r-observacion)",
+  RIESGOSO: "var(--color-r-riesgoso)",
+  CRÍTICO: "var(--color-r-critico)",
   // A FAVOR NO ES EL ESCALON CERO DE LA ESCALA, ES OTRA COSA: ese cliente no
   // debe nada, le debemos nosotros. Por eso un celeste y no un verde más
   // verde: un sexto paso del degradé lo pondría a competir con BUENO por el
   // lugar de "el mejor", cuando ni siquiera está en la misma pregunta.
-  "A FAVOR": "#38bdf8",
+  "A FAVOR": "var(--color-r-afavor)",
 };
 
 /**
@@ -105,11 +125,11 @@ export const COLOR_TRAMO_AGING: Record<string, string> = {
   // antigüedad. Antes caían en el tramo que les tocaba por edad y lo
   // DESCONTABAN --tres de ellas en "+90 días"-- así que el tramo más caro de
   // todos salía más chico de lo que es.
-  "A favor": "#38bdf8",
-  "No vencido": "#15803d",
-  "0-30 días": "#34d399",
-  "31-60 días": "#fde047",
-  "61-90 días": "#fb923c",
-  "+90 días": "#dc2626",
+  "A favor": "var(--color-r-afavor)",
+  "No vencido": "var(--color-r-bueno)",
+  "0-30 días": "var(--color-r-aldia)",
+  "31-60 días": "var(--color-r-observacion)",
+  "61-90 días": "var(--color-r-riesgoso)",
+  "+90 días": "var(--color-r-critico)",
   "Sin dato": TEMA.muted,
 };

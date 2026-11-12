@@ -51,17 +51,20 @@ export const LOGISTICA_ML: Record<string, string> = {
 export const SIN_DATO = "Sin dato";
 
 export const COLOR_LOGISTICA: Record<string, string> = {
-  Full: "#3b82f6",
-  Flex: "#22c55e",
-  Colecta: "#f59e0b",
-  "Punto de despacho": "#a78bfa",
-  "Punto de despacho (XD)": "#22d3ee",
-  "Logística propia": "#f472b6",
+  // Son los seis de la paleta del tablero, por variable y no por hex: así el
+  // modo claro los cambia por sus versiones oscuras sin que esto se entere.
+  // Ver el comentario de PALETA en lib/paleta.ts.
+  Full: "var(--color-c1)",
+  Flex: "var(--color-c2)",
+  Colecta: "var(--color-c3)",
+  "Punto de despacho": "var(--color-c4)",
+  "Punto de despacho (XD)": "var(--color-c5)",
+  "Logística propia": "var(--color-c6)",
   // Un gris CLARO: es un valor real de ML, no un hueco.
-  "Sin especificar": "#94a3b8",
-  // Y uno OSCURO para el hueco nuestro, que tiene que leerse como apagado y no
-  // como una categoría más.
-  [SIN_DATO]: "#4b5563",
+  "Sin especificar": "var(--color-sin-especificar)",
+  // Y uno APAGADO para el hueco nuestro, que tiene que leerse como apagado y
+  // no como una categoría más.
+  [SIN_DATO]: "var(--color-sin-dato)",
 };
 
 /**
@@ -85,7 +88,7 @@ export function etiquetaLogistica(crudo: string | null | undefined): string {
  * del tablero y se nota.
  */
 export function colorLogistica(etiqueta: string): string {
-  return COLOR_LOGISTICA[etiqueta] ?? "#e879f9";
+  return COLOR_LOGISTICA[etiqueta] ?? "var(--color-desconocido)";
 }
 
 /**

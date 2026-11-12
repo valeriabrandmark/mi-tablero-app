@@ -1,3 +1,4 @@
+import ControlTema from "@/components/ControlTema";
 import FormularioCambiarContrasena from "@/components/FormularioCambiarContrasena";
 import { Panel } from "@/components/ui";
 import { authConfigurada } from "@/lib/supabase/env";
@@ -33,6 +34,14 @@ export default async function CuentaPage() {
         )}
       </Panel>
 
+      {/* EL TEMA VA ACA Y NO EN LA BARRA DE ARRIBA. Es una preferencia que se
+          elige una vez y no se vuelve a tocar: un interruptor siempre visible
+          ocuparía lugar permanente en la pantalla por algo que se usa dos
+          veces al año, y encima al lado de botones que sí hacen cosas
+          (actualizar, aplicar costos). */}
+      <Panel titulo="Tema" nota="Cómo se ve el tablero">
+        <ControlTema />
+      </Panel>
     </div>
   );
 }
