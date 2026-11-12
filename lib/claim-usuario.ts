@@ -1,3 +1,4 @@
+import { VENDEDORES_OBJETIVOS, type VendedorObjetivos } from "@/lib/constantes";
 import { esModulo, necesitaUsuarioSigma, type ClaveModulo } from "@/lib/modulos";
 
 /**
@@ -31,7 +32,29 @@ export type CuerpoUsuario = {
   editar?: unknown;
   sigma?: unknown;
   nombreSigma?: unknown;
+  vendedoresObjetivos?: unknown;
 };
+
+/**
+ * DE QUE VENDEDORES VE LOS OBJETIVOS, leído del claim.
+ *
+ * Hasta el 12/11/2026 el módulo Objetivos era una sola casilla y abría las
+ * páginas de los cuatro vendedores. Ahora se elige vendedor por vendedor, y la
+ * lista se guarda en `vendedores_objetivos`.
+ *
+ * SIN LISTA SON LOS CUATRO, a propósito: es el claim de quien tenía la casilla
+ * antes de que existiera la lista (eran tres personas). Leerlo como "ninguno"
+ * los dejaba sin objetivos el día del despliegue sin que nadie lo decidiera.
+ * Con una lista guardada --aunque sea vacía-- vale la lista.
+ */
+export function vendedoresObjetivosDel(valor: unknown): VendedorObjetivos[] {
+  if (!Array.isArray(valor)) return [...VENDEDORES_OBJETIVOS];
+  const pedidos = valor
+    .filter((v): v is string => typeof v === "string")
+    .map((v) => v.trim().toUpperCase());
+  // En el orden de VENDEDORES_OBJETIVOS, que es el de las pestañas.
+  return VENDEDORES_OBJETIVOS.filter((v) => pedidos.includes(v));
+}
 
 /** Las claves de módulo válidas de lo que haya mandado el navegador. */
 export function modulosValidos(valor: unknown): ClaveModulo[] {
@@ -53,6 +76,8 @@ export type ClaimUsuario = {
   editar: ClaveModulo[];
   sigma: number | null;
   nombre_sigma: string | null;
+  /** Vacía si no tiene el módulo Objetivos. Ver `vendedoresObjetivosDel`. */
+  vendedores_objetivos: VendedorObjetivos[];
 };
 
 /**
@@ -66,7 +91,18 @@ export type ClaimUsuario = {
  * para nada y lo único que hace es confundir al que lo lee.
  */
 export function claimDeUsuario(cuerpo: CuerpoUsuario): ClaimUsuario {
-  const ve = modulosValidos(cuerpo.modulos);
+  // LOS VENDEDORES SE MANDAN SIEMPRE EXPLICITOS desde el panel. Si no vino la
+  // lista se toma vacía, no "los cuatro": lo de "sin lista son los cuatro" es
+  // para leer claims viejos, no para escribir uno nuevo sin haber elegido.
+  const vendedores = Array.isArray(cuerpo.vendedoresObjetivos)
+    ? vendedoresObjetivosDel(cuerpo.vendedoresObjetivos)
+    : [];
+  // Objetivos sin ningún vendedor no abre ninguna página: se saca el módulo,
+  // para que no aparezca en el menú una entrada que lleva a un 403. La ruta
+  // de usuarios avisa antes de guardar (ver `faltaVendedorObjetivos`).
+  const ve = modulosValidos(cuerpo.modulos).filter(
+    (m) => m !== "objetivos" || vendedores.length > 0,
+  );
   const edita = modulosValidos(cuerpo.editar).filter((m) => ve.includes(m));
   const firma = necesitaUsuarioSigma(edita);
   return {
@@ -75,5 +111,18 @@ export function claimDeUsuario(cuerpo: CuerpoUsuario): ClaimUsuario {
     editar: edita,
     sigma: firma ? numeroPositivo(cuerpo.sigma) : null,
     nombre_sigma: firma ? textoNoVacio(cuerpo.nombreSigma) : null,
+    vendedores_objetivos: ve.includes("objetivos") ? vendedores : [],
   };
+}
+
+/**
+ * `true` si marcaron Objetivos sin elegir ningún vendedor. La ruta lo frena con
+ * un mensaje en vez de guardar el permiso sin el módulo, que se vería como que
+ * la casilla "no se guardó".
+ */
+export function faltaVendedorObjetivos(cuerpo: CuerpoUsuario): boolean {
+  return (
+    modulosValidos(cuerpo.modulos).includes("objetivos") &&
+    claimDeUsuario(cuerpo).vendedores_objetivos.length === 0
+  );
 }

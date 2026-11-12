@@ -429,6 +429,14 @@ nadie que pueda devolverlo desde la pantalla.
 | Precios TN | aprobar y rechazar cambios de precio, y correr la comparación |
 | los demás | nada: se ven o no se ven |
 
+**Objetivos se da vendedor por vendedor.** Al marcar la casilla aparecen las de
+Silvio, German, Pablo y Ricardo, y la persona ve sólo las páginas de los que
+estén marcados: la pestaña no aparece, y escribir la dirección de otro vendedor
+la rebota igual (lo decide `puedeVerVendedor`, que usan el proxy, la API y la
+página). Hay que marcar al menos uno. Se guarda en `vendedores_objetivos`; los
+permisos armados antes del 12/11/2026 no tienen esa lista y siguen viendo a los
+cuatro hasta que se los edite.
+
 Tres cosas que conviene saber antes de usarlo:
 
 - **Ver y editar dejaron de ser lo mismo.** Antes cada rol traía las dos juntas
