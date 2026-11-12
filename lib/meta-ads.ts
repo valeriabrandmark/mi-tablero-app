@@ -175,6 +175,71 @@ async function leerMarca(marca: Marca, token: string, cuenta: string): Promise<M
   };
 }
 
+/**
+ * Suma varias cuentas publicitarias de una misma marca.
+ *
+ * TODO SE SUMA EXACTO menos el ALCANCE: Meta deduplica personas dentro de una
+ * cuenta, no entre cuentas, así que una persona que vio anuncios de las dos
+ * cuentas cuenta dos veces. Es una cota de arriba; la frecuencia se recalcula
+ * con ese alcance y queda, por lo mismo, una cota de abajo.
+ */
+function combinar(partes: MetaAdsMarca[]): MetaAdsMarca {
+  if (partes.length === 1) return partes[0];
+  const sumar = (a: CampanaMeta, b: CampanaMeta): CampanaMeta => ({
+    ...a,
+    gasto: a.gasto + b.gasto,
+    impresiones: a.impresiones + b.impresiones,
+    clics: a.clics + b.clics,
+    compras: a.compras + b.compras,
+    valorCompras: a.valorCompras + b.valorCompras,
+  });
+  const porNombre = (listas: CampanaMeta[][]) => {
+    const m = new Map<string, CampanaMeta>();
+    for (const f of listas.flat()) m.set(f.nombre, m.has(f.nombre) ? sumar(m.get(f.nombre)!, f) : f);
+    return [...m.values()];
+  };
+  const porGasto = (a: CampanaMeta, b: CampanaMeta) => b.gasto - a.gasto;
+  const t = partes.map((p) => p.totales);
+  const suma = (k: keyof MetaAdsMarca["totales"]) => t.reduce((s, x) => s + x[k], 0);
+  const impresiones = suma("impresiones");
+  const alcance = suma("alcance");
+  return {
+    fuente: "meta",
+    totales: {
+      gasto: suma("gasto"),
+      impresiones,
+      alcance,
+      frecuencia: alcance ? impresiones / alcance : 0,
+      clics: suma("clics"),
+      compras: suma("compras"),
+      valorCompras: suma("valorCompras"),
+      conversaciones: suma("conversaciones"),
+    },
+    diario: partes[0].diario.map((d, i) =>
+      partes.slice(1).reduce(
+        (acc, p) => {
+          const o = p.diario[i];
+          return o
+            ? {
+                ...acc,
+                gasto: acc.gasto + o.gasto,
+                impresiones: acc.impresiones + o.impresiones,
+                clics: acc.clics + o.clics,
+                compras: acc.compras + o.compras,
+                valorCompras: acc.valorCompras + o.valorCompras,
+              }
+            : acc;
+        },
+        { ...d },
+      ),
+    ),
+    campanas: partes.flatMap((p) => p.campanas).sort(porGasto),
+    anuncios: partes.flatMap((p) => p.anuncios).sort(porGasto).slice(0, 10),
+    plataformas: porNombre(partes.map((p) => p.plataformas)).sort(porGasto),
+    edades: porNombre(partes.map((p) => p.edades)).sort((a, b) => a.nombre.localeCompare(b.nombre)),
+  };
+}
+
 const NOMBRE_PLATAFORMA: Record<string, string> = {
   instagram: "Instagram",
   facebook: "Facebook",
@@ -211,11 +276,17 @@ export async function leerMetaAds(): Promise<MetaAds> {
   const token = process.env.META_ADS_TOKEN?.trim();
   const pares = await Promise.all(
     MARCAS.map(async (m): Promise<[ClaveMarca, MetaAdsMarca]> => {
-      const cuenta = variable("META_ADS_CUENTA", m.clave);
+      // Puede haber MÁS DE UNA cuenta por marca, separadas por coma: Hola Toys
+      // tiene "Hola Toys Argentina" y "Hola Toys 2". Se leen todas y se suman.
+      const cuentas = (variable("META_ADS_CUENTA", m.clave) ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .filter(Boolean);
       if (!token) return [m.clave, demoMeta(m, "Falta META_ADS_TOKEN")];
-      if (!cuenta) return [m.clave, demoMeta(m, `Falta META_ADS_CUENTA_${m.clave.toUpperCase()}`)];
+      if (!cuentas.length) return [m.clave, demoMeta(m, `Falta META_ADS_CUENTA_${m.clave.toUpperCase()}`)];
       try {
-        return [m.clave, await leerMarca(m, token, cuenta)];
+        const porCuenta = await Promise.all(cuentas.map((c) => leerMarca(m, token, c)));
+        return [m.clave, combinar(porCuenta)];
       } catch (e) {
         const motivo = e instanceof Error ? e.message : String(e);
         console.error(`Meta Ads ${m.nombre}:`, motivo);
