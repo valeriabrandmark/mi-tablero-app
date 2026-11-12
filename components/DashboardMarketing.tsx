@@ -1203,10 +1203,10 @@ function SeccionTiendaNube({ m }: { m: Marca }) {
     <>
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-muted text-xs font-medium tracking-wide uppercase">Tienda Nube</h3>
-        <Chip color={atrasada ? AMBAR : VERDE}>
-          Importado · último pedido {fechaCorta(tn.ultimoPedido)}
+        <Chip color={atrasada && tn.origen === "importado" ? AMBAR : VERDE}>
+          {tn.origen === "api" ? "API" : "Importado"} · último pedido {fechaCorta(tn.ultimoPedido)}
         </Chip>
-        {atrasada && <span className="text-[11px]" style={{ color: AMBAR }}>Hace más de una semana que no se importa</span>}
+        {atrasada && tn.origen === "importado" && <span className="text-[11px]" style={{ color: AMBAR }}>Hace más de una semana que no se importa</span>}
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <TarjetaKpi titulo="Venta tienda (c/IVA)" valor={fmtMonedaCorta(tn.venta)} detalle={`${fmtNumero(tn.pedidos)} pedidos pagados`} />
@@ -1249,6 +1249,13 @@ function SeccionTiendaNube({ m }: { m: Marca }) {
           )}
         </Panel>
         <Panel titulo="Pedidos por provincia" nota="Dónde pega la pauta">
+          {tn.provincias.length === 0 ? (
+            <p className="text-muted text-sm">
+              {tn.origen === "api"
+                ? "La venta que trae el orquestador no guarda la provincia del pedido."
+                : "Sin pedidos este mes."}
+            </p>
+          ) : (
           <div className="h-60">
             <ResponsiveContainer>
               <BarChart data={tn.provincias} layout="vertical" margin={{ left: 10 }}>
@@ -1260,6 +1267,7 @@ function SeccionTiendaNube({ m }: { m: Marca }) {
               </BarChart>
             </ResponsiveContainer>
           </div>
+          )}
         </Panel>
       </div>
     </>
@@ -1297,12 +1305,17 @@ function PanelFuentes() {
       ) as Record<ClaveMarca, Estado>,
     },
     {
-      fuente: "Tienda Nube (CSV importado)",
+      fuente: "Tienda Nube (API Unibrandco · CSV el resto)",
       uso: "Venta de tienda, pedidos, ticket, cupones, clientes nuevos",
       porMarca: Object.fromEntries(
         MARCAS.map((m) => {
           const tn = venta.tiendaNube.porMarca[m.clave];
-          return [m.clave, tn ? { ok: true, texto: `Al ${fechaCorta(tn.ultimoPedido)}` } : { ok: false, texto: venta.tiendaNube.motivo ?? "Sin importar" }];
+          return [
+            m.clave,
+            tn
+              ? { ok: true, texto: `${tn.origen === "api" ? "API" : "CSV"} al ${fechaCorta(tn.ultimoPedido)}` }
+              : { ok: false, texto: venta.tiendaNube.motivo ?? "Sin importar" },
+          ];
         }),
       ) as Record<ClaveMarca, Estado>,
     },

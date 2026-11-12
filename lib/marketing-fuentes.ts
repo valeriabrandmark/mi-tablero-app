@@ -10,6 +10,8 @@ import type { MetaAds } from "@/lib/meta-ads-tipos";
  */
 
 export type DatosTiendaNube = {
+  /** "api": la tienda tiene API y la trae el orquestador; "importado": CSV. */
+  origen: "api" | "importado";
   venta: number;
   pedidos: number;
   /** Venta por día del mes, índice 0 = día 1. */

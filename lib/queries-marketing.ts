@@ -96,6 +96,7 @@ async function leerTiendaNube(): Promise<Partial<Record<ClaveMarca, DatosTiendaN
       for (const x of d) diaria[x.dia - 1] = Number(x.venta);
       const c = clientes.find((x) => x.marca === u.marca);
       out[u.marca] = {
+        origen: "importado",
         venta: d.reduce((s, x) => s + Number(x.venta), 0),
         pedidos: d.reduce((s, x) => s + Number(x.pedidos), 0),
         diaria: Array.from(diaria, (v) => v ?? 0),
@@ -200,14 +201,94 @@ async function leerTiendasNuevas(): Promise<number | string> {
   }
 }
 
+/**
+ * LA TIENDA DE UNIBRANDCO SÍ TIENE API: la lee el orquestador
+ * (tablero_quo/tiendanube.py) y llega a gold.fact_ventas con canal
+ * 'Tienda Nube', igual que la ve la página Venta minorista → Tienda Nube.
+ * Las otras tres tiendas no tienen el plan Escala y van por el importador.
+ *
+ * gold.fact_ventas tiene una fila por PRODUCTO y ya viene filtrada por el
+ * criterio de venta (pagado y no cancelado), así que acá no se vuelve a
+ * decidir. `total_linea` es con IVA, igual que el total del CSV importado.
+ * El cliente es el nombre del comprador: alcanza para nuevo vs. recurrente.
+ */
+async function leerUnibrandcoApi(): Promise<DatosTiendaNube | null> {
+  const CANAL_TN = "Tienda Nube";
+  const [dias, cupones, clientes, historia, ultimo] = await Promise.all([
+    query<{ dia: number; venta: string; pedidos: string }>(
+      `select extract(day from fecha)::int as dia, sum(total_linea) as venta,
+              count(distinct nro_orden) as pedidos
+         from gold.fact_ventas where canal = $1 and fecha >= ${INICIO_MES}
+        group by 1`,
+      [CANAL_TN],
+    ),
+    query<{ cupon: string; pedidos: string; venta: string }>(
+      `select upper(cupon) as cupon, count(distinct nro_orden) as pedidos, sum(total_linea) as venta
+         from gold.fact_ventas
+        where canal = $1 and fecha >= ${INICIO_MES} and cupon is not null and cupon <> ''
+        group by 1 order by 3 desc`,
+      [CANAL_TN],
+    ),
+    query<{ nuevos: string; recurrentes: string }>(
+      `with primera as (
+         select cliente, min(fecha) as primera from gold.fact_ventas
+          where canal = $1 and cliente is not null group by 1)
+       select count(distinct f.cliente) filter (where p.primera >= ${INICIO_MES}) as nuevos,
+              count(distinct f.cliente) filter (where p.primera <  ${INICIO_MES}) as recurrentes
+         from gold.fact_ventas f join primera p using (cliente)
+        where f.canal = $1 and f.fecha >= ${INICIO_MES}`,
+      [CANAL_TN],
+    ),
+    query<{ mes: string; venta: string }>(
+      `select to_char(date_trunc('month', fecha), 'YYYY-MM') as mes, sum(total_linea) as venta
+         from gold.fact_ventas
+        where canal = $1 and fecha >= ${INICIO_MES} - interval '3 months'
+        group by 1`,
+      [CANAL_TN],
+    ),
+    query<{ ultimo: string | null }>(
+      `select max(fecha)::text as ultimo from gold.fact_ventas where canal = $1`,
+      [CANAL_TN],
+    ),
+  ]);
+  if (!ultimo[0]?.ultimo) return null;
+  const diaria: number[] = [];
+  for (const x of dias) diaria[x.dia - 1] = Number(x.venta);
+  return {
+    origen: "api",
+    venta: dias.reduce((s, x) => s + Number(x.venta), 0),
+    pedidos: dias.reduce((s, x) => s + Number(x.pedidos), 0),
+    diaria: Array.from(diaria, (v) => v ?? 0),
+    cupones: cupones.map((x) => ({ cupon: x.cupon, pedidos: Number(x.pedidos), venta: Number(x.venta) })),
+    clientesNuevos: Number(clientes[0]?.nuevos ?? 0),
+    clientesRecurrentes: Number(clientes[0]?.recurrentes ?? 0),
+    historia: historia.map((x) => ({ mes: x.mes, venta: Number(x.venta) })),
+    // gold.fact_ventas no guarda la provincia del pedido de Tienda Nube.
+    provincias: [],
+    ultimoPedido: new Date(`${ultimo[0].ultimo}T12:00:00-03:00`).toISOString(),
+    ultimaImportacion: new Date().toISOString(),
+  };
+}
+
 export async function leerVentaReal(): Promise<DatosVentaReal> {
-  const [tiendaNube, mayorista, tiendasNuevas] = await Promise.all([
+  const [importado, mayorista, tiendasNuevas, unibrandco] = await Promise.all([
     leerTiendaNube(),
     leerMayorista(),
     leerTiendasNuevas(),
+    leerUnibrandcoApi().catch((e: unknown) => {
+      console.error("[marketing] Unibrandco API", e);
+      return null;
+    }),
   ]);
+  // Unibrandco por API pisa a un CSV que se haya importado de esa tienda.
+  // Si la tabla del importador falla, Unibrandco igual se ve: es otra fuente.
+  const porMarca = typeof importado === "string" ? {} : { ...importado };
+  if (unibrandco) porMarca.unibrandco = unibrandco;
   return {
-    tiendaNube: typeof tiendaNube === "string" ? { motivo: tiendaNube, porMarca: {} } : { porMarca: tiendaNube },
+    tiendaNube: {
+      motivo: typeof importado === "string" ? importado : undefined,
+      porMarca,
+    },
     mayorista: typeof mayorista === "string" ? { motivo: mayorista, porMarca: {} } : { porMarca: mayorista },
     tiendasNuevas: typeof tiendasNuevas === "string" ? { motivo: tiendasNuevas, cantidad: null } : { cantidad: tiendasNuevas },
   };
