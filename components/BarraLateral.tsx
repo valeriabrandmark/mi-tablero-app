@@ -36,7 +36,8 @@ export type ClaveIcono =
   | "operaciones"
   | "precios"
   | "costos"
-  | "factura";
+  | "factura"
+  | "marketing";
 
 /** Subpágina de un grupo. Lleva su propia marca porque es la que se mira. */
 export type ItemHijo = {
@@ -95,7 +96,8 @@ type ClaveTrazo =
   | "operaciones"
   | "precios"
   | "costos"
-  | "factura";
+  | "factura"
+  | "marketing";
 
 const TRAZOS: Record<ClaveTrazo, ReactNode> = {
   // Una lista con tildes: lo que se hace, no lo que se mira.
@@ -187,6 +189,18 @@ const TRAZOS: Record<ClaveTrazo, ReactNode> = {
       <path d="M6 2h9l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z" />
       <path d="M8 8h6M8 12h8" />
       <path d="m9 17 2 2 4-4" stroke={NARANJA} />
+    </>
+  ),
+  // Megáfono: la marca que se hace oír. El aro de la boca va en el naranja de
+  // la marca, como el centro del engranaje o el tilde de la factura: el
+  // acento dice de qué se trata y el resto sigue a `currentColor`.
+  marketing: (
+    <>
+      <path d="M3.5 10v4a1 1 0 0 0 1 1H7V9H4.5a1 1 0 0 0-1 1Z" />
+      <path d="M7 9 17.5 4.5v15L7 15" />
+      <path d="m8.2 15 1.5 4.5h2.4l-1.3-3.9" />
+      <path d="M17.5 4.5v15" stroke={NARANJA} />
+      <path d="M20.5 10a2.5 2.5 0 0 1 0 4" stroke={NARANJA} />
     </>
   ),
   stock: (
