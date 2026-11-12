@@ -1538,7 +1538,7 @@ function Deadlines({ marca }: { marca: ClaveMarca | null }) {
       titulo="Deadlines y entregas"
       nota={
         planReal
-          ? "De Marketing → Planificación · fecha comprometida vs real · meta 100 % a tiempo"
+          ? "De Mis tareas → Marketing · fecha comprometida vs real · meta 100 % a tiempo"
           : "Datos de ejemplo"
       }
     >
@@ -1547,7 +1547,7 @@ function Deadlines({ marca }: { marca: ClaveMarca | null }) {
           <Chip color={AMBAR}>Ejemplo</Chip>
           <span className="text-muted">
             {plan.motivo ?? "No hay iniciativas cargadas para este período."} Se cargan en{" "}
-            <a href="/marketing/planificacion" className="text-c1 hover:underline">Marketing → Planificación</a>.
+            <a href="/tareas/marketing" className="text-c1 hover:underline">Mis tareas → Marketing</a>.
           </span>
         </div>
       )}

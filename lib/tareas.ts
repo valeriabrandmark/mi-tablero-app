@@ -22,4 +22,13 @@ export const PAGINAS_TAREAS = [
     href: `${RAIZ_TAREAS}/mercado-libre`,
     icono: "mercadolibre",
   },
+  {
+    // La planificación del área de marca: calendario comercial, iniciativas y
+    // subtareas pendientes. Sólo el superadmin, igual que todo /marketing
+    // (ver RUTAS_MARKETING en lib/permisos.ts).
+    slug: "marketing",
+    label: "Marketing",
+    href: `${RAIZ_TAREAS}/marketing`,
+    icono: "calendario",
+  },
 ] as const;

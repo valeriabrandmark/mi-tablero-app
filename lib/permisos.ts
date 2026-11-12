@@ -241,7 +241,7 @@ function esDeCostos(pathname: string): boolean {
  * de lib/modulos.ts a propósito, así que ningún permiso personalizado lo abre.
  * Cuando se decida que Agatina vea su propio tablero, se abre acá.
  */
-const RUTAS_MARKETING = ["/marketing", "/api/marketing"];
+const RUTAS_MARKETING = ["/marketing", "/api/marketing", "/tareas/marketing"];
 
 function esDeMarketing(pathname: string): boolean {
   return RUTAS_MARKETING.some((r) => pathname === r || pathname.startsWith(`${r}/`));

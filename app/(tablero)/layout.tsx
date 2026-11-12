@@ -77,9 +77,8 @@ const NAV: ItemNav[] = [
     icono: "marketing",
     hijos: [
       { href: "/marketing", label: "Tablero de Marca", icono: "marketing" },
-      // Lo que se HACE, al lado de lo que se MIRA: calendario comercial,
-      // iniciativas con brief y subtareas. Ver components/Planificacion.tsx.
-      { href: "/marketing/planificacion", label: "Planificación", icono: "calendario" },
+      // La Planificación NO va acá: es para hacer, no para mirar, así que vive
+      // en "Mis tareas → Marketing" (lib/tareas.ts).
       // Las tiendas de las marcas no tienen API (falta el plan Escala): los
       // pedidos entran subiendo el CSV de Ventas que exporta Tienda Nube.
       { href: "/marketing/importar", label: "Importar Tienda Nube", icono: "tiendanube" },

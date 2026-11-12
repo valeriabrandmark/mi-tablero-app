@@ -1,14 +1,9 @@
-import Planificacion from "@/components/Planificacion";
-
-export const dynamic = "force-dynamic";
-
-export const metadata = { title: "Planificación — Tablero Brandmark" };
+import { redirect } from "next/navigation";
 
 /**
- * Marketing → Planificación: calendario comercial, iniciativas con brief y
- * subtareas. Sólo el superadmin, como todo /marketing (lib/permisos.ts).
- * Tablas en migraciones/marketing_planificacion.sql.
+ * La planificación se mudó a "Mis tareas → Marketing". Se deja la ruta vieja
+ * redirigiendo para que no se rompa un link guardado.
  */
-export default function PlanificacionPage() {
-  return <Planificacion />;
+export default function PlanificacionVieja() {
+  redirect("/tareas/marketing");
 }
