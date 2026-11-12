@@ -21,6 +21,7 @@ import { CajaTooltip, FilaTooltip } from "@/components/charts/TooltipOscuro";
 import { fmtMoneda, fmtNumero } from "@/lib/format";
 import { TEMA } from "@/lib/paleta";
 import type { DatosTablero } from "@/lib/marketing-fuentes";
+import { aTiempo as aTiempoPlan, avance as avancePlan, riesgo as riesgoPlan } from "@/lib/planificacion";
 import { avance, proyectar as proyectarP, type Periodo } from "@/lib/marketing-periodo";
 import FiltroPeriodo from "@/components/FiltroPeriodoMarketing";
 import {
@@ -50,7 +51,9 @@ import {
   ventaTotal,
   type ClaveMarca,
   type EstadoFuente,
+  type Colaboracion,
   type EstadoHito,
+  type Hito,
   type Marca,
 } from "@/lib/marketing-demo";
 
@@ -106,7 +109,16 @@ function semaforo(cumplimiento: number): string {
  * Las fuentes reales, para cualquier panel que necesite saber de dónde salió
  * su número. Va por contexto porque la consultan paneles a varios niveles.
  */
-const Fuentes = createContext<(DatosTablero & { periodo: Periodo }) | null>(null);
+type Contexto = DatosTablero & {
+  periodo: Periodo;
+  /** Fechas límite: de Planificación si hay algo cargado, si no el ejemplo. */
+  hitos: Hito[];
+  /** Colaboraciones con influencers: ídem. */
+  colaboraciones: Colaboracion[];
+  /** true = hitos y colaboraciones salen de Planificación. */
+  planReal: boolean;
+};
+const Fuentes = createContext<Contexto | null>(null);
 function useFuentes() {
   const f = useContext(Fuentes);
   if (!f) throw new Error("Falta el proveedor de fuentes");
@@ -236,7 +248,14 @@ type FilaScore = {
   peso: number;
 };
 
-function armarScorecard(marcas: Marca[], tiendasNuevasReal: number | null, P: Periodo): FilaScore[] {
+function armarScorecard(
+  marcas: Marca[],
+  tiendasNuevasReal: number | null,
+  P: Periodo,
+  HITOS: Hito[],
+  COLABORACIONES: Colaboracion[],
+  planReal: boolean,
+): FilaScore[] {
   const proyectar = (v: number) => proyectarP(v, P);
   const AVANCE_MES = avance(P);
   const metaInfluencers = Math.max(1, Math.round(META_INFLUENCERS_MES * P.factor));
@@ -249,8 +268,11 @@ function armarScorecard(marcas: Marca[], tiendasNuevasReal: number | null, P: Pe
   const pautaDias = propias.reduce((s, m) => s + m.diasPautaActiva, 0) / propias.length;
   const pubs = propias.flatMap((m) => m.publicacionesPorSemana);
   const pubsProm = pubs.reduce((s, v) => s + v, 0) / pubs.length;
-  const navidad = HITOS.find((h) => h.que.startsWith("Campaña de Navidad"))!;
-  const revistas = HITOS.filter((h) => h.que.startsWith("Revista") && h.entregado);
+  const navidad = HITOS.find((h) => /navidad/i.test(h.que)) ?? null;
+  const revistas = HITOS.filter((h) => /revista/i.test(h.que) && h.entregado);
+  const revistasATiempo = revistas.filter((h) => h.aTiempo ?? true).length;
+  const conFecha = HITOS.filter((h) => h.entregado || h.estado === "atrasado");
+  const puntuales = conFecha.filter((h) => h.entregado && (h.aTiempo ?? true)).length;
   const presupuesto = propias.reduce((s, m) => s + (m.presupuestoMes ?? 0), 0);
   const gastado = propias.reduce((s, m) => s + gastoTotal(m), 0);
   const ejec = gastado / presupuesto;
@@ -281,20 +303,43 @@ function armarScorecard(marcas: Marca[], tiendasNuevasReal: number | null, P: Pe
       cumplimiento: pubsProm / META_PUBLICACIONES_SEMANA,
       peso: 0.1,
     },
+    // Con Planificación cargada, estas dos filas dejan de ser fechas sueltas
+    // y pasan a medir el plan entero: entregas a tiempo y campaña estacional.
+    planReal
+      ? {
+          grupo: "Actividad",
+          meta: "Entregas a tiempo (Planificación)",
+          objetivo: "100 %",
+          real: conFecha.length ? `${puntuales} de ${conFecha.length}` : "Nada venció",
+          cumplimiento: conFecha.length ? puntuales / conFecha.length : 1,
+          peso: 0.1,
+        }
+      : {
+          grupo: "Actividad",
+          meta: "Campaña de Navidad publicada",
+          objetivo: navidad ? `antes del ${navidad.vence}` : "—",
+          real: navidad ? ESTADO_HITO[navidad.estado].label : "Sin cargar",
+          cumplimiento: !navidad ? 0 : navidad.estado === "hecho" ? 1 : navidad.estado === "en_curso" ? 0.5 : 0,
+          peso: 0.1,
+        },
     {
       grupo: "Actividad",
-      meta: "Campaña de Navidad publicada",
-      objetivo: `antes del ${navidad.vence}`,
-      real: ESTADO_HITO[navidad.estado].label,
-      cumplimiento: navidad.estado === "hecho" ? 1 : navidad.estado === "en_curso" ? 0.5 : 0,
-      peso: 0.1,
-    },
-    {
-      grupo: "Actividad",
-      meta: "Revista entregada antes del día 5",
-      objetivo: "100 % a tiempo",
-      real: `${revistas.length} de ${revistas.length}`,
-      cumplimiento: 1,
+      meta: planReal ? "Campaña de Navidad (Planificación)" : "Revista entregada antes del día 5",
+      objetivo: planReal ? (navidad ? `antes del ${navidad.vence}` : "Cargarla") : "100 % a tiempo",
+      real: planReal
+        ? navidad
+          ? `${ESTADO_HITO[navidad.estado].label} · ${Math.round((navidad.avance ?? 0) * 100)} %`
+          : "No está cargada"
+        : `${revistasATiempo} de ${revistas.length}`,
+      cumplimiento: planReal
+        ? navidad
+          ? navidad.estado === "hecho"
+            ? (navidad.aTiempo ?? true) ? 1 : 0.5
+            : (navidad.avance ?? 0)
+          : 0
+        : revistas.length
+          ? revistasATiempo / revistas.length
+          : 1,
       peso: 0.1,
     },
     {
@@ -344,8 +389,8 @@ function armarScorecard(marcas: Marca[], tiendasNuevasReal: number | null, P: Pe
 }
 
 function Scorecard({ marcas }: { marcas: Marca[] }) {
-  const { venta, periodo } = useFuentes();
-  const filas = armarScorecard(marcas, venta.tiendasNuevas.cantidad, periodo);
+  const { venta, periodo, hitos, colaboraciones, planReal } = useFuentes();
+  const filas = armarScorecard(marcas, venta.tiendasNuevas.cantidad, periodo, hitos, colaboraciones, planReal);
   const total = filas.reduce((s, f) => s + f.peso * Math.min(f.cumplimiento, 1), 0);
   const porGrupo = (["Actividad", "Venta", "Gestión"] as const).map((g) => {
     const fs = filas.filter((f) => f.grupo === g);
@@ -414,6 +459,7 @@ function Scorecard({ marcas }: { marcas: Marca[] }) {
 
 function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) {
   const P = usePeriodo();
+  const { hitos: HITOS, colaboraciones: COLABORACIONES } = useFuentes();
   const proyectar = (v: number) => proyectarP(v, P);
   const AVANCE_MES = avance(P);
   const asignado = marcas.reduce((s, m) => s + (m.presupuestoMes ?? 0), 0);
@@ -423,7 +469,7 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
   const objetivoPropias = propias.reduce((s, m) => s + (m.ventaObjetivoMes ?? 0), 0);
   const proyPropias = propias.reduce((s, m) => s + proyectar(ventaTotal(m)), 0);
   const entregas = HITOS.filter((h) => h.entregado);
-  const aTiempo = entregas.filter((h) => h.estado === "hecho").length;
+  const aTiempo = entregas.filter((h) => h.aTiempo ?? true).length;
   const atrasados = HITOS.filter((h) => h.estado === "atrasado").length;
   const costoInf = COLABORACIONES.reduce((s, c) => s + c.costo, 0);
   const ventaInf = COLABORACIONES.reduce((s, c) => s + c.ventaAtribuida, 0);
@@ -609,7 +655,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
   const may = fuentes.venta.mayorista.porMarca[m.clave];
   // Con pedidos importados, los canjes y la venta de cada cupón salen de
   // Tienda Nube; el costo de la colaboración sigue siendo carga manual.
-  const colabs = COLABORACIONES.filter((c) => c.marca === m.clave).map((c) => {
+  const colabs = fuentes.colaboraciones.filter((c) => c.marca === m.clave).map((c) => {
     const real = tn?.cupones.find((x) => x.cupon === c.cupon.toUpperCase());
     return tn ? { ...c, canjes: real?.pedidos ?? 0, ventaAtribuida: real?.venta ?? 0 } : c;
   });
@@ -1383,7 +1429,7 @@ function SeccionTiendaNube({ m }: { m: Marca }) {
  * panel es esa lista de hallazgos, y se achica sola a medida que se conecta.
  */
 function PanelFuentes() {
-  const { meta, instagram, venta } = useFuentes();
+  const { meta, instagram, venta, plan, planReal } = useFuentes();
   type Estado = { ok: boolean; texto: string };
   const filas: { fuente: string; uso: string; porMarca: Record<ClaveMarca, Estado> | null; general?: Estado }[] = [
     {
@@ -1434,8 +1480,16 @@ function PanelFuentes() {
       ) as Record<ClaveMarca, Estado>,
     },
     {
+      fuente: "Planificación",
+      uso: "Fechas límite, entregas a tiempo, influencers (costo y cupón)",
+      porMarca: null,
+      general: planReal
+        ? { ok: true, texto: `${plan.iniciativas.length} iniciativa(s) en el período` }
+        : { ok: false, texto: plan.motivo ?? "Sin iniciativas cargadas: se ven ejemplos" },
+    },
+    {
       fuente: "Carga manual",
-      uso: "Costo de influencers, leads, mensajes, fechas límite, Google Ads",
+      uso: "Leads, mensajes y tiempo de respuesta, Google Ads",
       porMarca: null,
       general: { ok: false, texto: "Datos de ejemplo · falta el formulario de carga" },
     },
@@ -1460,7 +1514,7 @@ function PanelFuentes() {
                 })
               : (
                 <td colSpan={MARCAS.length} className="px-2 py-2">
-                  <Chip color={AMBAR}>{f.general!.texto}</Chip>
+                  <Chip color={f.general!.ok ? VERDE : AMBAR}>{f.general!.texto}</Chip>
                 </td>
               )}
           </tr>
@@ -1475,24 +1529,56 @@ function PanelFuentes() {
 // ---------------------------------------------------------------------------
 
 function Deadlines({ marca }: { marca: ClaveMarca | null }) {
-  const hitos = HITOS.filter((h) => marca === null || h.marca === marca || h.marca === "todas");
+  const { hitos: todos, planReal, plan } = useFuentes();
+  const hitos = todos.filter((h) => marca === null || h.marca === marca || h.marca === "todas");
   const nombre = (k: ClaveMarca | "todas") =>
     k === "todas" ? "Todas" : (MARCAS.find((m) => m.clave === k)?.nombre ?? k);
   return (
-    <Panel titulo="Deadlines y entregas" nota="Fecha comprometida vs fecha real · meta 100 % a tiempo">
-      <Tabla cabecera={["Entrega", "Marca", "Vence", "Entregado", "Presupuesto", "Responsable", "Estado"]}>
+    <Panel
+      titulo="Deadlines y entregas"
+      nota={
+        planReal
+          ? "De Marketing → Planificación · fecha comprometida vs real · meta 100 % a tiempo"
+          : "Datos de ejemplo"
+      }
+    >
+      {!planReal && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+          <Chip color={AMBAR}>Ejemplo</Chip>
+          <span className="text-muted">
+            {plan.motivo ?? "No hay iniciativas cargadas para este período."} Se cargan en{" "}
+            <a href="/marketing/planificacion" className="text-c1 hover:underline">Marketing → Planificación</a>.
+          </span>
+        </div>
+      )}
+      {planReal && hitos.length === 0 && <p className="text-muted mb-2 text-sm">Nada que venza en este período.</p>}
+      <Tabla cabecera={["Entrega", "Marca", "Vence", "Entregado", "Avance", "Presupuesto", "Responsable", "Estado"]}>
         {hitos.map((h) => (
-          <tr key={h.que}>
+          <tr key={`${h.que}-${h.vence}`}>
             <td className="px-2 py-2">{h.que}</td>
             <td className="text-muted px-2 py-2 text-xs whitespace-nowrap">{nombre(h.marca)}</td>
             <td className="px-2 py-2 tabular-nums">{h.vence}</td>
             <td className="px-2 py-2 tabular-nums">{h.entregado ?? "—"}</td>
+            <td className="w-28 px-2 py-2">
+              {h.avance === undefined ? (
+                <span className="text-muted">—</span>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Barrita valor={h.avance} color={ESTADO_HITO[h.estado].color} />
+                  <span className="text-muted w-9 text-right text-[11px] tabular-nums">{Math.round(h.avance * 100)}%</span>
+                </div>
+              )}
+            </td>
             <td className="px-2 py-2 tabular-nums">
               {h.presupuesto ? fmtMonedaCorta(h.presupuesto) : "—"}
             </td>
             <td className="text-muted px-2 py-2 text-xs whitespace-nowrap">{h.responsable}</td>
             <td className="px-2 py-2">
-              <Chip color={ESTADO_HITO[h.estado].color}>{ESTADO_HITO[h.estado].label}</Chip>
+              {h.estado === "hecho" && h.aTiempo === false ? (
+                <Chip color={AMBAR}>Entregado tarde</Chip>
+              ) : (
+                <Chip color={ESTADO_HITO[h.estado].color}>{ESTADO_HITO[h.estado].label}</Chip>
+              )}
             </td>
           </tr>
         ))}
@@ -1597,6 +1683,53 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
   });
   const marca = marcas.find((m) => m.clave === vista) ?? null;
 
+  // PLANIFICACIÓN PISA AL EJEMPLO en fechas límite e influencers apenas hay
+  // UNA iniciativa cargada. Entran las que vencen en el período y las que
+  // siguen abiertas con la fecha pasada (las atrasadas no desaparecen solas).
+  const ddmm = (iso: string | null) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : undefined);
+  const delPeriodo = datos.plan.iniciativas.filter(
+    (i) =>
+      i.estado !== "cancelada" &&
+      ((i.vence >= P.desde && i.vence <= P.hasta) || (i.vence < P.desde && i.estado !== "entregada")),
+  );
+  const planReal = datos.plan.iniciativas.length > 0;
+  const hitos: Hito[] = planReal
+    ? delPeriodo
+        .filter((i) => i.tipo !== "influencer")
+        .map((i) => {
+          const r = riesgoPlan(i, P.hoy);
+          return {
+            que: i.titulo,
+            marca: i.marca,
+            vence: ddmm(i.vence)!,
+            entregado: i.estado === "entregada" ? ddmm(i.entregadoEn ?? i.vence) : undefined,
+            estado:
+              r === "entregada" ? "hecho" : r === "atrasada" ? "atrasado" : i.estado === "en_curso" || i.estado === "en_revision" ? "en_curso" : "pendiente",
+            responsable: i.responsable ?? "—",
+            presupuesto: i.presupuesto ?? undefined,
+            aTiempo: aTiempoPlan(i) ?? undefined,
+            avance: avancePlan(i),
+          };
+        })
+    : HITOS;
+  const colaboraciones: Colaboracion[] = planReal
+    ? delPeriodo
+        .filter((i) => i.tipo === "influencer" && i.marca !== "todas")
+        .map((i) => {
+          const cupon = (i.cupon ?? "").toUpperCase();
+          const usado = real.tiendaNube.porMarca[i.marca as ClaveMarca]?.cupones.find((c) => c.cupon === cupon);
+          return {
+            marca: i.marca as ClaveMarca,
+            influencer: i.titulo,
+            fecha: ddmm(i.vence)!,
+            cupon: cupon || "—",
+            costo: i.gasto ?? i.presupuesto ?? 0,
+            canjes: usado?.pedidos ?? 0,
+            ventaAtribuida: usado?.venta ?? 0,
+          };
+        })
+    : COLABORACIONES;
+
   const opciones: { clave: ClaveMarca | "todas"; nombre: string; color: string }[] = [
     { clave: "todas", nombre: "Consolidado", color: TEMA.ink },
     ...marcas.map((m) => ({ clave: m.clave, nombre: m.nombre, color: m.color })),
@@ -1640,7 +1773,7 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
         })}
       </nav>
 
-      <Fuentes.Provider value={{ ...datos, periodo: P }}>
+      <Fuentes.Provider value={{ ...datos, periodo: P, hitos, colaboraciones, planReal }}>
         {marca ? (
           <VistaMarca key={marca.clave} m={marca} meta={meta[marca.clave]} />
         ) : (
