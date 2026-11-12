@@ -7,8 +7,8 @@ import type { DatosMayorista, DatosTiendaNube, DatosVentaReal } from "@/lib/mark
  * Lo que el Tablero de Marca lee de la base: los pedidos de Tienda Nube que se
  * importaron a mano y la venta mayorista por marca que ya viene de SIGMA.
  *
- * Todo es del MES CALENDARIO en curso, en hora argentina: las metas del
- * acuerdo de rol son por mes ("$17MM/mes"), no por mes comercial.
+ * Todo se calcula sobre el PERÍODO que elige el filtro (mes calendario por
+ * omisión, mes comercial, o un rango), en hora argentina.
  *
  * Si una consulta falla (sin base en local, tabla sin crear), esa parte vuelve
  * `null` y la pantalla muestra el ejemplo con el motivo. No se tapa el error
@@ -16,7 +16,11 @@ import type { DatosMayorista, DatosTiendaNube, DatosVentaReal } from "@/lib/mark
  */
 
 const TZ = "America/Argentina/Buenos_Aires";
-const INICIO_MES = `date_trunc('month', now() at time zone '${TZ}')::date`;
+/**
+ * Todas las consultas reciben el período como `desde` y `hasta` (YYYY-MM-DD,
+ * puntas incluidas). Ya no es "el mes en curso": lo elige el filtro.
+ */
+type Rango = { desde: string; hasta: string };
 
 /**
  * Cómo aparece cada marca en `gold.fact_ventas.marca` (lo que carga SIGMA).
@@ -38,22 +42,24 @@ function motivoDe(e: unknown): string {
   return m;
 }
 
-async function leerTiendaNube(): Promise<Partial<Record<ClaveMarca, DatosTiendaNube>> | string> {
+async function leerTiendaNube(r: Rango): Promise<Partial<Record<ClaveMarca, DatosTiendaNube>> | string> {
   try {
     const [dias, cupones, clientes, historia, ultima, provincias] = await Promise.all([
       query<{ marca: ClaveMarca; dia: number; venta: string; pedidos: string }>(
-        `select marca, extract(day from fecha at time zone '${TZ}')::int as dia,
+        `select marca, ((fecha at time zone '${TZ}')::date - $1::date) + 1 as dia,
                 sum(total) as venta, count(*) as pedidos
            from bronze.mkt_tn_pedidos
-          where es_venta and (fecha at time zone '${TZ}')::date >= ${INICIO_MES}
+          where es_venta and (fecha at time zone '${TZ}')::date between $1::date and $2::date
           group by 1, 2`,
+        [r.desde, r.hasta],
       ),
       query<{ marca: ClaveMarca; cupon: string; pedidos: string; venta: string }>(
         `select marca, upper(cupon) as cupon, count(*) as pedidos, sum(total) as venta
            from bronze.mkt_tn_pedidos
           where es_venta and cupon is not null
-            and (fecha at time zone '${TZ}')::date >= ${INICIO_MES}
+            and (fecha at time zone '${TZ}')::date between $1::date and $2::date
           group by 1, 2 order by 4 desc`,
+        [r.desde, r.hasta],
       ),
       // Nuevo = su primera compra pagada en esa tienda es de este mes.
       query<{ marca: ClaveMarca; nuevos: string; recurrentes: string }>(
@@ -63,19 +69,21 @@ async function leerTiendaNube(): Promise<Partial<Record<ClaveMarca, DatosTiendaN
             where es_venta and cliente_hash is not null
             group by 1, 2)
          select p.marca,
-                count(distinct p.cliente_hash) filter (where (pr.primera at time zone '${TZ}')::date >= ${INICIO_MES}) as nuevos,
-                count(distinct p.cliente_hash) filter (where (pr.primera at time zone '${TZ}')::date <  ${INICIO_MES}) as recurrentes
+                count(distinct p.cliente_hash) filter (where (pr.primera at time zone '${TZ}')::date >= $1::date) as nuevos,
+                count(distinct p.cliente_hash) filter (where (pr.primera at time zone '${TZ}')::date <  $1::date) as recurrentes
            from bronze.mkt_tn_pedidos p
            join primera pr using (marca, cliente_hash)
-          where p.es_venta and (p.fecha at time zone '${TZ}')::date >= ${INICIO_MES}
+          where p.es_venta and (p.fecha at time zone '${TZ}')::date between $1::date and $2::date
           group by 1`,
+        [r.desde, r.hasta],
       ),
       query<{ marca: ClaveMarca; mes: string; venta: string }>(
         `select marca, to_char(date_trunc('month', fecha at time zone '${TZ}'), 'YYYY-MM') as mes,
                 sum(total) as venta
            from bronze.mkt_tn_pedidos
-          where es_venta and (fecha at time zone '${TZ}')::date >= ${INICIO_MES} - interval '3 months'
+          where es_venta and (fecha at time zone '${TZ}')::date between date_trunc('month', $1::date) - interval '3 months' and $1::date
           group by 1, 2`,
+        [r.hasta],
       ),
       query<{ marca: ClaveMarca; ultimo_pedido: string; ultima_importacion: string }>(
         `select marca, max(fecha) as ultimo_pedido, max(importado_en) as ultima_importacion
@@ -84,8 +92,9 @@ async function leerTiendaNube(): Promise<Partial<Record<ClaveMarca, DatosTiendaN
       query<{ marca: ClaveMarca; provincia: string; pedidos: string }>(
         `select marca, coalesce(provincia, 'Sin dato') as provincia, count(*) as pedidos
            from bronze.mkt_tn_pedidos
-          where es_venta and (fecha at time zone '${TZ}')::date >= ${INICIO_MES}
+          where es_venta and (fecha at time zone '${TZ}')::date between $1::date and $2::date
           group by 1, 2`,
+        [r.desde, r.hasta],
       ),
     ]);
 
@@ -123,19 +132,19 @@ async function leerTiendaNube(): Promise<Partial<Record<ClaveMarca, DatosTiendaN
   }
 }
 
-async function leerMayorista(): Promise<Partial<Record<ClaveMarca, DatosMayorista>> | string> {
+async function leerMayorista(r: Rango): Promise<Partial<Record<ClaveMarca, DatosMayorista>> | string> {
   const marcas = Object.entries(PATRON_MARCA_SIGMA) as [ClaveMarca, string][];
   try {
     const [dias, historia, tiendas] = await Promise.all([
       query<{ clave: ClaveMarca; dia: number; venta: string }>(
-        `select m.clave, extract(day from fv.fecha)::int as dia,
+        `select m.clave, (fv.fecha - $4::date) + 1 as dia,
                 sum(fv.precio_neto * fv.cantidad)::numeric as venta
            from gold.fact_ventas fv
            join unnest($2::text[], $3::text[]) as m(clave, patron)
              on upper(fv.marca) like m.patron
-          where fv.canal = $1 and fv.fecha >= ${INICIO_MES}
+          where fv.canal = $1 and fv.fecha between $4::date and $5::date
           group by 1, 2`,
-        [CANAL_MAYORISTA, marcas.map(([k]) => k), marcas.map(([, p]) => p)],
+        [CANAL_MAYORISTA, marcas.map(([k]) => k), marcas.map(([, p]) => p), r.desde, r.hasta],
       ),
       query<{ clave: ClaveMarca; mes: string; venta: string }>(
         `select m.clave, to_char(date_trunc('month', fv.fecha), 'YYYY-MM') as mes,
@@ -143,9 +152,9 @@ async function leerMayorista(): Promise<Partial<Record<ClaveMarca, DatosMayorist
            from gold.fact_ventas fv
            join unnest($2::text[], $3::text[]) as m(clave, patron)
              on upper(fv.marca) like m.patron
-          where fv.canal = $1 and fv.fecha >= ${INICIO_MES} - interval '3 months'
+          where fv.canal = $1 and fv.fecha between date_trunc('month', $4::date) - interval '3 months' and $4::date
           group by 1, 2`,
-        [CANAL_MAYORISTA, marcas.map(([k]) => k), marcas.map(([, p]) => p)],
+        [CANAL_MAYORISTA, marcas.map(([k]) => k), marcas.map(([, p]) => p), r.hasta],
       ),
       // Tiendas que compran la marca por PRIMERA VEZ este mes. Es la mitad
       // "demanda" de las tiendas nuevas: Agatina la genera, el comisionista
@@ -159,9 +168,9 @@ async function leerMayorista(): Promise<Partial<Record<ClaveMarca, DatosMayorist
                on upper(fv.marca) like m.patron
             where fv.canal = $1 and fv.precio_neto * fv.cantidad > 0
             group by 1, 2)
-         select clave, count(*) filter (where primera >= ${INICIO_MES}) as nuevas
+         select clave, count(*) filter (where primera between $4::date and $5::date) as nuevas
            from primera group by 1`,
-        [CANAL_MAYORISTA, marcas.map(([k]) => k), marcas.map(([, p]) => p)],
+        [CANAL_MAYORISTA, marcas.map(([k]) => k), marcas.map(([, p]) => p), r.desde, r.hasta],
       ),
     ]);
     const out: Partial<Record<ClaveMarca, DatosMayorista>> = {};
@@ -185,15 +194,15 @@ async function leerMayorista(): Promise<Partial<Record<ClaveMarca, DatosMayorist
 }
 
 /** Tiendas (clientes mayoristas) cuya PRIMERA compra de cualquier marca es de este mes. */
-async function leerTiendasNuevas(): Promise<number | string> {
+async function leerTiendasNuevas(r: Rango): Promise<number | string> {
   try {
     const [fila] = await query<{ nuevas: string }>(
       `select count(*) as nuevas from (
          select cliente from gold.fact_ventas
           where canal = $1 and precio_neto * cantidad > 0
           group by cliente
-         having min(fecha) >= ${INICIO_MES}) t`,
-      [CANAL_MAYORISTA],
+         having min(fecha) between $2::date and $3::date) t`,
+      [CANAL_MAYORISTA, r.desde, r.hasta],
     );
     return Number(fila?.nuevas ?? 0);
   } catch (e) {
@@ -212,39 +221,39 @@ async function leerTiendasNuevas(): Promise<number | string> {
  * decidir. `total_linea` es con IVA, igual que el total del CSV importado.
  * El cliente es el nombre del comprador: alcanza para nuevo vs. recurrente.
  */
-async function leerUnibrandcoApi(): Promise<DatosTiendaNube | null> {
+async function leerUnibrandcoApi(r: Rango): Promise<DatosTiendaNube | null> {
   const CANAL_TN = "Tienda Nube";
   const [dias, cupones, clientes, historia, ultimo] = await Promise.all([
     query<{ dia: number; venta: string; pedidos: string }>(
-      `select extract(day from fecha)::int as dia, sum(total_linea) as venta,
+      `select (fecha - $2::date) + 1 as dia, sum(total_linea) as venta,
               count(distinct nro_orden) as pedidos
-         from gold.fact_ventas where canal = $1 and fecha >= ${INICIO_MES}
+         from gold.fact_ventas where canal = $1 and fecha between $2::date and $3::date
         group by 1`,
-      [CANAL_TN],
+      [CANAL_TN, r.desde, r.hasta],
     ),
     query<{ cupon: string; pedidos: string; venta: string }>(
       `select upper(cupon) as cupon, count(distinct nro_orden) as pedidos, sum(total_linea) as venta
          from gold.fact_ventas
-        where canal = $1 and fecha >= ${INICIO_MES} and cupon is not null and cupon <> ''
+        where canal = $1 and fecha between $2::date and $3::date and cupon is not null and cupon <> ''
         group by 1 order by 3 desc`,
-      [CANAL_TN],
+      [CANAL_TN, r.desde, r.hasta],
     ),
     query<{ nuevos: string; recurrentes: string }>(
       `with primera as (
          select cliente, min(fecha) as primera from gold.fact_ventas
           where canal = $1 and cliente is not null group by 1)
-       select count(distinct f.cliente) filter (where p.primera >= ${INICIO_MES}) as nuevos,
-              count(distinct f.cliente) filter (where p.primera <  ${INICIO_MES}) as recurrentes
+       select count(distinct f.cliente) filter (where p.primera >= $2::date) as nuevos,
+              count(distinct f.cliente) filter (where p.primera <  $2::date) as recurrentes
          from gold.fact_ventas f join primera p using (cliente)
-        where f.canal = $1 and f.fecha >= ${INICIO_MES}`,
-      [CANAL_TN],
+        where f.canal = $1 and f.fecha between $2::date and $3::date`,
+      [CANAL_TN, r.desde, r.hasta],
     ),
     query<{ mes: string; venta: string }>(
       `select to_char(date_trunc('month', fecha), 'YYYY-MM') as mes, sum(total_linea) as venta
          from gold.fact_ventas
-        where canal = $1 and fecha >= ${INICIO_MES} - interval '3 months'
+        where canal = $1 and fecha between date_trunc('month', $2::date) - interval '3 months' and $2::date
         group by 1`,
-      [CANAL_TN],
+      [CANAL_TN, r.hasta],
     ),
     query<{ ultimo: string | null }>(
       `select max(fecha)::text as ultimo from gold.fact_ventas where canal = $1`,
@@ -270,12 +279,13 @@ async function leerUnibrandcoApi(): Promise<DatosTiendaNube | null> {
   };
 }
 
-export async function leerVentaReal(): Promise<DatosVentaReal> {
+/** `hasta` es el último día CON DATOS: hoy si el período sigue abierto. */
+export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
   const [importado, mayorista, tiendasNuevas, unibrandco] = await Promise.all([
-    leerTiendaNube(),
-    leerMayorista(),
-    leerTiendasNuevas(),
-    leerUnibrandcoApi().catch((e: unknown) => {
+    leerTiendaNube(r),
+    leerMayorista(r),
+    leerTiendasNuevas(r),
+    leerUnibrandcoApi(r).catch((e: unknown) => {
       console.error("[marketing] Unibrandco API", e);
       return null;
     }),

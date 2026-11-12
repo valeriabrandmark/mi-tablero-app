@@ -74,9 +74,9 @@ const NAV: ItemNav[] = [
   {
     clave: "marketing",
     label: "Marketing",
-    icono: "objetivos",
+    icono: "marketing",
     hijos: [
-      { href: "/marketing", label: "Tablero de Marca", icono: "objetivos" },
+      { href: "/marketing", label: "Tablero de Marca", icono: "marketing" },
       // Las tiendas de las marcas no tienen API (falta el plan Escala): los
       // pedidos entran subiendo el CSV de Ventas que exporta Tienda Nube.
       { href: "/marketing/importar", label: "Importar Tienda Nube", icono: "tiendanube" },
