@@ -75,13 +75,39 @@ export type Marca = {
   historia: { mes: string; inversion: number; venta: number }[];
 };
 
-/** Día de corte del prototipo: 11/11/2026. */
-export const CORTE = { dia: 11, diasMes: 30, mes: "Noviembre 2026", fecha: "11/11/2026" };
+const MESES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+/**
+ * El día de corte es HOY en Argentina: con datos reales, el ritmo y la
+ * proyección tienen que medirse contra el día del mes en que se mira.
+ */
+function corteDeHoy() {
+  const ar = new Date(Date.now() - 3 * 3600_000);
+  const anio = ar.getUTCFullYear();
+  const mes = ar.getUTCMonth();
+  const dia = ar.getUTCDate();
+  const dd = String(dia).padStart(2, "0");
+  const mm = String(mes + 1).padStart(2, "0");
+  return {
+    dia,
+    diasMes: new Date(Date.UTC(anio, mes + 1, 0)).getUTCDate(),
+    mes: `${MESES[mes]} ${anio}`,
+    fecha: `${dd}/${mm}/${anio}`,
+    mm,
+  };
+}
+
+export const CORTE = corteDeHoy();
 
 /** Una serie diaria determinista alrededor de un promedio, con picos de campaña. */
 function serie(promedio: number, picos: Record<number, number> = {}): number[] {
   const ruido = [0.92, 1.05, 0.88, 1.1, 0.97, 1.02, 0.85, 1.08, 0.95, 1.12, 0.99];
-  return ruido.slice(0, CORTE.dia).map((r, i) => Math.round(promedio * r * (picos[i + 1] ?? 1)));
+  return Array.from({ length: CORTE.dia }, (_, i) =>
+    Math.round(promedio * ruido[i % ruido.length] * (picos[i + 1] ?? 1)),
+  );
 }
 
 export const MARCAS: Marca[] = [

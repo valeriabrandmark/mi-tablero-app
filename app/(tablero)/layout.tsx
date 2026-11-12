@@ -75,7 +75,12 @@ const NAV: ItemNav[] = [
     clave: "marketing",
     label: "Marketing",
     icono: "objetivos",
-    hijos: [{ href: "/marketing", label: "Tablero de Marca", icono: "objetivos" }],
+    hijos: [
+      { href: "/marketing", label: "Tablero de Marca", icono: "objetivos" },
+      // Las tiendas de las marcas no tienen API (falta el plan Escala): los
+      // pedidos entran subiendo el CSV de Ventas que exporta Tienda Nube.
+      { href: "/marketing/importar", label: "Importar Tienda Nube", icono: "tiendanube" },
+    ],
   },
   // Operaciones es la tercera pata, al lado de las dos de venta: lo que pasa
   // con la mercadería, no con la plata. Stock no cuelga de Mayoristas ni de

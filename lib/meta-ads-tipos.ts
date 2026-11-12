@@ -30,6 +30,8 @@ export type TotalesMeta = {
 
 export type CampanaMeta = {
   nombre: string;
+  /** Objetivo de la campaña según Meta (OUTCOME_SALES, OUTCOME_AWARENESS...). */
+  objetivo?: string | null;
   gasto: number;
   impresiones: number;
   clics: number;
@@ -44,6 +46,12 @@ export type MetaAdsMarca = {
   diario: DiaMeta[];
   totales: TotalesMeta;
   campanas: CampanaMeta[];
+  /** Los anuncios (creatividades) con más inversión del mes. */
+  anuncios: CampanaMeta[];
+  /** Apertura por plataforma: Instagram, Facebook, Messenger, Audience Network. */
+  plataformas: CampanaMeta[];
+  /** Apertura por rango de edad. */
+  edades: CampanaMeta[];
 };
 
 export type MetaAds = Record<ClaveMarca, MetaAdsMarca>;

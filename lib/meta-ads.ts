@@ -1,6 +1,7 @@
 
 import { CORTE, MARCAS, type ClaveMarca, type Marca } from "@/lib/marketing-demo";
-import type { DiaMeta, MetaAds, MetaAdsMarca } from "@/lib/meta-ads-tipos";
+import type { CampanaMeta, DiaMeta, MetaAds, MetaAdsMarca } from "@/lib/meta-ads-tipos";
+import type { DatosInstagram, InstagramMarca } from "@/lib/marketing-fuentes";
 
 export type { MetaAds, MetaAdsMarca } from "@/lib/meta-ads-tipos";
 
@@ -53,6 +54,10 @@ type Accion = { action_type: string; value: string };
 type FilaInsights = {
   date_start?: string;
   campaign_name?: string;
+  ad_name?: string;
+  objective?: string;
+  publisher_platform?: string;
+  age?: string;
   spend?: string;
   impressions?: string;
   reach?: string;
@@ -118,11 +123,25 @@ async function leerMarca(marca: Marca, token: string, cuenta: string): Promise<M
     : {};
   const base = "spend,impressions,inline_link_clicks,actions,action_values";
 
-  const [total, dias, campanas] = await Promise.all([
+  const [total, dias, campanas, anuncios, plataformas, edades] = await Promise.all([
     insights(cuenta, token, { level: "account", fields: `${base},reach,frequency`, ...filtering }),
     insights(cuenta, token, { level: "account", fields: base, time_increment: "1", ...filtering }),
-    insights(cuenta, token, { level: "campaign", fields: `campaign_name,${base}`, ...filtering }),
+    insights(cuenta, token, { level: "campaign", fields: `campaign_name,objective,${base}`, ...filtering }),
+    insights(cuenta, token, { level: "ad", fields: `ad_name,${base}`, sort: "spend_descending", ...filtering }),
+    insights(cuenta, token, { level: "account", fields: base, breakdowns: "publisher_platform", ...filtering }),
+    insights(cuenta, token, { level: "account", fields: base, breakdowns: "age", ...filtering }),
   ]);
+
+  const fila = (nombre: string, c: FilaInsights): CampanaMeta => ({
+    nombre,
+    objetivo: c.objective ?? null,
+    gasto: num(c.spend),
+    impresiones: num(c.impressions),
+    clics: num(c.inline_link_clicks),
+    compras: accion(c.actions, TIPOS_COMPRA),
+    valorCompras: accion(c.action_values, TIPOS_COMPRA),
+  });
+  const porGasto = (a: CampanaMeta, b: CampanaMeta) => b.gasto - a.gasto;
 
   const t = total[0] ?? {};
   return {
@@ -147,18 +166,22 @@ async function leerMarca(marca: Marca, token: string, cuenta: string): Promise<M
         valorCompras: accion(d.action_values, TIPOS_COMPRA),
       })),
     ),
-    campanas: campanas
-      .map((c) => ({
-        nombre: c.campaign_name ?? "(sin nombre)",
-        gasto: num(c.spend),
-        impresiones: num(c.impressions),
-        clics: num(c.inline_link_clicks),
-        compras: accion(c.actions, TIPOS_COMPRA),
-        valorCompras: accion(c.action_values, TIPOS_COMPRA),
-      }))
-      .sort((a, b) => b.gasto - a.gasto),
+    campanas: campanas.map((c) => fila(c.campaign_name ?? "(sin nombre)", c)).sort(porGasto),
+    anuncios: anuncios.map((c) => fila(c.ad_name ?? "(sin nombre)", c)).sort(porGasto).slice(0, 10),
+    plataformas: plataformas
+      .map((c) => fila(NOMBRE_PLATAFORMA[c.publisher_platform ?? ""] ?? c.publisher_platform ?? "Otra", c))
+      .sort(porGasto),
+    edades: edades.map((c) => fila(c.age ?? "?", c)).sort((a, b) => a.nombre.localeCompare(b.nombre)),
   };
 }
+
+const NOMBRE_PLATAFORMA: Record<string, string> = {
+  instagram: "Instagram",
+  facebook: "Facebook",
+  messenger: "Messenger",
+  audience_network: "Audience Network",
+  threads: "Threads",
+};
 
 function ddmm(iso: string): string {
   const [, m, d] = iso.split("-");
@@ -232,7 +255,7 @@ function demoMeta(m: Marca, motivo: string): MetaAdsMarca {
   const gastoMes = m.gastoPorCanal["Meta Ads"];
   // Los días sin pauta del ejemplo salen de `diasPautaActiva`, repartidos
   // hacia el final para que se vea cómo se marca un corte.
-  const cortes = CORTE.dia - m.diasPautaActiva;
+  const cortes = Math.max(0, Math.min(CORTE.dia - 1, 11 - m.diasPautaActiva));
   const sinPauta = new Set(Array.from({ length: cortes }, (_, i) => CORTE.dia - 1 - i * 2));
   const pesos = Array.from({ length: CORTE.dia }, (_, i) =>
     sinPauta.has(i) ? 0 : 1 + ((i * 7) % 5) / 10 + (i < 4 ? 0.4 : 0),
@@ -246,7 +269,7 @@ function demoMeta(m: Marca, motivo: string): MetaAdsMarca {
     const impresiones = Math.round(gasto / 4.2);
     const valorCompras = Math.round(gasto * roasMedio * (0.8 + ((i * 3) % 5) / 10));
     return {
-      fecha: `${String(i + 1).padStart(2, "0")}/11`,
+      fecha: `${String(i + 1).padStart(2, "0")}/${CORTE.mm}`,
       gasto,
       impresiones,
       clics: Math.round(impresiones * 0.013),
@@ -285,5 +308,183 @@ function demoMeta(m: Marca, motivo: string): MetaAdsMarca {
         valorCompras: Math.round(gasto * r),
       };
     }),
+    anuncios: CAMPANAS_DEMO[m.clave].flatMap(([nombre, parte, r], k) =>
+      ["Reel", "Carrusel"].map((tipo, n) => {
+        const gasto = Math.round(gastoMes * parte * (n ? 0.4 : 0.6));
+        const imp = Math.round(gasto / 4.2);
+        const rr = r * (n ? 0.8 : 1.15);
+        return {
+          nombre: `${nombre.split(" - ").slice(1).join(" - ")} · ${tipo} ${k + 1}`,
+          gasto,
+          impresiones: imp,
+          clics: Math.round(imp * (n ? 0.011 : 0.016)),
+          compras: Math.round((gasto * rr) / ticket),
+          valorCompras: Math.round(gasto * rr),
+        };
+      }),
+    ).sort((a, b) => b.gasto - a.gasto).slice(0, 10),
+    plataformas: repartir(gastoMes, roasMedio, ticket, [
+      ["Instagram", 0.68, 1.1],
+      ["Facebook", 0.27, 0.8],
+      ["Messenger", 0.03, 0.5],
+      ["Audience Network", 0.02, 0.2],
+    ]),
+    edades: repartir(gastoMes, roasMedio, ticket, [
+      ["18-24", 0.08, 0.5],
+      ["25-34", 0.42, 1.2],
+      ["35-44", 0.33, 1.0],
+      ["45-54", 0.12, 0.8],
+      ["55-64", 0.05, 0.6],
+    ]),
   };
+}
+
+function repartir(
+  gastoMes: number,
+  roasMedio: number,
+  ticket: number,
+  partes: [string, number, number][],
+): CampanaMeta[] {
+  return partes.map(([nombre, parte, factor]) => {
+    const gasto = Math.round(gastoMes * parte);
+    const imp = Math.round(gasto / 4.2);
+    const valor = Math.round(gasto * roasMedio * factor);
+    return {
+      nombre,
+      gasto,
+      impresiones: imp,
+      clics: Math.round(imp * 0.013),
+      compras: Math.round(valor / ticket),
+      valorCompras: valor,
+    };
+  });
+}
+
+// ===========================================================================
+// INSTAGRAM ORGÁNICO (Graph API de Instagram, mismo token)
+// ===========================================================================
+//
+// Con el mismo acceso de Meta salen los KPIs del NIVEL 1 del acuerdo de rol,
+// que hasta ahora eran "captura mensual del panel": seguidores, alcance,
+// interacciones, y además la meta de CONTENIDO --3 publicaciones por semana
+// por marca-- se cuenta sola a partir de lo publicado.
+//
+// Variables: META_IG_CUENTA_<MARCA> = el ID de la cuenta profesional de
+// Instagram (no el @usuario). Se ve en Business Manager → Cuentas de
+// Instagram, o con /me/accounts?fields=instagram_business_account.
+// El usuario del sistema necesita además instagram_basic,
+// instagram_manage_insights y pages_read_engagement.
+
+type RespuestaGraph<T> = T & { error?: { message?: string } };
+
+async function graph<T>(ruta: string, token: string, params: Record<string, string> = {}): Promise<T> {
+  const version = process.env.META_ADS_API_VERSION?.trim() || "v23.0";
+  const url = new URL(`https://graph.facebook.com/${version}/${ruta}`);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    next: { revalidate: 900 },
+  });
+  const cuerpo = (await res.json()) as RespuestaGraph<T>;
+  if (!res.ok || cuerpo.error) throw new Error(cuerpo.error?.message ?? `Meta respondió ${res.status}`);
+  return cuerpo;
+}
+
+/** Inicio del mes en curso, en hora argentina, como segundos Unix. */
+function inicioMesUnix(): number {
+  const ar = new Date(Date.now() - 3 * 3600_000);
+  return Date.UTC(ar.getUTCFullYear(), ar.getUTCMonth(), 1, 3) / 1000;
+}
+
+async function leerIgMarca(id: string, token: string): Promise<DatosInstagram> {
+  const desde = inicioMesUnix();
+  const hasta = Math.floor(Date.now() / 1000);
+
+  const perfil = await graph<{ username?: string; followers_count?: number }>(id, token, {
+    fields: "username,followers_count",
+  });
+  const media = await graph<{ data: { timestamp: string; like_count?: number; comments_count?: number }[] }>(
+    `${id}/media`,
+    token,
+    { fields: "timestamp,like_count,comments_count", since: String(desde), limit: "100" },
+  );
+
+  // Las métricas de Insights cambian de nombre seguido (impressions pasó a
+  // views en 2025). Cada una se pide sola: si Meta da de baja una, se pierde
+  // ese número y no la sección entera.
+  async function total(metrica: string): Promise<number | null> {
+    try {
+      const r = await graph<{ data: { total_value?: { value?: number } }[] }>(`${id}/insights`, token, {
+        metric: metrica,
+        period: "day",
+        metric_type: "total_value",
+        since: String(desde),
+        until: String(hasta),
+      });
+      return r.data[0]?.total_value?.value ?? null;
+    } catch {
+      return null;
+    }
+  }
+  async function nuevosSeguidores(): Promise<number | null> {
+    try {
+      const r = await graph<{ data: { values?: { value?: number }[] }[] }>(`${id}/insights`, token, {
+        metric: "follower_count",
+        period: "day",
+        since: String(desde),
+        until: String(hasta),
+      });
+      return (r.data[0]?.values ?? []).reduce((s, v) => s + (v.value ?? 0), 0);
+    } catch {
+      return null;
+    }
+  }
+  const [alcance, vistas, interaccionesApi, seguidoresNuevos] = await Promise.all([
+    total("reach"),
+    total("views"),
+    total("total_interactions"),
+    nuevosSeguidores(),
+  ]);
+
+  const publicadas = media.data.filter((p) => Date.parse(p.timestamp) / 1000 >= desde);
+  const porSemana: number[] = [];
+  for (const p of publicadas) {
+    const dia = new Date(Date.parse(p.timestamp) - 3 * 3600_000).getUTCDate();
+    const semana = Math.floor((dia - 1) / 7);
+    porSemana[semana] = (porSemana[semana] ?? 0) + 1;
+  }
+  const hoy = new Date(Date.now() - 3 * 3600_000).getUTCDate();
+  const semanas = Math.floor((hoy - 1) / 7) + 1;
+
+  return {
+    usuario: perfil.username ?? null,
+    seguidores: perfil.followers_count ?? 0,
+    seguidoresNuevos,
+    alcance,
+    vistas,
+    interacciones:
+      interaccionesApi ??
+      publicadas.reduce((s, p) => s + (p.like_count ?? 0) + (p.comments_count ?? 0), 0),
+    publicacionesMes: publicadas.length,
+    publicacionesPorSemana: Array.from({ length: semanas }, (_, i) => porSemana[i] ?? 0),
+  };
+}
+
+export async function leerInstagram(): Promise<Record<ClaveMarca, InstagramMarca>> {
+  const token = process.env.META_ADS_TOKEN?.trim();
+  const pares = await Promise.all(
+    MARCAS.map(async (m): Promise<[ClaveMarca, InstagramMarca]> => {
+      const id = variable("META_IG_CUENTA", m.clave);
+      if (!token) return [m.clave, { fuente: "demo", motivo: "Falta META_ADS_TOKEN" }];
+      if (!id) return [m.clave, { fuente: "demo", motivo: `Falta META_IG_CUENTA_${m.clave.toUpperCase()}` }];
+      try {
+        return [m.clave, { fuente: "meta", datos: await leerIgMarca(id, token) }];
+      } catch (e) {
+        const motivo = e instanceof Error ? e.message : String(e);
+        console.error(`Instagram ${m.nombre}:`, motivo);
+        return [m.clave, { fuente: "demo", motivo: `Instagram devolvió un error: ${motivo}` }];
+      }
+    }),
+  );
+  return Object.fromEntries(pares) as Record<ClaveMarca, InstagramMarca>;
 }
