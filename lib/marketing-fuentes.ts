@@ -1,6 +1,7 @@
 import type { ClaveMarca } from "@/lib/marketing-demo";
 import type { MetaAds } from "@/lib/meta-ads-tipos";
 import type { Iniciativa } from "@/lib/planificacion";
+import type { Planilla } from "@/lib/marketing-planilla";
 
 /**
  * Todo lo que el Tablero de Marca recibe de fuentes REALES, ya calculado en el
@@ -65,6 +66,11 @@ export type DatosTablero = {
    * y no del ejemplo.
    */
   plan: { iniciativas: Iniciativa[]; motivo?: string };
+  /**
+   * La última foto de la planilla de Marketing (Google Sheets). Con ella, el
+   * presupuesto, la inversión en influencers y los otros gastos son reales.
+   */
+  planilla: { datos: Planilla | null; motivo?: string };
   /** ISO del momento en que se armó, para el encabezado. */
   generado: string;
 };

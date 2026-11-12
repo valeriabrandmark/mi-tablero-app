@@ -22,6 +22,7 @@ import { fmtMoneda, fmtNumero } from "@/lib/format";
 import { TEMA } from "@/lib/paleta";
 import type { DatosTablero } from "@/lib/marketing-fuentes";
 import { aTiempo as aTiempoPlan, avance as avancePlan, riesgo as riesgoPlan } from "@/lib/planificacion";
+import { canalDeConcepto, enPeriodo, presupuestoDelPeriodo } from "@/lib/marketing-planilla";
 import { avance, proyectar as proyectarP, type Periodo } from "@/lib/marketing-periodo";
 import FiltroPeriodo from "@/components/FiltroPeriodoMarketing";
 import {
@@ -459,7 +460,7 @@ function Scorecard({ marcas }: { marcas: Marca[] }) {
 
 function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) {
   const P = usePeriodo();
-  const { hitos: HITOS, colaboraciones: COLABORACIONES } = useFuentes();
+  const { hitos: HITOS, colaboraciones: COLABORACIONES, planilla } = useFuentes();
   const proyectar = (v: number) => proyectarP(v, P);
   const AVANCE_MES = avance(P);
   const asignado = marcas.reduce((s, m) => s + (m.presupuestoMes ?? 0), 0);
@@ -519,7 +520,7 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
           titulo="Influencers"
           valor={`${COLABORACIONES.length} / ${META_INFLUENCERS_MES}`}
           acento={semaforo(COLABORACIONES.length / META_INFLUENCERS_MES)}
-          detalle={`ROI ${dec1.format(ventaInf / costoInf)}x · ${fmtMonedaCorta(costoInf)} invertidos`}
+          detalle={costoInf ? `ROI ${dec1.format(ventaInf / costoInf)}x · ${fmtMonedaCorta(costoInf)} invertidos` : "Sin inversión en el período"}
         />
         <TarjetaKpi
           titulo="Deadlines"
@@ -553,8 +554,9 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
             </ResponsiveContainer>
           </div>
           <p className="text-muted mt-2 text-xs">
-            Unibrandco y Litter Genie no tienen presupuesto asignado (a definir): todo lo que se
-            gasta ahí es un desvío a consultar con Alejandro.
+            {planilla.datos
+              ? "Presupuesto de la hoja Presupuesto de la planilla de Marketing. Una marca sin presupuesto cargado para el período figura en cero: lo que gaste ahí es un desvío a consultar con Alejandro."
+              : "Unibrandco y Litter Genie no tienen presupuesto asignado (a definir): todo lo que se gasta ahí es un desvío a consultar con Alejandro."}
           </p>
         </Panel>
 
@@ -964,13 +966,57 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
       <Panel
         titulo="Influencers"
         nota={
-          tn
-            ? "Canjes y venta leídos de los pedidos importados · el costo es carga manual"
-            : "Un cupón único por colaboración · datos de ejemplo"
+          fuentes.planilla.datos
+            ? "De la planilla de Marketing · venta por cupón de Tienda Nube"
+            : tn
+              ? "Canjes y venta leídos de los pedidos importados · el costo es carga manual"
+              : "Un cupón único por colaboración · datos de ejemplo"
         }
       >
         {colabs.length === 0 ? (
-          <p className="text-muted text-sm">Sin colaboraciones este mes.</p>
+          <p className="text-muted text-sm">Sin colaboraciones en el período.</p>
+        ) : colabs.some((c) => c.modalidad !== undefined) ? (
+          <>
+            <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+              <TarjetaKpi titulo="Inversión en influencers" valor={fmtMonedaCorta(colabs.reduce((s, c) => s + c.costo, 0))} detalle={`${colabs.length} colaboración(es)`} />
+              <TarjetaKpi titulo="Honorarios" valor={fmtMonedaCorta(colabs.reduce((s, c) => s + (c.honorarios ?? 0), 0))} detalle={`${colabs.filter((c) => (c.honorarios ?? 0) > 0).length} con pago`} />
+              <TarjetaKpi titulo="Canje + envíos" valor={fmtMonedaCorta(colabs.reduce((s, c) => s + (c.costoCanje ?? 0) + (c.costoEnvio ?? 0), 0))} detalle="Costo de la mercadería y del envío" />
+              <TarjetaKpi
+                titulo="Pagos pendientes"
+                valor={fmtMonedaCorta(colabs.filter((c) => c.estadoPago === "Pendiente").reduce((s, c) => s + (c.honorarios ?? 0), 0))}
+                acento={colabs.some((c) => c.estadoPago === "Pendiente") ? AMBAR : VERDE}
+                detalle={`${colabs.filter((c) => c.estadoPago === "Pendiente").length} colaboración(es) sin pagar`}
+              />
+            </div>
+            <Tabla cabecera={["Influencer", "Fecha", "Modalidad", "Formato", "Honorarios", "Canje", "Envío", "Total", "Estado", "Pago", "Cupón", "Pedidos", "Venta", "ROI"]}>
+              {colabs.map((c) => (
+                <tr key={c.id ?? c.cupon}>
+                  <td className="px-2 py-2">{c.influencer}</td>
+                  <td className="text-muted px-2 py-2">{c.fecha}</td>
+                  <td className="px-2 py-2 text-xs whitespace-nowrap">{c.modalidad ?? "—"}</td>
+                  <td className="text-muted px-2 py-2 text-xs">{c.formato ?? "—"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{c.honorarios ? fmtMonedaCorta(c.honorarios) : "—"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{c.costoCanje ? fmtMonedaCorta(c.costoCanje) : "—"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{c.costoEnvio ? fmtMonedaCorta(c.costoEnvio) : "—"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap tabular-nums font-medium">{fmtMonedaCorta(c.costo)}</td>
+                  <td className="text-muted px-2 py-2 text-xs whitespace-nowrap">{c.estado ?? "—"}</td>
+                  <td className="px-2 py-2 text-xs whitespace-nowrap" style={{ color: c.estadoPago === "Pendiente" ? AMBAR : undefined }}>
+                    {c.estadoPago ?? "—"}
+                  </td>
+                  <td className="px-2 py-2 font-mono text-xs">{c.cupon}</td>
+                  <td className="px-2 py-2 tabular-nums">{c.cupon !== "—" ? c.canjes : "—"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{c.cupon !== "—" ? fmtMonedaCorta(c.ventaAtribuida) : "—"}</td>
+                  <td className="px-2 py-2 tabular-nums" style={c.cupon !== "—" && c.costo ? { color: semaforo(c.ventaAtribuida / c.costo / 3) } : undefined}>
+                    {c.cupon !== "—" && c.costo ? `${dec1.format(c.ventaAtribuida / c.costo)}x` : "—"}
+                  </td>
+                </tr>
+              ))}
+            </Tabla>
+            <p className="text-muted mt-2 text-xs">
+              Total = honorarios (con IVA) + costo del canje + envío + otros. El ROI sólo se calcula con cupón: sin cupón
+              no hay forma de saber qué venta trajo.
+            </p>
+          </>
         ) : (
           <Tabla cabecera={["Influencer", "Fecha", "Cupón", "Costo", "Canjes", "Venta atribuida", "ROI", "CAC"]}>
             {colabs.map((c) => (
@@ -1429,7 +1475,7 @@ function SeccionTiendaNube({ m }: { m: Marca }) {
  * panel es esa lista de hallazgos, y se achica sola a medida que se conecta.
  */
 function PanelFuentes() {
-  const { meta, instagram, venta, plan, planReal } = useFuentes();
+  const { meta, instagram, venta, plan, planReal, planilla } = useFuentes();
   type Estado = { ok: boolean; texto: string };
   const filas: { fuente: string; uso: string; porMarca: Record<ClaveMarca, Estado> | null; general?: Estado }[] = [
     {
@@ -1480,8 +1526,19 @@ function PanelFuentes() {
       ) as Record<ClaveMarca, Estado>,
     },
     {
+      fuente: "Planilla de Marketing (Sheets)",
+      uso: "Presupuesto, influencers (honorarios, canje, envío), Google Ads, producción, ferias",
+      porMarca: null,
+      general: planilla.datos
+        ? {
+            ok: true,
+            texto: `Último envío ${fechaCorta(planilla.datos.recibidoEn)} · ${planilla.datos.colaboraciones.length} colaboraciones · ${planilla.datos.gastos.length} gastos`,
+          }
+        : { ok: false, texto: planilla.motivo ?? "Sin datos" },
+    },
+    {
       fuente: "Planificación",
-      uso: "Fechas límite, entregas a tiempo, influencers (costo y cupón)",
+      uso: "Fechas límite y entregas a tiempo",
       porMarca: null,
       general: planReal
         ? { ok: true, texto: `${plan.iniciativas.length} iniciativa(s) en el período` }
@@ -1489,7 +1546,7 @@ function PanelFuentes() {
     },
     {
       fuente: "Carga manual",
-      uso: "Leads, mensajes y tiempo de respuesta, Google Ads",
+      uso: "Leads, mensajes y tiempo de respuesta",
       porMarca: null,
       general: { ok: false, texto: "Datos de ejemplo · falta el formulario de carga" },
     },
@@ -1656,6 +1713,37 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
       clicsPauta: meta[m.clave].totales.clics,
       conversionesPauta: meta[m.clave].totales.compras,
     };
+    // LA PLANILLA DE MARKETING PISA AL EJEMPLO en presupuesto y en todo lo
+    // que no es Meta: influencers (honorarios + canje + envío), Google Ads,
+    // contenido/producción y ferias. La pauta de Meta sólo se toma de la
+    // planilla si la API de Meta no está conectada: si no, se contaría dos veces.
+    const pl = datos.planilla.datos;
+    if (pl) {
+      // Sin presupuesto cargado para el período, queda "a definir": no se
+      // inventa uno con el ejemplo cuando la planilla es la fuente.
+      r.presupuestoMes = presupuestoDelPeriodo(pl.presupuesto, m.clave, P.desde, P.hasta);
+      const mesDesde = P.desde.slice(0, 7);
+      const mesHasta = P.hasta.slice(0, 7);
+      const canales = { Influencers: 0, "Google Ads": 0, Contenido: 0, Ferias: 0, "Meta Ads": 0 };
+      for (const c of pl.colaboraciones) {
+        if (c.marca === m.clave && c.estado !== "Cancelada" && enPeriodo(c.fecha, P.desde, P.hasta)) {
+          canales.Influencers += c.costoTotal;
+        }
+      }
+      for (const g of pl.gastos) {
+        if (g.marca !== m.clave) continue;
+        const dentro = g.fecha ? enPeriodo(g.fecha, P.desde, P.hasta) : !!g.mes && g.mes >= mesDesde && g.mes <= mesHasta;
+        if (dentro) canales[canalDeConcepto(g.concepto)] += g.total;
+      }
+      r.gastoPorCanal = {
+        ...r.gastoPorCanal,
+        Influencers: canales.Influencers,
+        "Google Ads": canales["Google Ads"],
+        Contenido: canales.Contenido,
+        Ferias: canales.Ferias,
+        "Meta Ads": meta[m.clave].fuente === "meta" ? r.gastoPorCanal["Meta Ads"] : canales["Meta Ads"],
+      };
+    }
     if (ig.fuente === "meta") {
       const d = ig.datos;
       r.seguidores = d.seguidores;
@@ -1712,7 +1800,31 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
           };
         })
     : HITOS;
-  const colaboraciones: Colaboracion[] = planReal
+  const planilla = datos.planilla.datos;
+  const colaboraciones: Colaboracion[] = planilla && planilla.colaboraciones.length
+    ? planilla.colaboraciones
+        .filter((c) => c.estado !== "Cancelada" && enPeriodo(c.fecha, P.desde, P.hasta))
+        .map((c) => {
+          const usado = c.cupon ? real.tiendaNube.porMarca[c.marca]?.cupones.find((x) => x.cupon === c.cupon) : undefined;
+          return {
+            id: c.id,
+            marca: c.marca,
+            influencer: c.influencer,
+            fecha: ddmm(c.fecha)!,
+            cupon: c.cupon ?? "—",
+            costo: c.costoTotal,
+            canjes: usado?.pedidos ?? 0,
+            ventaAtribuida: usado?.venta ?? 0,
+            modalidad: c.modalidad,
+            formato: c.formato,
+            honorarios: c.honorarios + c.ivaHonorarios,
+            costoCanje: c.costoCanje,
+            costoEnvio: c.costoEnvio,
+            estado: c.estado,
+            estadoPago: c.estadoPago,
+          };
+        })
+    : planReal
     ? delPeriodo
         .filter((i) => i.tipo === "influencer" && i.marca !== "todas")
         .map((i) => {
