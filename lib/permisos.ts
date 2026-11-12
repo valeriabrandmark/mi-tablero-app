@@ -1,3 +1,4 @@
+import { vendedoresObjetivosDel } from "@/lib/claim-usuario";
 import { PAGINAS_TAREAS, RAIZ_TAREAS } from "@/lib/tareas";
 import { RUTA_ACTUALIZAR } from "@/lib/actualizar";
 import {
@@ -105,6 +106,13 @@ export type Permiso =
       sigma: number | null;
       /** Nombre con el que Sigma lo muestra, sólo para la pantalla. */
       nombreSigma: string | null;
+      /**
+       * De qué vendedores ve los objetivos, si tiene el módulo. Sin el campo
+       * son los cuatro: es como quedaron los permisos armados antes del
+       * 12/11/2026, cuando Objetivos era una sola casilla. Ver
+       * `vendedoresObjetivosDel` en claim-usuario.ts.
+       */
+      vendedoresObjetivos?: VendedorObjetivos[];
     };
 
 /** Forma mínima del usuario de Supabase que hace falta acá. */
@@ -145,7 +153,13 @@ export function permisoDelUsuario(usuario: UsuarioConClaim): Permiso | null {
   }
 
   if (rol === "personalizado") {
-    const modulos = listaDeModulos(meta.modulos);
+    const vendedoresObjetivos = vendedoresObjetivosDel(meta.vendedores_objetivos);
+    // Objetivos con la lista de vendedores vacía no abre ninguna página: se
+    // saca el módulo, igual que al guardar (ver `claimDeUsuario`), para que no
+    // quede en el menú una entrada que lleva a un 403.
+    const modulos = listaDeModulos(meta.modulos).filter(
+      (m) => m !== "objetivos" || vendedoresObjetivos.length > 0,
+    );
     // SIN MÓDULOS NO HAY PERMISO, igual que un vendedor sin vendedor: si el
     // claim quedó a medio escribir, que se quede afuera y llame.
     if (modulos.length === 0) return null;
@@ -163,6 +177,7 @@ export function permisoDelUsuario(usuario: UsuarioConClaim): Permiso | null {
       editar,
       sigma: Number.isInteger(sigma) && sigma > 0 ? sigma : null,
       nombreSigma: texto(meta.nombre_sigma),
+      vendedoresObjetivos,
     };
   }
 
@@ -178,6 +193,12 @@ function listaDeModulos(valor: unknown): ClaveModulo[] {
 const PAGINAS_OBJETIVOS = VENDEDORES_OBJETIVOS.map(
   (v) => `/objetivos/${slugVendedor(v)}`,
 );
+
+/** El vendedor de una página de objetivos (`/objetivos/silvio`), o `null`. */
+function vendedorDePagina(pathname: string): VendedorObjetivos | null {
+  const i = PAGINAS_OBJETIVOS.indexOf(pathname);
+  return i >= 0 ? VENDEDORES_OBJETIVOS[i] : null;
+}
 
 /**
  * Rutas que ve cualquiera con permiso válido, sin importar el rol: son de la
@@ -384,6 +405,11 @@ export function puedeVer(permiso: Permiso | null, pathname: string): boolean {
   // el menú. La excepción existe para dejar a `admin` afuera, y `admin` se
   // resuelve más abajo: no tiene nada que decir sobre este permiso.
   if (permiso.rol === "personalizado") {
+    // LA PAGINA DE UN VENDEDOR NO ALCANZA CON EL MODULO: tiene que ser uno de
+    // los suyos. Sin esto, quien tiene sólo a SILVIO abría /objetivos/german
+    // escribiendo la dirección, aunque la pestaña no se le mostrara.
+    const vendedor = vendedorDePagina(pathname);
+    if (vendedor) return puedeVerVendedor(permiso, vendedor);
     return moduloPermiteRuta(permiso.modulos, pathname);
   }
 
@@ -471,8 +497,13 @@ const PAGINAS_EN_CONSTRUCCION = [
  * puede llamar desde una prueba, y esto es justo lo que no puede fallar.
  */
 export function destinoObjetivos(permiso: Permiso | null): string {
+  // Al primero que PUEDE VER, que es lo mismo que antes para el vendedor (el
+  // suyo) y para los roles que ven todos (el primero), y lo que hace falta
+  // para el personalizado con vendedores elegidos: mandar a quien tiene sólo
+  // a GERMAN a la página de SILVIO es mandarlo a un 403.
   const vendedor =
-    permiso?.rol === "vendedor" ? permiso.vendedor : VENDEDORES_OBJETIVOS[0];
+    VENDEDORES_OBJETIVOS.find((v) => puedeVerVendedor(permiso, v)) ??
+    VENDEDORES_OBJETIVOS[0];
   return `/objetivos/${slugVendedor(vendedor)}`;
 }
 
@@ -665,11 +696,16 @@ export function puedeVerVendedor(
 ): boolean {
   if (!permiso) return false;
   if (permiso.rol === "vendedor") return permiso.vendedor === vendedor;
-  // El personalizado los ve si le marcaron Objetivos, y a los cuatro: la
-  // casilla es del módulo entero. Un permiso "sólo este vendedor" es lo que ya
-  // hace el rol `vendedor`, y mezclar los dos daría dos formas de decir lo
-  // mismo que pueden contradecirse.
-  if (permiso.rol === "personalizado") return permiso.modulos.includes("objetivos");
+  // El personalizado, si le marcaron Objetivos Y ese vendedor. Desde el
+  // 12/11/2026 se eligen uno por uno en el panel de Usuarios: antes la casilla
+  // abría los cuatro. Sin lista guardada siguen siendo los cuatro (ver el
+  // tipo `Permiso`).
+  if (permiso.rol === "personalizado") {
+    return (
+      permiso.modulos.includes("objetivos") &&
+      (permiso.vendedoresObjetivos ?? VENDEDORES_OBJETIVOS).some((v) => v === vendedor)
+    );
+  }
   // Se lista explícitamente en vez de `return true`: con el `true` de antes,
   // cada rol nuevo pasaba a ver los objetivos de los cuatro vendedores sin que
   // nadie lo decidiera — que es justo lo que NO tiene que ver el de Meli.

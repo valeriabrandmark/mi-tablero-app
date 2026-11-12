@@ -13,7 +13,7 @@
  *     node --experimental-strip-types --import ./pruebas/registrar.mjs pruebas/permisos.mts
  */
 
-import { claimDeUsuario } from "@/lib/claim-usuario";
+import { claimDeUsuario, faltaVendedorObjetivos } from "@/lib/claim-usuario";
 import {
   moduloDeRuta,
   moduloPermiteRuta,
@@ -24,10 +24,12 @@ import {
   destinoTareas,
   enConstruccion,
   paginaInicial,
+  permisoDelUsuario,
   puedeCargarFacturas,
   puedeEditar,
   puedeVer,
   puedeVerBorradores,
+  puedeVerVendedor,
   type Permiso,
 } from "@/lib/permisos";
 
@@ -502,6 +504,70 @@ for (const permiso of [
 // Sin sesión no hay a quién preguntarle: el destino existe igual y el proxy se
 // encarga del resto. Lo que no puede es romper.
 revisar("sin permiso devuelve una ruta válida", destinoObjetivos(null), "/objetivos/silvio");
+
+// --- OBJETIVOS VENDEDOR POR VENDEDOR (12/11/2026) ---------------------------
+//
+// La casilla Objetivos abría las páginas de los cuatro vendedores. Ahora se
+// eligen uno por uno. Lo que no puede pasar: que la pestaña no se vea pero la
+// dirección escrita a mano abra igual, o que alguien que ya tenía la casilla
+// se quede sin objetivos el día del despliegue.
+
+{
+  const soloGerman = permisoDelUsuario({
+    app_metadata: { rol: "personalizado", modulos: ["objetivos"], vendedores_objetivos: ["GERMAN"] },
+  });
+  revisar("con GERMAN elegido ve a GERMAN", puedeVerVendedor(soloGerman, "GERMAN"), true);
+  revisar("y no a SILVIO", puedeVerVendedor(soloGerman, "SILVIO"), false);
+  revisar("ni escribiendo la dirección", puedeVer(soloGerman, "/objetivos/silvio"), false);
+  revisar("su página sí abre", puedeVer(soloGerman, "/objetivos/german"), true);
+  revisar("entra por /objetivos", puedeVer(soloGerman, "/objetivos"), true);
+  revisar("y /objetivos lo manda a la suya, no a la de SILVIO",
+    destinoObjetivos(soloGerman), "/objetivos/german");
+  revisar("la API la deja pasar (la ruta revisa el vendedor)",
+    puedeVer(soloGerman, "/api/objetivos"), true);
+
+  const dos = permisoDelUsuario({
+    app_metadata: { rol: "personalizado", modulos: ["objetivos"], vendedores_objetivos: ["pablo", "SILVIO"] },
+  });
+  revisar("dos elegidos, en minúscula también", [
+    puedeVerVendedor(dos, "SILVIO"), puedeVerVendedor(dos, "GERMAN"), puedeVerVendedor(dos, "PABLO"),
+  ], [true, false, true]);
+
+  // Los tres que tenían la casilla antes de que existiera la lista.
+  const viejo = permisoDelUsuario({ app_metadata: { rol: "personalizado", modulos: ["objetivos"] } });
+  revisar("un permiso sin lista sigue viendo a los cuatro",
+    ["SILVIO", "GERMAN", "PABLO", "RICARDO"].map((v) => puedeVerVendedor(viejo, v)),
+    [true, true, true, true]);
+
+  // Una lista vacía escrita a mano no deja una entrada del menú que lleve a un 403.
+  const vacio = permisoDelUsuario({
+    app_metadata: { rol: "personalizado", modulos: ["objetivos", "stock"], vendedores_objetivos: [] },
+  });
+  revisar("lista vacía: no ve Objetivos", puedeVer(vacio, "/objetivos"), false);
+  revisar("pero lo demás sí", puedeVer(vacio, "/stock"), true);
+  revisar("con sólo Objetivos y lista vacía no hay permiso",
+    permisoDelUsuario({ app_metadata: { rol: "personalizado", modulos: ["objetivos"], vendedores_objetivos: [] } }),
+    null);
+
+  // Los roles viejos no cambian.
+  revisar("el supervisor sigue viendo a los cuatro",
+    puedeVer({ rol: "supervisor" }, "/objetivos/ricardo"), true);
+  revisar("un vendedor sigue sin ver al otro",
+    puedeVer({ rol: "vendedor", vendedor: "SILVIO" }, "/objetivos/german"), false);
+
+  // Lo que guarda el panel.
+  const guardado = claimDeUsuario({ modulos: ["objetivos"], vendedoresObjetivos: ["RICARDO", "SILVIO", "NADIE"] });
+  revisar("guarda los elegidos, en el orden de las pestañas y sin inventados",
+    guardado.vendedores_objetivos, ["SILVIO", "RICARDO"]);
+  revisar("sin Objetivos no guarda vendedores",
+    claimDeUsuario({ modulos: ["stock"], vendedoresObjetivos: ["SILVIO"] }).vendedores_objetivos, []);
+  revisar("Objetivos sin vendedores: la ruta lo frena",
+    faltaVendedorObjetivos({ modulos: ["objetivos"], vendedoresObjetivos: [] }), true);
+  revisar("y si no mandaron la lista, también (no se asume 'los cuatro' al guardar)",
+    faltaVendedorObjetivos({ modulos: ["objetivos"] }), true);
+  revisar("con uno elegido pasa",
+    faltaVendedorObjetivos({ modulos: ["objetivos"], vendedoresObjetivos: ["PABLO"] }), false);
+}
 
 // --- QUE LA ENTRADA NUEVA DEL MENU SE PUEDA ABRIR ---------------------------
 //

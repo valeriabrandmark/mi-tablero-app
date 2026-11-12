@@ -2,9 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { necesitaUsuarioSigma } from "@/lib/modulos";
 import {
   claimDeUsuario,
+  faltaVendedorObjetivos,
   modulosValidos,
   numeroPositivo,
   textoNoVacio,
+  vendedoresObjetivosDel,
   type CuerpoUsuario,
 } from "@/lib/claim-usuario";
 import {
@@ -61,6 +63,11 @@ export async function GET() {
       modulos: modulosValidos(meta.modulos),
       editar: modulosValidos(meta.editar),
       sigma: numeroPositivo(meta.sigma),
+      // Con la misma regla que el acceso: sin lista guardada son los cuatro,
+      // y así se muestran marcados en el panel.
+      vendedoresObjetivos: modulosValidos(meta.modulos).includes("objetivos")
+        ? vendedoresObjetivosDel(meta.vendedores_objetivos)
+        : [],
       ultimoIngreso: u.last_sign_in_at ?? null,
     };
   });
@@ -110,6 +117,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Falta el mail" }, { status: 400 });
   }
 
+  if (faltaVendedorObjetivos(cuerpo)) {
+    return NextResponse.json(
+      {
+        error:
+          "En Objetivos marcá al menos un vendedor: sin ninguno no abre ninguna página.",
+      },
+      { status: 400 },
+    );
+  }
   const permisos = claimDeUsuario(cuerpo);
   if (permisos.modulos.length === 0) {
     return NextResponse.json(
@@ -187,6 +203,15 @@ export async function PATCH(request: NextRequest) {
     });
   }
 
+  if (faltaVendedorObjetivos(cuerpo)) {
+    return NextResponse.json(
+      {
+        error:
+          "En Objetivos marcá al menos un vendedor: sin ninguno no abre ninguna página.",
+      },
+      { status: 400 },
+    );
+  }
   const permisos = claimDeUsuario(cuerpo);
   // CUALQUIER MODULO QUE FIRME EN SIGMA, no sólo Compras. Miraba `compras` a
   // secas, así que al separar la carga de facturas se podía guardar a alguien

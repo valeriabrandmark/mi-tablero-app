@@ -4,6 +4,11 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { CLASE_INPUT, Mensaje } from "@/components/CamposContrasena";
 import { Aviso } from "@/components/ui";
 import {
+  nombrePropio,
+  VENDEDORES_OBJETIVOS,
+  type VendedorObjetivos,
+} from "@/lib/constantes";
+import {
   MODULOS,
   necesitaUsuarioSigma,
   nombreModulo,
@@ -38,8 +43,22 @@ type Usuario = {
   modulos: ClaveModulo[];
   editar: ClaveModulo[];
   sigma: number | null;
+  /** De qué vendedores ve los objetivos. Vacía si no tiene el módulo. */
+  vendedoresObjetivos: VendedorObjetivos[];
   ultimoIngreso: string | null;
 };
+
+/**
+ * "Objetivos (Silvio, German)" en el resumen de la fila, para que se vea sin
+ * abrir los permisos a quién le puede mirar los objetivos. Con los cuatro va
+ * solo: "Objetivos (todos)" no agrega nada.
+ */
+function nombreConVendedores(clave: ClaveModulo, vendedores: VendedorObjetivos[]): string {
+  if (clave !== "objetivos" || vendedores.length === VENDEDORES_OBJETIVOS.length) {
+    return nombreModulo(clave);
+  }
+  return `${nombreModulo(clave)} (${vendedores.map(nombrePropio).join(", ")})`;
+}
 
 /** Los roles de antes no se tocan desde acá: se muestran y se explican. */
 const ROLES_VIEJOS: Record<string, string> = {
@@ -250,7 +269,9 @@ function FilaUsuario({
             {aMedida
               ? sinAcceso
                 ? "Sin acceso"
-                : usuario.modulos.map(nombreModulo).join(" · ")
+                : usuario.modulos
+                    .map((m) => nombreConVendedores(m, usuario.vendedoresObjetivos))
+                    .join(" · ")
               : (ROLES_VIEJOS[usuario.rol ?? ""] ?? "Sin permisos cargados")}
             {usuario.vendedor ? ` (${usuario.vendedor})` : ""}
             {" — "}
@@ -352,7 +373,7 @@ function FormularioAlta({ onCreado }: { onCreado: () => void }) {
 
       <div className="mt-3">
         <FormularioPermisos
-          inicial={{ nombre: "", modulos: [], editar: [], sigma: null }}
+          inicial={{ nombre: "", modulos: [], editar: [], sigma: null, vendedoresObjetivos: [] }}
           textoBoton="Crear usuario"
           onEnviar={async (datos) => {
             const res = await fetch("/api/usuarios", {
@@ -398,6 +419,7 @@ type Datos = {
   editar: ClaveModulo[];
   sigma: number | null;
   nombreSigma?: string | null;
+  vendedoresObjetivos: VendedorObjetivos[];
 };
 
 /** Las casillas. Es el mismo formulario para crear y para editar. */
@@ -411,6 +433,7 @@ function FormularioPermisos({
     modulos: ClaveModulo[];
     editar: ClaveModulo[];
     sigma: number | null;
+    vendedoresObjetivos: VendedorObjetivos[];
   };
   textoBoton: string;
   onEnviar: (datos: Datos) => Promise<string | null>;
@@ -418,6 +441,9 @@ function FormularioPermisos({
   const [nombre, setNombre] = useState(inicial.nombre ?? "");
   const [ve, setVe] = useState<ClaveModulo[]>(inicial.modulos);
   const [edita, setEdita] = useState<ClaveModulo[]>(inicial.editar);
+  const [vendedores, setVendedores] = useState<VendedorObjetivos[]>(
+    inicial.vendedoresObjetivos,
+  );
   const [sigma, setSigma] = useState(
     inicial.sigma ? String(inicial.sigma) : "",
   );
@@ -448,6 +474,7 @@ function FormularioPermisos({
         modulos: ve,
         editar: edita,
         sigma: sigma.trim() === "" ? null : Number(sigma),
+        vendedoresObjetivos: ve.includes("objetivos") ? vendedores : [],
       });
       setOk(aviso ?? "Listo.");
     } catch (e) {
@@ -502,6 +529,36 @@ function FormularioPermisos({
                   />
                   puede {m.queEdita}
                 </label>
+              )}
+              {/* OBJETIVOS SE DA VENDEDOR POR VENDEDOR. Antes la casilla abría
+                  los cuatro; ahora se elige de quién. Sin ninguno marcado el
+                  servidor no guarda (no abriría ninguna página). */}
+              {m.clave === "objetivos" && visible && (
+                <div className="text-muted ml-6 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                  {VENDEDORES_OBJETIVOS.map((v) => (
+                    <label key={v} className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={vendedores.includes(v)}
+                        onChange={() =>
+                          setVendedores((antes) =>
+                            antes.includes(v)
+                              ? antes.filter((x) => x !== v)
+                              : VENDEDORES_OBJETIVOS.filter(
+                                  (x) => x === v || antes.includes(x),
+                                ),
+                          )
+                        }
+                      />
+                      {nombrePropio(v)}
+                    </label>
+                  ))}
+                  {vendedores.length === 0 && (
+                    <span className="basis-full text-amber-300">
+                      Marcá al menos un vendedor.
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           );
