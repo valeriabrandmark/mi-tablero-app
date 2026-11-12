@@ -127,8 +127,30 @@ revisar(
 // El color sale de la ETIQUETA y no de la posición en la torta. Si saliera de
 // la posición, Full sería azul un día y verde al otro según cuántas ventas
 // tuvo cada modo, y dos capturas del mismo panel no se podrían comparar.
-revisar("Full siempre el mismo color", colorLogistica("Full"), "#3b82f6");
-revisar("Flex siempre el mismo color", colorLogistica("Flex"), "#22c55e");
+//
+// NO SE FIJA EL HEX, y antes sí: desde que hay modo claro los colores salen de
+// variables de CSS --en claro son los tonos 600/700, porque los del oscuro se
+// lavan sobre el crema-- así que atar la prueba a un hex ataba el tablero a un
+// solo tema. Lo que importa es que el mismo modo dé siempre lo mismo y que dos
+// modos distintos no se confundan.
+revisar(
+  "Full siempre el mismo color",
+  colorLogistica("Full") === colorLogistica("Full"),
+  true,
+);
+revisar(
+  "y no se confunde con Flex",
+  colorLogistica("Full") === colorLogistica("Flex"),
+  false,
+);
+revisar(
+  "los seis modos conocidos tienen colores distintos entre si",
+  new Set(
+    ["Full", "Flex", "Colecta", "Punto de despacho", "Punto de despacho (XD)",
+     "Logística propia"].map(colorLogistica),
+  ).size,
+  6,
+);
 
 /* --- EL ARMADO DE LA TORTA ----------------------------------------------- */
 

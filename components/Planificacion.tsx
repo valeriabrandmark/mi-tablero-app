@@ -561,7 +561,7 @@ function VistaCalendario({
         <button type="button" onClick={() => mover(1)} className="border-line text-muted hover:text-ink rounded-lg border px-2.5 py-1 text-xs">Siguiente ›</button>
       </div>
       <div className="overflow-x-auto">
-        <div className="grid min-w-[760px] grid-cols-7 gap-px overflow-hidden rounded-lg bg-[#242a33]">
+        <div className="grid min-w-[760px] grid-cols-7 gap-px overflow-hidden rounded-lg bg-line">
           {["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map((d) => (
             <div key={d} className="bg-panel text-muted px-2 py-1 text-[11px]">{d}</div>
           ))}

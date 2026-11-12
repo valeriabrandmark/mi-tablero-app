@@ -1,7 +1,13 @@
 @import "tailwindcss";
 
 /* Tablero Brandmark / NOA — modo oscuro por default.
-   Fondo casi negro, texto casi blanco, acentos moderados. */
+   Fondo casi negro, texto casi blanco, acentos moderados.
+
+   EL CLARO SE DEFINE MAS ABAJO, pisando estas mismas variables. Por eso todo
+   --paneles, bordes, texto, gráficos-- tiene que salir de acá y no de un color
+   escrito a mano en un componente: lo que esté escrito a mano se queda oscuro
+   cuando se prende el claro, y no hay forma de que nadie se entere hasta que
+   lo ve. */
 @theme {
   --color-bg: #0b0d10;
   --color-panel: #14171c;
@@ -18,12 +24,85 @@
   --color-c5: #22d3ee;
   --color-c6: #f472b6;
 
+  /* El rojo de "esto está mal": saldo negativo, margen bajo, cancelado. */
+  --color-negativo: #f43f5e;
+
+  /* La escala ordenada de riesgo de cuentas corrientes y de antigüedad. NO es
+     categórica: va de mejor a peor y el color lo tiene que decir solo. */
+  --color-r-bueno: #15803d;
+  --color-r-aldia: #34d399;
+  --color-r-observacion: #fde047;
+  --color-r-riesgoso: #fb923c;
+  --color-r-critico: #dc2626;
+  /* A favor no es el escalón cero de la escala: es otra cosa --no debe nada,
+     le debemos-- y por eso celeste y no un verde más verde. */
+  --color-r-afavor: #38bdf8;
+
+  /* Los tres de la torta de logística de ML que no salen de la paleta: el modo
+     que ML declara "sin especificar", el hueco nuestro, y el color de alarma
+     para un modo que ML invente y no conozcamos. */
+  --color-sin-especificar: #94a3b8;
+  --color-sin-dato: #4b5563;
+  --color-desconocido: #e879f9;
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
+/* ===========================================================================
+   MODO CLARO
+
+   El fondo NO es blanco: es crema. Un blanco puro contra un panel blanco no
+   se distingue, y obliga a marcar cada panel con un borde más oscuro para que
+   se vea dónde empieza. Con el fondo crema y los paneles casi blancos, el
+   panel se levanta solo --la misma jerarquía que en oscuro, donde el panel es
+   más claro que el fondo-- y los bordes pueden seguir siendo suaves.
+
+   LOS GRISES SON CALIDOS. Un gris neutro sobre crema se ve verdoso por
+   contraste simultáneo. Los de acá tienen la misma temperatura que el fondo.
+
+   LOS COLORES DE SERIE NO SON LOS MISMOS, y no es capricho: los seis del
+   oscuro están pensados para brillar sobre casi negro y sobre crema quedan
+   lavados. El verde #22c55e da 1,9:1 contra el fondo claro --por debajo del
+   3:1 que necesita un elemento gráfico para verse-- así que en claro se usan
+   las versiones 600/700 de cada tono. Es el mismo color conceptual, no la
+   misma tinta.
+   =========================================================================== */
+html[data-tema="claro"] {
+  --color-bg: #f5f1ea;
+  --color-panel: #fdfbf7;
+  --color-panel-2: #efe9df;
+  --color-line: #e0d9cc;
+  --color-ink: #2a2724;
+  --color-muted: #6b645e;
+
+  --color-c1: #2563eb;
+  --color-c2: #15803d;
+  --color-c3: #b45309;
+  --color-c4: #7c3aed;
+  --color-c5: #0e7490;
+  --color-c6: #be185d;
+
+  --color-negativo: #be123c;
+
+  --color-r-bueno: #15803d;
+  --color-r-aldia: #059669;
+  --color-r-observacion: #a16207;
+  --color-r-riesgoso: #c2410c;
+  --color-r-critico: #b91c1c;
+  --color-r-afavor: #0369a1;
+
+  --color-sin-especificar: #8a837c;
+  --color-sin-dato: #b8b0a4;
+  --color-desconocido: #a21caf;
+}
+
 html {
   color-scheme: dark;
+}
+
+html[data-tema="claro"] {
+  color-scheme: light;
 }
 
 body {
@@ -31,10 +110,11 @@ body {
   color: var(--color-ink);
 }
 
-/* Selects nativos legibles en fondo oscuro */
+/* Los controles nativos no heredan nada del tablero: hay que pintarlos. Sin
+   esto, en claro, el desplegable de un filtro se abre negro. */
 select option {
-  background: #14171c;
-  color: #e7e9ee;
+  background: var(--color-panel);
+  color: var(--color-ink);
 }
 
 ::-webkit-scrollbar {
@@ -42,9 +122,12 @@ select option {
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #0b0d10;
+  background: var(--color-bg);
 }
 ::-webkit-scrollbar-thumb {
-  background: #2b323c;
+  background: var(--color-line);
   border-radius: 6px;
+}
+html[data-tema="claro"] ::-webkit-scrollbar-thumb {
+  background: #cfc6b6;
 }
