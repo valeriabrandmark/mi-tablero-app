@@ -76,21 +76,28 @@ html[data-tema="claro"] {
   --color-ink: #2a2724;
   --color-muted: #6b645e;
 
-  --color-c1: #2563eb;
-  --color-c2: #15803d;
-  --color-c3: #b45309;
-  --color-c4: #7c3aed;
-  --color-c5: #0e7490;
-  --color-c6: #be185d;
+  --color-c1: #7fa9f0;
+  --color-c2: #6fcf97;
+  --color-c3: #f2a65a;
+  --color-c4: #b39ddb;
+  --color-c5: #76c7d8;
+  --color-c6: #ef9db8;
 
-  --color-negativo: #be123c;
+  /* El rojo de "esto está mal" NO es pastel: es el único color del tablero
+     cuyo trabajo es interrumpir. Un rosa suave avisando de un margen negativo
+     deja de avisar. */
+  --color-negativo: #d1435b;
 
-  --color-r-bueno: #15803d;
-  --color-r-aldia: #059669;
-  --color-r-observacion: #a16207;
-  --color-r-riesgoso: #c2410c;
-  --color-r-critico: #b91c1c;
-  --color-r-afavor: #0369a1;
+  /* La escala de riesgo también pastel, pero ABRIENDO el paso entre los
+     extremos: en pastel, un naranja y un rojo suaves se confunden, y acá
+     confundir RIESGOSO con CRITICO es confundir "mirá esto" con "llamá hoy".
+     Por eso CRITICO conserva cuerpo y BUENO se va al verde más claro. */
+  --color-r-bueno: #8fd3a6;
+  --color-r-aldia: #b7e3c0;
+  --color-r-observacion: #f3d98b;
+  --color-r-riesgoso: #f0ab7a;
+  --color-r-critico: #e4737a;
+  --color-r-afavor: #9fcdf0;
 
   --color-sin-especificar: #8a837c;
   --color-sin-dato: #b8b0a4;
@@ -130,4 +137,72 @@ select option {
 }
 html[data-tema="claro"] ::-webkit-scrollbar-thumb {
   background: #cfc6b6;
+}
+
+/* ===========================================================================
+   LOS COLORES DE AVISO ESCRITOS A MANO
+
+   El tablero usa unos 120 `text-amber-300`, `text-rose-300`, `text-emerald-300`
+   para los avisos: amarillo advierte, rosa está mal, verde está bien, celeste
+   informa. Son tonos 100-400 de Tailwind, elegidos para brillar sobre casi
+   negro -- y sobre el crema desaparecen. El 12/11/2026 el panel de fechas de
+   Marketing quedó con el título y las dos fechas ILEGIBLES: amarillo claro
+   sobre amarillo claro.
+
+   SE REMAPEAN ACA Y NO EN LOS 120 LUGARES. Cambiarlos uno por uno sería tocar
+   treinta archivos para arreglar un problema que es del TEMA y no de cada
+   pantalla, con el riesgo de romper el oscuro --que anda bien-- en el camino.
+   Acá el oscuro no se toca: estas reglas sólo existen dentro del claro.
+
+   LA CONTRA, ANOTADA: esto depende del NOMBRE de la clase. Una pantalla nueva
+   que use `text-amber-300` queda cubierta; una que use `text-amber-500` no.
+   Por eso hay una prueba que recorre los componentes y falla si aparece un
+   tono claro que esta lista no cubre -- es lo que convierte el remapeo en algo
+   mantenible y no en una curita que se despega sola.
+
+   Los fondos y bordes NO se remapean: un `bg-amber-500/10` sobre crema es un
+   amarillo pálido que funciona igual de bien, y un `border-amber-500/40` se
+   ve. El problema era sólo el texto.
+   =========================================================================== */
+html[data-tema="claro"] :is(.text-amber-100, .text-amber-200, .text-amber-300, .text-amber-400),
+html[data-tema="claro"] :is(.text-yellow-100, .text-yellow-200, .text-yellow-300, .text-yellow-400) {
+  color: #92400e;
+}
+html[data-tema="claro"] :is(.text-rose-100, .text-rose-200, .text-rose-300, .text-rose-400),
+html[data-tema="claro"] :is(.text-red-100, .text-red-200, .text-red-300, .text-red-400) {
+  color: #9f1239;
+}
+html[data-tema="claro"] :is(.text-emerald-100, .text-emerald-200, .text-emerald-300, .text-emerald-400),
+html[data-tema="claro"] :is(.text-green-100, .text-green-200, .text-green-300, .text-green-400) {
+  color: #065f46;
+}
+html[data-tema="claro"] :is(.text-sky-100, .text-sky-200, .text-sky-300, .text-sky-400),
+html[data-tema="claro"] :is(.text-blue-100, .text-blue-200, .text-blue-300, .text-blue-400) {
+  color: #075985;
+}
+html[data-tema="claro"] :is(.text-orange-100, .text-orange-200, .text-orange-300, .text-orange-400) {
+  color: #9a3412;
+}
+html[data-tema="claro"] :is(.text-violet-100, .text-violet-200, .text-violet-300, .text-violet-400),
+html[data-tema="claro"] :is(.text-purple-100, .text-purple-200, .text-purple-300, .text-purple-400),
+html[data-tema="claro"] :is(.text-indigo-100, .text-indigo-200, .text-indigo-300, .text-indigo-400) {
+  color: #5b21b6;
+}
+html[data-tema="claro"] :is(.text-cyan-100, .text-cyan-200, .text-cyan-300, .text-cyan-400),
+html[data-tema="claro"] :is(.text-teal-100, .text-teal-200, .text-teal-300, .text-teal-400) {
+  color: #155e75;
+}
+html[data-tema="claro"] :is(.text-pink-100, .text-pink-200, .text-pink-300, .text-pink-400),
+html[data-tema="claro"] :is(.text-fuchsia-100, .text-fuchsia-200, .text-fuchsia-300, .text-fuchsia-400) {
+  color: #9d174d;
+}
+html[data-tema="claro"] :is(.text-lime-100, .text-lime-200, .text-lime-300, .text-lime-400) {
+  color: #3f6212;
+}
+/* Los grises de Tailwind usados como texto secundario: el token del tablero
+   ya es el gris correcto para cada tema. */
+html[data-tema="claro"] :is(.text-neutral-300, .text-neutral-400, .text-slate-300, .text-slate-400,
+                            .text-zinc-300, .text-zinc-400, .text-gray-300, .text-gray-400,
+                            .text-stone-300, .text-stone-400) {
+  color: var(--color-muted);
 }
