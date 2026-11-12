@@ -1,5 +1,6 @@
 import type { ClaveMarca } from "@/lib/marketing-demo";
 import type { MetaAds } from "@/lib/meta-ads-tipos";
+import type { Iniciativa } from "@/lib/planificacion";
 
 /**
  * Todo lo que el Tablero de Marca recibe de fuentes REALES, ya calculado en el
@@ -58,6 +59,12 @@ export type DatosTablero = {
   meta: MetaAds;
   instagram: Record<ClaveMarca, InstagramMarca>;
   venta: DatosVentaReal;
+  /**
+   * Las iniciativas de Marketing → Planificación del período. Si hay alguna,
+   * las fechas límite, los influencers y esa parte del puntaje salen de acá
+   * y no del ejemplo.
+   */
+  plan: { iniciativas: Iniciativa[]; motivo?: string };
   /** ISO del momento en que se armó, para el encabezado. */
   generado: string;
 };

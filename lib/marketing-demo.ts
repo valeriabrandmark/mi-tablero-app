@@ -346,6 +346,10 @@ export type Hito = {
   estado: EstadoHito;
   responsable: string;
   presupuesto?: number;
+  /** Entregada en fecha. En el ejemplo, toda entrega es a tiempo. */
+  aTiempo?: boolean;
+  /** Avance por subtareas (0 a 1), cuando viene de Planificación. */
+  avance?: number;
 };
 
 /** Deadlines del período: campañas, revista y el plan de los primeros 60 días. */

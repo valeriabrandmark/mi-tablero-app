@@ -37,7 +37,8 @@ export type ClaveIcono =
   | "precios"
   | "costos"
   | "factura"
-  | "marketing";
+  | "marketing"
+  | "calendario";
 
 /** Subpágina de un grupo. Lleva su propia marca porque es la que se mira. */
 export type ItemHijo = {
@@ -97,7 +98,8 @@ type ClaveTrazo =
   | "precios"
   | "costos"
   | "factura"
-  | "marketing";
+  | "marketing"
+  | "calendario";
 
 const TRAZOS: Record<ClaveTrazo, ReactNode> = {
   // Una lista con tildes: lo que se hace, no lo que se mira.
@@ -189,6 +191,14 @@ const TRAZOS: Record<ClaveTrazo, ReactNode> = {
       <path d="M6 2h9l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z" />
       <path d="M8 8h6M8 12h8" />
       <path d="m9 17 2 2 4-4" stroke={NARANJA} />
+    </>
+  ),
+  // Calendario con un tilde: planificar es poner fecha y después cumplirla.
+  calendario: (
+    <>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 10h18M8 3v4M16 3v4" />
+      <path d="m9 15.5 2 2 4-4" stroke={NARANJA} />
     </>
   ),
   // Megáfono: la marca que se hace oír. El aro de la boca va en el naranja de
