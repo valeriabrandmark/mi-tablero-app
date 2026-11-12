@@ -759,6 +759,44 @@ Silvio): los cinco grupos de producto, la facturación de las dos empresas
 
 ---
 
+## Marketing: puesta en marcha
+
+Sólo lo ve el superadmin (`RUTAS_MARKETING` en `lib/permisos.ts`). Tres
+pantallas: **Marketing → Tablero de Marca**, **Marketing → Importar Tienda
+Nube** y **Mis tareas → Marketing** (planificación).
+
+### Migraciones (una vez, en el editor SQL de Supabase)
+
+| Archivo | Para qué |
+|---|---|
+| `migraciones/marketing_tienda_nube.sql` | Pedidos importados del CSV de Tienda Nube |
+| `migraciones/marketing_planificacion.sql` | Calendario comercial, iniciativas y subtareas |
+| `migraciones/marketing_planilla.sql` | Fotos de la planilla de Marketing (Google Sheets) |
+
+### Variables (Vercel → Settings → Environment Variables)
+
+Ver `.env.example` para el detalle de cada una.
+
+- `META_ADS_TOKEN`, `META_ADS_CUENTA_<MARCA>`, `META_IG_CUENTA_<MARCA>`: Meta Ads e Instagram.
+- `MKT_PLANILLA_TOKEN`: lo inventa uno (texto largo al azar) y va igual en
+  la propiedad del script de la planilla.
+
+UNA VARIABLE NUEVA NO VALE HASTA EL PRÓXIMO DEPLOY. Si no se puede usar el
+botón Redeploy, alcanza con mergear cualquier cambio a `main`: Vercel
+despliega producción solo y el deploy nuevo ya la lee.
+
+### La planilla de Marketing
+
+1. Subir el Excel a Drive y abrirlo como Hoja de cálculo de Google.
+2. Extensiones → Apps Script → pegar `apps-script/planilla-marketing.gs`.
+3. Propiedades del script: `TABLERO_URL` (el dominio del tablero) y
+   `MKT_PLANILLA_TOKEN` (el mismo que en Vercel).
+4. Menú Marketing → Enviar al tablero ahora, y Activar envío automático.
+
+Si el script dice "El tablero no tiene MKT_PLANILLA_TOKEN", falta el deploy
+después de cargar la variable. Si dice "no coincide", los dos textos son
+distintos (ojo con espacios al copiar).
+
 ## Pendientes / decisiones abiertas
 
 - **Vendedores** — la página usa la lista blanca `PABLO`, `GERMAN`, `SILVIO`,
