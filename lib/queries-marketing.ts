@@ -2,6 +2,7 @@ import { query } from "@/lib/db";
 import { CANAL_MAYORISTA } from "@/lib/constantes";
 import type { ClaveMarca } from "@/lib/marketing-demo";
 import type { DatosMayorista, DatosTiendaNube, DatosVentaReal } from "@/lib/marketing-fuentes";
+import { normalizarPlanilla, type Planilla } from "@/lib/marketing-planilla";
 
 /**
  * Lo que el Tablero de Marca lee de la base: los pedidos de Tienda Nube que se
@@ -302,4 +303,25 @@ export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
     mayorista: typeof mayorista === "string" ? { motivo: mayorista, porMarca: {} } : { porMarca: mayorista },
     tiendasNuevas: typeof tiendasNuevas === "string" ? { motivo: tiendasNuevas, cantidad: null } : { cantidad: tiendasNuevas },
   };
+}
+
+/**
+ * La última foto que mandó la planilla de Marketing. Se normaliza al leer y
+ * no al guardar: así un arreglo en la normalización vale también para las
+ * fotos que ya están guardadas.
+ */
+export async function leerPlanilla(): Promise<{ datos: Planilla | null; motivo?: string }> {
+  try {
+    const [fila] = await query<{ datos: unknown; recibido_en: string }>(
+      `select datos, recibido_en from bronze.mkt_planilla order by recibido_en desc limit 1`,
+    );
+    if (!fila) return { datos: null, motivo: "La planilla todavía no mandó datos (menú Marketing → Enviar al tablero)" };
+    return { datos: normalizarPlanilla(fila.datos, new Date(fila.recibido_en).toISOString()) };
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    if (/mkt_planilla/.test(m) && /does not exist|no existe/.test(m)) {
+      return { datos: null, motivo: "Falta correr migraciones/marketing_planilla.sql" };
+    }
+    return { datos: null, motivo: motivoDe(e) };
+  }
 }

@@ -315,6 +315,15 @@ export type Colaboracion = {
   costo: number;
   canjes: number;
   ventaAtribuida: number;
+  // Lo que agrega la planilla de marketing (vacío en el ejemplo).
+  id?: string;
+  modalidad?: string | null;
+  formato?: string | null;
+  honorarios?: number;
+  costoCanje?: number;
+  costoEnvio?: number;
+  estado?: string | null;
+  estadoPago?: string | null;
 };
 
 /**

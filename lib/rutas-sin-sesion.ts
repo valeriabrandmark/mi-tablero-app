@@ -45,7 +45,13 @@ export const RUTAS_PUBLICAS = [
  * SE COMPARAN ENTERAS, no por prefijo: con `startsWith` cualquier cosa
  * colgada abajo entraría gratis.
  */
-export const RUTAS_CON_LLAVE_PROPIA = ["/api/precios-tn/planilla"];
+export const RUTAS_CON_LLAVE_PROPIA = [
+  "/api/precios-tn/planilla",
+  // La planilla de Marketing (apps-script/planilla-marketing.gs) manda su foto
+  // y pide la venta por cupón con MKT_PLANILLA_TOKEN. Verifica su llave y
+  // niega todo si la variable no está cargada.
+  "/api/marketing/planilla",
+];
 
 /** Si esta ruta puede contestar sin que haya una sesión. */
 export function esPublica(pathname: string): boolean {
