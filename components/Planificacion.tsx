@@ -50,8 +50,9 @@ const ROJO = "#f43f5e";
 
 const RESPONSABLES_SUGERIDOS = ["Agatina", "Lucila", "Diseñador externo", "Ana", "Alejandro"];
 
-type Vista = "calendario" | "linea" | "tablero" | "lista" | "fechas";
+type Vista = "pendientes" | "calendario" | "linea" | "tablero" | "lista" | "fechas";
 const VISTAS: { clave: Vista; label: string }[] = [
+  { clave: "pendientes", label: "Pendientes" },
   { clave: "calendario", label: "Calendario" },
   { clave: "linea", label: "Línea de tiempo" },
   { clave: "tablero", label: "Tablero por estado" },
@@ -740,6 +741,133 @@ function VistaTablero({
   );
 }
 
+/**
+ * LO PENDIENTE, agrupado por cuándo hay que hacerlo. Es la vista con la que
+ * abre la página: es "Mis tareas", y lo primero que se mira es qué hay que
+ * hacer hoy.
+ *
+ * Entran las subtareas sin hacer y, además, las iniciativas abiertas que no
+ * tienen subtareas (su propia entrega es la tarea). Lo tildado en los últimos
+ * 7 días queda abajo, para poder destildar un error.
+ */
+function VistaPendientes({
+  iniciativas,
+  hoy,
+  responsable,
+  guardando,
+  onAbrir,
+  onTildar,
+}: {
+  iniciativas: Iniciativa[];
+  hoy: string;
+  responsable: string;
+  guardando: boolean;
+  onAbrir: (i: Iniciativa) => void;
+  onTildar: (s: Subtarea, hecha: boolean) => void;
+}) {
+  type Item = { s: Subtarea | null; i: Iniciativa; vence: string | null; titulo: string; quien: string | null };
+  const abiertas = iniciativas.filter((i) => i.estado !== "entregada" && i.estado !== "cancelada");
+  const items: Item[] = abiertas.flatMap<Item>((i) =>
+    i.subtareas.length
+      ? i.subtareas
+          .filter((s) => !s.hecha)
+          .map((s) => ({ s, i, vence: s.vence, titulo: s.titulo, quien: s.responsable ?? i.responsable }))
+      : [{ s: null, i, vence: i.vence, titulo: `Entregar: ${i.titulo}`, quien: i.responsable }],
+  );
+  const mias = items.filter((x) => !responsable || x.quien === responsable);
+  const semana = sumarDiasIso(hoy, 7);
+  const mes = sumarDiasIso(hoy, 30);
+  const grupos: { titulo: string; color: string; items: Item[] }[] = [
+    { titulo: "Vencidas", color: ROJO, items: mias.filter((x) => x.vence && x.vence < hoy) },
+    { titulo: "Hoy", color: AMBAR, items: mias.filter((x) => x.vence === hoy) },
+    { titulo: "Próximos 7 días", color: "#3b82f6", items: mias.filter((x) => x.vence && x.vence > hoy && x.vence <= semana) },
+    { titulo: "Próximos 30 días", color: "#a78bfa", items: mias.filter((x) => x.vence && x.vence > semana && x.vence <= mes) },
+    { titulo: "Más adelante", color: "#8b93a1", items: mias.filter((x) => x.vence && x.vence > mes) },
+    { titulo: "Sin fecha", color: "#8b93a1", items: mias.filter((x) => !x.vence) },
+  ];
+  for (const g of grupos) g.items.sort((a, b) => (a.vence ?? "").localeCompare(b.vence ?? ""));
+
+  const hace7 = sumarDiasIso(hoy, -7);
+  const hechas = iniciativas
+    .flatMap((i) => i.subtareas.filter((s) => s.hecha && (s.hechaEn ?? "").slice(0, 10) >= hace7).map((s) => ({ s, i })))
+    .filter(({ s, i }) => !responsable || (s.responsable ?? i.responsable) === responsable)
+    .sort((a, b) => (b.s.hechaEn ?? "").localeCompare(a.s.hechaEn ?? ""));
+
+  const fila = (x: Item) => (
+    <li key={`${x.i.id}-${x.s?.id ?? "entrega"}`} className="border-line flex items-start gap-3 border-t py-2 first:border-t-0">
+      {x.s ? (
+        <input
+          type="checkbox"
+          className="mt-1 size-4 accent-emerald-500"
+          checked={false}
+          disabled={!x.s.id || guardando}
+          onChange={() => onTildar(x.s!, true)}
+          aria-label={`Marcar hecha: ${x.titulo}`}
+        />
+      ) : (
+        <span className="mt-1 size-4 shrink-0 rounded-full border-2" style={{ borderColor: colorMarca(x.i.marca) }} title="Entrega de la iniciativa: se marca desde la iniciativa" />
+      )}
+      <button type="button" onClick={() => onAbrir(x.i)} className="min-w-0 flex-1 text-left">
+        <span className="block text-sm leading-tight">{x.titulo}</span>
+        <span className="text-muted mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px]">
+          <span className="inline-flex items-center gap-1">
+            <span className="size-1.5 rounded-full" style={{ background: colorMarca(x.i.marca) }} />
+            {x.i.titulo}
+          </span>
+          {x.s && <span>{FASES[x.s.fase]}</span>}
+          {x.quien && <span>· {x.quien}</span>}
+        </span>
+      </button>
+      <span className={`shrink-0 text-xs tabular-nums ${x.vence && x.vence < hoy ? "text-rose-400" : "text-muted"}`}>
+        {x.vence ? fechaCorta(x.vence) : "—"}
+      </span>
+    </li>
+  );
+
+  return (
+    <div className="space-y-4">
+      {mias.length === 0 && (
+        <Panel titulo="Pendientes">
+          <p className="text-muted text-sm">
+            {iniciativas.length ? "No hay nada pendiente" : "Todavía no hay iniciativas cargadas"}
+            {responsable ? ` para ${responsable}` : ""}.
+          </p>
+        </Panel>
+      )}
+      {grupos
+        .filter((g) => g.items.length)
+        .map((g) => (
+          <Panel key={g.titulo} titulo={g.titulo} nota={`${g.items.length} tarea(s)`}>
+            <div className="-mt-2 mb-1 h-0.5 w-10 rounded" style={{ background: g.color }} />
+            <ul>{g.items.map(fila)}</ul>
+          </Panel>
+        ))}
+      {hechas.length > 0 && (
+        <Panel titulo="Hechas en los últimos 7 días" nota="Destildá si fue un error">
+          <ul>
+            {hechas.map(({ s, i }) => (
+              <li key={`${i.id}-${s.id}`} className="border-line flex items-start gap-3 border-t py-2 first:border-t-0">
+                <input
+                  type="checkbox"
+                  className="mt-1 size-4 accent-emerald-500"
+                  checked
+                  disabled={!s.id || guardando}
+                  onChange={() => onTildar(s, false)}
+                  aria-label={`Marcar pendiente: ${s.titulo}`}
+                />
+                <button type="button" onClick={() => onAbrir(i)} className="text-muted min-w-0 flex-1 text-left text-sm line-through">
+                  {s.titulo}
+                  <span className="ml-2 text-[11px] no-underline">· {i.titulo}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
+    </div>
+  );
+}
+
 function VistaLista({ iniciativas, hoy, onAbrir }: { iniciativas: Iniciativa[]; hoy: string; onAbrir: (i: Iniciativa) => void }) {
   return (
     <Panel titulo="Todas las iniciativas" nota="Ordenadas por fecha de entrega">
@@ -881,7 +1009,7 @@ export default function Planificacion() {
   const [eventos, setEventos] = useState<EventoCalendario[]>([]);
   const [cargando, setCargando] = useState(true);
   const [errorCarga, setErrorCarga] = useState<string | null>(null);
-  const [vista, setVista] = useState<Vista>("calendario");
+  const [vista, setVista] = useState<Vista>("pendientes");
   const [mes, setMes] = useState(hoy.slice(0, 7));
   const [marca, setMarca] = useState<string>("");
   const [responsable, setResponsable] = useState<string>("");
@@ -1022,8 +1150,10 @@ export default function Planificacion() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Planificación</h1>
-          <p className="text-muted text-sm">Calendario comercial, iniciativas con su brief y subtareas con responsable y fecha.</p>
+          <h1 className="text-xl font-semibold tracking-tight">Mis tareas · Marketing</h1>
+          <p className="text-muted text-sm">
+            Lo pendiente, el calendario comercial y la planificación de cada iniciativa: brief, subtareas con responsable y fecha, y avance.
+          </p>
         </div>
         <div className="flex gap-2">
           <button type="button" onClick={() => { setErrorGuardar(null); setEditando({ tipo: "evento", datos: { desde: hoy, hasta: hoy, tipo: "comercial", importancia: 2, anticipacionDias: 45, lanzamientoDias: 0 } }); }}
@@ -1102,6 +1232,9 @@ export default function Planificacion() {
             ))}
           </nav>
 
+          {vista === "pendientes" && (
+            <VistaPendientes iniciativas={filtradas} hoy={hoy} responsable={responsable} guardando={guardando} onAbrir={abrir} onTildar={(s, h) => void tildar(s, h)} />
+          )}
           {vista === "calendario" && (
             <VistaCalendario mes={mes} setMes={setMes} iniciativas={filtradas} eventos={eventosFiltrados} hoy={hoy} onAbrir={abrir} onEvento={abrirEvento} />
           )}
@@ -1116,6 +1249,8 @@ export default function Planificacion() {
         </div>
 
         <div className="space-y-4">
+          {/* En la vista Pendientes sería repetir lo mismo al lado. */}
+          {vista !== "pendientes" && (
           <Panel titulo="Próximas subtareas" nota={responsable ? responsable : "Vencidas y próximos 14 días"}>
             {proximas.length === 0 ? (
               <p className="text-muted text-sm">Nada pendiente en los próximos 14 días.</p>
@@ -1139,6 +1274,7 @@ export default function Planificacion() {
               </ul>
             )}
           </Panel>
+          )}
 
           <Panel titulo="Fechas que vienen" nota="★ = clave del año">
             <ul className="space-y-2">
