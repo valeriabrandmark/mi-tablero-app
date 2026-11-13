@@ -1,8 +1,8 @@
 import { query } from "@/lib/db";
 import { CANAL_MAYORISTA } from "@/lib/constantes";
 import type { ClaveMarca } from "@/lib/marketing-demo";
-import type { DatosMayorista, DatosTiendaNube, DatosVentaReal } from "@/lib/marketing-fuentes";
-import { normalizarPlanilla, type Planilla } from "@/lib/marketing-planilla";
+import type { DatosMayorista, DatosMercadoLibre, DatosTiendaNube, DatosVentaReal } from "@/lib/marketing-fuentes";
+import { SQL_ES_CANJE } from "@/lib/queries-carga";
 
 /**
  * Lo que el Tablero de Marca lee de la base: los pedidos de Tienda Nube que se
@@ -17,6 +17,7 @@ import { normalizarPlanilla, type Planilla } from "@/lib/marketing-planilla";
  */
 
 const TZ = "America/Argentina/Buenos_Aires";
+const CANAL_MERCADO_LIBRE = "Mercado Libre";
 /**
  * Todas las consultas reciben el período como `desde` y `hasta` (YYYY-MM-DD,
  * puntas incluidas). Ya no es "el mes en curso": lo elige el filtro.
@@ -30,7 +31,8 @@ type Rango = { desde: string; hasta: string };
  */
 const PATRON_MARCA_SIGMA: Partial<Record<ClaveMarca, string>> = {
   diaper_genie: "%DIAPER%GENIE%",
-  hola_toys: "%HOLA%TOYS%",
+  // En SIGMA (y en Mercado Libre) la marca de Hola Toys figura como "HOLA".
+  hola_toys: "HOLA%",
   litter_genie: "%LITTER%GENIE%",
 };
 
@@ -144,6 +146,7 @@ async function leerMayorista(r: Rango): Promise<Partial<Record<ClaveMarca, Datos
            join unnest($2::text[], $3::text[]) as m(clave, patron)
              on upper(fv.marca) like m.patron
           where fv.canal = $1 and fv.fecha between $4::date and $5::date
+            and not ${SQL_ES_CANJE("fv.")}
           group by 1, 2`,
         [CANAL_MAYORISTA, marcas.map(([k]) => k), marcas.map(([, p]) => p), r.desde, r.hasta],
       ),
@@ -154,6 +157,7 @@ async function leerMayorista(r: Rango): Promise<Partial<Record<ClaveMarca, Datos
            join unnest($2::text[], $3::text[]) as m(clave, patron)
              on upper(fv.marca) like m.patron
           where fv.canal = $1 and fv.fecha between date_trunc('month', $4::date) - interval '3 months' and $4::date
+            and not ${SQL_ES_CANJE("fv.")}
           group by 1, 2`,
         [CANAL_MAYORISTA, marcas.map(([k]) => k), marcas.map(([, p]) => p), r.hasta],
       ),
@@ -168,6 +172,7 @@ async function leerMayorista(r: Rango): Promise<Partial<Record<ClaveMarca, Datos
              join unnest($2::text[], $3::text[]) as m(clave, patron)
                on upper(fv.marca) like m.patron
             where fv.canal = $1 and fv.precio_neto * fv.cantidad > 0
+              and not ${SQL_ES_CANJE("fv.")}
             group by 1, 2)
          select clave, count(*) filter (where primera between $4::date and $5::date) as nuevas
            from primera group by 1`,
@@ -194,13 +199,48 @@ async function leerMayorista(r: Rango): Promise<Partial<Record<ClaveMarca, Datos
   }
 }
 
+/**
+ * MERCADO LIBRE: la cuenta es una sola para todas las marcas, así que se
+ * separa por la marca del producto (igual que en SIGMA). `total_linea` es con
+ * IVA, como lo que paga el comprador (igual que Tienda Nube).
+ */
+async function leerMercadoLibre(r: Rango): Promise<Partial<Record<ClaveMarca, DatosMercadoLibre>> | string> {
+  const marcas = Object.entries(PATRON_MARCA_SIGMA) as [ClaveMarca, string][];
+  try {
+    const dias = await query<{ clave: ClaveMarca; dia: number; venta: string; pedidos: string }>(
+      `select m.clave, (fv.fecha - $4::date) + 1 as dia,
+              sum(fv.total_linea)::numeric as venta, count(distinct fv.nro_orden) as pedidos
+         from gold.fact_ventas fv
+         join unnest($2::text[], $3::text[]) as m(clave, patron)
+           on upper(fv.marca) like m.patron
+        where fv.canal = $1 and fv.fecha between $4::date and $5::date
+        group by 1, 2`,
+      [CANAL_MERCADO_LIBRE, marcas.map(([k]) => k), marcas.map(([, p]) => p), r.desde, r.hasta],
+    );
+    const out: Partial<Record<ClaveMarca, DatosMercadoLibre>> = {};
+    for (const [clave] of marcas) {
+      const d = dias.filter((x) => x.clave === clave);
+      const diaria: number[] = [];
+      for (const x of d) diaria[x.dia - 1] = Number(x.venta);
+      out[clave] = {
+        venta: d.reduce((s, x) => s + Number(x.venta), 0),
+        pedidos: d.reduce((s, x) => s + Number(x.pedidos), 0),
+        diaria: Array.from(diaria, (v) => v ?? 0),
+      };
+    }
+    return out;
+  } catch (e) {
+    return motivoDe(e);
+  }
+}
+
 /** Tiendas (clientes mayoristas) cuya PRIMERA compra de cualquier marca es de este mes. */
 async function leerTiendasNuevas(r: Rango): Promise<number | string> {
   try {
     const [fila] = await query<{ nuevas: string }>(
       `select count(*) as nuevas from (
          select cliente from gold.fact_ventas
-          where canal = $1 and precio_neto * cantidad > 0
+          where canal = $1 and precio_neto * cantidad > 0 and not ${SQL_ES_CANJE()}
           group by cliente
          having min(fecha) between $2::date and $3::date) t`,
       [CANAL_MAYORISTA, r.desde, r.hasta],
@@ -282,7 +322,7 @@ async function leerUnibrandcoApi(r: Rango): Promise<DatosTiendaNube | null> {
 
 /** `hasta` es el último día CON DATOS: hoy si el período sigue abierto. */
 export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
-  const [importado, mayorista, tiendasNuevas, unibrandco] = await Promise.all([
+  const [importado, mayorista, tiendasNuevas, unibrandco, meli] = await Promise.all([
     leerTiendaNube(r),
     leerMayorista(r),
     leerTiendasNuevas(r),
@@ -290,6 +330,7 @@ export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
       console.error("[marketing] Unibrandco API", e);
       return null;
     }),
+    leerMercadoLibre(r),
   ]);
   // Unibrandco por API pisa a un CSV que se haya importado de esa tienda.
   // Si la tabla del importador falla, Unibrandco igual se ve: es otra fuente.
@@ -301,27 +342,7 @@ export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
       porMarca,
     },
     mayorista: typeof mayorista === "string" ? { motivo: mayorista, porMarca: {} } : { porMarca: mayorista },
+    mercadoLibre: typeof meli === "string" ? { motivo: meli, porMarca: {} } : { porMarca: meli },
     tiendasNuevas: typeof tiendasNuevas === "string" ? { motivo: tiendasNuevas, cantidad: null } : { cantidad: tiendasNuevas },
   };
-}
-
-/**
- * La última foto que mandó la planilla de Marketing. Se normaliza al leer y
- * no al guardar: así un arreglo en la normalización vale también para las
- * fotos que ya están guardadas.
- */
-export async function leerPlanilla(): Promise<{ datos: Planilla | null; motivo?: string }> {
-  try {
-    const [fila] = await query<{ datos: unknown; recibido_en: string }>(
-      `select datos, recibido_en from bronze.mkt_planilla order by recibido_en desc limit 1`,
-    );
-    if (!fila) return { datos: null, motivo: "La planilla todavía no mandó datos (menú Marketing → Enviar al tablero)" };
-    return { datos: normalizarPlanilla(fila.datos, new Date(fila.recibido_en).toISOString()) };
-  } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    if (/mkt_planilla/.test(m) && /does not exist|no existe/.test(m)) {
-      return { datos: null, motivo: "Falta correr migraciones/marketing_planilla.sql" };
-    }
-    return { datos: null, motivo: motivoDe(e) };
-  }
 }

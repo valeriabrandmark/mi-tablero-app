@@ -23,8 +23,8 @@
 
 export type ClaveMarca = "diaper_genie" | "hola_toys" | "unibrandco" | "litter_genie";
 
-export type Canal = "Meta Ads" | "Google Ads" | "Influencers" | "Contenido" | "Ferias";
-export const CANALES: Canal[] = ["Meta Ads", "Google Ads", "Influencers", "Contenido", "Ferias"];
+export type Canal = "Meta Ads" | "Google Ads" | "Mercado Ads" | "Influencers" | "Contenido" | "Ferias";
+export const CANALES: Canal[] = ["Meta Ads", "Google Ads", "Mercado Ads", "Influencers", "Contenido", "Ferias"];
 
 export type Marca = {
   clave: ClaveMarca;
@@ -45,6 +45,8 @@ export type Marca = {
   gastoPorCanal: Record<Canal, number>;
   ventaTiendas: number;
   ventaMayorista: number;
+  /** Venta de la marca en Mercado Libre (gold.fact_ventas). El ejemplo no la tiene. */
+  ventaMercadoLibre?: number;
   /** Venta diaria de las tiendas + mayorista, día 1 al día de corte. */
   ventaDiaria: number[];
   diasPautaActiva: number;
@@ -123,7 +125,9 @@ export const MARCAS: Marca[] = [
     ventaBase: 10_500_000,
     gastoPorCanal: {
       "Meta Ads": 380_000,
-      "Google Ads": 150_000,
+      // Google Ads y Mercado Ads están pendientes de conectar: no se inventa gasto.
+      "Google Ads": 0,
+      "Mercado Ads": 0,
       Influencers: 250_000,
       Contenido: 80_000,
       Ferias: 0,
@@ -172,7 +176,9 @@ export const MARCAS: Marca[] = [
     ventaBase: 6_200_000,
     gastoPorCanal: {
       "Meta Ads": 420_000,
-      "Google Ads": 110_000,
+      // Google Ads y Mercado Ads están pendientes de conectar: no se inventa gasto.
+      "Google Ads": 0,
+      "Mercado Ads": 0,
       Influencers: 400_000,
       Contenido: 120_000,
       Ferias: 0,
@@ -221,7 +227,9 @@ export const MARCAS: Marca[] = [
     ventaBase: 4_100_000,
     gastoPorCanal: {
       "Meta Ads": 60_000,
-      "Google Ads": 40_000,
+      // Google Ads y Mercado Ads están pendientes de conectar: no se inventa gasto.
+      "Google Ads": 0,
+      "Mercado Ads": 0,
       Influencers: 0,
       Contenido: 20_000,
       Ferias: 0,
@@ -269,7 +277,9 @@ export const MARCAS: Marca[] = [
     ventaBase: 2_300_000,
     gastoPorCanal: {
       "Meta Ads": 80_000,
-      "Google Ads": 30_000,
+      // Google Ads y Mercado Ads están pendientes de conectar: no se inventa gasto.
+      "Google Ads": 0,
+      "Mercado Ads": 0,
       Influencers: 0,
       Contenido: 25_000,
       Ferias: 0,
@@ -398,11 +408,11 @@ export const INDICADORES: Indicador[] = [
   { nivel: 1, nombre: "Alcance y visualizaciones", formula: "Vista de 30 días", fuente: "Instagram Insights", estado: "listo" },
   { nivel: 1, nombre: "Tasa de interacción +", formula: "Interacciones ÷ alcance", fuente: "Instagram Insights", estado: "listo" },
   { nivel: 1, nombre: "Mensajes recibidos y tiempo de respuesta", formula: "Conteo semanal · minutos a 1ª respuesta", fuente: "Bandeja Instagram / Tienda Nube", estado: "listo" },
-  { nivel: 1, nombre: "Puntaje y reseñas de tiendas", formula: "Lectura mensual", fuente: "Panel Tienda Nube", estado: "listo" },
   { nivel: 2, nombre: "Visitas por tienda", formula: "Sesiones del mes", fuente: "Google Analytics", estado: "verificar" },
   { nivel: 2, nombre: "Origen del tráfico", formula: "Informe de adquisición", fuente: "Google Analytics", estado: "verificar" },
   { nivel: 2, nombre: "Inversión, clics y CPC de pauta (Meta)", formula: "Inversión ÷ clics, día por día", fuente: "API de Meta Ads (automático)", estado: "listo" },
-  { nivel: 2, nombre: "Inversión, clics y CPC de pauta (Google)", formula: "Inversión ÷ clics", fuente: "Google Ads", estado: "listo" },
+  { nivel: 2, nombre: "Inversión, clics y CPC de pauta (Google)", formula: "Inversión ÷ clics", fuente: "Google Ads (pendiente de conectar)", estado: "montar" },
+  { nivel: 2, nombre: "Inversión en Mercado Ads", formula: "Inversión ÷ ventas atribuidas", fuente: "Mercado Ads (pendiente de conectar)", estado: "montar" },
   { nivel: 2, nombre: "Días con pauta activa +", formula: "Días con gasto > 0 en Meta", fuente: "API de Meta Ads (automático)", estado: "listo" },
   { nivel: 2, nombre: "Alcance, frecuencia, CTR y CPM de pauta +", formula: "Insights por campaña", fuente: "API de Meta Ads (automático)", estado: "listo" },
   { nivel: 3, nombre: "Compras y ROAS atribuidos a Meta +", formula: "Valor de compras del píxel ÷ inversión", fuente: "API de Meta Ads (requiere píxel en las tiendas)", estado: "verificar" },
@@ -411,10 +421,11 @@ export const INDICADORES: Indicador[] = [
   { nivel: 3, nombre: "Venta de tiendas oficiales por marca", formula: "Informe de ventas filtrado", fuente: "Panel Tienda Nube", estado: "listo" },
   { nivel: 3, nombre: "Conversión de cada tienda", formula: "Pedidos ÷ visitas", fuente: "Tienda Nube + Analytics", estado: "verificar" },
   { nivel: 3, nombre: "Ticket promedio", formula: "Venta ÷ pedidos", fuente: "Panel Tienda Nube", estado: "listo" },
-  { nivel: 3, nombre: "Venta mayorista de marcas propias", formula: "DG y Hola Toys a tiendas", fuente: "SIGMA", estado: "listo" },
+  { nivel: 3, nombre: "Venta mayorista de marcas propias", formula: "DG y Hola Toys a tiendas, sin canjes", fuente: "SIGMA", estado: "listo" },
+  { nivel: 3, nombre: "Venta en Mercado Libre por marca +", formula: "Ventas por marca del producto", fuente: "Mercado Libre (gold.fact_ventas)", estado: "listo" },
   { nivel: 3, nombre: "Costo de adquisición (CAC)", formula: "(Pauta + influencers) ÷ pedidos atribuidos", fuente: "Cálculo mensual", estado: "montar" },
   { nivel: 3, nombre: "Retorno de la inversión (ROAS / MER) +", formula: "Venta ÷ inversión de marketing", fuente: "Cálculo mensual", estado: "listo" },
-  { nivel: 3, nombre: "Ejecución de presupuesto +", formula: "Gastado ÷ asignado vs. % del mes", fuente: "Planilla de gastos", estado: "listo" },
+  { nivel: 3, nombre: "Ejecución de presupuesto +", formula: "Gastado ÷ asignado vs. % del mes", fuente: "Marketing → Carga", estado: "listo" },
   { nivel: 3, nombre: "Entregas a tiempo (revista y campañas)", formula: "Entregadas en fecha ÷ comprometidas", fuente: "Checklist de entregas", estado: "listo" },
 ];
 
@@ -427,7 +438,7 @@ export function gastoTotal(m: Marca): number {
 }
 
 export function ventaTotal(m: Marca): number {
-  return m.ventaTiendas + m.ventaMayorista;
+  return m.ventaTiendas + m.ventaMayorista + (m.ventaMercadoLibre ?? 0);
 }
 
 /** Proyección lineal al cierre de mes según el ritmo de lo que va. */

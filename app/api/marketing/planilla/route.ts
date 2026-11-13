@@ -1,18 +1,14 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { query } from "@/lib/db";
-import { normalizarPlanilla } from "@/lib/marketing-planilla";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Una planilla de marketing de un año entero son unos cientos de KB. */
-const LIMITE_BYTES = 5_000_000;
-
 /**
  * La planilla de Marketing (Google Sheets) habla con el tablero por acá.
  *
- *   POST  foto entera de la planilla → bronze.mkt_planilla
+ *   POST  YA NO SE USA (410): antes, foto entera de la planilla → bronze.mkt_planilla
  *   GET   venta por cupón (Tienda Nube) para escribir el resultado de cada
  *         colaboración de vuelta en la planilla
  *
@@ -54,56 +50,19 @@ function rechazo(estado: "sin_configurar" | "invalido") {
 export async function POST(request: NextRequest) {
   const t = tokenValido(request);
   if (t !== "ok") return rechazo(t);
-
-  const texto = await request.text();
-  if (texto.length > LIMITE_BYTES) {
-    return NextResponse.json({ ok: false, mensaje: "La planilla pesa demasiado" }, { status: 413 });
-  }
-  let crudo: unknown;
-  try {
-    crudo = JSON.parse(texto);
-  } catch {
-    return NextResponse.json({ ok: false, mensaje: "No es JSON" }, { status: 400 });
-  }
-
-  // Se normaliza ANTES de guardar sólo para contar y avisar: lo que se guarda
-  // es la foto cruda, así un cambio en la normalización no obliga a reenviar.
-  const ahora = new Date().toISOString();
-  const p = normalizarPlanilla(crudo, ahora);
-  const filas = p.colaboraciones.length + p.gastos.length + p.presupuesto.length + p.envios.length;
-
-  try {
-    await query(
-      `insert into bronze.mkt_planilla (datos, filas, origen) values ($1::jsonb, $2, $3)`,
-      [texto, filas, request.headers.get("x-planilla") ?? null],
-    );
-    // Se guardan las últimas 60 fotos: alcanza para ver qué cambió.
-    await query(
-      `delete from bronze.mkt_planilla where id not in (select id from bronze.mkt_planilla order by recibido_en desc limit 60)`,
-    );
-  } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    console.error("[api/marketing/planilla] POST", e);
-    return NextResponse.json(
-      {
-        ok: false,
-        mensaje: /mkt_planilla/.test(m) && /does not exist|no existe/.test(m)
-          ? "Falta correr migraciones/marketing_planilla.sql en Supabase."
-          : m,
-      },
-      { status: 500 },
-    );
-  }
-
-  return NextResponse.json({
-    ok: true,
-    recibido: ahora,
-    colaboraciones: p.colaboraciones.length,
-    gastos: p.gastos.length,
-    presupuesto: p.presupuesto.length,
-    envios: p.envios.length,
-    influencers: p.influencers,
-  });
+  // LA PLANILLA YA NO ALIMENTA AL TABLERO (reunión del 13/11/2026): todo se
+  // carga y se edita en Marketing → Carga, con historial, y los canjes salen
+  // de SIGMA. Lo que ya había mandado se migró con migraciones/marketing_carga.sql.
+  // Se contesta 410 para que el menú de la planilla lo diga en vez de fallar mudo.
+  return NextResponse.json(
+    {
+      ok: false,
+      error: "reemplazada",
+      mensaje:
+        "La planilla ya no se usa: las colaboraciones, gastos y presupuesto se cargan en el tablero, en Marketing → Carga de marketing.",
+    },
+    { status: 410 },
+  );
 }
 
 /**

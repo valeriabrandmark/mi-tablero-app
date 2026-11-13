@@ -2,6 +2,7 @@ import type { ClaveMarca } from "@/lib/marketing-demo";
 import type { MetaAds } from "@/lib/meta-ads-tipos";
 import type { Iniciativa } from "@/lib/planificacion";
 import type { Planilla } from "@/lib/marketing-planilla";
+import type { Periodo } from "@/lib/marketing-periodo";
 
 /**
  * Todo lo que el Tablero de Marca recibe de fuentes REALES, ya calculado en el
@@ -35,9 +36,16 @@ export type DatosMayorista = {
   tiendasNuevas: number;
 };
 
+export type DatosMercadoLibre = {
+  venta: number;
+  pedidos: number;
+  diaria: number[];
+};
+
 export type DatosVentaReal = {
   tiendaNube: { motivo?: string; porMarca: Partial<Record<ClaveMarca, DatosTiendaNube>> };
   mayorista: { motivo?: string; porMarca: Partial<Record<ClaveMarca, DatosMayorista>> };
+  mercadoLibre: { motivo?: string; porMarca: Partial<Record<ClaveMarca, DatosMercadoLibre>> };
   tiendasNuevas: { motivo?: string; cantidad: number | null };
 };
 
@@ -67,10 +75,17 @@ export type DatosTablero = {
    */
   plan: { iniciativas: Iniciativa[]; motivo?: string };
   /**
-   * La última foto de la planilla de Marketing (Google Sheets). Con ella, el
-   * presupuesto, la inversión en influencers y los otros gastos son reales.
+   * Lo cargado en Marketing → Carga (colaboraciones, canjes de SIGMA, envíos,
+   * gastos y presupuesto), con la forma que tenía la planilla de Sheets. Con
+   * ella, el presupuesto, la inversión en influencers y los otros gastos son reales.
    */
   planilla: { datos: Planilla | null; motivo?: string };
+  /**
+   * Lo mismo del PERÍODO ANTERIOR (lib/marketing-periodo.ts → periodoAnterior),
+   * para que cada KPI se compare. Planificación y la carga no se repiten: ya
+   * vienen enteras y se filtran por fecha en la pantalla.
+   */
+  anterior: { periodo: Periodo; meta: MetaAds; instagram: Record<ClaveMarca, InstagramMarca>; venta: DatosVentaReal };
   /** ISO del momento en que se armó, para el encabezado. */
   generado: string;
 };
