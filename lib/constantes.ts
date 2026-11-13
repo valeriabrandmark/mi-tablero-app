@@ -173,6 +173,24 @@ function conCierreMovido(mes: string, fecha: string): string {
 }
 
 /**
+ * El mes comercial que acaba de cerrar.
+ *
+ * NO ES EL MES CALENDARIO ANTERIOR, y la diferencia no es un detalle: el mes
+ * comercial va del 6 al 5, así que lo que se vendió del 1 al 5 de noviembre
+ * pertenece a OCTUBRE. Medir "el mes pasado" con `date_trunc('month')` deja
+ * esas ventas afuera y le suma las del 1 al 5 de octubre, que son de
+ * septiembre.
+ *
+ * El 13/11/2026 eso hizo que la pantalla de Compras dijera "sin venta" para
+ * GE07009 en la columna "Rent. oct 2026": el artículo vendió 60 unidades en
+ * octubre comercial, todas entre el 2 y el 5 de noviembre. En octubre
+ * calendario no vendió ni una.
+ */
+export function mesComercialAnterior(ahora: Date = new Date()): string {
+  return correrMes(mesComercialActual(ahora), -1);
+}
+
+/**
  * El primer y el último día de un mes comercial, respetando los cierres
  * movidos. `2026-08` normalmente es 06/08 a 05/09.
  */

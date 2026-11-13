@@ -1,5 +1,6 @@
 import { cacheado } from "@/lib/cache";
 import { fmtMes } from "@/lib/format";
+import { mesComercialAnterior } from "@/lib/constantes";
 import { query, queryOne } from "@/lib/db";
 import { agregarFiltro } from "@/lib/filtros";
 import { buscadorDeArticulo } from "@/lib/sql-codigos";
@@ -344,19 +345,31 @@ ventas as (
            where fecha >= current_date - ${MESES_RENTABILIDAD * 30}), 0) as margen_rent,
          coalesce(sum(precio_neto * cantidad) filter (
            where fecha >= current_date - ${MESES_RENTABILIDAD * 30}), 0) as facturado_rent,
-         -- El MES CALENDARIO pasado, aparte de la ventana movil de 3 meses: una
-         -- cosa es como viene rindiendo el articulo y otra a cuanto se vendio el
-         -- mes que acaba de cerrar, que es contra lo que se compara la oferta
-         -- que el proveedor ofrece ahora.
+         -- EL MES COMERCIAL QUE ACABA DE CERRAR, aparte de la ventana movil de
+         -- 3 meses: una cosa es como viene rindiendo el articulo y otra a
+         -- cuanto se vendio el mes que cerro, que es contra lo que se compara
+         -- la oferta que el proveedor ofrece ahora.
+         --
+         -- VA POR LA COLUMNA mes_comercial Y NO POR FECHAS. Antes era un
+         -- date_trunc('month', current_date) menos un mes, o sea el mes
+         -- CALENDARIO -- y el mes de este negocio va del 6 al 5. Lo que se
+         -- vendio del 1 al 5 de noviembre es de OCTUBRE, y quedaba afuera; lo
+         -- del 1 al 5 de octubre es de septiembre, y entraba.
+         --
+         -- El 13/11/2026 eso dejo a GE07009 con "sin venta" en la columna
+         -- "Rent. oct 2026": vendio 60 unidades en octubre comercial, todas
+         -- entre el 2 y el 5 de noviembre. En octubre calendario, ninguna.
+         --
+         -- Esa columna la estampa modelo.py con la tabla de
+         -- cierres movidos, asi que esto respeta tambien los meses que no
+         -- cerraron el 5 -- cosa que ninguna cuenta de fechas hecha aca podria
+         -- hacer sin repetir esa tabla.
          coalesce(sum(cantidad) filter (
-           where fecha >= date_trunc('month', current_date) - interval '1 month'
-             and fecha <  date_trunc('month', current_date)), 0) as uds_mes_pasado,
+           where mes_comercial = $7), 0) as uds_mes_pasado,
          coalesce(sum(margen_total) filter (
-           where fecha >= date_trunc('month', current_date) - interval '1 month'
-             and fecha <  date_trunc('month', current_date)), 0) as margen_mes_pasado,
+           where mes_comercial = $7), 0) as margen_mes_pasado,
          coalesce(sum(precio_neto * cantidad) filter (
-           where fecha >= date_trunc('month', current_date) - interval '1 month'
-             and fecha <  date_trunc('month', current_date)), 0) as facturado_mes_pasado
+           where mes_comercial = $7), 0) as facturado_mes_pasado
   from gold.fact_ventas
   group by sku
 ),
@@ -666,6 +679,9 @@ function where(
     // rompen.
     evento,
     mesCostos,
+    // $7. El mes comercial que acaba de cerrar, para la columna "Rent. <mes>".
+    // Va acá, entre los fijos, por lo mismo que $5 y $6.
+    mesComercialAnterior(),
   ];
 
   // LO QUE ELIGIÓ LA PERSONA: qué artículos mirar. Todo lo que se agregue acá
@@ -1120,15 +1136,12 @@ async function getDashboardComprasDirecto(
     getSellInFoto(),
   ]);
 
-  // El mes pasado, calculado igual que en el SQL, para que la pantalla lo
-  // nombre sin volver a deducirlo —y sin la chance de que los dos no coincidan
-  // el día 1 de un mes.
-  const hoy = new Date();
-  const mesPasado = new Date(
-    Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - 1, 1),
-  )
-    .toISOString()
-    .slice(0, 7);
+  // El mes que nombra la columna, calculado con la MISMA función que usa el
+  // SQL, para que los dos no puedan discrepar. Antes cada uno lo deducía por
+  // su cuenta --acá con `Date`, allá con `date_trunc`-- y los dos deducían el
+  // mes CALENDARIO: la columna decía "oct 2026" y mostraba el 1 al 31 de
+  // octubre, cuando octubre comercial va del 06/10 al 05/11.
+  const mesPasado = mesComercialAnterior();
 
   return {
     filas: listado.filas,

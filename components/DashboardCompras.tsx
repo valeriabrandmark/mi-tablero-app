@@ -1477,7 +1477,8 @@ export default function DashboardComprasPage({
       // ésta que se mira si la oferta que el proveedor ofrece ahora conviene.
       titulo: `Rent. ${data ? fmtMes(data.mesPasado) : "mes pasado"}`,
       ayuda:
-        "La rentabilidad del mes que acaba de cerrar, aparte de la ventana móvil. Es contra lo que se mira si la oferta que el proveedor ofrece ahora conviene.",
+        "La rentabilidad del mes que acaba de cerrar, aparte de la ventana móvil. Es contra lo que se mira si la oferta que el proveedor ofrece ahora conviene. " +
+        "Es el mes COMERCIAL, del 6 al 5, igual que el resto del tablero: lo que se vendió del 1 al 5 de noviembre cuenta en octubre.",
       celda: (f) =>
         f.rentMesPasado == null ? (
           <span className="text-muted">sin venta</span>
