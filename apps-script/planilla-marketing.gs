@@ -20,7 +20,8 @@
  *      escribir en las hojas: valida los campos obligatorios, usa las mismas
  *      listas que la hoja Listas y escribe en la primera fila libre sin tocar
  *      las fórmulas. Una colaboración se carga entera, con sus productos de
- *      canje y su envío, en un solo paso.
+ *      canje y su envío, en un solo paso. El HTML del formulario va en el
+ *      archivo "Formulario" del mismo proyecto.
  *
  * Lee las hojas POR NOMBRE DE COLUMNA, no por posición: se pueden agregar
  * columnas o moverlas, mientras los encabezados de la fila 3 sigan iguales.
@@ -31,7 +32,9 @@
  *
  *   1. Subir el Excel a Google Drive y abrirlo con Hojas de cálculo de Google
  *      (Archivo → Guardar como Hojas de cálculo de Google).
- *   2. Extensiones → Apps Script. Pegar este archivo entero y guardar.
+ *   2. Extensiones → Apps Script. Pegar este archivo entero en Código.gs.
+ *      Después, "+" → HTML, llamarlo exactamente "Formulario" y pegar ahí
+ *      apps-script/planilla-marketing-formulario.html. Guardar.
  *   3. Configuración del proyecto (el engranaje) → Propiedades del script:
  *        TABLERO_URL         https://brandmark-business.vercel.app
  *        MKT_PLANILLA_TOKEN  el mismo valor que MKT_PLANILLA_TOKEN en Vercel
@@ -309,7 +312,9 @@ var TITULOS_FORM = {
 };
 
 function abrirFormulario(tipo) {
-  var t = HtmlService.createTemplate(htmlFormulario_());
+  // El HTML vive en su propio archivo del proyecto: "Formulario" (copia de
+  // apps-script/planilla-marketing-formulario.html).
+  var t = HtmlService.createTemplateFromFile("Formulario");
   t.tipoInicial = tipo || "colaboracion";
   var salida = t.evaluate().setTitle("Marketing · Cargar datos");
   SpreadsheetApp.getUi().showSidebar(salida);
@@ -769,210 +774,4 @@ function guardarContenido(d) {
     Observaciones: texto_(d.Observaciones),
   });
   return { mensaje: despues_("Pieza cargada en " + d["ID colaboración"]) };
-}
-
-// ---------------------------------------------------------------------------
-// El HTML del formulario. Va acá adentro, y no en un archivo .html aparte,
-// para que instalar el script siga siendo pegar UN archivo.
-// (Sin comillas invertidas ni "$" + "{" adentro: rompen esta plantilla.)
-// ---------------------------------------------------------------------------
-function htmlFormulario_() {
-  return `<!DOCTYPE html>
-<html><head><base target="_top">
-<style>
-  body{font-family:Arial,sans-serif;font-size:13px;color:#1f2937;margin:0;padding:12px}
-  h2{font-size:15px;margin:0 0 8px;color:#1F3A5F}
-  h3{font-size:12px;margin:14px 0 6px;color:#1F3A5F;text-transform:uppercase;letter-spacing:.03em}
-  label{display:block;font-size:11px;color:#4b5563;margin:8px 0 2px}
-  label .req{color:#b91c1c}
-  input,select,textarea{width:100%;box-sizing:border-box;padding:6px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px}
-  textarea{min-height:52px}
-  input.err,select.err,textarea.err{border-color:#dc2626;background:#fef2f2}
-  .fila{display:flex;gap:6px}.fila>div{flex:1}
-  .caja{border:1px solid #e5e7eb;border-radius:8px;padding:8px;margin-top:6px;background:#f9fafb}
-  .prod{border-bottom:1px dashed #d1d5db;padding-bottom:6px;margin-bottom:6px}
-  button{cursor:pointer;border:0;border-radius:6px;padding:8px 12px;font-size:13px}
-  .prim{background:#1F3A5F;color:#fff;width:100%;margin-top:14px}
-  .prim:disabled{opacity:.5}
-  .sec{background:#e5e7eb;color:#111827;padding:5px 8px;font-size:12px}
-  .quitar{background:none;color:#b91c1c;padding:2px 0;font-size:11px}
-  .msg{margin-top:10px;padding:8px;border-radius:6px;font-size:12px;display:none}
-  .ok{background:#dcfce7;color:#166534;display:block}.mal{background:#fee2e2;color:#991b1b;display:block}
-  .nota{font-size:11px;color:#6b7280;margin-top:4px}
-  .oculto{display:none}
-</style></head>
-<body>
-<label>¿Qué querés cargar?</label>
-<select id="tipo">
-  <option value="colaboracion">Nueva colaboración</option>
-  <option value="actualizar">Actualizar colaboración (estado, pago, link)</option>
-  <option value="influencer">Nuevo influencer</option>
-  <option value="envio">Envío</option>
-  <option value="producto">Producto de canje</option>
-  <option value="gasto">Otro gasto</option>
-  <option value="presupuesto">Presupuesto del mes</option>
-  <option value="contenido">Pieza de contenido</option>
-</select>
-<div id="form"><p class="nota">Cargando listas…</p></div>
-<div id="msg" class="msg"></div>
-
-<script>
-var D = null;
-var TIPO = "<?= tipoInicial ?>";
-var FUNCION = {colaboracion:"guardarColaboracion", actualizar:"actualizarColaboracion", influencer:"guardarInfluencer",
-  envio:"guardarEnvio", producto:"guardarProducto", gasto:"guardarGasto", presupuesto:"guardarPresupuesto", contenido:"guardarContenido"};
-
-function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
-function opts(lista, vacio){var h=vacio?'<option value="">'+esc(vacio)+'</option>':'';(lista||[]).forEach(function(o){var v=typeof o==="object"?o.v:o,t=typeof o==="object"?o.t:o;h+='<option value="'+esc(v)+'">'+esc(t)+'</option>';});return h;}
-function campo(etq, nombre, html, req){return '<label>'+esc(etq)+(req?' <span class="req">*</span>':'')+'</label>'+html.replace('NAME','name="'+nombre+'"'+(req?' data-req="1"':''));}
-function inp(etq,nombre,tipo,req,extra){return campo(etq,nombre,'<input NAME type="'+(tipo||"text")+'" '+(extra||"")+'>',req);}
-function sel(etq,nombre,lista,req,vacio){return campo(etq,nombre,'<select NAME>'+opts(lista,vacio||"Elegir…")+'</select>',req);}
-function area(etq,nombre,req){return campo(etq,nombre,'<textarea NAME></textarea>',req);}
-function dos(a,b){return '<div class="fila"><div>'+a+'</div><div>'+b+'</div></div>';}
-function L(n){return (D&&D.listas[n])||[];}
-function colabOpts(){return D.colaboraciones.slice().reverse().map(function(c){return {v:c.id,t:c.id+" · "+c.marca+" · "+c.influencer};});}
-
-function render(){
-  var f=document.getElementById("form"), h="";
-  if(TIPO==="colaboracion"){
-    h+='<h2>Nueva colaboración</h2>';
-    h+=dos(sel("Marca","Marca",L("Marcas"),1), inp("Fecha del acuerdo","Fecha","date",1,'value="'+D.hoy+'"'));
-    h+=inp("Influencer","Influencer","text",1,'list="infls" placeholder="Escribí o elegí de la lista"');
-    h+='<datalist id="infls">'+D.influencers.map(function(i){return '<option value="'+esc(i.nombre)+'">'+esc(i.instagram)+'</option>';}).join("")+'</datalist>';
-    h+='<div id="nuevoInf" class="caja oculto"><div class="nota">No está en la base: se crea con estos datos.</div>'+dos(inp("@ Instagram","nuevoInstagram","text",0,'placeholder="@usuario"'),inp("Seguidores","nuevoSeguidores","number",0))+'</div>';
-    h+=dos(sel("Modalidad","Modalidad",L("Modalidad"),1), sel("Formato","Formato",L("Formato"),1));
-    h+=dos(inp("Piezas","Piezas","number",0,'min="1" value="1"'), sel("Estado","Estado",L("Estado colaboración"),1));
-    h+=inp("Campaña / fecha comercial","Campaña / fecha comercial","text",0,'placeholder="Ej.: Día del Niño"');
-    h+=inp("Producto / marca promocionada","Producto / marca promocionada","text",0);
-    h+=area("Objetivo","Objetivo",0);
-    h+='<div id="bloquePago" class="oculto"><h3>Pago</h3>'+dos(inp("Honorarios ($)","Honorarios ($)","number",0,'min="0"'),inp("IVA honorarios ($)","IVA honorarios ($)","number",0,'min="0"'))
-      +dos(sel("Estado de pago","Estado de pago",["Pendiente","Pagado"],0,"Pendiente"), sel("Medio de pago","Medio de pago",L("Medio de pago"),0))+'</div>';
-    h+='<div id="bloqueCanje" class="oculto"><h3>Productos del canje</h3><div class="nota">Costo = lo que nos cuesta. Si el SKU está en el catálogo, se completa solo.</div><div id="prods"></div><button type="button" class="sec" onclick="agregarProd()">+ Producto</button>';
-    h+='<datalist id="skus">'+D.catalogo.map(function(c){return '<option value="'+esc(c.sku)+'">'+esc(c.producto)+'</option>';}).join("")+'</datalist></div>';
-    h+='<h3>Envío</h3><label style="display:flex;gap:6px;align-items:center;font-size:12px;color:#111"><input type="checkbox" id="cargarEnvio" style="width:auto"> Cargar el envío ahora</label>';
-    h+='<div id="bloqueEnvio" class="caja oculto">'+dos(inp("Fecha","env_Fecha","date",0,'value="'+D.hoy+'"'), sel("Transporte","env_Transporte",L("Transporte"),0))
-      +dos(inp("Costo envío ($)","env_Costo envío ($)","number",0,'min="0"'), sel("Estado","env_Estado",L("Estado del envío"),0))+inp("Seguimiento","env_Seguimiento","text",0)+'</div>';
-    h+='<h3>Resultado</h3>'+dos(inp("Publicación prevista","Publicación prevista","date",0), inp("Cupón","Cupón","text",0,'placeholder="HOLA-ANA10"'));
-    h+='<div class="nota">Sin cupón no se puede medir la venta que trae.</div>';
-    h+=inp("Otros costos ($)","Otros costos ($)","number",0,'min="0"')+area("Observaciones","Observaciones",0);
-  } else if(TIPO==="actualizar"){
-    h+='<h2>Actualizar colaboración</h2>'+sel("Colaboración","ID",colabOpts(),1);
-    h+='<div id="campos" class="oculto">'+dos(sel("Estado","Estado",L("Estado colaboración"),1), sel("Estado de pago","Estado de pago",L("Estado de pago"),0));
-    h+=dos(inp("Fecha de pago","Fecha de pago","date",0), sel("Medio de pago","Medio de pago",L("Medio de pago"),0))+inp("Factura","Factura","text",0);
-    h+=dos(inp("Publicación real","Publicación real","date",0), inp("Cupón","Cupón","text",0))+inp("Link","Link","url",0);
-    h+=dos(inp("Alcance","Alcance","number",0,'min="0"'), inp("Interacciones","Interacciones","number",0,'min="0"'))+area("Observaciones","Observaciones",0)+'</div>';
-  } else if(TIPO==="influencer"){
-    h+='<h2>Nuevo influencer</h2>'+inp("Nombre","Nombre","text",1)+dos(inp("@ Instagram","Instagram","text",1,'placeholder="@usuario"'), inp("Seguidores","Seguidores","number",1,'min="0"'));
-    h+=dos(sel("Red","Red",L("Red"),0,"Instagram"), inp("Provincia / ciudad","Provincia / ciudad","text",0))+inp("Nicho","Nicho","text",0,'placeholder="Maternidad, juguetes, beauty…"');
-    h+='<label>Marcas</label>'+L("Marcas").map(function(m){return '<label style="display:inline-flex;gap:4px;margin-right:8px;font-size:12px;color:#111"><input type="checkbox" class="marca" value="'+esc(m)+'" style="width:auto">'+esc(m)+'</label>';}).join("");
-    h+='<h3>Tarifas</h3>'+dos(inp("Historia ($)","Tarifa historia ($)","number",0,'min="0"'), inp("Reel ($)","Tarifa reel ($)","number",0,'min="0"'))+dos(inp("Pack ($)","Tarifa pack ($)","number",0,'min="0"'), sel("Acepta canje","Acepta canje",["Sí","No"],0));
-    h+='<h3>Contacto</h3>'+dos(inp("Email","Email","email",0), inp("WhatsApp","WhatsApp","text",0))+dos(sel("Estado del contacto","Estado del contacto",L("Estado del contacto"),1), inp("Último contacto","Último contacto","date",0,'value="'+D.hoy+'"'))+area("Observaciones","Observaciones",0);
-  } else if(TIPO==="envio"){
-    h+='<h2>Envío</h2>'+dos(sel("Tipo","Tipo",L("Tipo de envío"),1), sel("Marca","Marca",L("Marcas"),1));
-    h+=sel("Colaboración (si es a un influencer)","ID colaboración",colabOpts(),0,"— Sin colaboración —")+inp("Destinatario","Destinatario","text",1);
-    h+=dos(inp("Fecha","Fecha","date",1,'value="'+D.hoy+'"'), sel("Transporte","Transporte",L("Transporte"),1))+dos(inp("Costo envío ($)","Costo envío ($)","number",1,'min="0"'), sel("Estado","Estado",L("Estado del envío"),1));
-    h+=inp("Seguimiento","Seguimiento","text",0)+area("Observaciones","Observaciones",0);
-  } else if(TIPO==="producto"){
-    h+='<h2>Producto de canje</h2>'+sel("Colaboración","ID colaboración",colabOpts(),1)+inp("SKU","SKU","text",0,'list="skus"');
-    h+='<datalist id="skus">'+D.catalogo.map(function(c){return '<option value="'+esc(c.sku)+'">'+esc(c.producto)+'</option>';}).join("")+'</datalist>';
-    h+=inp("Producto","Producto","text",1)+dos(inp("Cantidad","Cantidad","number",1,'min="1" value="1"'), inp("Fecha de entrega","Fecha de entrega","date",0))+dos(inp("Costo unitario ($)","Costo unitario ($)","number",0,'min="0"'), inp("PVP unitario ($)","PVP unitario ($)","number",0,'min="0"'));
-    h+='<div class="nota">Si dejás el costo vacío, se usa el del Catálogo de costos.</div>'+area("Observaciones","Observaciones",0);
-  } else if(TIPO==="gasto"){
-    h+='<h2>Otro gasto</h2>'+dos(inp("Fecha","Fecha","date",1,'value="'+D.hoy+'"'), sel("Marca","Marca",L("Marcas"),1))+sel("Concepto","Concepto",L("Concepto de gasto"),1);
-    h+=inp("Proveedor","Proveedor","text",0,'list="provs"')+'<datalist id="provs">'+opts(D.proveedores)+'</datalist>'+inp("Detalle","Detalle","text",1);
-    h+=dos(inp("Monto ($)","Monto ($)","number",1,'min="0"'), inp("IVA ($)","IVA ($)","number",0,'min="0"'))+dos(sel("Estado de pago","Estado de pago",["Pendiente","Pagado"],1), inp("Fecha de pago","Fecha de pago","date",0));
-    h+=inp("Factura","Factura","text",0)+area("Observaciones","Observaciones",0)+'<div class="nota">La pauta de Meta no hace falta: el tablero la lee de Meta Ads.</div>';
-  } else if(TIPO==="presupuesto"){
-    h+='<h2>Presupuesto del mes</h2>'+dos(inp("Mes","Mes","month",1,'value="'+D.hoy.slice(0,7)+'"'), sel("Marca","Marca",L("Marcas"),1))+inp("Presupuesto ($)","Presupuesto ($)","number",1,'min="0"')+inp("Nota","Nota","text",0);
-    h+='<div class="nota">Si ya hay presupuesto para ese mes y marca, se reemplaza.</div>';
-  } else if(TIPO==="contenido"){
-    h+='<h2>Pieza de contenido</h2>'+sel("Colaboración","ID colaboración",colabOpts(),1)+dos(sel("Formato","Formato",L("Formato"),1), sel("Estado","Estado",["Planificado","En producción","Aprobado","Publicado"],1));
-    h+=inp("Título","Título","text",1)+area("Concepto","Concepto",0)+area("Guion","Guion",0)+area("Copy","Copy",0)+dos(inp("Fecha","Fecha","date",0), inp("Link","Link","url",0))+area("Observaciones","Observaciones",0);
-  }
-  h+='<button class="prim" id="guardar" type="button" onclick="guardar()">Guardar</button>';
-  f.innerHTML=h;
-  enganchar();
-}
-
-function enganchar(){
-  var q=function(n){return document.querySelector('[name="'+n+'"]');};
-  // El rojo se va apenas se completa el campo, sin esperar al próximo Guardar.
-  document.getElementById("form").addEventListener("input",function(e){if(String(e.target.value).trim())e.target.classList.remove("err");});
-  document.getElementById("form").addEventListener("change",function(e){if(String(e.target.value).trim())e.target.classList.remove("err");});
-  if(TIPO==="colaboracion"){
-    var mod=q("Modalidad"), inf=q("Influencer");
-    var ver=function(){var m=mod.value;document.getElementById("bloquePago").classList.toggle("oculto",!(m==="Pago"||m==="Pago + canje"));
-      document.getElementById("bloqueCanje").classList.toggle("oculto",!(m==="Canje"||m==="Pago + canje"));
-      if((m==="Canje"||m==="Pago + canje")&&!document.querySelectorAll(".prod").length)agregarProd();};
-    mod.addEventListener("change",ver);
-    inf.addEventListener("input",function(){var existe=D.influencers.some(function(i){return i.nombre===inf.value.trim();});
-      document.getElementById("nuevoInf").classList.toggle("oculto",existe||!inf.value.trim());});
-    document.getElementById("cargarEnvio").addEventListener("change",function(e){document.getElementById("bloqueEnvio").classList.toggle("oculto",!e.target.checked);});
-  }
-  if(TIPO==="actualizar"){
-    q("ID").addEventListener("change",function(e){if(!e.target.value)return;mensaje("Cargando…","");
-      google.script.run.withSuccessHandler(function(c){document.getElementById("campos").classList.remove("oculto");
-        ["Estado","Estado de pago","Fecha de pago","Medio de pago","Factura","Publicación real","Cupón","Link","Alcance","Interacciones","Observaciones"].forEach(function(k){var el=q(k);if(el)el.value=c[k]==null?"":c[k];});
-        mensaje("","");}).withFailureHandler(function(err){mensaje(err.message,"mal");}).leerColaboracion(e.target.value);});
-  }
-  if(TIPO==="producto"){q("SKU").addEventListener("change",function(e){completarSku(e.target,q("Producto"),q("Costo unitario ($)"));});}
-  if(TIPO==="envio"){q("ID colaboración").addEventListener("change",function(e){var c=D.colaboraciones.filter(function(x){return x.id===e.target.value;})[0];
-    if(c){q("Destinatario").value=c.influencer;q("Marca").value=c.marca;q("Tipo").value="Influencer";}});}
-}
-
-function completarSku(skuEl, prodEl, costoEl){var c=D.catalogo.filter(function(x){return x.sku===skuEl.value.trim();})[0];
-  if(c){if(!prodEl.value)prodEl.value=c.producto;if(!costoEl.value&&c.costo)costoEl.placeholder="Catálogo: $"+c.costo;}}
-
-function agregarProd(){var d=document.createElement("div");d.className="prod";
-  d.innerHTML='<div class="fila"><div><label>SKU</label><input class="p_SKU" list="skus"></div><div><label>Cantidad <span class="req">*</span></label><input class="p_Cantidad" type="number" min="1" value="1"></div></div>'
-   +'<label>Producto <span class="req">*</span></label><input class="p_Producto">'
-   +'<div class="fila"><div><label>Costo unit. ($)</label><input class="p_Costo" type="number" min="0"></div><div><label>PVP unit. ($)</label><input class="p_PVP" type="number" min="0"></div></div>'
-   +'<button type="button" class="quitar" onclick="this.parentNode.remove()">Quitar producto</button>';
-  document.getElementById("prods").appendChild(d);
-  d.querySelector(".p_SKU").addEventListener("change",function(e){completarSku(e.target,d.querySelector(".p_Producto"),d.querySelector(".p_Costo"));});}
-
-function recolectar(){
-  var o={}, faltan=[];
-  document.querySelectorAll("#form [name]").forEach(function(el){
-    var visible=!el.closest(".oculto");
-    el.classList.remove("err");
-    if(el.dataset.req&&visible&&!String(el.value).trim()){el.classList.add("err");faltan.push(el.name);}
-    if(visible)o[el.name]=el.value;
-  });
-  if(TIPO==="influencer")o.Marcas=Array.prototype.map.call(document.querySelectorAll(".marca:checked"),function(x){return x.value;});
-  if(TIPO==="colaboracion"){
-    o.productos=Array.prototype.map.call(document.querySelectorAll("#bloqueCanje:not(.oculto) .prod"),function(p){
-      return {SKU:p.querySelector(".p_SKU").value,Producto:p.querySelector(".p_Producto").value,Cantidad:p.querySelector(".p_Cantidad").value,
-        "Costo unitario ($)":p.querySelector(".p_Costo").value,"PVP unitario ($)":p.querySelector(".p_PVP").value};});
-    var env=document.getElementById("cargarEnvio").checked;
-    o.envio={cargar:env};
-    Object.keys(o).forEach(function(k){if(k.indexOf("env_")===0){o.envio[k.slice(4)]=o[k];delete o[k];}});
-    if(env)["Fecha","Transporte","Costo envío ($)","Estado"].forEach(function(k){if(!String(o.envio[k]||"").trim()){faltan.push("Envío: "+k);var el=document.querySelector('[name="env_'+k+'"]');if(el)el.classList.add("err");}});
-    var m=o.Modalidad;
-    if((m==="Pago"||m==="Pago + canje")&&!(Number(o["Honorarios ($)"])>0)){faltan.push("Honorarios");var h=document.querySelector('[name="Honorarios ($)"]');if(h)h.classList.add("err");}
-    if((m==="Canje"||m==="Pago + canje")&&!o.productos.some(function(p){return p.Producto.trim();}))faltan.push("al menos un producto del canje");
-    var nuevo=!D.influencers.some(function(i){return i.nombre===String(o.Influencer||"").trim();});
-    if(nuevo&&o.Influencer&&!String(o.nuevoInstagram||"").trim()){faltan.push("@ del influencer nuevo");var ig=document.querySelector('[name="nuevoInstagram"]');if(ig)ig.classList.add("err");}
-  }
-  return {datos:o,faltan:faltan};
-}
-
-function guardar(){
-  var r=recolectar();
-  if(r.faltan.length){mensaje("Falta completar: "+r.faltan.join(", "),"mal");return;}
-  var b=document.getElementById("guardar");b.disabled=true;b.textContent="Guardando…";
-  google.script.run.withSuccessHandler(function(res){mensaje(res.mensaje,"ok");cargar(true);})
-    .withFailureHandler(function(err){b.disabled=false;b.textContent="Guardar";mensaje(err.message,"mal");})[FUNCION[TIPO]](r.datos);
-}
-
-function mensaje(t,clase){var m=document.getElementById("msg");m.textContent=t;m.className="msg "+(t?clase:"");}
-
-function cargar(conservarMensaje){google.script.run.withSuccessHandler(function(d){D=d;render();if(!conservarMensaje)mensaje("","");})
-  .withFailureHandler(function(err){mensaje("No se pudieron leer las listas: "+err.message,"mal");}).datosFormulario();}
-
-document.getElementById("tipo").value=TIPO;
-document.getElementById("tipo").addEventListener("change",function(e){TIPO=e.target.value;mensaje("","");if(D)render();});
-cargar(false);
-</script>
-</body></html>`;
 }
