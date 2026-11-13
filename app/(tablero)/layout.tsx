@@ -77,6 +77,9 @@ const NAV: ItemNav[] = [
     icono: "marketing",
     hijos: [
       { href: "/marketing", label: "Tablero de Marca", icono: "marketing" },
+      // Colaboraciones, canjes, gastos y presupuesto se cargan acá (antes, en
+      // una planilla de Google Sheets).
+      { href: "/marketing/carga", label: "Carga de marketing", icono: "factura" },
       // La Planificación NO va acá: es para hacer, no para mirar, así que vive
       // en "Mis tareas → Marketing" (lib/tareas.ts).
       // Las tiendas de las marcas no tienen API (falta el plan Escala): los

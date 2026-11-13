@@ -287,12 +287,13 @@ function combinar(partes: MetaAdsMarca[]): MetaAdsMarca {
 // Se convierte a pesos TODO lo que es plata (gasto y valor de compras), nunca
 // cantidades (impresiones, clics, compras).
 //
-// POR AHORA NO SE CONVIERTE (pedido de Ana, 12/11/2026): sin la variable
-// META_ADS_TIPO_CAMBIO cada cuenta queda en su moneda y la pantalla avisa
-// "importes en USD, sin convertir". Para convertir, cargar la variable:
-//   "tarjeta"                dólar tarjeta de dolarapi.com: es lo que se paga
+// SE CONVIERTE CON EL DÓLAR TARJETA DEL DÍA (pedido de Ana, 13/11/2026, para
+// poder sumar Hola Toys Argentina y Hola Toys 2 en un solo número). La
+// variable META_ADS_TIPO_CAMBIO cambia la cotización:
+//   (sin cargar) | "tarjeta" dólar tarjeta de dolarapi.com: es lo que se paga
 //                            de verdad cuando Meta cobra en USD a una tarjeta
 //                            argentina, con los impuestos incluidos.
+//   "no"                     no convertir: cada cuenta en su moneda.
 //   "oficial" | "blue" | "mep" | "cripto"  otra cotización de dolarapi.com.
 //   un número, ej. "1450"    valor fijo que definan Ana y Alejandro.
 
@@ -306,7 +307,7 @@ async function tipoDeCambio(moneda: string): Promise<{ valor: number; fuente: st
   if (moneda !== "USD") {
     throw new Error(`La cuenta está en ${moneda} y sólo se sabe convertir USD`);
   }
-  const conf = (process.env.META_ADS_TIPO_CAMBIO ?? "").trim().toLowerCase();
+  const conf = (process.env.META_ADS_TIPO_CAMBIO ?? "").trim().toLowerCase() || "tarjeta";
   const fijo = Number(conf.replace(",", "."));
   if (Number.isFinite(fijo) && fijo > 0) return { valor: fijo, fuente: "valor fijo" };
   const res = await fetch(`https://dolarapi.com/v1/dolares/${encodeURIComponent(conf)}`, {
@@ -319,10 +320,18 @@ async function tipoDeCambio(moneda: string): Promise<{ valor: number; fuente: st
 
 async function enPesos(d: MetaAdsMarca, moneda: string): Promise<MetaAdsMarca> {
   if (moneda === "ARS") return d;
-  if (!process.env.META_ADS_TIPO_CAMBIO?.trim()) {
+  if (/^(no|sin convertir)$/i.test(process.env.META_ADS_TIPO_CAMBIO?.trim() ?? "")) {
     return { ...d, conversion: { moneda, tipoCambio: 1, fuente: "sin convertir" } };
   }
-  const { valor: tc, fuente } = await tipoDeCambio(moneda);
+  let tc: number;
+  let fuente: string;
+  try {
+    ({ valor: tc, fuente } = await tipoDeCambio(moneda));
+  } catch (e) {
+    // Sin cotización no se inventa una: queda en su moneda y la pantalla lo avisa.
+    console.error("[meta] tipo de cambio", e);
+    return { ...d, conversion: { moneda, tipoCambio: 1, fuente: "sin convertir" } };
+  }
   const plata = <T extends { gasto: number; valorCompras: number }>(x: T): T => ({
     ...x,
     gasto: x.gasto * tc,

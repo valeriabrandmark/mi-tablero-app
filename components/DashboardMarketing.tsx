@@ -22,7 +22,7 @@ import { fmtMoneda, fmtNumero } from "@/lib/format";
 import { TEMA } from "@/lib/paleta";
 import type { DatosTablero } from "@/lib/marketing-fuentes";
 import { aTiempo as aTiempoPlan, avance as avancePlan, riesgo as riesgoPlan } from "@/lib/planificacion";
-import { canalDeConcepto, enPeriodo, presupuestoDelPeriodo } from "@/lib/marketing-planilla";
+import { canalDeConcepto, enPeriodo, presupuestoDelPeriodo, type ColaboracionPlanilla } from "@/lib/marketing-planilla";
 import { avance, proyectar as proyectarP, type Periodo } from "@/lib/marketing-periodo";
 import FiltroPeriodo from "@/components/FiltroPeriodoMarketing";
 import {
@@ -73,6 +73,7 @@ import {
 const COLOR_CANAL: Record<string, string> = {
   "Meta Ads": "#3b82f6",
   "Google Ads": "#f59e0b",
+  "Mercado Ads": "#facc15",
   Influencers: "#f472b6",
   Contenido: "#a78bfa",
   Ferias: "#22d3ee",
@@ -82,8 +83,8 @@ const pct0 = new Intl.NumberFormat("es-AR", { style: "percent", maximumFractionD
 const pct1 = new Intl.NumberFormat("es-AR", { style: "percent", maximumFractionDigits: 1 });
 const dec1 = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
 /**
- * Moneda corta CON un decimal en millones. La de lib/format redondea a entero
- * y acá los presupuestos son de $2,5MM: "$ 3 M" decía otra cosa.
+ * Moneda corta SÓLO PARA LOS EJES de los gráficos. En tarjetas y tablas los
+ * montos van enteros ($ 1.500.000, no 1,5 M): pedido de la reunión del 13/11/2026.
  */
 function fmtMonedaCorta(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
@@ -118,6 +119,10 @@ type Contexto = DatosTablero & {
   colaboraciones: Colaboracion[];
   /** true = hitos y colaboraciones salen de Planificación. */
   planReal: boolean;
+  /** De qué canal se cuenta la venta en los KPIs. */
+  origen: OrigenVenta;
+  /** El período anterior ya armado, para comparar cada KPI. */
+  comparar: { periodo: Periodo; marcas: Marca[]; colaboraciones: ColaboracionPlanilla[] };
 };
 const Fuentes = createContext<Contexto | null>(null);
 function useFuentes() {
@@ -237,6 +242,70 @@ function Tabla({ cabecera, children }: { cabecera: string[]; children: ReactNode
 }
 
 // ---------------------------------------------------------------------------
+// Comparación con el período anterior
+// ---------------------------------------------------------------------------
+
+type Vs = {
+  actual: number;
+  anterior: number | null | undefined;
+  formato?: (n: number) => string;
+  /** Gasto, costo de adquisición, atrasos: bajar es bueno (verde). */
+  menosEsMejor?: boolean;
+  /** Para tasas (conversión, ejecución): la diferencia va en puntos, no en %. */
+  puntos?: boolean;
+};
+
+/**
+ * "▲ 12 % vs Octubre 2026 · $ 1.234.567": cuánto cambió contra el período
+ * anterior cortado a la misma altura (lib/marketing-periodo.ts).
+ */
+function Variacion({ actual, anterior, formato = fmtMoneda, menosEsMejor = false, puntos = false }: Vs) {
+  const { comparar } = useFuentes();
+  const etiqueta = comparar.periodo.enCurso && comparar.periodo.transcurridos < comparar.periodo.dias
+    ? `${comparar.periodo.etiqueta} (a la misma altura)`
+    : comparar.periodo.etiqueta;
+  if (anterior === null || anterior === undefined || !Number.isFinite(anterior) || !Number.isFinite(actual)) {
+    return <span className="mt-0.5 block">Sin dato de {etiqueta}</span>;
+  }
+  const dif = puntos ? (actual - anterior) * 100 : anterior !== 0 ? actual / anterior - 1 : null;
+  const sube = actual > anterior;
+  const igual = Math.abs(actual - anterior) < 1e-9;
+  const color = igual ? TEMA.muted : sube !== menosEsMejor ? VERDE : ROJO;
+  const texto = igual
+    ? "= igual"
+    : dif === null
+      ? sube ? "▲ nuevo" : "▼"
+      : `${sube ? "▲" : "▼"} ${puntos ? `${dec1.format(Math.abs(dif))} pp` : p0(Math.abs(dif))}`;
+  return (
+    <span className="mt-0.5 block">
+      <span style={{ color }} className="font-medium">{texto}</span> vs {etiqueta} · {formato(anterior)}
+    </span>
+  );
+}
+
+/** TarjetaKpi + la línea de comparación con el período anterior. */
+function Kpi({ vs, detalle, ...props }: Parameters<typeof TarjetaKpi>[0] & { vs?: Vs }) {
+  return (
+    <TarjetaKpi
+      {...props}
+      detalle={
+        detalle || vs ? (
+          <>
+            {detalle}
+            {vs && <Variacion {...vs} />}
+          </>
+        ) : undefined
+      }
+    />
+  );
+}
+
+/** La misma marca en el período anterior. */
+function useMarcaAnterior(clave: ClaveMarca): Marca | undefined {
+  return useFuentes().comparar.marcas.find((m) => m.clave === clave);
+}
+
+// ---------------------------------------------------------------------------
 // Scorecard: cómo se mide a Agatina
 // ---------------------------------------------------------------------------
 
@@ -346,16 +415,16 @@ function armarScorecard(
     {
       grupo: "Venta",
       meta: "Venta Diaper Genie (proyectada)",
-      objetivo: fmtMonedaCorta(dg.ventaObjetivoMes),
-      real: fmtMonedaCorta(proyectar(ventaTotal(dg))),
+      objetivo: fmtMoneda(dg.ventaObjetivoMes),
+      real: fmtMoneda(proyectar(ventaTotal(dg))),
       cumplimiento: proyectar(ventaTotal(dg)) / dg.ventaObjetivoMes!,
       peso: 0.15,
     },
     {
       grupo: "Venta",
       meta: "Venta Hola Toys (proyectada)",
-      objetivo: fmtMonedaCorta(ht.ventaObjetivoMes),
-      real: fmtMonedaCorta(proyectar(ventaTotal(ht))),
+      objetivo: fmtMoneda(ht.ventaObjetivoMes),
+      real: fmtMoneda(proyectar(ventaTotal(ht))),
       cumplimiento: proyectar(ventaTotal(ht)) / ht.ventaObjetivoMes!,
       peso: 0.15,
     },
@@ -458,9 +527,70 @@ function Scorecard({ marcas }: { marcas: Marca[] }) {
 // Vista consolidada
 // ---------------------------------------------------------------------------
 
+/**
+ * VENTAS TOTALES POR CANAL: Mayorista (SIGMA, sin los clientes de canje),
+ * Mercado Libre y Tienda Nube, por marca, con el total del período anterior.
+ * Respeta el filtro "Ventas de".
+ */
+function VentaPorCanal({ marcas }: { marcas: Marca[] }) {
+  const { comparar, venta: real } = useFuentes();
+  const filas = marcas.map((m) => {
+    const a = comparar.marcas.find((x) => x.clave === m.clave);
+    return { m, total: ventaTotal(m), anterior: a ? ventaTotal(a) : null };
+  });
+  const suma = (f: (m: Marca) => number) => marcas.reduce((s, m) => s + f(m), 0);
+  const totalAnt = filas.every((f) => f.anterior !== null) ? filas.reduce((s, f) => s + (f.anterior ?? 0), 0) : null;
+  const motivos = [
+    real.mayorista.motivo && `Mayorista: ${real.mayorista.motivo}`,
+    real.mercadoLibre?.motivo && `Mercado Libre: ${real.mercadoLibre.motivo}`,
+    real.tiendaNube.motivo && `Tienda Nube: ${real.tiendaNube.motivo}`,
+  ].filter(Boolean);
+  return (
+    <Panel
+      titulo="Ventas totales por canal"
+      nota="Mayorista sin IVA y sin canjes · Mercado Libre y Tienda Nube con IVA (lo que paga el cliente)"
+    >
+      {motivos.length > 0 && <p className="mb-2 text-xs" style={{ color: AMBAR }}>{motivos.join(" · ")}</p>}
+      <Tabla cabecera={["Marca", "Mayorista (SIGMA)", "Mercado Libre", "Tienda Nube", "Total", "vs anterior"]}>
+        {filas.map(({ m, total, anterior }) => (
+          <tr key={m.clave}>
+            <td className="px-2 py-2 whitespace-nowrap">
+              <span className="mr-2 inline-block size-2 rounded-full" style={{ background: m.color }} />
+              {m.nombre}
+            </td>
+            <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(m.ventaMayorista)}</td>
+            <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(m.ventaMercadoLibre ?? 0)}</td>
+            <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(m.ventaTiendas)}</td>
+            <td className="px-2 py-2 font-medium whitespace-nowrap tabular-nums">{fmtMoneda(total)}</td>
+            <td className="text-muted px-2 py-2 text-xs whitespace-nowrap">
+              <Variacion actual={total} anterior={anterior} />
+            </td>
+          </tr>
+        ))}
+        <tr className="font-medium">
+          <td className="px-2 py-2">Total</td>
+          <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(suma((m) => m.ventaMayorista))}</td>
+          <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(suma((m) => m.ventaMercadoLibre ?? 0))}</td>
+          <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(suma((m) => m.ventaTiendas))}</td>
+          <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(suma(ventaTotal))}</td>
+          <td className="text-muted px-2 py-2 text-xs font-normal whitespace-nowrap">
+            <Variacion actual={suma(ventaTotal)} anterior={totalAnt} />
+          </td>
+        </tr>
+      </Tabla>
+    </Panel>
+  );
+}
+
 function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) {
   const P = usePeriodo();
-  const { hitos: HITOS, colaboraciones: COLABORACIONES, planilla } = useFuentes();
+  const { hitos: HITOS, colaboraciones: COLABORACIONES, planilla, comparar, origen } = useFuentes();
+  const A = comparar.marcas;
+  const gastadoA = A.reduce((s, m) => s + gastoTotal(m), 0);
+  const ventaA = A.reduce((s, m) => s + ventaTotal(m), 0);
+  const propiasA = A.filter((m) => m.foco);
+  const objetivoPropiasA = propiasA.reduce((s, m) => s + (m.ventaObjetivoMes ?? 0), 0);
+  const proyPropiasA = propiasA.reduce((s, m) => s + proyectarP(ventaTotal(m), comparar.periodo), 0);
   const proyectar = (v: number) => proyectarP(v, P);
   const AVANCE_MES = avance(P);
   const asignado = marcas.reduce((s, m) => s + (m.presupuestoMes ?? 0), 0);
@@ -494,41 +624,48 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <TarjetaKpi
+        <Kpi
           titulo="Presupuesto ejecutado"
-          valor={fmtMonedaCorta(gastado)}
+          valor={fmtMoneda(gastado)}
           acento={semaforo(gastado / asignado <= AVANCE_MES + 0.1 ? 1 : 0.8)}
-          detalle={`${p0(gastado / asignado)} de ${fmtMonedaCorta(asignado)} · período al ${p0(AVANCE_MES)}`}
+          detalle={`${p0(gastado / asignado)} de ${fmtMoneda(asignado)} · período al ${p0(AVANCE_MES)}`}
+          vs={{ actual: gastado, anterior: gastadoA, menosEsMejor: true }}
         />
-        <TarjetaKpi
-          titulo="Venta del período (4 marcas)"
-          valor={fmtMonedaCorta(venta)}
-          detalle={P.enCurso ? `Proyección ${fmtMonedaCorta(proyectar(venta))}` : "Período cerrado"}
+        <Kpi
+          titulo={`Venta del período${origen === "todas" ? " (todos los canales)" : ` · ${ORIGENES_VENTA.find((o) => o.clave === origen)?.label}`}`}
+          valor={fmtMoneda(venta)}
+          detalle={P.enCurso ? `Proyección ${fmtMoneda(proyectar(venta))}` : "Período cerrado"}
+          vs={{ actual: venta, anterior: ventaA }}
         />
-        <TarjetaKpi
+        <Kpi
           titulo="Marcas propias vs objetivo"
           valor={p0(proyPropias / objetivoPropias)}
           acento={semaforo(proyPropias / objetivoPropias)}
-          detalle={`${fmtMonedaCorta(proyPropias)}${P.enCurso ? " proy." : ""} / ${fmtMonedaCorta(objetivoPropias)}`}
+          detalle={`${fmtMoneda(proyPropias)}${P.enCurso ? " proy." : ""} / ${fmtMoneda(objetivoPropias)}`}
+          vs={{ actual: proyPropias / objetivoPropias, anterior: proyPropiasA / objetivoPropiasA, formato: p0, puntos: true }}
         />
-        <TarjetaKpi
+        <Kpi
           titulo="Retorno (venta ÷ inversión)"
           valor={`${dec1.format(venta / gastado)}x`}
           detalle="MER del período, todas las marcas"
+          vs={{ actual: venta / gastado, anterior: gastadoA ? ventaA / gastadoA : null, formato: (x) => `${dec1.format(x)}x` }}
         />
-        <TarjetaKpi
+        <Kpi
           titulo="Influencers"
           valor={`${COLABORACIONES.length} / ${META_INFLUENCERS_MES}`}
           acento={semaforo(COLABORACIONES.length / META_INFLUENCERS_MES)}
-          detalle={costoInf ? `ROI ${dec1.format(ventaInf / costoInf)}x · ${fmtMonedaCorta(costoInf)} invertidos` : "Sin inversión en el período"}
+          detalle={costoInf ? `ROI ${dec1.format(ventaInf / costoInf)}x · ${fmtMoneda(costoInf)} invertidos` : "Sin inversión en el período"}
+          vs={{ actual: COLABORACIONES.length, anterior: planilla.datos ? comparar.colaboraciones.length : null, formato: fmtNumero }}
         />
-        <TarjetaKpi
+        <Kpi
           titulo="Deadlines"
           valor={`${aTiempo} / ${entregas.length} a tiempo`}
           acento={atrasados ? ROJO : VERDE}
           detalle={atrasados ? `${atrasados} atrasado(s)` : "Sin atrasos"}
         />
       </div>
+
+      <VentaPorCanal marcas={marcas} />
 
       <PanelFuentes />
 
@@ -555,7 +692,7 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
           </div>
           <p className="text-muted mt-2 text-xs">
             {planilla.datos
-              ? "Presupuesto de la hoja Presupuesto de la planilla de Marketing. Una marca sin presupuesto cargado para el período figura en cero: lo que gaste ahí es un desvío a consultar con Alejandro."
+              ? "Presupuesto cargado en Marketing → Carga → Presupuesto. Una marca sin presupuesto cargado para el período figura en cero: lo que gaste ahí es un desvío a consultar con Alejandro."
               : "Unibrandco y Litter Genie no tienen presupuesto asignado (a definir): todo lo que se gasta ahí es un desvío a consultar con Alejandro."}
           </p>
         </Panel>
@@ -612,8 +749,8 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
                   {m.nombre}
                 </td>
                 <td className="text-muted px-2 py-2 text-xs">{m.estado}</td>
-                <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMonedaCorta(gastoTotal(m))}</td>
-                <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMonedaCorta(ventaTotal(m))}</td>
+                <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(gastoTotal(m))}</td>
+                <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(ventaTotal(m))}</td>
                 <td className="px-2 py-2 tabular-nums">
                   {dec1.format(ventaTotal(m) / gastoTotal(m))}x
                 </td>
@@ -654,15 +791,20 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
   const fuentes = useFuentes();
   const tn = fuentes.venta.tiendaNube.porMarca[m.clave];
   const ig = fuentes.instagram[m.clave];
-  const may = fuentes.venta.mayorista.porMarca[m.clave];
   // Con pedidos importados, los canjes y la venta de cada cupón salen de
   // Tienda Nube; el costo de la colaboración sigue siendo carga manual.
   const colabs = fuentes.colaboraciones.filter((c) => c.marca === m.clave).map((c) => {
     const real = tn?.cupones.find((x) => x.cupon === c.cupon.toUpperCase());
     return tn ? { ...c, canjes: real?.pedidos ?? 0, ventaAtribuida: real?.venta ?? 0 } : c;
   });
-  const costoPauta = m.gastoPorCanal["Meta Ads"] + m.gastoPorCanal["Google Ads"];
+  const costoPauta = m.gastoPorCanal["Meta Ads"] + m.gastoPorCanal["Google Ads"] + m.gastoPorCanal["Mercado Ads"];
   const cac = (costoPauta + m.gastoPorCanal.Influencers) / m.pedidosTienda;
+  const { comparar } = fuentes;
+  const colabsA = comparar.colaboraciones.filter((c) => c.marca === m.clave);
+  const A = useMarcaAnterior(m.clave);
+  const cacA = A
+    ? (A.gastoPorCanal["Meta Ads"] + A.gastoPorCanal["Google Ads"] + A.gastoPorCanal["Mercado Ads"] + A.gastoPorCanal.Influencers) / A.pedidosTienda
+    : null;
   const conversion = m.pedidosTienda / m.visitasTienda;
   const ticket = m.ventaTiendas / m.pedidosTienda;
   const interaccion = m.interacciones30d / m.alcance30d;
@@ -698,7 +840,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         {m.margen && (
           <Chip color={TEMA.muted}>
             Margen ~{p1(m.margen)} · punto de equilibrio{" "}
-            {fmtMonedaCorta((m.presupuestoMes ?? 0) / m.margen)} de venta
+            {fmtMoneda((m.presupuestoMes ?? 0) / m.margen)} de venta
           </Chip>
         )}
       </div>
@@ -707,41 +849,52 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         Presupuesto y venta
       </h3>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <TarjetaKpi
+        <Kpi
           titulo={P.factor === 1 ? "Presupuesto del mes" : "Presupuesto del período"}
-          valor={m.presupuestoMes ? fmtMonedaCorta(m.presupuestoMes) : "A definir"}
+          valor={m.presupuestoMes ? fmtMoneda(m.presupuestoMes) : "A definir"}
           detalle="Pauta, contenido, producciones, influencers y ferias"
+          vs={{ actual: m.presupuestoMes ?? 0, anterior: A ? (A.presupuestoMes ?? 0) : null }}
         />
-        <TarjetaKpi
+        <Kpi
           titulo="Gastado"
-          valor={fmtMonedaCorta(gastado)}
+          valor={fmtMoneda(gastado)}
           acento={ejec === null ? AMBAR : semaforo(ejec <= AVANCE_MES + 0.1 ? 1 : 0.8)}
           detalle={
             ejec === null
               ? "Sin presupuesto asignado"
               : `${p0(ejec)} ejecutado · período al ${p0(AVANCE_MES)}`
           }
+          vs={{ actual: gastado, anterior: A ? gastoTotal(A) : null, menosEsMejor: true }}
         />
-        <TarjetaKpi
+        <Kpi
           titulo="Venta al corte"
-          valor={fmtMonedaCorta(venta)}
-          detalle={`Tiendas ${fmtMonedaCorta(m.ventaTiendas)} · Mayorista ${fmtMonedaCorta(m.ventaMayorista)}`}
+          valor={fmtMoneda(venta)}
+          detalle={`Mayorista ${fmtMoneda(m.ventaMayorista)} · Mercado Libre ${fmtMoneda(m.ventaMercadoLibre ?? 0)} · Tienda Nube ${fmtMoneda(m.ventaTiendas)}`}
+          vs={{ actual: venta, anterior: A ? ventaTotal(A) : null }}
         />
-        <TarjetaKpi
+        <Kpi
           titulo={`${P.enCurso ? "Proyección" : "Venta"} vs ${objetivo ? "objetivo" : "línea de base"}`}
           valor={p0(proy / metaMes)}
           acento={semaforo(proy / metaMes)}
-          detalle={`${fmtMonedaCorta(proy)} / ${fmtMonedaCorta(metaMes)}`}
+          detalle={`${fmtMoneda(proy)} / ${fmtMoneda(metaMes)}`}
+          vs={{
+            actual: proy / metaMes,
+            anterior: A ? proyectarP(ventaTotal(A), comparar.periodo) / (A.ventaObjetivoMes ?? A.ventaBase) : null,
+            formato: p0,
+            puntos: true,
+          }}
         />
-        <TarjetaKpi
+        <Kpi
           titulo="Retorno (venta ÷ inversión)"
           valor={`${dec1.format(venta / gastado)}x`}
           detalle="MER del período"
+          vs={{ actual: venta / gastado, anterior: A && gastoTotal(A) ? ventaTotal(A) / gastoTotal(A) : null, formato: (x) => `${dec1.format(x)}x` }}
         />
-        <TarjetaKpi
+        <Kpi
           titulo="Costo de adquisición"
           valor={fmtMoneda(cac)}
           detalle="(Pauta + influencers) ÷ pedidos"
+          vs={{ actual: cac, anterior: cacA, menosEsMejor: true }}
         />
       </div>
 
@@ -758,41 +911,56 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         )}
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <TarjetaKpi
+        <Kpi
           titulo="Seguidores"
           valor={fmtNumero(m.seguidores)}
           detalle={`+${fmtNumero(m.seguidores - m.seguidoresMesAnterior)} en el período (${p1(m.seguidores / m.seguidoresMesAnterior - 1)})`}
+          vs={{
+            actual: m.seguidores - m.seguidoresMesAnterior,
+            anterior: A ? A.seguidores - A.seguidoresMesAnterior : null,
+            formato: (x) => `+${fmtNumero(x)} nuevos`,
+          }}
         />
-        <TarjetaKpi
+        <Kpi
           titulo={ig.fuente === "meta" ? "Alcance del período" : "Alcance 30 días"}
           valor={fmtNumero(m.alcance30d)}
           detalle={`Interacción ${p1(interaccion)}`}
+          vs={{ actual: m.alcance30d, anterior: A?.alcance30d, formato: fmtNumero }}
         />
-        <TarjetaKpi
+        <Kpi
           titulo="Mensajes recibidos"
           valor={fmtNumero(m.mensajes30d)}
           acento={m.tiempoRespuestaMin <= 120 ? VERDE : AMBAR}
           detalle={`1ª respuesta en ${m.tiempoRespuestaMin} min promedio`}
+          vs={{ actual: m.mensajes30d, anterior: A?.mensajes30d, formato: fmtNumero }}
         />
-        <TarjetaKpi
-          titulo="Puntaje tienda"
-          valor={`${dec1.format(m.puntajeTienda)} ★`}
-          detalle={`${fmtNumero(m.resenas)} reseñas`}
-        />
-        <TarjetaKpi
+        <Kpi
           titulo="Conversión tienda"
           valor={p1(conversion)}
-          detalle={`Ticket promedio ${fmtMonedaCorta(ticket)}`}
+          detalle={`Ticket promedio ${fmtMoneda(ticket)}`}
+          vs={{ actual: conversion, anterior: A ? A.pedidosTienda / A.visitasTienda : null, formato: p1, puntos: true }}
         />
-        <TarjetaKpi
-          titulo={may ? "Tiendas nuevas de la marca" : "Leads mayoristas"}
-          valor={fmtNumero(may ? may.tiendasNuevas : m.leadsMayoristas)}
+        <Kpi
+          titulo="Mercado Ads"
+          valor={m.gastoPorCanal["Mercado Ads"] ? fmtMoneda(m.gastoPorCanal["Mercado Ads"]) : "Pendiente"}
+          acento={AMBAR}
           detalle={
-            may
-              ? "Primera compra a SIGMA en el período"
-              : `Pauta activa ${m.diasPautaActiva} de ${P.transcurridos} días`
+            m.gastoPorCanal["Mercado Ads"]
+              ? "Cargado a mano en Otros gastos · API pendiente de conectar"
+              : "Pendiente de conectar · se puede cargar en Carga → Otros gastos"
           }
-          acento={may ? undefined : m.diasPautaActiva === P.transcurridos ? VERDE : AMBAR}
+          vs={m.gastoPorCanal["Mercado Ads"] ? { actual: m.gastoPorCanal["Mercado Ads"], anterior: A?.gastoPorCanal["Mercado Ads"], menosEsMejor: true } : undefined}
+        />
+        <Kpi
+          titulo="Google Ads"
+          valor={m.gastoPorCanal["Google Ads"] ? fmtMoneda(m.gastoPorCanal["Google Ads"]) : "Pendiente"}
+          acento={AMBAR}
+          detalle={
+            m.gastoPorCanal["Google Ads"]
+              ? "Cargado a mano en Otros gastos · API pendiente de conectar"
+              : "Pendiente de conectar · se puede cargar en Carga → Otros gastos"
+          }
+          vs={m.gastoPorCanal["Google Ads"] ? { actual: m.gastoPorCanal["Google Ads"], anterior: A?.gastoPorCanal["Google Ads"], menosEsMejor: true } : undefined}
         />
       </div>
 
@@ -967,7 +1135,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         titulo="Influencers"
         nota={
           fuentes.planilla.datos
-            ? "De la planilla de Marketing · venta por cupón de Tienda Nube"
+            ? "De Marketing → Carga (canjes de SIGMA) · venta por cupón de Tienda Nube"
             : tn
               ? "Canjes y venta leídos de los pedidos importados · el costo es carga manual"
               : "Un cupón único por colaboración · datos de ejemplo"
@@ -978,12 +1146,27 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         ) : colabs.some((c) => c.modalidad !== undefined) ? (
           <>
             <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-              <TarjetaKpi titulo="Inversión en influencers" valor={fmtMonedaCorta(colabs.reduce((s, c) => s + c.costo, 0))} detalle={`${colabs.length} colaboración(es)`} />
-              <TarjetaKpi titulo="Honorarios" valor={fmtMonedaCorta(colabs.reduce((s, c) => s + (c.honorarios ?? 0), 0))} detalle={`${colabs.filter((c) => (c.honorarios ?? 0) > 0).length} con pago`} />
-              <TarjetaKpi titulo="Canje + envíos" valor={fmtMonedaCorta(colabs.reduce((s, c) => s + (c.costoCanje ?? 0) + (c.costoEnvio ?? 0), 0))} detalle="Costo de la mercadería y del envío" />
+              <Kpi
+                titulo="Inversión en influencers"
+                valor={fmtMoneda(colabs.reduce((s, c) => s + c.costo, 0))}
+                detalle={`${colabs.length} colaboración(es)`}
+                vs={{ actual: colabs.reduce((s, c) => s + c.costo, 0), anterior: colabsA.reduce((s, c) => s + c.costoTotal, 0), menosEsMejor: true }}
+              />
+              <Kpi
+                titulo="Honorarios"
+                valor={fmtMoneda(colabs.reduce((s, c) => s + (c.honorarios ?? 0), 0))}
+                detalle={`${colabs.filter((c) => (c.honorarios ?? 0) > 0).length} con pago`}
+                vs={{ actual: colabs.reduce((s, c) => s + (c.honorarios ?? 0), 0), anterior: colabsA.reduce((s, c) => s + c.honorarios + c.ivaHonorarios, 0), menosEsMejor: true }}
+              />
+              <Kpi
+                titulo="Canje + envíos"
+                valor={fmtMoneda(colabs.reduce((s, c) => s + (c.costoCanje ?? 0) + (c.costoEnvio ?? 0), 0))}
+                detalle="Costo de la mercadería (SIGMA) y del envío"
+                vs={{ actual: colabs.reduce((s, c) => s + (c.costoCanje ?? 0) + (c.costoEnvio ?? 0), 0), anterior: colabsA.reduce((s, c) => s + c.costoCanje + c.costoEnvio, 0), menosEsMejor: true }}
+              />
               <TarjetaKpi
                 titulo="Pagos pendientes"
-                valor={fmtMonedaCorta(colabs.filter((c) => c.estadoPago === "Pendiente").reduce((s, c) => s + (c.honorarios ?? 0), 0))}
+                valor={fmtMoneda(colabs.filter((c) => c.estadoPago === "Pendiente").reduce((s, c) => s + (c.honorarios ?? 0), 0))}
                 acento={colabs.some((c) => c.estadoPago === "Pendiente") ? AMBAR : VERDE}
                 detalle={`${colabs.filter((c) => c.estadoPago === "Pendiente").length} colaboración(es) sin pagar`}
               />
@@ -995,17 +1178,17 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
                   <td className="text-muted px-2 py-2">{c.fecha}</td>
                   <td className="px-2 py-2 text-xs whitespace-nowrap">{c.modalidad ?? "—"}</td>
                   <td className="text-muted px-2 py-2 text-xs">{c.formato ?? "—"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{c.honorarios ? fmtMonedaCorta(c.honorarios) : "—"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{c.costoCanje ? fmtMonedaCorta(c.costoCanje) : "—"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{c.costoEnvio ? fmtMonedaCorta(c.costoEnvio) : "—"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap tabular-nums font-medium">{fmtMonedaCorta(c.costo)}</td>
+                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{c.honorarios ? fmtMoneda(c.honorarios) : "—"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{c.costoCanje ? fmtMoneda(c.costoCanje) : "—"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{c.costoEnvio ? fmtMoneda(c.costoEnvio) : "—"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap tabular-nums font-medium">{fmtMoneda(c.costo)}</td>
                   <td className="text-muted px-2 py-2 text-xs whitespace-nowrap">{c.estado ?? "—"}</td>
                   <td className="px-2 py-2 text-xs whitespace-nowrap" style={{ color: c.estadoPago === "Pendiente" ? AMBAR : undefined }}>
                     {c.estadoPago ?? "—"}
                   </td>
                   <td className="px-2 py-2 font-mono text-xs">{c.cupon}</td>
                   <td className="px-2 py-2 tabular-nums">{c.cupon !== "—" ? c.canjes : "—"}</td>
-                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{c.cupon !== "—" ? fmtMonedaCorta(c.ventaAtribuida) : "—"}</td>
+                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{c.cupon !== "—" ? fmtMoneda(c.ventaAtribuida) : "—"}</td>
                   <td className="px-2 py-2 tabular-nums" style={c.cupon !== "—" && c.costo ? { color: semaforo(c.ventaAtribuida / c.costo / 3) } : undefined}>
                     {c.cupon !== "—" && c.costo ? `${dec1.format(c.ventaAtribuida / c.costo)}x` : "—"}
                   </td>
@@ -1112,7 +1295,7 @@ function PanelMetaConsolidado({ marcas, meta }: { marcas: Marca[]; meta: MetaAds
                 <span className="mr-2 inline-block size-2 rounded-full" style={{ background: m.color }} />
                 {m.nombre}
               </td>
-              <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMonedaCorta(t.gasto)}</td>
+              <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(t.gasto)}</td>
               <td className="px-2 py-2 tabular-nums">{fmtNumero(t.alcance)}</td>
               <td className="px-2 py-2 tabular-nums">{dec1.format(t.frecuencia)}</td>
               <td className="px-2 py-2 tabular-nums">{p1(ctr(t))}</td>
@@ -1161,6 +1344,10 @@ function deVenta(meta: MetaAdsMarca) {
 function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
   const P = usePeriodo();
   const t = meta.totales;
+  const metaA = useFuentes().anterior.meta[m.clave];
+  // Si el período anterior cae en el ejemplo (sin token, error), no se compara contra inventado.
+  const tA = meta.fuente === "meta" && metaA?.fuente === "meta" ? metaA.totales : null;
+  const ventaA = tA ? deVenta(metaA) : null;
   const venta = deVenta(meta);
   const dias = diasConPauta(meta.diario);
   const cortes = meta.diario.length - dias;
@@ -1180,14 +1367,16 @@ function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         )}
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <TarjetaKpi
+        <Kpi
           titulo="Inversión del período"
-          valor={fmtMonedaCorta(t.gasto)}
+          valor={fmtMoneda(t.gasto)}
           detalle={
             m.presupuestoMes ? `${p0(t.gasto / m.presupuestoMes)} del presupuesto de la marca` : "Presupuesto a definir"
           }
+          vs={{ actual: t.gasto, anterior: tA?.gasto, menosEsMejor: true }}
         />
-        <TarjetaKpi
+        <Kpi
+          vs={{ actual: dias, anterior: tA ? diasConPauta(metaA.diario) : null, formato: (x) => `${x} días` }}
           titulo="Pauta activa"
           valor={`${dias} de ${meta.diario.length} días`}
           acento={cortes ? ROJO : VERDE}
@@ -1207,24 +1396,28 @@ function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
             </>
           }
         />
-        <TarjetaKpi
+        <Kpi
+          vs={{ actual: t.alcance, anterior: tA?.alcance, formato: fmtNumero }}
           titulo="Alcance · frecuencia"
           valor={fmtNumero(t.alcance)}
           acento={t.frecuencia > 4 ? AMBAR : undefined}
           detalle={`Frecuencia ${dec1.format(t.frecuencia)}${t.frecuencia > 4 ? " · audiencia saturada" : ""}`}
         />
-        <TarjetaKpi
+        <Kpi
+          vs={{ actual: ctr(t), anterior: tA ? ctr(tA) : null, formato: p1, puntos: true }}
           titulo="CTR · CPC"
           valor={p1(ctr(t))}
           detalle={`CPC ${fmtMoneda(cpc(t))} · CPM ${fmtMoneda(cpm(t))}`}
         />
-        <TarjetaKpi
+        <Kpi
+          vs={{ actual: t.compras, anterior: tA?.compras, formato: fmtNumero }}
           titulo="Compras atribuidas"
           valor={fmtNumero(t.compras)}
-          detalle={`${fmtMonedaCorta(t.valorCompras)} · ${fmtMoneda(costoPorCompra(t))} c/u`}
+          detalle={`${fmtMoneda(t.valorCompras)} · ${fmtMoneda(costoPorCompra(t))} c/u`}
         />
         {venta.hay ? (
-          <TarjetaKpi
+          <Kpi
+            vs={{ actual: roas(venta), anterior: ventaA?.hay ? roas(ventaA) : null, formato: (x) => `${dec1.format(x)}x` }}
             titulo="ROAS de las campañas de venta"
             valor={`${dec1.format(roas(venta))}x`}
             acento={semaforo(roas(venta) / 3)}
@@ -1279,7 +1472,7 @@ function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
                       "—"
                     )}
                   </td>
-                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMonedaCorta(c.gasto)}</td>
+                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(c.gasto)}</td>
                   <td className="px-2 py-2 tabular-nums">
                     {c.resultado ? (
                       <>
@@ -1326,7 +1519,7 @@ function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
               {meta.anuncios.map((c) => (
                 <tr key={c.nombre}>
                   <td className="px-2 py-2">{c.nombre}</td>
-                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMonedaCorta(c.gasto)}</td>
+                  <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(c.gasto)}</td>
                   <td className="px-2 py-2 tabular-nums">{fmtNumero(c.impresiones)}</td>
                   <td className="px-2 py-2 tabular-nums">{p1(ctr(c))}</td>
                   <td className="px-2 py-2 tabular-nums">{fmtNumero(c.compras)}</td>
@@ -1370,8 +1563,10 @@ function BarrasMeta({ filas, color }: { filas: CampanaMeta[]; color: string }) {
 // ---------------------------------------------------------------------------
 
 function SeccionTiendaNube({ m }: { m: Marca }) {
-  const { venta, generado } = useFuentes();
+  const { venta, generado, anterior } = useFuentes();
   const tn = venta.tiendaNube.porMarca[m.clave];
+  const tnA = anterior.venta.tiendaNube.porMarca[m.clave];
+  const A = useMarcaAnterior(m.clave);
   if (!tn) {
     return (
       <div className="border-line bg-panel flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3 text-sm">
@@ -1400,26 +1595,43 @@ function SeccionTiendaNube({ m }: { m: Marca }) {
         {atrasada && tn.origen === "importado" && <span className="text-[11px]" style={{ color: AMBAR }}>Hace más de una semana que no se importa</span>}
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <TarjetaKpi titulo="Venta tienda (c/IVA)" valor={fmtMonedaCorta(tn.venta)} detalle={`${fmtNumero(tn.pedidos)} pedidos pagados`} />
-        <TarjetaKpi titulo="Ticket promedio" valor={fmtMoneda(tn.pedidos ? tn.venta / tn.pedidos : NaN)} />
-        <TarjetaKpi
+        <Kpi
+          titulo="Venta tienda (c/IVA)"
+          valor={fmtMoneda(tn.venta)}
+          detalle={`${fmtNumero(tn.pedidos)} pedidos pagados`}
+          vs={{ actual: tn.venta, anterior: tnA?.venta ?? 0 }}
+        />
+        <Kpi
+          titulo="Ticket promedio"
+          valor={fmtMoneda(tn.pedidos ? tn.venta / tn.pedidos : NaN)}
+          vs={{ actual: tn.pedidos ? tn.venta / tn.pedidos : NaN, anterior: tnA?.pedidos ? tnA.venta / tnA.pedidos : null }}
+        />
+        <Kpi
+          vs={{ actual: tn.clientesNuevos, anterior: tnA?.clientesNuevos ?? 0, formato: fmtNumero }}
           titulo="Clientes nuevos"
           valor={fmtNumero(tn.clientesNuevos)}
           detalle={total ? `${p0(tn.clientesNuevos / total)} de los compradores del período` : "—"}
         />
-        <TarjetaKpi
+        <Kpi
+          vs={{ actual: tn.clientesRecurrentes, anterior: tnA?.clientesRecurrentes ?? 0, formato: fmtNumero }}
           titulo="Clientes que vuelven"
           valor={fmtNumero(tn.clientesRecurrentes)}
           detalle="Ya habían comprado en la tienda"
         />
-        <TarjetaKpi
+        <Kpi
+          vs={{ actual: tn.cupones.reduce((s, c) => s + c.venta, 0), anterior: (tnA?.cupones ?? []).reduce((s, c) => s + c.venta, 0) }}
           titulo="Venta con cupón"
-          valor={fmtMonedaCorta(tn.cupones.reduce((s, c) => s + c.venta, 0))}
+          valor={fmtMoneda(tn.cupones.reduce((s, c) => s + c.venta, 0))}
           detalle={`${tn.cupones.length} cupones usados`}
         />
-        <TarjetaKpi
+        <Kpi
+          vs={{
+            actual: tn.clientesNuevos ? (m.gastoPorCanal["Meta Ads"] + m.gastoPorCanal["Google Ads"] + m.gastoPorCanal["Mercado Ads"] + m.gastoPorCanal.Influencers) / tn.clientesNuevos : NaN,
+            anterior: A && tnA?.clientesNuevos ? (A.gastoPorCanal["Meta Ads"] + A.gastoPorCanal["Google Ads"] + A.gastoPorCanal["Mercado Ads"] + A.gastoPorCanal.Influencers) / tnA.clientesNuevos : null,
+            menosEsMejor: true,
+          }}
           titulo="Costo por cliente nuevo"
-          valor={fmtMoneda(tn.clientesNuevos ? (m.gastoPorCanal["Meta Ads"] + m.gastoPorCanal["Google Ads"] + m.gastoPorCanal.Influencers) / tn.clientesNuevos : NaN)}
+          valor={fmtMoneda(tn.clientesNuevos ? (m.gastoPorCanal["Meta Ads"] + m.gastoPorCanal["Google Ads"] + m.gastoPorCanal["Mercado Ads"] + m.gastoPorCanal.Influencers) / tn.clientesNuevos : NaN)}
           detalle="(Pauta + influencers) ÷ clientes nuevos"
         />
       </div>
@@ -1512,7 +1724,7 @@ function PanelFuentes() {
     },
     {
       fuente: "SIGMA (gold.fact_ventas)",
-      uso: "Venta mayorista por marca, tiendas nuevas",
+      uso: "Venta mayorista por marca (sin los clientes de canje)",
       porMarca: Object.fromEntries(
         MARCAS.map((m) => {
           const may = venta.mayorista.porMarca[m.clave];
@@ -1526,15 +1738,36 @@ function PanelFuentes() {
       ) as Record<ClaveMarca, Estado>,
     },
     {
-      fuente: "Planilla de Marketing (Sheets)",
-      uso: "Presupuesto, influencers (honorarios, canje, envío), Google Ads, producción, ferias",
+      fuente: "Mercado Libre (gold.fact_ventas)",
+      uso: "Venta en Mercado Libre por marca del producto",
+      porMarca: Object.fromEntries(
+        MARCAS.map((m) => {
+          const ml = venta.mercadoLibre?.porMarca[m.clave];
+          return [
+            m.clave,
+            ml
+              ? { ok: true, texto: "Conectado" }
+              : { ok: false, texto: m.clave === "unibrandco" ? "No aplica" : (venta.mercadoLibre?.motivo ?? "Sin datos") },
+          ];
+        }),
+      ) as Record<ClaveMarca, Estado>,
+    },
+    {
+      fuente: "Marketing → Carga + canjes de SIGMA",
+      uso: "Presupuesto, influencers (honorarios, canje, envío), producción, ferias, otros gastos",
       porMarca: null,
       general: planilla.datos
         ? {
             ok: true,
-            texto: `Último envío ${fechaCorta(planilla.datos.recibidoEn)} · ${planilla.datos.colaboraciones.length} colaboraciones · ${planilla.datos.gastos.length} gastos`,
+            texto: `${planilla.datos.colaboraciones.length} colaboraciones · ${planilla.datos.gastos.length} gastos · ${planilla.datos.presupuesto.length} meses de presupuesto`,
           }
         : { ok: false, texto: planilla.motivo ?? "Sin datos" },
+    },
+    {
+      fuente: "Google Ads · Mercado Ads",
+      uso: "Inversión en pauta de Google y de Mercado Libre",
+      porMarca: null,
+      general: { ok: false, texto: "Pendientes de conectar · mientras tanto se pueden cargar en Otros gastos" },
     },
     {
       fuente: "Planificación",
@@ -1627,7 +1860,7 @@ function Deadlines({ marca }: { marca: ClaveMarca | null }) {
               )}
             </td>
             <td className="px-2 py-2 tabular-nums">
-              {h.presupuesto ? fmtMonedaCorta(h.presupuesto) : "—"}
+              {h.presupuesto ? fmtMoneda(h.presupuesto) : "—"}
             </td>
             <td className="text-muted px-2 py-2 text-xs whitespace-nowrap">{h.responsable}</td>
             <td className="px-2 py-2">
@@ -1675,19 +1908,33 @@ function Indicadores() {
 // Página
 // ---------------------------------------------------------------------------
 
-export default function DashboardMarketing({ datos, periodo }: { datos: DatosTablero; periodo: Periodo }) {
-  const [vista, setVista] = useState<ClaveMarca | "todas">("todas");
+export type OrigenVenta = "todas" | "mayorista" | "mercadolibre" | "tiendas";
+export const ORIGENES_VENTA: { clave: OrigenVenta; label: string }[] = [
+  { clave: "todas", label: "Todas" },
+  { clave: "mayorista", label: "Mayorista (SIGMA)" },
+  { clave: "mercadolibre", label: "Mercado Libre" },
+  { clave: "tiendas", label: "Tienda Nube" },
+];
+
+/**
+ * LO REAL PISA AL EJEMPLO, campo por campo. Así el presupuesto, el scorecard
+ * y el retorno usan el mismo número que cada sección y no pueden
+ * contradecirse: si Meta dice $420 k, el gasto de la marca es $420 k.
+ *
+ * Es una función aparte porque se corre DOS VECES: con el período elegido y
+ * con el anterior, para que cada KPI muestre contra qué se compara.
+ */
+function armarMarcas(
+  datos: Pick<DatosTablero, "meta" | "instagram" | "venta" | "planilla">,
+  P: Periodo,
+  origen: OrigenVenta,
+): Marca[] {
   const { meta, instagram, venta: real } = datos;
-  const P = periodo;
   const n = Math.max(P.transcurridos, 1);
   // El EJEMPLO está escrito para 11 días de un mes: para otro período se
   // estira parejo, así las proporciones se mantienen. Lo real no se toca.
   const k = n / 11;
-
-  // LO REAL PISA AL EJEMPLO, campo por campo. Así el presupuesto, el
-  // scorecard y el retorno usan el mismo número que cada sección y no pueden
-  // contradecirse: si Meta dice $420 k, el gasto de la marca es $420 k.
-  const marcas: Marca[] = MARCAS.map((m) => {
+  return MARCAS.map((m) => {
     const ig = instagram[m.clave];
     const tn = real.tiendaNube.porMarca[m.clave];
     const may = real.mayorista.porMarca[m.clave];
@@ -1704,6 +1951,7 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
       gastoPorCanal: {
         ...m.gastoPorCanal,
         "Google Ads": m.gastoPorCanal["Google Ads"] * k,
+        "Mercado Ads": m.gastoPorCanal["Mercado Ads"] * k,
         Influencers: m.gastoPorCanal.Influencers * k,
         Contenido: m.gastoPorCanal.Contenido * k,
         Ferias: m.gastoPorCanal.Ferias * k,
@@ -1724,7 +1972,7 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
       r.presupuestoMes = presupuestoDelPeriodo(pl.presupuesto, m.clave, P.desde, P.hasta);
       const mesDesde = P.desde.slice(0, 7);
       const mesHasta = P.hasta.slice(0, 7);
-      const canales = { Influencers: 0, "Google Ads": 0, Contenido: 0, Ferias: 0, "Meta Ads": 0 };
+      const canales = { Influencers: 0, "Google Ads": 0, "Mercado Ads": 0, Contenido: 0, Ferias: 0, "Meta Ads": 0 };
       for (const c of pl.colaboraciones) {
         if (c.marca === m.clave && c.estado !== "Cancelada" && enPeriodo(c.fecha, P.desde, P.hasta)) {
           canales.Influencers += c.costoTotal;
@@ -1739,6 +1987,7 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
         ...r.gastoPorCanal,
         Influencers: canales.Influencers,
         "Google Ads": canales["Google Ads"],
+        "Mercado Ads": canales["Mercado Ads"],
         Contenido: canales.Contenido,
         Ferias: canales.Ferias,
         "Meta Ads": meta[m.clave].fuente === "meta" ? r.gastoPorCanal["Meta Ads"] : canales["Meta Ads"],
@@ -1767,8 +2016,37 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
         (may ? (may.diaria[i] ?? 0) : ejemploMayorista / n),
       );
     }
+    const meli = real.mercadoLibre?.porMarca[m.clave];
+    r.ventaMercadoLibre = meli?.venta ?? 0;
+    if (meli) r.ventaDiaria = r.ventaDiaria.map((v, i) => v + (meli.diaria[i] ?? 0));
+    // EL FILTRO "VENTAS DE": deja sólo el canal elegido en todos los KPIs.
+    if (origen !== "todas") {
+      if (origen !== "tiendas") r.ventaTiendas = 0;
+      if (origen !== "mayorista") r.ventaMayorista = 0;
+      if (origen !== "mercadolibre") r.ventaMercadoLibre = 0;
+      const dTn = origen === "tiendas" ? tn?.diaria : undefined;
+      const dMay = origen === "mayorista" ? may?.diaria : undefined;
+      const dMl = origen === "mercadolibre" ? meli?.diaria : undefined;
+      const serie = dTn ?? dMay ?? dMl;
+      r.ventaDiaria = Array.from({ length: n }, (_, i) => (serie ? (serie[i] ?? 0) : ventaTotal(r) / n));
+    }
     return r;
   });
+}
+
+/** Colaboraciones cargadas (no canceladas) cuya fecha cae en el período. */
+function colaboracionesDelPeriodo(datos: Pick<DatosTablero, "planilla">, P: Periodo) {
+  return (datos.planilla.datos?.colaboraciones ?? []).filter((c) => c.estado !== "Cancelada" && enPeriodo(c.fecha, P.desde, P.hasta));
+}
+
+export default function DashboardMarketing({ datos, periodo }: { datos: DatosTablero; periodo: Periodo }) {
+  const [vista, setVista] = useState<ClaveMarca | "todas">("todas");
+  const [origen, setOrigen] = useState<OrigenVenta>("todas");
+  const { meta, venta: real } = datos;
+  const P = periodo;
+  const marcas = armarMarcas(datos, P, origen);
+  const ant = datos.anterior;
+  const marcasAnt = armarMarcas({ ...ant, planilla: datos.planilla }, ant.periodo, origen);
   const marca = marcas.find((m) => m.clave === vista) ?? null;
 
   // PLANIFICACIÓN PISA AL EJEMPLO en fechas límite e influencers apenas hay
@@ -1802,8 +2080,7 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
     : HITOS;
   const planilla = datos.planilla.datos;
   const colaboraciones: Colaboracion[] = planilla && planilla.colaboraciones.length
-    ? planilla.colaboraciones
-        .filter((c) => c.estado !== "Cancelada" && enPeriodo(c.fecha, P.desde, P.hasta))
+    ? colaboracionesDelPeriodo(datos, P)
         .map((c) => {
           const usado = c.cupon ? real.tiendaNube.porMarca[c.marca]?.cupones.find((x) => x.cupon === c.cupon) : undefined;
           return {
@@ -1863,6 +2140,21 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
 
       <FiltroPeriodo key={`${P.desde}-${P.hasta}`} periodo={P} />
 
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-muted">Ventas de:</span>
+        {ORIGENES_VENTA.map((o) => (
+          <button
+            key={o.clave}
+            type="button"
+            onClick={() => setOrigen(o.clave)}
+            className={`rounded-lg border px-2.5 py-1 ${origen === o.clave ? "border-c1 bg-c1/15 text-c1" : "border-line text-muted hover:text-ink"}`}
+          >
+            {o.label}
+          </button>
+        ))}
+        <span className="text-muted">· todos los KPIs de venta usan este filtro · se compara con {ant.periodo.etiqueta}</span>
+      </div>
+
       <nav className="border-line -mx-1 flex gap-1 overflow-x-auto border-b px-1">
         {opciones.map((o) => {
           const activa = vista === o.clave;
@@ -1885,7 +2177,17 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
         })}
       </nav>
 
-      <Fuentes.Provider value={{ ...datos, periodo: P, hitos, colaboraciones, planReal }}>
+      <Fuentes.Provider
+        value={{
+          ...datos,
+          periodo: P,
+          hitos,
+          colaboraciones,
+          planReal,
+          origen,
+          comparar: { periodo: ant.periodo, marcas: marcasAnt, colaboraciones: colaboracionesDelPeriodo(datos, ant.periodo) },
+        }}
+      >
         {marca ? (
           <VistaMarca key={marca.clave} m={marca} meta={meta[marca.clave]} />
         ) : (

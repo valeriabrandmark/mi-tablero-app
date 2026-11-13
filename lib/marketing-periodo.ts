@@ -147,3 +147,30 @@ export const ATAJOS: Atajo[] = [
   { label: "30 días", rango: (hoy) => ({ desde: sumarDias(hoy, -29), hasta: hoy }) },
   { label: "90 días", rango: (hoy) => ({ desde: sumarDias(hoy, -89), hasta: hoy }) },
 ];
+
+/**
+ * EL PERÍODO CON QUE SE COMPARA: el mes anterior si se mira un mes (calendario
+ * o comercial), y si no, la misma cantidad de días justo antes.
+ *
+ * Si el período está en curso, se corta A LA MISMA ALTURA: el 13 de noviembre
+ * se compara con el 1 al 13 de octubre, no con octubre entero. Se logra
+ * armándolo con un `hoy` en esa fecha, así `hastaConDatos` y `proyectar`
+ * funcionan igual que en el período actual.
+ */
+export function periodoAnterior(p: Periodo): Periodo {
+  const cal = mesCalendario(p.desde);
+  let r: Rango;
+  if (p.desde === cal.desde && p.hasta === cal.hasta) {
+    r = mesCalendario(sumarDias(p.desde, -1));
+  } else if (/^Mes comercial/.test(p.etiqueta)) {
+    const [a, m] = p.desde.split("-").map(Number);
+    const candidatos = [`${a}-${String(m).padStart(2, "0")}`, `${m === 1 ? a - 1 : a}-${String(m === 1 ? 12 : m - 1).padStart(2, "0")}`];
+    const mes = candidatos.find((x) => limitesMesComercial(x).desde === p.desde) ?? candidatos[0];
+    const [aa, mm] = mes.split("-").map(Number);
+    r = limitesMesComercial(mm === 1 ? `${aa - 1}-12` : `${aa}-${String(mm - 1).padStart(2, "0")}`);
+  } else {
+    r = { desde: sumarDias(p.desde, -p.dias), hasta: sumarDias(p.desde, -1) };
+  }
+  const corte = p.transcurridos === 0 ? sumarDias(r.desde, -1) : p.enCurso ? sumarDias(r.desde, p.transcurridos - 1) : r.hasta;
+  return resolverPeriodo(r.desde, r.hasta, corte < r.hasta ? corte : r.hasta);
+}

@@ -251,8 +251,9 @@ export function normalizarPlanilla(crudo: unknown, recibidoEn: string): Planilla
  * Meta se marca aparte porque ya viene de la API: sumarla también desde la
  * planilla la contaría dos veces.
  */
-export function canalDeConcepto(concepto: string): "Meta Ads" | "Google Ads" | "Influencers" | "Contenido" | "Ferias" {
+export function canalDeConcepto(concepto: string): "Meta Ads" | "Google Ads" | "Mercado Ads" | "Influencers" | "Contenido" | "Ferias" {
   const c = concepto.toLowerCase();
+  if (/mercado\s*(ads|libre)/.test(c)) return "Mercado Ads";
   if (/meta|facebook|instagram ads/.test(c) && /pauta/.test(c)) return "Meta Ads";
   if (/google/.test(c)) return "Google Ads";
   if (/feria|stand|evento/.test(c)) return "Ferias";

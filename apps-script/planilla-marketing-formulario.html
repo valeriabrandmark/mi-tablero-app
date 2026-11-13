@@ -23,8 +23,9 @@
   .oculto{display:none}
 </style></head>
 <body>
-<label>¿Qué querés cargar?</label>
-<select id="tipo">
+<!-- El tipo ya viene elegido desde el menú Marketing → Cargar…: el selector
+     queda oculto y sólo se usa para saber qué formulario dibujar. -->
+<select id="tipo" class="oculto">
   <option value="colaboracion">Nueva colaboración</option>
   <option value="actualizar">Actualizar colaboración (estado, pago, link)</option>
   <option value="influencer">Nuevo influencer</option>
