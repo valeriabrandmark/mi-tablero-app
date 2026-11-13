@@ -16,7 +16,7 @@
  *      "Colaboraciones" (Pedidos con cupón, Venta con cupón), así el ROI de
  *      cada influencer se calcula solo en la planilla.
  *   3. Pone el ID a cada colaboración e influencer nuevo (COL-0001, INF-001).
- *   4. Un FORMULARIO LATERAL (menú Marketing → Cargar datos) para cargar sin
+ *   4. Un FORMULARIO LATERAL (menú Marketing → Cargar…) para cargar sin
  *      escribir en las hojas: valida los campos obligatorios, usa las mismas
  *      listas que la hoja Listas y escribe en la primera fila libre sin tocar
  *      las fórmulas. Una colaboración se carga entera, con sus productos de
@@ -64,7 +64,6 @@ var CELDA_ULTIMO_ENVIO = "H1"; // en la hoja Resumen
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("Marketing")
-    .addItem("Cargar datos (formulario)", "abrirFormulario")
     .addSubMenu(
       SpreadsheetApp.getUi()
         .createMenu("Cargar…")
