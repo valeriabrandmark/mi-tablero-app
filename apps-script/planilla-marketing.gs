@@ -315,7 +315,7 @@ function abrirFormulario(tipo) {
   // apps-script/planilla-marketing-formulario.html).
   var t = HtmlService.createTemplateFromFile("Formulario");
   t.tipoInicial = tipo || "colaboracion";
-  var salida = t.evaluate().setTitle("Marketing · Cargar datos");
+  var salida = t.evaluate().setTitle("Marketing · " + (TITULOS_FORM[t.tipoInicial] || "Cargar datos"));
   SpreadsheetApp.getUi().showSidebar(salida);
 }
 function formColaboracion() { abrirFormulario("colaboracion"); }
