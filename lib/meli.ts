@@ -38,6 +38,8 @@
  */
 
 /** Filtro fijo de la sección: no es un selector, es parte de su definición. */
+import { fmtPct } from "@/lib/format";
+
 export const CANAL_MELI = "Mercado Libre";
 
 /**
@@ -139,3 +141,57 @@ export {
  * browser.
  */
 export const TOPE_ARTICULOS = 600;
+
+/**
+ * CUANTO PESA UN COSTO SOBRE LA VENTA NETA, para la ayuda de las tarjetas.
+ *
+ * ---------------------------------------------------------------------------
+ * POR QUE HACE FALTA UN SEGUNDO DENOMINADOR
+ *
+ * Las tarjetas de comisión y envío se muestran sobre la venta C/IVA, y eso
+ * está bien: Mercado Libre cobra la comisión como un % del precio publicado,
+ * que lleva el IVA adentro, así que sobre c/IVA da la tarifa que ML publica
+ * --~13 %-- y sobre s/IVA daría un número que no existe en ningún lado.
+ *
+ * Pero cuando la pregunta es "cuánto me come", el denominador que importa es
+ * la venta NETA: es con el que se mide el margen, el que usan Compras y Ventas
+ * Mayoristas, y el único contra el que comparar la comisión con el costo de la
+ * mercadería tiene sentido. Los dos números son correctos y contestan
+ * preguntas distintas; por eso uno va a la vista y el otro en la ayuda.
+ *
+ * ---------------------------------------------------------------------------
+ * DEVUELVE null Y NO 0 SIN VENTA
+ *
+ * Sin venta no es "pesa 0 %": es que no hay sobre qué calcularlo. Un 0 % ahí
+ * se leería como "no me cuesta nada", que es lo contrario de lo que pasa
+ * cuando hay comisión y no hay facturación.
+ */
+export function pesoSobreVentaNeta(
+  monto: number,
+  ventaSiva: number,
+): number | null {
+  if (!Number.isFinite(monto) || !Number.isFinite(ventaSiva)) return null;
+  if (ventaSiva <= 0) return null;
+  return monto / ventaSiva;
+}
+
+/**
+ * El texto de la ayuda de una tarjeta de costo.
+ *
+ * Arma la frase completa --cuánto pesa sobre la venta neta, y por qué el
+ * número a la vista usa otro denominador-- en vez de dejar que cada tarjeta la
+ * escriba. Así la parte que se repite se escribe una vez, y el caso sin venta
+ * se contesta igual en todas: "no hay sobre qué calcularlo" y no un 0 %.
+ */
+export function ayudaDelCosto(
+  monto: number,
+  ventaSiva: number,
+  porQue: string,
+): string {
+  const peso = pesoSobreVentaNeta(monto, ventaSiva);
+  const cabeza =
+    peso == null
+      ? "Todavía no hay venta neta en el recorte, así que no hay sobre qué calcular cuánto pesa."
+      : `Es el ${fmtPct(peso)} de la venta neta (sin IVA), que es el denominador con el que se mide el margen y el que usan Compras y Ventas Mayoristas.`;
+  return `${cabeza} ${porQue}`;
+}

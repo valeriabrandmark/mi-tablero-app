@@ -28,7 +28,7 @@ import {
 } from "@/components/ui";
 import { alternar as alternarValor, vacio as sinValores } from "@/lib/filtros";
 import { fmtFechaCorta, fmtFechaHora, fmtMoneda, fmtNumero, fmtPct } from "@/lib/format";
-import { CARGA_IMPOSITIVA, TOPE_ARTICULOS } from "@/lib/meli";
+import { ayudaDelCosto, CARGA_IMPOSITIVA, TOPE_ARTICULOS } from "@/lib/meli";
 import { PALETA, TEMA } from "@/lib/paleta";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 import type {
@@ -948,10 +948,22 @@ export default function DashboardMeliPage({
               valor={fmtMoneda(k.costo)}
               detalle="Sin IVA, ya con el descuento del proveedor"
             />
+            {/* LOS DOS SE MUESTRAN SOBRE LA VENTA C/IVA Y SE EXPLICAN SOBRE
+                LA NETA. Ver `pesoSobreVentaNeta`: el % sobre c/IVA es la
+                tarifa que ML publica y el que sobre la neta dice cuánto se
+                come del margen. Son dos preguntas distintas, así que una va a
+                la vista y la otra en la ayuda. */}
             <TarjetaKpi
               titulo="Comisión Mercado Libre"
               valor={fmtMoneda(k.comision)}
               detalle={`${fmtPct(k.pctComision)} de la venta c/IVA`}
+              ayuda={ayudaDelCosto(
+                k.comision,
+                k.ventaSiva,
+                "Se muestra sobre la venta c/IVA porque Mercado Libre cobra la " +
+                  "comisión como un % del precio publicado, que lleva el IVA " +
+                  "adentro: así da la tarifa que ML publica.",
+              )}
             />
             <TarjetaKpi
               titulo="Costo de envío"
@@ -961,6 +973,13 @@ export default function DashboardMeliPage({
                   ? "Sin envíos cargados en este recorte"
                   : `${fmtPct(k.envio / k.ventaCiva)} de la venta c/IVA`
               }
+              ayuda={ayudaDelCosto(
+                k.envio,
+                k.ventaSiva,
+                "Es lo que Mercado Libre nos descuenta por los envíos a cargo " +
+                  "del vendedor, ya sin IVA y repartido entre las líneas de " +
+                  "cada paquete.",
+              )}
             />
           </div>
         </ConAlarmaMargen>
