@@ -29,8 +29,33 @@ const CAMPO =
 
 /** De dónde salió el costo teórico. Ver `FuenteTeorico` en lib/queries-costos. */
 type FuenteTeorico =
-  | { tipo: "sigma"; articulos: number }
-  | { tipo: "copia"; motivo: string; copiaDe: string | null; articulos: number };
+  | {
+      tipo: "sigma";
+      articulos: number;
+      maestroId: number | null;
+      pedidoEn: string | null;
+      reusado: boolean;
+    }
+  | {
+      tipo: "copia";
+      motivo: string;
+      copiaDe: string | null;
+      articulos: number;
+      deDonde: "tablero" | "orquestador";
+      maestroId: number | null;
+      reintentable: boolean;
+    };
+
+/**
+ * CUANDO SIGMA ESTA SATURADO SE VUELVE A PEDIR SOLO.
+ *
+ * Antes la única salida era recargar la página, y recargar eran dos pedidos
+ * más a una Sigma que ya estaba contestando 429: lo empeoraba. Ahora la
+ * pantalla espera un minuto y pide de nuevo, sin perder lo que se está
+ * mirando, hasta tres veces.
+ */
+const REINTENTO_MS = 60_000;
+const REINTENTOS_SOLOS = 3;
 
 type Preparado = {
   snapshot: Snapshot;
@@ -103,6 +128,13 @@ export default function ActualizarCostos() {
   const [listo, setListo] = useState<string | null>(null);
   const [recargas, setRecargas] = useState(0);
   /**
+   * LA RECARGA QUE TIENE QUE IR A SIGMA SI O SI (`?sigma=1`). Se guarda la
+   * clave y no un booleano: así queda atada a esa recarga y no se arrastra a
+   * las que siguen.
+   */
+  const [forzarEn, setForzarEn] = useState<number | null>(null);
+  const [reintentosSolos, setReintentosSolos] = useState(0);
+  /**
    * EL PEDIDO DE LA FOTO DEL MOMENTO.
    *
    * `null` mientras se está pidiendo. Después queda el resultado, que la
@@ -130,7 +162,7 @@ export default function ActualizarCostos() {
   useEffect(() => {
     let vivo = true;
     const clave = recargas;
-    fetch("/api/compras/costos")
+    fetch(forzarEn === clave ? "/api/compras/costos?sigma=1" : "/api/compras/costos")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((j: Preparado) => vivo && setTraido({ clave, datos: j }))
       .catch(() => {
@@ -140,7 +172,7 @@ export default function ActualizarCostos() {
     return () => {
       vivo = false;
     };
-  }, [recargas]);
+  }, [recargas, forzarEn]);
 
   /**
    * AL ABRIR LA PANTALLA SE PIDE LA FOTO DEL MOMENTO.
@@ -172,7 +204,35 @@ export default function ActualizarCostos() {
     };
   }, []);
 
-  const datos = traido?.clave === recargas ? traido.datos : null;
+  // PIDIENDO A SIGMA SE SIGUE VIENDO LA FOTO ANTERIOR. Puede tardar hasta
+  // medio minuto, y dejar la pantalla en blanco ese rato es peor que mostrar
+  // lo que había con un "pidiendo…". Aplicar queda frenado mientras tanto.
+  const pidiendoASigma = forzarEn === recargas && traido?.clave !== recargas;
+  const datos =
+    traido?.clave === recargas || pidiendoASigma ? (traido?.datos ?? null) : null;
+
+  const pedirASigma = () => {
+    setForzarEn(recargas + 1);
+    setRecargas((n) => n + 1);
+  };
+
+  // EL REINTENTO SOLO. Sólo si Sigma falló de una forma que se va sola, y no
+  // más de REINTENTOS_SOLOS veces por pantalla abierta.
+  const reintentar =
+    !pidiendoASigma &&
+    datos?.teorico.tipo === "copia" &&
+    datos.teorico.reintentable &&
+    reintentosSolos < REINTENTOS_SOLOS;
+  useEffect(() => {
+    if (!reintentar) return;
+    const t = setTimeout(() => {
+      setReintentosSolos((n) => n + 1);
+      pedirASigma();
+    }, REINTENTO_MS);
+    return () => clearTimeout(t);
+    // `pedirASigma` cambia en cada render; lo que decide es la recarga.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reintentar, recargas]);
 
   // El destino efectivo: lo elegido si se eligió, y si no lo que propuso el
   // servidor. Se deriva en vez de guardarse, por lo que dice `destino`.
@@ -208,6 +268,9 @@ export default function ActualizarCostos() {
         body: JSON.stringify({
           nota,
           fotoId: datos?.foto?.id ?? null,
+          // Y EL MAESTRO DE SIGMA QUE SE MIRO. El servidor lo busca por id
+          // en vez de volver a pedírselo a Sigma.
+          maestroId: datos?.teorico.maestroId ?? null,
           // A DONDE VA. Los numeros los rearma el servidor; esto es lo unico
           // que decide la pantalla, y alla se vuelve a validar.
           mes: mesElegido,
@@ -238,7 +301,8 @@ export default function ActualizarCostos() {
     !!s &&
     s.problemas.length === 0 &&
     nota.trim().length > 0 &&
-    problemaDestino === null;
+    problemaDestino === null &&
+    !pidiendoASigma;
 
   return (
     <div className="max-w-4xl space-y-4">
@@ -316,17 +380,39 @@ export default function ActualizarCostos() {
                 que faltaba el 29/10/2026: ANA cambió costos en Sigma, apretó el
                 botón y se aplicó la copia de 23 horas antes sin que nada lo
                 dijera. El silencio era el problema, no la copia. */}
-            {datos.teorico.tipo === "sigma" ? (
+            {pidiendoASigma ? (
               <p className="text-muted mt-2 text-xs">
-                Costo teórico pedido a Sigma en el momento:{" "}
-                <strong className="text-ink">{fmtNumero(datos.teorico.articulos)}</strong>{" "}
-                artículos activos.
+                Pidiéndole el maestro a Sigma… (puede tardar hasta medio minuto;
+                mientras tanto se ve la foto anterior).
               </p>
+            ) : datos.teorico.tipo === "sigma" ? (
+              <div className="text-muted mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                <span>
+                  Costo teórico pedido a Sigma
+                  {datos.teorico.pedidoEn ? (
+                    <>
+                      {" "}el <strong className="text-ink">{datos.teorico.pedidoEn}</strong>
+                    </>
+                  ) : (
+                    " en el momento"
+                  )}
+                  :{" "}
+                  <strong className="text-ink">{fmtNumero(datos.teorico.articulos)}</strong>{" "}
+                  artículos activos.
+                  {datos.teorico.reusado &&
+                    " Si cambiaste un costo en Sigma después de esa hora, pedilo de nuevo."}
+                </span>
+                <button type="button" className={BOTON} onClick={pedirASigma}>
+                  Pedir a Sigma de nuevo
+                </button>
+              </div>
             ) : (
               <div className="mt-2">
                 <Aviso tono="alerta">
                   <p className="font-medium">
-                    El costo teórico no salió de Sigma: es la copia{" "}
+                    {datos.teorico.deDonde === "tablero"
+                      ? "Sigma no contestó ahora: el costo teórico es el último que sí contestó, "
+                      : "El costo teórico no salió de Sigma: es la copia "}
                     {datos.teorico.copiaDe
                       ? `del ${datos.teorico.copiaDe}`
                       : "guardada, sin fecha conocida"}
@@ -334,9 +420,22 @@ export default function ActualizarCostos() {
                   </p>
                   <p className="mt-1 text-xs">{datos.teorico.motivo}</p>
                   <p className="mt-1 text-xs">
-                    Si cambiaste un costo en Sigma hace un rato, no va a entrar: esa
-                    copia la refresca el orquestador una vez por día.
+                    {datos.teorico.deDonde === "tablero"
+                      ? "Si cambiaste un costo en Sigma después de esa hora, todavía no entró."
+                      : "Si cambiaste un costo en Sigma hace un rato, no va a entrar: esa copia la refresca el orquestador una vez por día."}
                   </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <button type="button" className={BOTON} onClick={pedirASigma}>
+                      Pedir a Sigma de nuevo
+                    </button>
+                    {reintentar ? (
+                      <span className="text-xs">
+                        Se vuelve a pedir solo en un minuto (intento{" "}
+                        {reintentosSolos + 1} de {REINTENTOS_SOLOS}); no hace falta
+                        recargar la página.
+                      </span>
+                    ) : null}
+                  </div>
                 </Aviso>
               </div>
             )}
@@ -484,7 +583,14 @@ export default function ActualizarCostos() {
                 proveedor, buscar un SKU. La pantalla muestra lo que frena; el
                 archivo deja mirar todo lo demás. */}
             <div className="border-line mt-3 flex flex-wrap items-center gap-3 border-t pt-3">
-              <a className={BOTON} href="/api/compras/costos/archivo">
+              <a
+                className={BOTON}
+                href={
+                  datos.teorico.maestroId != null
+                    ? `/api/compras/costos/archivo?maestro=${datos.teorico.maestroId}`
+                    : "/api/compras/costos/archivo"
+                }
+              >
                 Bajar esta foto en Excel
               </a>
               <span className="text-muted text-xs">
