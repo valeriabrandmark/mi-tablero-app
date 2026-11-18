@@ -341,24 +341,19 @@ revisar(
 
 // --- EL DESC 2 FIJO DE UN PROVEEDOR --------------------------------------
 //
-// Con ROFINA son 4,94 % en todos los artículos, siempre. Escribirlo a mano en
-// cada renglón de cada orden sale igual todas las veces, y el día que alguien
-// se lo olvida en un renglón la orden pide más caro de lo acordado.
+// ROFINA llevaba 4,94 % fijo en todos los artículos. Compras lo sacó el
+// 18/11/2026: un renglón de ROFINA arranca en cero como cualquier otro, y si
+// una orden lo lleva se escribe a mano. Si alguien lo vuelve a agregar sin
+// querer, esto lo ataja.
 
-// EL NOMBRE ES EL DEL MAESTRO, EXACTO: "ROFINA S A I C F", con los espacios
-// entre las siglas (156 artículos en sigma_articulos). Esta prueba está acá
-// porque un nombre mal escrito NO ROMPE NADA: simplemente no aplica el
-// descuento, y nadie se entera hasta que llega la factura.
-revisar(
-  "el proveedor se llama ROFINA S A I C F y lleva 4,94",
-  DESC2_FIJO_POR_PROVEEDOR["ROFINA S A I C F"],
-  4.94,
-);
+revisar("ROFINA ya no tiene desc 2 fijo",
+  DESC2_FIJO_POR_PROVEEDOR["ROFINA S A I C F"], undefined);
 
-revisar("un renglón de ROFINA arranca con 4,94", 
+revisar("un renglón de ROFINA arranca con desc 2 en cero",
   renglonInicial(fila({ sku: "A", proveedor: "ROFINA S A I C F" })).descuento2,
-  4.94,
+  0,
 );
+revisar("ni con espacios al borde", desc2DelProveedor("  ROFINA S A I C F "), 0);
 
 revisar(
   "el de cualquier otro proveedor sigue en cero",
@@ -369,20 +364,16 @@ revisar(
 // Un artículo sin proveedor cargado no puede quedar con el descuento de nadie.
 revisar("sin proveedor, cero", desc2DelProveedor(null), 0);
 
-// Los espacios de más no deberían costar el descuento: el nombre viaja desde
-// la base y ya se vio venir con espacios al borde en otras columnas.
-revisar("un espacio al borde no lo pierde", desc2DelProveedor("  ROFINA S A I C F "), 4.94);
-
-// EL DESC 1 NO SE TOCA. El sell in sigue saliendo del sell in, y los dos
-// descuentos se aplican EN CASCADA: 10 % y 4,94 % no son 14,94 %.
+// EL DESC 1 NO SE TOCA: sigue saliendo del sell in. Y si se carga un desc 2 a
+// mano, los dos se aplican EN CASCADA: 10 % y 4,94 % no son 14,94 %.
 {
   const r = renglonInicial(
     fila({ sku: "A", proveedor: "ROFINA S A I C F", sellInPct: 10 }),
   );
   revisar("el desc 1 sigue saliendo del sell in", r.descuento, 10);
   revisar(
-    "y los dos se aplican en cascada",
-    Math.round(factorNeto(r.descuento, r.descuento2) * 1e6) / 1e6,
+    "y dos descuentos se aplican en cascada",
+    Math.round(factorNeto(10, 4.94) * 1e6) / 1e6,
     Math.round(0.9 * (1 - 0.0494) * 1e6) / 1e6,
   );
 }

@@ -650,8 +650,9 @@ export type RenglonOrden = {
  * POR QUE EXISTE
  *
  * El desc 2 se negocia orden por orden, y por eso arranca vacío. Pero hay
- * acuerdos que no se negocian cada vez: con ROFINA son 4,94 % fijos en TODOS
- * los artículos, siempre. Escribirlo a mano en cada renglón de cada orden es
+ * acuerdos que no se negocian cada vez: un mismo porcentaje en TODOS los
+ * artículos del proveedor, siempre (hasta el 18/11/2026 era el caso de ROFINA,
+ * con 4,94 %; hoy no hay ninguno). Escribirlo a mano en cada renglón de cada orden es
  * trabajo que sale igual todas las veces, y el día que alguien se lo olvida en
  * un renglón la orden sale pidiendo más caro de lo acordado.
  *
@@ -666,8 +667,8 @@ export type RenglonOrden = {
  * ---------------------------------------------------------------------------
  * EL NOMBRE TIENE QUE SER EL DEL MAESTRO, EXACTO
  *
- * Es `sigma_articulos."proveedorNombre"`, tal cual: "ROFINA S A I C F", con
- * los espacios entre las siglas. Un nombre que no coincide no rompe nada --y
+ * Es `sigma_articulos."proveedorNombre"`, tal cual (por ejemplo
+ * "ROFINA S A I C F", con los espacios entre las siglas). Un nombre que no coincide no rompe nada --y
  * eso es lo peligroso-- simplemente no aplica el descuento y nadie se entera.
  * Por eso hay una prueba que lo verifica contra el nombre real.
  *
@@ -675,7 +676,9 @@ export type RenglonOrden = {
  * puntual lleva otro número, se escribe encima como cualquier otro renglón.
  */
 export const DESC2_FIJO_POR_PROVEEDOR: Readonly<Record<string, number>> = {
-  "ROFINA S A I C F": 4.94,
+  // ROFINA ("ROFINA S A I C F") llevaba 4,94 % fijo. Se sacó el 18/11/2026 a
+  // pedido de compras: ya no arranca cargado y, si una orden lo lleva, se
+  // escribe a mano. El mecanismo queda para el próximo acuerdo fijo.
 };
 
 /** El desc 2 con el que arranca un renglón de este proveedor. */
