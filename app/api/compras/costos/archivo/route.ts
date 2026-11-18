@@ -45,12 +45,15 @@ export async function GET(request: NextRequest) {
   const mes = p.get("mes");
   const desde = p.get("desde");
   const origen = p.get("origen");
+  // El pedido a Sigma con el que se armó la pantalla. Ver la ruta POST.
+  const maestro = Number(p.get("maestro"));
+  const maestroId = Number.isSafeInteger(maestro) && maestro > 0 ? maestro : null;
 
   try {
     const { libro, nombre } =
       mes && desde && origen
         ? await libroDeUnTramo(mes, desde, origen)
-        : await libroDeLaFoto();
+        : await libroDeLaFoto(maestroId);
 
     if (!libro) {
       return NextResponse.json({ error: "No existe esa foto." }, { status: 404 });
@@ -75,8 +78,10 @@ export async function GET(request: NextRequest) {
   }
 }
 
-async function libroDeLaFoto() {
-  const { caratula, filas, mes, vigenteDesde } = await fotoParaArchivo();
+async function libroDeLaFoto(maestroId: number | null) {
+  const { caratula, filas, mes, vigenteDesde } = await fotoParaArchivo(new Date(), {
+    maestroId,
+  });
   return {
     libro: libroDeCostos(caratula, filas),
     nombre: `costos-foto-${mes}-${vigenteDesde}.xlsx`,

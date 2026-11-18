@@ -38,13 +38,21 @@ async function quienPuede(): Promise<string | null | false> {
   return quien?.email ?? null;
 }
 
-/** La foto, sin escribir nada. Es lo que se mira antes de aplicar. */
-export async function GET() {
+/**
+ * La foto, sin escribir nada. Es lo que se mira antes de aplicar.
+ *
+ * `?sigma=1` saltea el pedido guardado y llama a Sigma sí o sí: es el botón
+ * "Pedir a Sigma de nuevo", para cuando se acaba de cambiar un costo allá. Sin
+ * eso, un pedido de hace menos de diez minutos se reusa (ver
+ * lib/sigma-maestro-guardado).
+ */
+export async function GET(request: NextRequest) {
   if ((await quienPuede()) === false) {
     return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
   }
+  const forzar = request.nextUrl.searchParams.get("sigma") === "1";
   try {
-    return NextResponse.json(await prepararCostos());
+    return NextResponse.json(await prepararCostos(new Date(), undefined, { forzar }));
   } catch (error) {
     const mensaje = error instanceof Error ? error.message : "Error desconocido";
     console.error("[api/compras/costos] GET", error);
@@ -58,7 +66,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
   }
 
-  let cuerpo: { nota?: unknown; fotoId?: unknown; mes?: unknown; vigenteDesde?: unknown };
+  let cuerpo: {
+    nota?: unknown;
+    fotoId?: unknown;
+    maestroId?: unknown;
+    mes?: unknown;
+    vigenteDesde?: unknown;
+  };
   try {
     cuerpo = await request.json();
   } catch {
@@ -101,7 +115,26 @@ export async function POST(request: NextRequest) {
     // escribe tiene que salir de la base, no de lo que alguien mande: con el
     // snapshot viajando en el cuerpo, cualquiera podría fijar el costo de
     // cualquier artículo desde la consola.
-    const preparado = await prepararCostos(new Date(), destino);
+    //
+    // EL MAESTRO DE SIGMA, EN CAMBIO, ES EL QUE SE MIRO: se pide por id el
+    // pedido guardado con el que se armó la pantalla. Es un id de la base, no
+    // números: no hay nada que inventar desde la consola. Y no se vuelve a
+    // llamar a Sigma, que era la llamada que más seguido volvía con 429.
+    const maestroId = typeof cuerpo.maestroId === "number" ? cuerpo.maestroId : null;
+    const preparado = await prepararCostos(new Date(), destino, { maestroId });
+
+    // Si ese pedido ya no está (se podó), la foto se armó con otro maestro y
+    // los números pueden no ser los que se vieron. Mismo criterio que la foto.
+    if (maestroId != null && preparado.teorico.maestroId !== maestroId) {
+      return NextResponse.json(
+        {
+          error:
+            "El maestro de Sigma que estabas mirando ya no está guardado. " +
+            "Revisá los números otra vez antes de aplicar.",
+        },
+        { status: 409 },
+      );
+    }
 
     // LO QUE SE APLICA TIENE QUE SER LO QUE SE MIRO.
     //

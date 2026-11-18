@@ -3,6 +3,13 @@ import { limitesMesComercial, mesComercialActual } from "@/lib/constantes";
 import { hoyEnArgentina, type Destino } from "@/lib/destino-costos";
 import { armarSnapshot, type ArticuloParaCostear, type Snapshot } from "@/lib/costos-snapshot";
 import { pedirArticulosASigma } from "@/lib/sigma-articulos";
+import {
+  esMasNuevoQueLaCopia,
+  guardarMaestro,
+  maestroGuardadoPorId,
+  ultimoMaestroGuardado,
+  VIGENCIA_MS,
+} from "@/lib/sigma-maestro-guardado";
 import { leerOfertas, type OfertasDeLaPlanilla } from "@/lib/ofertas-planilla";
 import type { CaratulaCostos, FilaDeArchivo } from "@/lib/exportar-costos";
 
@@ -76,14 +83,49 @@ export type Preparado = {
  * `lib/sigma-articulos.ts` para por qué puede no ser Sigma.
  */
 export type FuenteTeorico =
-  | { tipo: "sigma"; articulos: number }
+  | {
+      tipo: "sigma";
+      articulos: number;
+      /**
+       * EL PEDIDO QUE SE MIRO. Vuelve al aplicar y al bajar el Excel para que
+       * usen exactamente este maestro, sin llamar a Sigma otra vez. `null` si
+       * no se pudo guardar (falta la migración `sigma_maestro_tablero`).
+       */
+      maestroId: number | null;
+      /** Cuándo contestó Sigma, en hora de Buenos Aires. */
+      pedidoEn: string | null;
+      /**
+       * `true` si no se llamó a Sigma porque había un pedido de hace menos de
+       * `VIGENCIA_MS`. La pantalla lo dice y ofrece pedir de nuevo.
+       */
+      reusado: boolean;
+    }
   | {
       tipo: "copia";
       motivo: string;
-      /** Cuándo corrió bien el catálogo por última vez. `null` si no se sabe. */
+      /** De cuándo es la copia. `null` si no se sabe. */
       copiaDe: string | null;
       articulos: number;
+      /**
+       * DE DONDE ES LA COPIA: el último pedido bueno del tablero (horas) o la
+       * que deja el orquestador una vez por día.
+       */
+      deDonde: "tablero" | "orquestador";
+      maestroId: number | null;
+      /**
+       * Si tiene sentido volver a pedir solo en un rato: Sigma falló (429,
+       * lenta, caída). Con las variables sin cargar no, no se va a arreglar.
+       */
+      reintentable: boolean;
     };
+
+/** Cómo conseguir el maestro. Ver `leerArticulos`. */
+export type PedidoDeMaestro = {
+  /** Saltear el pedido guardado y llamar a Sigma sí o sí. */
+  forzar?: boolean;
+  /** Usar exactamente este pedido guardado (el que se miró en pantalla). */
+  maestroId?: number | null;
+};
 
 /**
  * El mismo texto para la pantalla y para la carátula del archivo.
@@ -94,10 +136,12 @@ export type FuenteTeorico =
  */
 export function textoDeLaFuente(f: FuenteTeorico): string {
   if (f.tipo === "sigma") {
-    return `costo teórico pedido a Sigma en el momento (${f.articulos} artículos)`;
+    const cuando = f.pedidoEn ? ` el ${f.pedidoEn}` : " en el momento";
+    return `costo teórico pedido a Sigma${cuando} (${f.articulos} artículos)`;
   }
   const de = f.copiaDe ? `del ${f.copiaDe}` : "sin fecha conocida";
-  return `costo teórico de la COPIA ${de} y no de Sigma — ${f.motivo}`;
+  const quien = f.deDonde === "tablero" ? "último pedido del tablero" : "copia del orquestador";
+  return `costo teórico de la COPIA ${de} (${quien}) y no de Sigma — ${f.motivo}`;
 }
 
 /**
@@ -130,39 +174,105 @@ async function cuandoSeCopioElCatalogo(): Promise<string | null> {
  * compra ni se vende, así que darle un costo nuevo es escribir filas que
  * ninguna pantalla va a leer.
  *
- * SE LE PIDE A SIGMA EN EL MOMENTO, y la copia de `bronze.sigma_articulos` es
- * el plan B. Al revés de como estaba: la copia se refresca una vez por día, así
- * que un costo cambiado hoy en Sigma no entraba hasta mañana. Ver
- * `lib/sigma-articulos.ts`.
+ * SE LE PIDE A SIGMA, pero no en cada request (ver
+ * `lib/sigma-maestro-guardado.ts`). En orden:
+ *
+ *   1. El pedido que se miró, si viene `maestroId` (aplicar, bajar el Excel).
+ *   2. El último pedido bueno, si es de hace menos de `VIGENCIA_MS` y no se
+ *      pidió `forzar`.
+ *   3. Sigma en vivo, que se guarda para los que siguen.
+ *   4. Si Sigma falla: el último pedido bueno del tablero, si es más nuevo que
+ *      la copia del orquestador.
+ *   5. La copia de `bronze.sigma_articulos`, que se refresca una vez por día.
  *
  * Sale a función aparte porque la leen dos: la foto que se muestra y el
  * archivo que se baja. Con el SQL copiado en los dos, el día que cambie el
  * filtro va a cambiar en uno solo.
  */
-async function leerArticulos(): Promise<{
+async function leerArticulos(pedido: PedidoDeMaestro = {}): Promise<{
   articulos: ArticuloParaCostear[];
   fuente: FuenteTeorico;
 }> {
+  // 1. EL QUE SE MIRO. Aplicar y bajar el Excel no vuelven a llamar a Sigma:
+  // usan el maestro con el que se armó la pantalla. Si ese pedido ya no está
+  // (se podó, o la tabla no existe) se sigue como si no hubiera venido.
+  if (pedido.maestroId != null) {
+    const visto = await maestroGuardadoPorId(pedido.maestroId);
+    if (visto) return { articulos: visto.articulos, fuente: fuenteGuardada(visto) };
+  }
+
+  // 2. UNO RECIENTE. Dentro de la vigencia no se llama a Sigma: es lo que
+  // evitaba que abrir y recargar la pantalla la saturara.
+  const ultimo = await ultimoMaestroGuardado();
+  if (!pedido.forzar && ultimo && ultimo.edadMs < VIGENCIA_MS) {
+    return { articulos: ultimo.articulos, fuente: fuenteGuardada(ultimo) };
+  }
+
+  // 3. SIGMA EN VIVO, y si contesta se guarda para los que siguen.
   const vivo = await pedirArticulosASigma();
   if (vivo.estado === "ok") {
+    const guardado = await guardarMaestro(vivo.articulos);
     return {
       articulos: vivo.articulos,
-      fuente: { tipo: "sigma", articulos: vivo.articulos.length },
+      fuente: {
+        tipo: "sigma",
+        articulos: vivo.articulos.length,
+        maestroId: guardado?.id ?? null,
+        pedidoEn: guardado?.pedidoEn ?? null,
+        reusado: false,
+      },
     };
   }
 
+  const motivo =
+    vivo.estado === "sin_conectar"
+      ? "Faltan las variables de Sigma en Vercel (SIGMA_URL_CLIENTE, SIGMA_BASEALIAS, SIGMA_ID_CLIENTE, SIGMA_TOKEN)."
+      : vivo.motivo;
+
+  // 4. PLAN B: el último pedido bueno del tablero, si es más nuevo que la
+  // copia del orquestador (o si no se sabe de cuándo es esa).
+  if (ultimo && (await esMasNuevoQueLaCopia(ultimo.id)) !== false) {
+    return {
+      articulos: ultimo.articulos,
+      fuente: {
+        tipo: "copia",
+        motivo,
+        copiaDe: ultimo.pedidoEn,
+        articulos: ultimo.articulos.length,
+        deDonde: "tablero",
+        maestroId: ultimo.id,
+        reintentable: vivo.estado === "falla",
+      },
+    };
+  }
+
+  // 5. Y si no, la copia del orquestador, como antes.
   const articulos = await leerArticulosDeLaCopia();
   return {
     articulos,
     fuente: {
       tipo: "copia",
-      motivo:
-        vivo.estado === "sin_conectar"
-          ? "Faltan las variables de Sigma en Vercel (SIGMA_URL_CLIENTE, SIGMA_BASEALIAS, SIGMA_ID_CLIENTE, SIGMA_TOKEN)."
-          : vivo.motivo,
+      motivo,
       copiaDe: await cuandoSeCopioElCatalogo(),
       articulos: articulos.length,
+      deDonde: "orquestador",
+      maestroId: null,
+      reintentable: vivo.estado === "falla",
     },
+  };
+}
+
+function fuenteGuardada(g: {
+  id: number;
+  pedidoEn: string;
+  articulos: ArticuloParaCostear[];
+}): FuenteTeorico {
+  return {
+    tipo: "sigma",
+    articulos: g.articulos.length,
+    maestroId: g.id,
+    pedidoEn: g.pedidoEn,
+    reusado: true,
   };
 }
 
@@ -220,7 +330,11 @@ async function leerCostoActual(): Promise<Map<string, number>> {
  * muestra lo de Sigma. Dos fuentes para la misma foto es justo lo que no puede
  * pasar.
  */
-async function prepararConMaestro(ahora: Date, destino?: Destino): Promise<{
+async function prepararConMaestro(
+  ahora: Date,
+  destino?: Destino,
+  pedido?: PedidoDeMaestro,
+): Promise<{
   preparado: Preparado;
   articulos: ArticuloParaCostear[];
   costoActual: Map<string, number>;
@@ -243,7 +357,7 @@ async function prepararConMaestro(ahora: Date, destino?: Destino): Promise<{
     );
   }
 
-  const { articulos, fuente: teorico } = await leerArticulos();
+  const { articulos, fuente: teorico } = await leerArticulos(pedido);
 
   const tramos = await listarTramos(12);
 
@@ -291,8 +405,9 @@ async function prepararConMaestro(ahora: Date, destino?: Destino): Promise<{
 export async function prepararCostos(
   ahora: Date = new Date(),
   destino?: Destino,
+  pedido?: PedidoDeMaestro,
 ): Promise<Preparado> {
-  return (await prepararConMaestro(ahora, destino)).preparado;
+  return (await prepararConMaestro(ahora, destino, pedido)).preparado;
 }
 
 /**
@@ -586,8 +701,9 @@ export function caratulaDeTramo(t: TramoGuardado): CaratulaCostos {
  */
 export async function fotoParaArchivo(
   ahora: Date = new Date(),
+  pedido?: PedidoDeMaestro,
 ): Promise<{ caratula: CaratulaCostos; filas: FilaDeArchivo[]; mes: string; vigenteDesde: string }> {
-  const { preparado, articulos, costoActual } = await prepararConMaestro(ahora);
+  const { preparado, articulos, costoActual } = await prepararConMaestro(ahora, undefined, pedido);
   const { snapshot, mes, vigenteDesde } = preparado;
 
   const porSku = new Map(articulos.map((a) => [a.sku, a]));
