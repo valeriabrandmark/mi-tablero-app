@@ -63,6 +63,7 @@ export function TarjetaKpi({
   titulo,
   valor,
   detalle,
+  ayuda,
   acento,
   compacta = false,
 }: {
@@ -70,6 +71,19 @@ export function TarjetaKpi({
   valor: string;
   /** Nodo y no string: hay tarjetas que muestran la variación con color. */
   detalle?: ReactNode;
+  /**
+   * Lo que aparece al pasar el mouse por el título.
+   *
+   * Para lo que NO entra en la bajada pero hace falta para interpretar el
+   * número: contra qué se mide, de dónde sale, con qué no confundirlo. La
+   * bajada tiene una línea y se lee siempre; esto puede tener tres y se lee
+   * cuando alguien pregunta.
+   *
+   * Mismo gesto que las columnas de las tablas --subrayado punteado y `title`
+   * del navegador-- para que quien ya aprendió que el punteado esconde una
+   * explicación no tenga que aprenderlo de nuevo acá.
+   */
+  ayuda?: string;
   acento?: string;
   /**
    * Achica padding y tipografía para que entren más por fila.
@@ -96,8 +110,15 @@ export function TarjetaKpi({
         className={`text-muted leading-tight ${
           compacta ? "text-[10px] sm:text-[11px]" : "text-[11px] sm:text-xs"
         }`}
+        title={ayuda}
       >
-        {titulo}
+        {ayuda ? (
+          <span className="decoration-dotted underline-offset-4 hover:underline">
+            {titulo}
+          </span>
+        ) : (
+          titulo
+        )}
       </p>
       {/* EL VALOR ACHICA UN ESCALÓN EN CELULAR, y no es cosmético: con dos
         tarjetas por fila en una pantalla de 360px cada una queda en unos

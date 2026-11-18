@@ -747,7 +747,15 @@ export type KpisMeli = {
   rentabilidadNeta: number;
   /** Fracción. Denominador VENTA S/IVA, como la pestaña "Alertas". */
   margenNetoPct: number | null;
-  /** Comisión sobre venta s/IVA, en fracción. */
+  /**
+   * Comisión sobre venta C/IVA, en fracción.
+   *
+   * Decía "s/IVA" y estaba mal: `getKpis` la calcula contra `ventaCiva`, y
+   * a propósito --ML cobra su comisión como un % del precio publicado, que
+   * lleva el IVA adentro, así que sobre c/IVA da la tarifa que ML publica--.
+   * El peso sobre la venta neta vive en la ayuda de la tarjeta; ver
+   * `pesoSobreVentaNeta` en lib/meli.ts.
+   */
   pctComision: number | null;
   ticketPromedio: number | null;
 };
