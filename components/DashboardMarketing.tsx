@@ -300,6 +300,48 @@ function Kpi({ vs, detalle, ...props }: Parameters<typeof TarjetaKpi>[0] & { vs?
   );
 }
 
+/**
+ * MERCADO ADS: con la API conectada (tablero_quo/ml_ads.py → bronze.ml_ads_diario)
+ * muestra la inversión, el ROAS sobre la venta que Mercado Libre le atribuye
+ * y la comparación. Sin conectar, lo cargado a mano o "Pendiente".
+ */
+function TarjetaMercadoAds({ m, gastoAnterior }: { m: Marca; gastoAnterior: number | undefined }) {
+  const { venta, anterior } = useFuentes();
+  const ads = venta.mercadoAds;
+  const gasto = m.gastoPorCanal["Mercado Ads"];
+  if (ads && !ads.motivo) {
+    const d = ads.porMarca[m.clave];
+    const dA = anterior.venta.mercadoAds?.porMarca[m.clave];
+    const roasAds = d && d.costo ? d.ventaAtribuida / d.costo : null;
+    return (
+      <Kpi
+        titulo="Mercado Ads"
+        valor={fmtMoneda(gasto)}
+        acento={gasto ? undefined : TEMA.muted}
+        detalle={
+          d && d.costo
+            ? `ROAS ${dec1.format(roasAds ?? 0)}x · ${fmtMoneda(d.ventaAtribuida)} atribuidos · ${fmtNumero(d.clics)} clics`
+            : "Sin inversión en el período"
+        }
+        vs={{ actual: gasto, anterior: anterior.venta.mercadoAds?.motivo ? null : (dA?.costo ?? 0), menosEsMejor: true }}
+      />
+    );
+  }
+  return (
+    <Kpi
+      titulo="Mercado Ads"
+      valor={gasto ? fmtMoneda(gasto) : "Pendiente"}
+      acento={AMBAR}
+      detalle={
+        gasto
+          ? `Cargado a mano en Otros gastos · ${ads?.motivo ?? "API sin conectar"}`
+          : (ads?.motivo ?? "Pendiente de conectar · se puede cargar en Carga → Otros gastos")
+      }
+      vs={gasto ? { actual: gasto, anterior: gastoAnterior, menosEsMejor: true } : undefined}
+    />
+  );
+}
+
 /** La misma marca en el período anterior. */
 function useMarcaAnterior(clave: ClaveMarca): Marca | undefined {
   return useFuentes().comparar.marcas.find((m) => m.clave === clave);
@@ -940,17 +982,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           detalle={`Ticket promedio ${fmtMoneda(ticket)}`}
           vs={{ actual: conversion, anterior: A ? A.pedidosTienda / A.visitasTienda : null, formato: p1, puntos: true }}
         />
-        <Kpi
-          titulo="Mercado Ads"
-          valor={m.gastoPorCanal["Mercado Ads"] ? fmtMoneda(m.gastoPorCanal["Mercado Ads"]) : "Pendiente"}
-          acento={AMBAR}
-          detalle={
-            m.gastoPorCanal["Mercado Ads"]
-              ? "Cargado a mano en Otros gastos · API pendiente de conectar"
-              : "Pendiente de conectar · se puede cargar en Carga → Otros gastos"
-          }
-          vs={m.gastoPorCanal["Mercado Ads"] ? { actual: m.gastoPorCanal["Mercado Ads"], anterior: A?.gastoPorCanal["Mercado Ads"], menosEsMejor: true } : undefined}
-        />
+        <TarjetaMercadoAds m={m} gastoAnterior={A?.gastoPorCanal["Mercado Ads"]} />
         <Kpi
           titulo="Google Ads"
           valor={m.gastoPorCanal["Google Ads"] ? fmtMoneda(m.gastoPorCanal["Google Ads"]) : "Pendiente"}
@@ -1764,10 +1796,19 @@ function PanelFuentes() {
         : { ok: false, texto: planilla.motivo ?? "Sin datos" },
     },
     {
-      fuente: "Google Ads · Mercado Ads",
-      uso: "Inversión en pauta de Google y de Mercado Libre",
+      fuente: "Mercado Ads (API, cada 6 h)",
+      uso: "Inversión en Product Ads de Mercado Libre y venta atribuida",
       porMarca: null,
-      general: { ok: false, texto: "Pendientes de conectar · mientras tanto se pueden cargar en Otros gastos" },
+      general:
+        venta.mercadoAds && !venta.mercadoAds.motivo
+          ? { ok: true, texto: `Conectado${venta.mercadoAds.ultimaCarga ? ` · última carga ${fechaCorta(venta.mercadoAds.ultimaCarga)}` : ""}` }
+          : { ok: false, texto: venta.mercadoAds?.motivo ?? "Sin conectar" },
+    },
+    {
+      fuente: "Google Ads",
+      uso: "Inversión en pauta de Google",
+      porMarca: null,
+      general: { ok: false, texto: "Pendiente de conectar · mientras tanto se puede cargar en Otros gastos" },
     },
     {
       fuente: "Planificación",
@@ -1992,6 +2033,11 @@ function armarMarcas(
         Ferias: canales.Ferias,
         "Meta Ads": meta[m.clave].fuente === "meta" ? r.gastoPorCanal["Meta Ads"] : canales["Meta Ads"],
       };
+    }
+    // MERCADO ADS: con la API conectada manda la API, igual que Meta: sumar
+    // además lo cargado a mano en Otros gastos lo contaría dos veces.
+    if (real.mercadoAds && !real.mercadoAds.motivo) {
+      r.gastoPorCanal = { ...r.gastoPorCanal, "Mercado Ads": real.mercadoAds.porMarca[m.clave]?.costo ?? 0 };
     }
     if (ig.fuente === "meta") {
       const d = ig.datos;

@@ -1,7 +1,7 @@
 import { query } from "@/lib/db";
 import { CANAL_MAYORISTA } from "@/lib/constantes";
 import type { ClaveMarca } from "@/lib/marketing-demo";
-import type { DatosMayorista, DatosMercadoLibre, DatosTiendaNube, DatosVentaReal } from "@/lib/marketing-fuentes";
+import type { DatosMayorista, DatosMercadoAds, DatosMercadoLibre, DatosTiendaNube, DatosVentaReal } from "@/lib/marketing-fuentes";
 import { SQL_ES_CANJE } from "@/lib/queries-carga";
 
 /**
@@ -234,6 +234,48 @@ async function leerMercadoLibre(r: Rango): Promise<Partial<Record<ClaveMarca, Da
   }
 }
 
+/**
+ * MERCADO ADS: la inversión en Product Ads por marca, de bronze.ml_ads_diario
+ * (la carga tablero_quo/ml_ads.py cada 6 horas, ya con la marca resuelta por
+ * el SKU igual que gold.fact_ventas).
+ */
+async function leerMercadoAds(
+  r: Rango,
+): Promise<{ porMarca: Partial<Record<ClaveMarca, DatosMercadoAds>>; ultimaCarga: string | null } | string> {
+  const marcas = Object.entries(PATRON_MARCA_SIGMA) as [ClaveMarca, string][];
+  try {
+    const [filas, ultima] = await Promise.all([
+      query<{ clave: ClaveMarca; costo: string; clics: string; impresiones: string; venta: string; unidades: string }>(
+        `select m.clave, sum(a.costo) as costo, sum(a.clics) as clics, sum(a.impresiones) as impresiones,
+                sum(a.venta_total) as venta, sum(a.unidades) as unidades
+           from bronze.ml_ads_diario a
+           join unnest($1::text[], $2::text[]) as m(clave, patron) on upper(a.marca) like m.patron
+          where a.fecha between $3::date and $4::date
+          group by 1`,
+        [marcas.map(([k]) => k), marcas.map(([, p]) => p), r.desde, r.hasta],
+      ),
+      query<{ ultima: string | null }>(`select max(actualizado_en)::text as ultima from bronze.ml_ads_diario`),
+    ]);
+    const porMarca: Partial<Record<ClaveMarca, DatosMercadoAds>> = {};
+    for (const f of filas) {
+      porMarca[f.clave] = {
+        costo: Number(f.costo),
+        clics: Number(f.clics),
+        impresiones: Number(f.impresiones),
+        ventaAtribuida: Number(f.venta),
+        unidades: Number(f.unidades),
+      };
+    }
+    return { porMarca, ultimaCarga: ultima[0]?.ultima ?? null };
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    if (/ml_ads_diario/.test(m) && /does not exist|no existe/.test(m)) {
+      return "Todavía no corrió la carga de Mercado Ads (tablero_quo/ml_ads.py)";
+    }
+    return motivoDe(e);
+  }
+}
+
 /** Tiendas (clientes mayoristas) cuya PRIMERA compra de cualquier marca es de este mes. */
 async function leerTiendasNuevas(r: Rango): Promise<number | string> {
   try {
@@ -322,7 +364,7 @@ async function leerUnibrandcoApi(r: Rango): Promise<DatosTiendaNube | null> {
 
 /** `hasta` es el último día CON DATOS: hoy si el período sigue abierto. */
 export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
-  const [importado, mayorista, tiendasNuevas, unibrandco, meli] = await Promise.all([
+  const [importado, mayorista, tiendasNuevas, unibrandco, meli, ads] = await Promise.all([
     leerTiendaNube(r),
     leerMayorista(r),
     leerTiendasNuevas(r),
@@ -331,6 +373,7 @@ export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
       return null;
     }),
     leerMercadoLibre(r),
+    leerMercadoAds(r),
   ]);
   // Unibrandco por API pisa a un CSV que se haya importado de esa tienda.
   // Si la tabla del importador falla, Unibrandco igual se ve: es otra fuente.
@@ -343,6 +386,7 @@ export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
     },
     mayorista: typeof mayorista === "string" ? { motivo: mayorista, porMarca: {} } : { porMarca: mayorista },
     mercadoLibre: typeof meli === "string" ? { motivo: meli, porMarca: {} } : { porMarca: meli },
+    mercadoAds: typeof ads === "string" ? { motivo: ads, porMarca: {} } : ads,
     tiendasNuevas: typeof tiendasNuevas === "string" ? { motivo: tiendasNuevas, cantidad: null } : { cantidad: tiendasNuevas },
   };
 }

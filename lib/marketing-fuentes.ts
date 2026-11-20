@@ -42,10 +42,26 @@ export type DatosMercadoLibre = {
   diaria: number[];
 };
 
+/** Mercado Ads (Product Ads) de la marca en el período: bronze.ml_ads_diario. */
+export type DatosMercadoAds = {
+  costo: number;
+  clics: number;
+  impresiones: number;
+  /** Venta que Mercado Libre le atribuye a los anuncios (directa + indirecta). */
+  ventaAtribuida: number;
+  unidades: number;
+};
+
 export type DatosVentaReal = {
   tiendaNube: { motivo?: string; porMarca: Partial<Record<ClaveMarca, DatosTiendaNube>> };
   mayorista: { motivo?: string; porMarca: Partial<Record<ClaveMarca, DatosMayorista>> };
   mercadoLibre: { motivo?: string; porMarca: Partial<Record<ClaveMarca, DatosMercadoLibre>> };
+  /**
+   * Sin `motivo` la API está conectada: una marca que no figura en `porMarca`
+   * no invirtió en el período (cero, no "pendiente"). `ultimaCarga` es la
+   * última vez que el orquestador trajo datos.
+   */
+  mercadoAds: { motivo?: string; porMarca: Partial<Record<ClaveMarca, DatosMercadoAds>>; ultimaCarga?: string | null };
   tiendasNuevas: { motivo?: string; cantidad: number | null };
 };
 
