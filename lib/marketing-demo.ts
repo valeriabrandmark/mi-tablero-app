@@ -412,7 +412,7 @@ export const INDICADORES: Indicador[] = [
   { nivel: 2, nombre: "Origen del tráfico", formula: "Informe de adquisición", fuente: "Google Analytics", estado: "verificar" },
   { nivel: 2, nombre: "Inversión, clics y CPC de pauta (Meta)", formula: "Inversión ÷ clics, día por día", fuente: "API de Meta Ads (automático)", estado: "listo" },
   { nivel: 2, nombre: "Inversión, clics y CPC de pauta (Google)", formula: "Inversión ÷ clics", fuente: "Google Ads (pendiente de conectar)", estado: "montar" },
-  { nivel: 2, nombre: "Inversión en Mercado Ads", formula: "Inversión ÷ ventas atribuidas", fuente: "Mercado Ads (pendiente de conectar)", estado: "montar" },
+  { nivel: 2, nombre: "Inversión y ROAS en Mercado Ads +", formula: "Venta atribuida ÷ inversión", fuente: "API de Mercado Ads (automático)", estado: "listo" },
   { nivel: 2, nombre: "Días con pauta activa +", formula: "Días con gasto > 0 en Meta", fuente: "API de Meta Ads (automático)", estado: "listo" },
   { nivel: 2, nombre: "Alcance, frecuencia, CTR y CPM de pauta +", formula: "Insights por campaña", fuente: "API de Meta Ads (automático)", estado: "listo" },
   { nivel: 3, nombre: "Compras y ROAS atribuidos a Meta +", formula: "Valor de compras del píxel ÷ inversión", fuente: "API de Meta Ads (requiere píxel en las tiendas)", estado: "verificar" },
