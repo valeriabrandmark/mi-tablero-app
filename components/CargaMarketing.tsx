@@ -437,6 +437,8 @@ export default function CargaMarketing() {
   const [buscar, setBuscar] = useState("");
   const [modales, setModales] = useState<{ tabla: ClaveTabla; fila: Fila }[]>([]);
   const [hoy] = useState(hoyAr);
+  // Fila que se está guardando desde la tabla (cambio rápido de estado).
+  const [guardandoFila, setGuardandoFila] = useState<string | null>(null);
 
   async function cargar() {
     try {
@@ -496,8 +498,58 @@ export default function CargaMarketing() {
 
   const sinAsignar = comprobantes(datos.lineasSigma).filter((c) => c.colaboracion_id === null);
 
+  /**
+   * CAMBIO RÁPIDO desde la tabla: el estado y el estado de pago de una
+   * colaboración se cambian con un desplegable, sin abrir el formulario. Se
+   * manda la fila entera con ese campo cambiado (la API valida todo igual y
+   * deja el cambio en el historial); productos y comprobantes no se tocan.
+   */
+  async function cambiarEnFila(f: Fila, clave: string, valor: string) {
+    if (valor === f[clave]) return;
+    const marcaFila = `${String(f.id)}-${clave}`;
+    setGuardandoFila(marcaFila);
+    try {
+      const datosFila: Fila = { ...f, [clave]: valor };
+      if (clave === "estado_pago" && valor === "Pagado" && !f.fecha_pago) datosFila.fecha_pago = hoy;
+      if (clave === "estado" && valor === "Publicada" && !f.publicacion_real) datosFila.publicacion_real = hoy;
+      const r = await fetch("/api/marketing/carga", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tabla: "colaboraciones", id: f.id, datos: datosFila }),
+      });
+      const j = (await r.json()) as { error?: string };
+      if (!r.ok) throw new Error(j.error ?? `Error ${r.status}`);
+      setAviso(`${String(f.codigo)}: ${clave === "estado" ? "estado" : "estado de pago"} → ${valor}`);
+      await cargar();
+    } catch (e) {
+      setAviso(`No se pudo cambiar ${String(f.codigo)}: ${e instanceof Error ? e.message : String(e)}. Abrí la colaboración para completarla.`);
+    } finally {
+      setGuardandoFila(null);
+    }
+  }
+
   function celda(f: Fila, c: Campo): ReactNode {
     const v = f[c.clave];
+    const conPago = f.modalidad === "Pago" || f.modalidad === "Pago + canje";
+    if (pestana === "colaboraciones" && (c.clave === "estado" || (c.clave === "estado_pago" && conPago))) {
+      const opciones = LISTAS[c.lista!] as readonly string[];
+      const actual = v === null || v === undefined ? "" : String(v);
+      return (
+        <select
+          aria-label={`${c.etiqueta} de ${String(f.codigo)}`}
+          className={`${CAMPO.replace("w-full", "")} w-auto py-1 text-xs`}
+          value={actual}
+          disabled={guardandoFila === `${String(f.id)}-${c.clave}`}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => void cambiarEnFila(f, c.clave, e.target.value)}
+        >
+          {!opciones.includes(actual) && <option value={actual}>{actual || "Elegir…"}</option>}
+          {opciones.map((o) => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </select>
+      );
+    }
     if (v === null || v === undefined || v === "") return <span className="text-muted">—</span>;
     if (c.tipo === "monto") return fmtMoneda(Number(v));
     if (c.tipo === "numero") return fmtNumero(Number(v));

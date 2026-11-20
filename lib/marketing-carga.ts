@@ -271,7 +271,10 @@ export function validar(
     const conCanje = d.modalidad === "Canje" || d.modalidad === "Pago + canje";
     if (conPago && !(Number(d.honorarios) > 0)) errores.push("Una colaboración paga necesita los honorarios");
     if (conPago && vacio(d.estado_pago)) errores.push("Falta el estado de pago");
-    if (conCanje && extra && !(extra.productos?.length || extra.comprobantes?.length)) {
+    // Sólo cuando se mandan productos o comprobantes: un cambio rápido de
+    // estado desde la tabla no los manda y no los toca.
+    const tocaCanje = !!extra && (extra.productos !== undefined || extra.comprobantes !== undefined);
+    if (conCanje && tocaCanje && !(extra?.productos?.length || extra?.comprobantes?.length)) {
       errores.push("Un canje necesita un comprobante de SIGMA o al menos un producto");
     }
     // Sólo al cargar: lo migrado de las planillas viejas no siempre tiene esas
