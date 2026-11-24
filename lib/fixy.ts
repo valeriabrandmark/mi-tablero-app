@@ -31,6 +31,23 @@
  * (pruebas/fixy.mts). La llamada a la API está en lib/fixy-api.ts.
  */
 
+/**
+ * Las sucursales de FIXY: una por empresa. No las piden ni el stock ni las
+ * recepciones; sí la cotización y la generación de guías (`codigo_sucursal`).
+ */
+export const SUCURSALES_FIXY = {
+  quo: { nombre: "QUO MARKETING SRL", codigo: "1794836565" },
+  diaperGenie: { nombre: "DIAPERGENIE", codigo: "1794837681" },
+  holaToys: { nombre: "HOLA TOYS", codigo: "1794837810" },
+  litterGenie: { nombre: "LITTER GENIE", codigo: "1794837890" },
+} as const;
+
+/** Los servicios de envío contratados (`codigo_servicio` en guías y cotización). */
+export const SERVICIOS_FIXY = {
+  estandar: { nombre: "Estándar", codigo: "004" },
+  sameday: { nombre: "Same day", codigo: "SDB" },
+} as const;
+
 /** Cuántos días puede tardar un envío de Tucumán en aparecer en el stock de FIXY. */
 export const DIAS_PARA_LLEGAR_A_FIXY = 7;
 

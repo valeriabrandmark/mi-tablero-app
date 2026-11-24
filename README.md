@@ -833,6 +833,20 @@ Pasos para encenderlo:
    valor, `notificacion` = true.
 5. Con dos días de foto, sacar `/stock/fixy` de `PAGINAS_EN_CONSTRUCCION`.
 
+Datos de la cuenta en FIXY (también en `lib/fixy.ts`):
+
+| Sucursal (una por empresa) | Código |
+|---|---|
+| QUO MARKETING SRL | 1794836565 |
+| DIAPERGENIE | 1794837681 |
+| HOLA TOYS | 1794837810 |
+| LITTER GENIE | 1794837890 |
+
+| Servicio | Código |
+|---|---|
+| Estándar | `004` |
+| Same day | `SDB` |
+
 Límites conocidos:
 
 - La API de FIXY no documenta la respuesta de `consultarStock`. `fixy.py`
