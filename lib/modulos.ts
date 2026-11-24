@@ -109,12 +109,15 @@ export const MODULOS: Modulo[] = [
   {
     clave: "stock",
     nombre: "Stock",
-    queEdita: null,
+    // Lo único que se escribe desde Stock: el aviso de ingreso a FIXY, que
+    // crea una orden de recepción en el sistema del depósito.
+    queEdita: "avisar a FIXY la mercadería que va a entrar",
     rutas: [
       "/stock",
       "/api/stock",
       "/api/stock-antiguedad",
       "/api/trazabilidad-full",
+      "/api/fixy",
     ],
   },
   {

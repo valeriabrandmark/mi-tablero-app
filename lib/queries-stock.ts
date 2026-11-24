@@ -40,6 +40,8 @@ import type {
  *
  *   bronze.digip_stock         unidades en el depósito de Tucumán
  *   bronze.ml_stock_full       unidades en el depósito de Mercado Libre
+ *   bronze.fixy_stock          unidades en FIXY, el depósito de Buenos Aires
+ *                              (puede no existir todavía: ver `hayFixy`)
  *   bronze.ml_inventario_sku   el mapa inventory_id -> SKU, ya calculado
  *   bronze.sigma_articulos     proveedor, marca y descripción
  *   bronze.costos_historicos   el costo con el que se valoriza
@@ -65,7 +67,7 @@ import type {
  * reglas (`p`, editables en "Reglas del sugerido" de Compras). Por eso esto es
  * una función: las reglas y si existe gold.dias_con_stock cambian el SQL.
  */
-function base(p: ParametrosCompras, hayDiasConStock: boolean): string {
+function base(p: ParametrosCompras, hayDiasConStock: boolean, hayFixy: boolean): string {
   return `
 with por_inv as (
   -- Un renglón por INVENTARIO y no por publicación: varias publicaciones
@@ -82,6 +84,19 @@ tuc as (
   select trim(codigo) as sku, sum(coalesce("stock.disponible", 0)) as unidades
   from bronze.digip_stock
   group by 1
+),
+fixy as (
+  -- El depósito de Buenos Aires (Tienda Nube y Flex). La tabla la crea
+  -- tablero_quo/fixy.py en su primera corrida con token: hasta entonces se usa
+  -- un CTE vacío, para que Stock no se caiga por un depósito que todavía no
+  -- reporta.
+  ${
+    hayFixy
+      ? `select trim(sku) as sku, sum(coalesce(disponible, 0)) as unidades
+  from bronze.fixy_stock
+  group by 1`
+      : `select null::text as sku, 0::numeric as unidades where false`
+  }
 ),
 costo as (
   -- El último costo conocido de cada SKU, el mismo criterio en todas las
@@ -144,13 +159,14 @@ ventas as (
 ),
 ${ctesRitmo(hayDiasConStock)}
 stock as (
-  -- FULL OUTER: hay SKU que sólo están en Tucumán y SKU que sólo están en Full.
-  -- Un inner join perdería justo los que están en un solo depósito, que son los
-  -- que más interesa mirar.
-  select coalesce(t.sku, f.sku)         as sku,
+  -- FULL OUTER: hay SKU que sólo están en Tucumán, en Full o en FIXY. Un inner
+  -- join perdería justo los que están en un solo depósito, que son los que más
+  -- interesa mirar.
+  select coalesce(t.sku, f.sku, x.sku)  as sku,
          coalesce(t.unidades, 0)        as tuc,
          coalesce(f.unidades, 0)        as full_ml,
          coalesce(f.en_camino, 0)       as full_en_camino,
+         coalesce(x.unidades, 0)        as fixy,
          -- El total depende del depósito elegido, y de ahí cuelga TODO lo
          -- demás: la plata, la cobertura, el exceso y el sugerido. Mirar sólo
          -- Full y seguir valorizando los dos depósitos daría un número que no
@@ -159,11 +175,13 @@ stock as (
            when 'tucuman' then coalesce(t.unidades, 0)
            -- Lo pendiente de ingreso a Full (según ML) cuenta como Full.
            when 'full'    then coalesce(f.unidades, 0) + coalesce(f.en_camino, 0)
+           when 'fixy'    then coalesce(x.unidades, 0)
            else coalesce(t.unidades, 0) + coalesce(f.unidades, 0)
-                + coalesce(f.en_camino, 0)
+                + coalesce(f.en_camino, 0) + coalesce(x.unidades, 0)
          end                            as total
   from tuc t
   full outer join full_ml f on f.sku = t.sku
+  full outer join fixy x on x.sku = coalesce(t.sku, f.sku)
 ),
 base as (
   select s.sku,
@@ -176,6 +194,7 @@ base as (
          s.tuc,
          s.full_ml,
          s.full_en_camino,
+         s.fixy,
          s.total,
          coalesce(c.costo_real, 0)                      as costo,
          s.total * coalesce(c.costo_real, 0)            as valor,
@@ -240,8 +259,20 @@ calculada as (
 }
 
 /** Las reglas del ritmo y si existe la tabla de días con stock. */
-type Reglas = { p: ParametrosCompras; hayDiasConStock: boolean };
-const SIN_REGLAS: Reglas = { p: parametrosPorDefecto(), hayDiasConStock: false };
+type Reglas = { p: ParametrosCompras; hayDiasConStock: boolean; hayFixy: boolean };
+const SIN_REGLAS: Reglas = {
+  p: parametrosPorDefecto(),
+  hayDiasConStock: false,
+  hayFixy: false,
+};
+
+/** Si ya existe la foto de FIXY. Ver el CTE `fixy` en `base`. */
+async function getHayFixy(): Promise<boolean> {
+  const fila = await queryOne<{ ok: boolean }>(
+    `select to_regclass('bronze.fixy_stock') is not null as ok`,
+  );
+  return Boolean(fila?.ok);
+}
 
 type Where = { sql: string; params: unknown[] };
 
@@ -286,7 +317,7 @@ const num = (v: unknown): number => Number(v ?? 0);
 async function getKpis(f: FiltrosStock, r: Reglas): Promise<KpisStock> {
   const w = where(f);
   const fila = await queryOne<Record<string, string>>(
-    `${base(r.p, r.hayDiasConStock)}
+    `${base(r.p, r.hayDiasConStock, r.hayFixy)}
      select count(*)                                                as skus,
             coalesce(sum(total), 0)                                 as unidades,
             coalesce(sum(valor), 0)                                 as valor,
@@ -326,7 +357,7 @@ async function getKpis(f: FiltrosStock, r: Reglas): Promise<KpisStock> {
 async function getTramos(f: FiltrosStock, r: Reglas): Promise<TramoStock[]> {
   const w = where(f);
   const filas = await query<Record<string, string | null>>(
-    `${base(r.p, r.hayDiasConStock)}
+    `${base(r.p, r.hayDiasConStock, r.hayFixy)}
      select cobertura, total, valor
      from calculada ${w.sql}`,
     w.params,
@@ -347,7 +378,7 @@ async function getTramos(f: FiltrosStock, r: Reglas): Promise<TramoStock[]> {
 async function getProveedores(f: FiltrosStock, r: Reglas): Promise<ProveedorStock[]> {
   const w = where(f);
   const filas = await query<Record<string, string | null>>(
-    `${base(r.p, r.hayDiasConStock)}
+    `${base(r.p, r.hayDiasConStock, r.hayFixy)}
      select coalesce(proveedor, 'Sin dato') as proveedor,
             count(*)                        as skus,
             coalesce(sum(valor), 0)         as valor,
@@ -371,9 +402,9 @@ const TOPE = 500;
 async function getFilas(f: FiltrosStock, r: Reglas): Promise<FilaStock[]> {
   const w = where(f);
   const filas = await query<Record<string, string | null>>(
-    `${base(r.p, r.hayDiasConStock)}
+    `${base(r.p, r.hayDiasConStock, r.hayFixy)}
      select sku, producto, proveedor, marca,
-            tuc, full_ml, full_en_camino, total, costo, valor,
+            tuc, full_ml, full_en_camino, fixy, total, costo, valor,
             uds, uds_meli, uds_tn, uds_may,
             ritmo_diario, cobertura, exceso_u, exceso, sugerido,
             ritmo_sobre_stock, uds_tuc, uds_full, dias_stock_tuc, dias_stock_full,
@@ -396,6 +427,7 @@ async function getFilas(f: FiltrosStock, r: Reglas): Promise<FilaStock[]> {
     tuc: num(x.tuc),
     full: num(x.full_ml),
     fullEnCamino: num(x.full_en_camino),
+    fixy: num(x.fixy),
     total: num(x.total),
     costo: num(x.costo),
     valor: num(x.valor),
@@ -435,7 +467,7 @@ async function getOpcionesStockDirecto() {
     marcas: string[] | null;
     grupos: string[] | null;
   }>(
-    `${base(SIN_REGLAS.p, SIN_REGLAS.hayDiasConStock)}
+    `${base(SIN_REGLAS.p, SIN_REGLAS.hayDiasConStock, await getHayFixy())}
      select array_agg(distinct proveedor) filter (where proveedor is not null) as proveedores,
             array_agg(distinct marca)     filter (where marca is not null)     as marcas,
             array_agg(distinct grupo)     filter (where grupo is not null)     as grupos
@@ -494,7 +526,8 @@ async function getDashboardStockDirecto(
    */
   p: ParametrosCompras = parametrosPorDefecto(),
 ): Promise<DashboardStock> {
-  const r: Reglas = { p, hayDiasConStock: await getHayDiasConStock() };
+  const [hayDiasConStock, hayFixy] = await Promise.all([getHayDiasConStock(), getHayFixy()]);
+  const r: Reglas = { p, hayDiasConStock, hayFixy };
   const [kpis, tramos, proveedores, filas, comprasHasta, antiguedadAl] =
     await Promise.all([
       getKpis(f, r),

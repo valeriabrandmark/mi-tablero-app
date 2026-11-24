@@ -51,6 +51,10 @@ export const RUTAS_CON_LLAVE_PROPIA = [
   // y pide la venta por cupón con MKT_PLANILLA_TOKEN. Verifica su llave y
   // niega todo si la variable no está cargada.
   "/api/marketing/planilla",
+  // Los avisos de cambio de estado de las guías de FIXY. Los manda el
+  // servidor de FIXY, sin sesión. La ruta compara el `token` del cuerpo con
+  // FIXY_WEBHOOK_TOKEN y niega todo si la variable no está cargada.
+  "/api/fixy/webhook",
 ];
 
 /** Si esta ruta puede contestar sin que haya una sesión. */

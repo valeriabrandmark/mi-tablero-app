@@ -481,6 +481,9 @@ const PAGINAS_EN_CONSTRUCCION = [
   // documenta. Publicarla antes de verificarlos sería ofrecer botones que
   // pueden llevar a una página en blanco.
   "/venta-minorista/mercado-libre/posventa",
+  // FIXY (depósito de Buenos Aires): armado, pero sin token de la API todavía.
+  // Sin token no hay foto de stock, y el control se vería vacío.
+  "/stock/fixy",
 ];
 
 /**
