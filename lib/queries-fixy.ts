@@ -398,7 +398,11 @@ async function getEventos() {
   return oVacio(
     query<Record<string, unknown>>(
       `select count(distinct guia) as guias,
-              count(distinct guia) filter (where codigo_estado = 'ENT' or estado ilike 'entregad%') as entregadas,
+              -- "ENTREGADA" es POD en la cuenta real (api/v2/estados.json); ENT es
+              -- el código del ejemplo de la documentación. Se aceptan los dos.
+              count(distinct guia) filter (
+                where codigo_estado in ('POD', 'ENT') or estado ilike 'entregad%'
+              ) as entregadas,
               max(recibido_en)::text as ultimo
          from app.fixy_eventos
         where recibido_en > now() - interval '30 days'`,
