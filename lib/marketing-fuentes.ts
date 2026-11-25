@@ -52,6 +52,16 @@ export type DatosMercadoAds = {
   unidades: number;
 };
 
+/** Google Ads de la marca en el período: bronze.google_ads_diario. */
+export type DatosGoogleAds = {
+  costo: number;
+  clics: number;
+  impresiones: number;
+  conversiones: number;
+  /** Valor de las conversiones según Google Ads (si la cuenta lo mide). */
+  valorConversiones: number;
+};
+
 export type DatosVentaReal = {
   tiendaNube: { motivo?: string; porMarca: Partial<Record<ClaveMarca, DatosTiendaNube>> };
   mayorista: { motivo?: string; porMarca: Partial<Record<ClaveMarca, DatosMayorista>> };
@@ -62,6 +72,18 @@ export type DatosVentaReal = {
    * última vez que el orquestador trajo datos.
    */
   mercadoAds: { motivo?: string; porMarca: Partial<Record<ClaveMarca, DatosMercadoAds>>; ultimaCarga?: string | null };
+  /**
+   * Igual que mercadoAds. `sinMarca`: inversión de campañas que no se pudieron
+   * asignar a ninguna marca (ni por la cuenta ni por el nombre), para avisar.
+   * `conversion`: si alguna cuenta está en otra moneda, con qué se pasó a pesos.
+   */
+  googleAds: {
+    motivo?: string;
+    porMarca: Partial<Record<ClaveMarca, DatosGoogleAds>>;
+    ultimaCarga?: string | null;
+    sinMarca?: number;
+    conversion?: string;
+  };
   tiendasNuevas: { motivo?: string; cantidad: number | null };
 };
 

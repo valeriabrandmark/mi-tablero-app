@@ -1,7 +1,15 @@
 import { query } from "@/lib/db";
 import { CANAL_MAYORISTA } from "@/lib/constantes";
 import type { ClaveMarca } from "@/lib/marketing-demo";
-import type { DatosMayorista, DatosMercadoAds, DatosMercadoLibre, DatosTiendaNube, DatosVentaReal } from "@/lib/marketing-fuentes";
+import type {
+  DatosGoogleAds,
+  DatosMayorista,
+  DatosMercadoAds,
+  DatosMercadoLibre,
+  DatosTiendaNube,
+  DatosVentaReal,
+} from "@/lib/marketing-fuentes";
+import { tipoDeCambio } from "@/lib/meta-ads";
 import { SQL_ES_CANJE } from "@/lib/queries-carga";
 
 /**
@@ -276,6 +284,95 @@ async function leerMercadoAds(
   }
 }
 
+/**
+ * GOOGLE ADS: de bronze.google_ads_diario, que manda el script pegado en la
+ * cuenta de Google Ads (apps-script/google-ads-tablero.js).
+ *
+ * A QUÉ MARCA VA CADA CAMPAÑA, en este orden:
+ *   1. GOOGLE_ADS_CUENTA_<MARCA> en Vercel: IDs de cuenta (con o sin guiones,
+ *      separados por coma). Todo lo de esa cuenta es de esa marca.
+ *   2. El nombre de la CAMPAÑA ("Hola Toys - Navidad", "DG Búsqueda"...).
+ *   3. El nombre de la CUENTA.
+ * Lo que no cae en ninguna queda en `sinMarca`, para que se vea y se arregle.
+ */
+const PALABRAS_GOOGLE: [ClaveMarca, RegExp][] = [
+  ["diaper_genie", /diaper|\bdg\b/i],
+  ["litter_genie", /litter|\blg\b/i],
+  ["hola_toys", /\bhola\b/i],
+  ["unibrandco", /unibran/i],
+];
+
+function marcaGoogle(cuentaId: string, cuentaNombre: string | null, campana: string | null): ClaveMarca | null {
+  for (const [clave] of PALABRAS_GOOGLE) {
+    const ids = (process.env[`GOOGLE_ADS_CUENTA_${clave.toUpperCase()}`] ?? "")
+      .split(",")
+      .map((x) => x.replace(/\D/g, ""))
+      .filter(Boolean);
+    if (ids.includes(cuentaId)) return clave;
+  }
+  for (const texto of [campana, cuentaNombre]) {
+    const hit = PALABRAS_GOOGLE.find(([, re]) => texto && re.test(texto));
+    if (hit) return hit[0];
+  }
+  return null;
+}
+
+async function leerGoogleAds(r: Rango): Promise<DatosVentaReal["googleAds"]> {
+  try {
+    const [filas, ultima] = await Promise.all([
+      query<{
+        cuenta_id: string; cuenta_nombre: string | null; campana: string | null; moneda: string;
+        costo: string; clics: string; impresiones: string; conversiones: string; valor: string;
+      }>(
+        `select cuenta_id, max(cuenta_nombre) as cuenta_nombre, campana, moneda,
+                sum(costo) as costo, sum(clics) as clics, sum(impresiones) as impresiones,
+                sum(conversiones) as conversiones, sum(valor_conversiones) as valor
+           from bronze.google_ads_diario
+          where fecha between $1::date and $2::date
+          group by cuenta_id, campana, moneda`,
+        [r.desde, r.hasta],
+      ),
+      query<{ ultima: string | null }>(`select max(recibido_en)::text as ultima from bronze.google_ads_diario`),
+    ]);
+    // Cuentas en otra moneda (USD): a pesos con la misma cotización que Meta.
+    const tc = new Map<string, number>();
+    let conversion: string | undefined;
+    for (const m of new Set(filas.map((f) => f.moneda).filter((m) => m !== "ARS"))) {
+      try {
+        const { valor, fuente } = await tipoDeCambio(m);
+        tc.set(m, valor);
+        conversion = `${m} a pesos con ${fuente}`;
+      } catch {
+        tc.set(m, 1);
+        conversion = `${m} sin convertir (no se pudo leer la cotización)`;
+      }
+    }
+    const porMarca: Partial<Record<ClaveMarca, DatosGoogleAds>> = {};
+    let sinMarca = 0;
+    for (const f of filas) {
+      const k = tc.get(f.moneda) ?? 1;
+      const clave = marcaGoogle(f.cuenta_id, f.cuenta_nombre, f.campana);
+      if (!clave) {
+        sinMarca += Number(f.costo) * k;
+        continue;
+      }
+      const d = (porMarca[clave] ??= { costo: 0, clics: 0, impresiones: 0, conversiones: 0, valorConversiones: 0 });
+      d.costo += Number(f.costo) * k;
+      d.clics += Number(f.clics);
+      d.impresiones += Number(f.impresiones);
+      d.conversiones += Number(f.conversiones);
+      d.valorConversiones += Number(f.valor) * k;
+    }
+    return { porMarca, ultimaCarga: ultima[0]?.ultima ?? null, sinMarca, conversion };
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    if (/google_ads_diario/.test(m) && /does not exist|no existe/.test(m)) {
+      return { motivo: "Falta correr migraciones/marketing_google_ads.sql y pegar el script en Google Ads", porMarca: {} };
+    }
+    return { motivo: motivoDe(e), porMarca: {} };
+  }
+}
+
 /** Tiendas (clientes mayoristas) cuya PRIMERA compra de cualquier marca es de este mes. */
 async function leerTiendasNuevas(r: Rango): Promise<number | string> {
   try {
@@ -364,7 +461,7 @@ async function leerUnibrandcoApi(r: Rango): Promise<DatosTiendaNube | null> {
 
 /** `hasta` es el último día CON DATOS: hoy si el período sigue abierto. */
 export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
-  const [importado, mayorista, tiendasNuevas, unibrandco, meli, ads] = await Promise.all([
+  const [importado, mayorista, tiendasNuevas, unibrandco, meli, ads, google] = await Promise.all([
     leerTiendaNube(r),
     leerMayorista(r),
     leerTiendasNuevas(r),
@@ -374,6 +471,7 @@ export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
     }),
     leerMercadoLibre(r),
     leerMercadoAds(r),
+    leerGoogleAds(r),
   ]);
   // Unibrandco por API pisa a un CSV que se haya importado de esa tienda.
   // Si la tabla del importador falla, Unibrandco igual se ve: es otra fuente.
@@ -387,6 +485,7 @@ export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
     mayorista: typeof mayorista === "string" ? { motivo: mayorista, porMarca: {} } : { porMarca: mayorista },
     mercadoLibre: typeof meli === "string" ? { motivo: meli, porMarca: {} } : { porMarca: meli },
     mercadoAds: typeof ads === "string" ? { motivo: ads, porMarca: {} } : ads,
+    googleAds: google,
     tiendasNuevas: typeof tiendasNuevas === "string" ? { motivo: tiendasNuevas, cantidad: null } : { cantidad: tiendasNuevas },
   };
 }

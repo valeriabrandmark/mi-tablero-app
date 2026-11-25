@@ -301,41 +301,50 @@ function Kpi({ vs, detalle, ...props }: Parameters<typeof TarjetaKpi>[0] & { vs?
 }
 
 /**
- * MERCADO ADS: con la API conectada (tablero_quo/ml_ads.py → bronze.ml_ads_diario)
- * muestra la inversión, el ROAS sobre la venta que Mercado Libre le atribuye
- * y la comparación. Sin conectar, lo cargado a mano o "Pendiente".
+ * PAUTA FUERA DE META: Mercado Ads (tablero_quo/ml_ads.py → bronze.ml_ads_diario)
+ * y Google Ads (script de la cuenta → bronze.google_ads_diario). Conectada,
+ * muestra la inversión, el retorno sobre lo que la plataforma le atribuye y
+ * la comparación. Sin conectar, lo cargado a mano en Otros gastos o "Pendiente".
  */
-function TarjetaMercadoAds({ m, gastoAnterior }: { m: Marca; gastoAnterior: number | undefined }) {
+function TarjetaPauta({ m, canal, gastoAnterior }: { m: Marca; canal: "Mercado Ads" | "Google Ads"; gastoAnterior: number | undefined }) {
   const { venta, anterior } = useFuentes();
-  const ads = venta.mercadoAds;
-  const gasto = m.gastoPorCanal["Mercado Ads"];
-  if (ads && !ads.motivo) {
-    const d = ads.porMarca[m.clave];
-    const dA = anterior.venta.mercadoAds?.porMarca[m.clave];
-    const roasAds = d && d.costo ? d.ventaAtribuida / d.costo : null;
+  const fuente = canal === "Mercado Ads" ? venta.mercadoAds : venta.googleAds;
+  const fuenteA = canal === "Mercado Ads" ? anterior.venta.mercadoAds : anterior.venta.googleAds;
+  const gasto = m.gastoPorCanal[canal];
+  if (fuente && !fuente.motivo) {
+    const d = fuente.porMarca[m.clave];
+    const dA = fuenteA?.porMarca[m.clave];
+    const atribuido = !d ? 0 : "ventaAtribuida" in d ? d.ventaAtribuida : d.valorConversiones;
+    const conversiones = d && "conversiones" in d ? d.conversiones : null;
     return (
       <Kpi
-        titulo="Mercado Ads"
+        titulo={canal}
         valor={fmtMoneda(gasto)}
         acento={gasto ? undefined : TEMA.muted}
         detalle={
           d && d.costo
-            ? `ROAS ${dec1.format(roasAds ?? 0)}x · ${fmtMoneda(d.ventaAtribuida)} atribuidos · ${fmtNumero(d.clics)} clics`
+            ? [
+                atribuido ? `ROAS ${dec1.format(atribuido / d.costo)}x · ${fmtMoneda(atribuido)} atribuidos` : null,
+                conversiones !== null ? `${fmtNumero(Math.round(conversiones))} conversiones` : null,
+                `${fmtNumero(d.clics)} clics`,
+              ]
+                .filter(Boolean)
+                .join(" · ")
             : "Sin inversión en el período"
         }
-        vs={{ actual: gasto, anterior: anterior.venta.mercadoAds?.motivo ? null : (dA?.costo ?? 0), menosEsMejor: true }}
+        vs={{ actual: gasto, anterior: fuenteA?.motivo ? null : (dA?.costo ?? 0), menosEsMejor: true }}
       />
     );
   }
   return (
     <Kpi
-      titulo="Mercado Ads"
+      titulo={canal}
       valor={gasto ? fmtMoneda(gasto) : "Pendiente"}
       acento={AMBAR}
       detalle={
         gasto
-          ? `Cargado a mano en Otros gastos · ${ads?.motivo ?? "API sin conectar"}`
-          : (ads?.motivo ?? "Pendiente de conectar · se puede cargar en Carga → Otros gastos")
+          ? `Cargado a mano en Otros gastos · ${fuente?.motivo ?? "sin conectar"}`
+          : (fuente?.motivo ?? "Pendiente de conectar · se puede cargar en Carga → Otros gastos")
       }
       vs={gasto ? { actual: gasto, anterior: gastoAnterior, menosEsMejor: true } : undefined}
     />
@@ -982,18 +991,8 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           detalle={`Ticket promedio ${fmtMoneda(ticket)}`}
           vs={{ actual: conversion, anterior: A ? A.pedidosTienda / A.visitasTienda : null, formato: p1, puntos: true }}
         />
-        <TarjetaMercadoAds m={m} gastoAnterior={A?.gastoPorCanal["Mercado Ads"]} />
-        <Kpi
-          titulo="Google Ads"
-          valor={m.gastoPorCanal["Google Ads"] ? fmtMoneda(m.gastoPorCanal["Google Ads"]) : "Pendiente"}
-          acento={AMBAR}
-          detalle={
-            m.gastoPorCanal["Google Ads"]
-              ? "Cargado a mano en Otros gastos · API pendiente de conectar"
-              : "Pendiente de conectar · se puede cargar en Carga → Otros gastos"
-          }
-          vs={m.gastoPorCanal["Google Ads"] ? { actual: m.gastoPorCanal["Google Ads"], anterior: A?.gastoPorCanal["Google Ads"], menosEsMejor: true } : undefined}
-        />
+        <TarjetaPauta m={m} canal="Mercado Ads" gastoAnterior={A?.gastoPorCanal["Mercado Ads"]} />
+        <TarjetaPauta m={m} canal="Google Ads" gastoAnterior={A?.gastoPorCanal["Google Ads"]} />
       </div>
 
       <SeccionTiendaNube m={m} />
@@ -1805,10 +1804,22 @@ function PanelFuentes() {
           : { ok: false, texto: venta.mercadoAds?.motivo ?? "Sin conectar" },
     },
     {
-      fuente: "Google Ads",
-      uso: "Inversión en pauta de Google",
+      fuente: "Google Ads (script de la cuenta, cada hora)",
+      uso: "Inversión, clics y conversiones de Google Ads",
       porMarca: null,
-      general: { ok: false, texto: "Pendiente de conectar · mientras tanto se puede cargar en Otros gastos" },
+      general:
+        venta.googleAds && !venta.googleAds.motivo
+          ? {
+              ok: true,
+              texto: [
+                `Conectado${venta.googleAds.ultimaCarga ? ` · último envío ${fechaCorta(venta.googleAds.ultimaCarga)}` : ""}`,
+                venta.googleAds.sinMarca ? `${fmtMoneda(venta.googleAds.sinMarca)} de campañas sin marca (ver GOOGLE_ADS_CUENTA_<MARCA>)` : null,
+                venta.googleAds.conversion ?? null,
+              ]
+                .filter(Boolean)
+                .join(" · "),
+            }
+          : { ok: false, texto: venta.googleAds?.motivo ?? "Sin conectar" },
     },
     {
       fuente: "Planificación",
@@ -2038,6 +2049,10 @@ function armarMarcas(
     // además lo cargado a mano en Otros gastos lo contaría dos veces.
     if (real.mercadoAds && !real.mercadoAds.motivo) {
       r.gastoPorCanal = { ...r.gastoPorCanal, "Mercado Ads": real.mercadoAds.porMarca[m.clave]?.costo ?? 0 };
+    }
+    // GOOGLE ADS: lo mismo, con lo que manda el script de la cuenta.
+    if (real.googleAds && !real.googleAds.motivo) {
+      r.gastoPorCanal = { ...r.gastoPorCanal, "Google Ads": real.googleAds.porMarca[m.clave]?.costo ?? 0 };
     }
     if (ig.fuente === "meta") {
       const d = ig.datos;

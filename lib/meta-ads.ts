@@ -303,7 +303,7 @@ async function monedaDe(cuenta: string, token: string): Promise<string> {
   return (r.currency ?? "ARS").toUpperCase();
 }
 
-async function tipoDeCambio(moneda: string): Promise<{ valor: number; fuente: string }> {
+export async function tipoDeCambio(moneda: string): Promise<{ valor: number; fuente: string }> {
   if (moneda !== "USD") {
     throw new Error(`La cuenta está en ${moneda} y sólo se sabe convertir USD`);
   }
