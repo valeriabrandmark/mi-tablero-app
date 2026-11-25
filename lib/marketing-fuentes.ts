@@ -87,6 +87,36 @@ export type DatosVentaReal = {
   tiendasNuevas: { motivo?: string; cantidad: number | null };
 };
 
+/**
+ * Una línea del DETALLE DE VENTAS del Tablero de Marca: todos los canales,
+ * con provincia, rentabilidad y lo que se sabe de la pauta que la trajo.
+ */
+export type LineaVenta = {
+  clave: ClaveMarca;
+  fecha: string;
+  canal: "Mayorista" | "Mercado Libre" | "Tienda Nube";
+  /** Comprobante de SIGMA o número de orden de ML / Tienda Nube. */
+  orden: string | null;
+  /** Sólo mayorista (es una empresa); de los compradores minoristas no se muestra el nombre. */
+  cliente: string | null;
+  sku: string | null;
+  producto: string;
+  cantidad: number;
+  /** Como en el resto del tablero: mayorista sin IVA, minorista con IVA. */
+  venta: number;
+  /** Venta sin IVA, la base de la rentabilidad. null si no se sabe (CSV importado). */
+  neto: number | null;
+  /** Margen en pesos (gold.fact_ventas.margen_total). null si no hay costo. */
+  margen: number | null;
+  provincia: string | null;
+  cupon: string | null;
+  /** Mercado Libre: la publicación tenía Mercado Ads con gasto ese día. */
+  conAds: boolean;
+  /** Tienda Nube con API: de dónde vino la visita (utm_source / utm_campaign). */
+  utmFuente: string | null;
+  utmCampana: string | null;
+};
+
 export type DatosInstagram = {
   usuario: string | null;
   seguidores: number;
@@ -123,6 +153,8 @@ export type DatosTablero = {
    * para que cada KPI se compare. Planificación y la carga no se repiten: ya
    * vienen enteras y se filtran por fecha en la pantalla.
    */
+  /** Detalle de ventas del período (todas las marcas; la pantalla filtra). */
+  detalle: { lineas: LineaVenta[]; motivo?: string; recortado?: boolean };
   anterior: { periodo: Periodo; meta: MetaAds; instagram: Record<ClaveMarca, InstagramMarca>; venta: DatosVentaReal };
   /** ISO del momento en que se armó, para el encabezado. */
   generado: string;

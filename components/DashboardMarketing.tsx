@@ -25,6 +25,7 @@ import { aTiempo as aTiempoPlan, avance as avancePlan, riesgo as riesgoPlan } fr
 import { canalDeConcepto, enPeriodo, presupuestoDelPeriodo, type ColaboracionPlanilla } from "@/lib/marketing-planilla";
 import { avance, proyectar as proyectarP, type Periodo } from "@/lib/marketing-periodo";
 import FiltroPeriodo from "@/components/FiltroPeriodoMarketing";
+import { DetalleVentas as PanelDetalle, VentasPorProvincia as PanelProvincias, filtrarLineas } from "@/components/MarketingVentas";
 import {
   costoPorResultado,
   costoPorCompra,
@@ -351,6 +352,28 @@ function TarjetaPauta({ m, canal, gastoAnterior }: { m: Marca; canal: "Mercado A
   );
 }
 
+/** Ventas por provincia de una marca (o de todas), de todos los canales. */
+function VentasPorProvincia({ marca }: { marca: ClaveMarca | null }) {
+  const { detalle, origen } = useFuentes();
+  return <PanelProvincias lineas={filtrarLineas(detalle.lineas, marca, origen)} />;
+}
+
+/** El detalle de ventas al pie de cada tablero. */
+function DetalleVentas({ marca }: { marca: ClaveMarca | null }) {
+  const { detalle, origen, planilla } = useFuentes();
+  const porCupon = new Map<string, string>();
+  for (const c of planilla.datos?.colaboraciones ?? []) if (c.cupon) porCupon.set(c.cupon.toUpperCase(), c.influencer);
+  return (
+    <PanelDetalle
+      lineas={filtrarLineas(detalle.lineas, marca, origen)}
+      mostrarMarca={marca === null}
+      influencerPorCupon={porCupon}
+      motivo={detalle.motivo}
+      recortado={detalle.recortado}
+    />
+  );
+}
+
 /** La misma marca en el período anterior. */
 function useMarcaAnterior(clave: ClaveMarca): Marca | undefined {
   return useFuentes().comparar.marcas.find((m) => m.clave === clave);
@@ -635,7 +658,7 @@ function VentaPorCanal({ marcas }: { marcas: Marca[] }) {
 
 function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) {
   const P = usePeriodo();
-  const { hitos: HITOS, colaboraciones: COLABORACIONES, planilla, comparar, origen } = useFuentes();
+  const { colaboraciones: COLABORACIONES, planilla, comparar, origen } = useFuentes();
   const A = comparar.marcas;
   const gastadoA = A.reduce((s, m) => s + gastoTotal(m), 0);
   const ventaA = A.reduce((s, m) => s + ventaTotal(m), 0);
@@ -650,9 +673,6 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
   const propias = marcas.filter((m) => m.foco);
   const objetivoPropias = propias.reduce((s, m) => s + (m.ventaObjetivoMes ?? 0), 0);
   const proyPropias = propias.reduce((s, m) => s + proyectar(ventaTotal(m)), 0);
-  const entregas = HITOS.filter((h) => h.entregado);
-  const aTiempo = entregas.filter((h) => h.aTiempo ?? true).length;
-  const atrasados = HITOS.filter((h) => h.estado === "atrasado").length;
   const costoInf = COLABORACIONES.reduce((s, c) => s + c.costo, 0);
   const ventaInf = COLABORACIONES.reduce((s, c) => s + c.ventaAtribuida, 0);
 
@@ -674,7 +694,7 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <Kpi
           titulo="Presupuesto ejecutado"
           valor={fmtMoneda(gastado)}
@@ -708,12 +728,6 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
           detalle={costoInf ? `ROI ${dec1.format(ventaInf / costoInf)}x · ${fmtMoneda(costoInf)} invertidos` : "Sin inversión en el período"}
           vs={{ actual: COLABORACIONES.length, anterior: planilla.datos ? comparar.colaboraciones.length : null, formato: fmtNumero }}
         />
-        <Kpi
-          titulo="Deadlines"
-          valor={`${aTiempo} / ${entregas.length} a tiempo`}
-          acento={atrasados ? ROJO : VERDE}
-          detalle={atrasados ? `${atrasados} atrasado(s)` : "Sin atrasos"}
-        />
       </div>
 
       <VentaPorCanal marcas={marcas} />
@@ -724,7 +738,7 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Panel titulo="Presupuesto por marca" nota="Asignado vs gastado vs ritmo del período">
-          <div className="h-72">
+          <div className="h-52">
             <ResponsiveContainer>
               <BarChart data={presupuestoPorMarca} barGap={2}>
                 <CartesianGrid stroke={TEMA.line} vertical={false} />
@@ -749,7 +763,7 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
         </Panel>
 
         <Panel titulo="Venta por marca" nota="Al corte, proyectada y objetivo (o línea de base)">
-          <div className="h-72">
+          <div className="h-52">
             <ResponsiveContainer>
               <BarChart data={ventaPorMarca} barGap={2}>
                 <CartesianGrid stroke={TEMA.line} vertical={false} />
@@ -769,7 +783,7 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
         </Panel>
 
         <Panel titulo="Gasto por canal y marca" nota="Pauta, influencers, contenido, ferias">
-          <div className="h-72">
+          <div className="h-52">
             <ResponsiveContainer>
               <BarChart data={canalPorMarca}>
                 <CartesianGrid stroke={TEMA.line} vertical={false} />
@@ -820,8 +834,11 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
 
       <PanelMetaConsolidado marcas={marcas} meta={meta} />
 
-      <Deadlines marca={null} />
+      <VentasPorProvincia marca={null} />
+
       <Indicadores />
+
+      <DetalleVentas marca={null} />
     </div>
   );
 }
@@ -856,8 +873,6 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
   const cacA = A
     ? (A.gastoPorCanal["Meta Ads"] + A.gastoPorCanal["Google Ads"] + A.gastoPorCanal["Mercado Ads"] + A.gastoPorCanal.Influencers) / A.pedidosTienda
     : null;
-  const conversion = m.pedidosTienda / m.visitasTienda;
-  const ticket = m.ventaTiendas / m.pedidosTienda;
   const interaccion = m.interacciones30d / m.alcance30d;
 
   const acumulado = ventaAcumulada(m);
@@ -961,7 +976,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           </span>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Kpi
           titulo="Seguidores"
           valor={fmtNumero(m.seguidores)}
@@ -978,19 +993,6 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           detalle={`Interacción ${p1(interaccion)}`}
           vs={{ actual: m.alcance30d, anterior: A?.alcance30d, formato: fmtNumero }}
         />
-        <Kpi
-          titulo="Mensajes recibidos"
-          valor={fmtNumero(m.mensajes30d)}
-          acento={m.tiempoRespuestaMin <= 120 ? VERDE : AMBAR}
-          detalle={`1ª respuesta en ${m.tiempoRespuestaMin} min promedio`}
-          vs={{ actual: m.mensajes30d, anterior: A?.mensajes30d, formato: fmtNumero }}
-        />
-        <Kpi
-          titulo="Conversión tienda"
-          valor={p1(conversion)}
-          detalle={`Ticket promedio ${fmtMoneda(ticket)}`}
-          vs={{ actual: conversion, anterior: A ? A.pedidosTienda / A.visitasTienda : null, formato: p1, puntos: true }}
-        />
         <TarjetaPauta m={m} canal="Mercado Ads" gastoAnterior={A?.gastoPorCanal["Mercado Ads"]} />
         <TarjetaPauta m={m} canal="Google Ads" gastoAnterior={A?.gastoPorCanal["Google Ads"]} />
       </div>
@@ -999,9 +1001,9 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
 
       <SeccionMeta m={m} meta={meta} />
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <Panel titulo="Venta acumulada del período" nota={`vs ${claveRitmo.toLowerCase()}`}>
-          <div className="h-72">
+          <div className="h-52">
             <ResponsiveContainer>
               <LineChart data={serieVenta}>
                 <CartesianGrid stroke={TEMA.line} vertical={false} />
@@ -1029,7 +1031,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         </Panel>
 
         <Panel titulo="Gasto por canal" nota={m.presupuestoMes ? `de ${fmtMoneda(m.presupuestoMes)}` : "Presupuesto a definir"}>
-          <div className="h-72">
+          <div className="h-52">
             <ResponsiveContainer>
               <BarChart data={canales} layout="vertical" margin={{ left: 10 }}>
                 <CartesianGrid stroke={TEMA.line} horizontal={false} />
@@ -1050,7 +1052,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         </Panel>
 
         <Panel titulo="Inversión vs venta" nota="Últimos 4 meses · *noviembre proyectado">
-          <div className="h-72">
+          <div className="h-52">
             <ResponsiveContainer>
               <ComposedChart data={historia}>
                 <CartesianGrid stroke={TEMA.line} vertical={false} />
@@ -1081,7 +1083,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         </Panel>
 
         <Panel titulo="Contenido publicado" nota={`Meta: ${META_PUBLICACIONES_SEMANA} por semana`}>
-          <div className="h-72">
+          <div className="h-52">
             <ResponsiveContainer>
               <BarChart data={publicaciones}>
                 <CartesianGrid stroke={TEMA.line} vertical={false} />
@@ -1145,7 +1147,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         </Panel>
 
         <Panel titulo="Origen del tráfico" nota="Google Analytics · pendiente de verificar">
-          <div className="h-60">
+          <div className="h-44">
             <ResponsiveContainer>
               <BarChart data={m.traficoOrigen} layout="vertical" margin={{ left: 10 }}>
                 <CartesianGrid stroke={TEMA.line} horizontal={false} />
@@ -1251,7 +1253,9 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         )}
       </Panel>
 
-      <Deadlines marca={m.clave} />
+      <VentasPorProvincia marca={m.clave} />
+
+      <DetalleVentas marca={m.clave} />
     </div>
   );
 }
@@ -1382,11 +1386,6 @@ function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
   const venta = deVenta(meta);
   const dias = diasConPauta(meta.diario);
   const cortes = meta.diario.length - dias;
-  const diario = meta.diario.map((d) => ({
-    fecha: d.fecha,
-    Inversión: d.gasto,
-    Compras: d.compras,
-  }));
 
   return (
     <>
@@ -1464,30 +1463,6 @@ function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <Panel titulo="Inversión diaria en Meta" nota="Barra roja = día sin pauta">
-          <div className="h-72">
-            <ResponsiveContainer>
-              <ComposedChart data={diario}>
-                <CartesianGrid stroke={TEMA.line} vertical={false} />
-                <XAxis dataKey="fecha" {...ejes} />
-                <YAxis yAxisId="m" {...ejes} tickFormatter={(v) => fmtMonedaCorta(v)} width={60} />
-                <YAxis yAxisId="c" orientation="right" {...ejes} allowDecimals={false} width={30} />
-                <Tooltip
-                  cursor={{ fill: "#ffffff08" }}
-                  content={<TooltipSimple formato={(n) => (n < 1000 ? fmtNumero(n) : fmtMoneda(n))} />}
-                />
-                <Leyenda />
-                <Bar yAxisId="m" dataKey="Inversión" radius={[3, 3, 0, 0]} minPointSize={3}>
-                  {diario.map((d) => (
-                    <Cell key={d.fecha} fill={d.Inversión > 0 ? "#3b82f6" : ROJO} />
-                  ))}
-                </Bar>
-                <Line yAxisId="c" dataKey="Compras" stroke={m.color} strokeWidth={2} dot={false} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-        </Panel>
-
         <Panel titulo="Campañas de Meta" nota="Con inversión en el período, de mayor a menor">
           {meta.campanas.length === 0 ? (
             <p className="text-muted text-sm">Sin campañas con gasto este mes.</p>
@@ -1571,7 +1546,7 @@ function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
 function BarrasMeta({ filas, color }: { filas: CampanaMeta[]; color: string }) {
   const datos = filas.map((f) => ({ nombre: f.nombre, Inversión: f.gasto, ROAS: roas(f) }));
   return (
-    <div className="h-60">
+    <div className="h-44">
       <ResponsiveContainer>
         <ComposedChart data={datos} layout="vertical" margin={{ left: 10 }}>
           <CartesianGrid stroke={TEMA.line} horizontal={false} />
@@ -1666,7 +1641,7 @@ function SeccionTiendaNube({ m }: { m: Marca }) {
           detalle="(Pauta + influencers) ÷ clientes nuevos"
         />
       </div>
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-4">
         <Panel titulo="Cupones usados" nota="Cada influencer con su cupón único">
           {tn.cupones.length === 0 ? (
             <p className="text-muted text-sm">Ningún pedido con cupón este mes.</p>
@@ -1680,27 +1655,6 @@ function SeccionTiendaNube({ m }: { m: Marca }) {
                 </tr>
               ))}
             </Tabla>
-          )}
-        </Panel>
-        <Panel titulo="Pedidos por provincia" nota="Dónde pega la pauta">
-          {tn.provincias.length === 0 ? (
-            <p className="text-muted text-sm">
-              {tn.origen === "api"
-                ? "La venta que trae el orquestador no guarda la provincia del pedido."
-                : "Sin pedidos este mes."}
-            </p>
-          ) : (
-          <div className="h-60">
-            <ResponsiveContainer>
-              <BarChart data={tn.provincias} layout="vertical" margin={{ left: 10 }}>
-                <CartesianGrid stroke={TEMA.line} horizontal={false} />
-                <XAxis type="number" {...ejes} allowDecimals={false} />
-                <YAxis type="category" dataKey="provincia" {...ejes} width={110} />
-                <Tooltip cursor={{ fill: "#ffffff08" }} content={<TooltipSimple formato={fmtNumero} />} />
-                <Bar dataKey="pedidos" name="Pedidos" fill={m.color} radius={[0, 3, 3, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
           )}
         </Panel>
       </div>
@@ -1869,65 +1823,6 @@ function PanelFuentes() {
 // ---------------------------------------------------------------------------
 // Deadlines e indicadores
 // ---------------------------------------------------------------------------
-
-function Deadlines({ marca }: { marca: ClaveMarca | null }) {
-  const { hitos: todos, planReal, plan } = useFuentes();
-  const hitos = todos.filter((h) => marca === null || h.marca === marca || h.marca === "todas");
-  const nombre = (k: ClaveMarca | "todas") =>
-    k === "todas" ? "Todas" : (MARCAS.find((m) => m.clave === k)?.nombre ?? k);
-  return (
-    <Panel
-      titulo="Deadlines y entregas"
-      nota={
-        planReal
-          ? "De Mis tareas → Marketing · fecha comprometida vs real · meta 100 % a tiempo"
-          : "Datos de ejemplo"
-      }
-    >
-      {!planReal && (
-        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
-          <Chip color={AMBAR}>Ejemplo</Chip>
-          <span className="text-muted">
-            {plan.motivo ?? "No hay iniciativas cargadas para este período."} Se cargan en{" "}
-            <a href="/tareas/marketing" className="text-c1 hover:underline">Mis tareas → Marketing</a>.
-          </span>
-        </div>
-      )}
-      {planReal && hitos.length === 0 && <p className="text-muted mb-2 text-sm">Nada que venza en este período.</p>}
-      <Tabla cabecera={["Entrega", "Marca", "Vence", "Entregado", "Avance", "Presupuesto", "Responsable", "Estado"]}>
-        {hitos.map((h) => (
-          <tr key={`${h.que}-${h.vence}`}>
-            <td className="px-2 py-2">{h.que}</td>
-            <td className="text-muted px-2 py-2 text-xs whitespace-nowrap">{nombre(h.marca)}</td>
-            <td className="px-2 py-2 tabular-nums">{h.vence}</td>
-            <td className="px-2 py-2 tabular-nums">{h.entregado ?? "—"}</td>
-            <td className="w-28 px-2 py-2">
-              {h.avance === undefined ? (
-                <span className="text-muted">—</span>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Barrita valor={h.avance} color={ESTADO_HITO[h.estado].color} />
-                  <span className="text-muted w-9 text-right text-[11px] tabular-nums">{Math.round(h.avance * 100)}%</span>
-                </div>
-              )}
-            </td>
-            <td className="px-2 py-2 tabular-nums">
-              {h.presupuesto ? fmtMoneda(h.presupuesto) : "—"}
-            </td>
-            <td className="text-muted px-2 py-2 text-xs whitespace-nowrap">{h.responsable}</td>
-            <td className="px-2 py-2">
-              {h.estado === "hecho" && h.aTiempo === false ? (
-                <Chip color={AMBAR}>Entregado tarde</Chip>
-              ) : (
-                <Chip color={ESTADO_HITO[h.estado].color}>{ESTADO_HITO[h.estado].label}</Chip>
-              )}
-            </td>
-          </tr>
-        ))}
-      </Tabla>
-    </Panel>
-  );
-}
 
 const NIVELES = { 1: "Marca", 2: "Demanda", 3: "Venta" } as const;
 
