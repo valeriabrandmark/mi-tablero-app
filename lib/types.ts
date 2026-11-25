@@ -1631,6 +1631,8 @@ export type FilaStock = {
   full: number;
   /** Full, pendiente de ingreso: declarado en envíos a Full y todavía no recibido por ML. */
   fullEnCamino: number;
+  /** FIXY, el depósito de Buenos Aires (Tienda Nube y Flex), unidades disponibles. */
+  fixy: number;
   total: number;
   /** Costo neto del último mes con costo cargado. `0` si no hay. */
   costo: number;

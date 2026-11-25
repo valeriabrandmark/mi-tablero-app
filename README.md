@@ -797,6 +797,72 @@ Si el script dice "El tablero no tiene MKT_PLANILLA_TOKEN", falta el deploy
 después de cargar la variable. Si dice "no coincide", los dos textos son
 distintos (ojo con espacios al copiar).
 
+## FIXY: puesta en marcha
+
+FIXY es el depósito de Buenos Aires desde 11/2026. Despacha las Tiendas Nube
+(UniBrandCo, Diaper Genie, Hola Toys, Litter Genie) y Mercado Libre Flex, y se
+conecta solo a Tienda Nube y a Mercado Libre. Lo que entra viene de Tucumán
+(pedidos de Digip) y de importaciones que van directo. **El stock es uno solo
+para todos los canales.**
+
+Qué hay en el tablero:
+
+- **Stock > Tablero:** FIXY es un depósito más, al lado de Tucumán y Full.
+- **Stock > FIXY** (en construcción, la ve sólo el `superadmin`):
+  - **Envíos de Tucumán a FIXY**, con el botón **Avisar a FIXY**. Crea la
+    orden de recepción en FIXY con lo que Digip preparó.
+  - **Avisar un ingreso a mano**, para las importaciones.
+  - **Control de stock:** stock de hoy − stock al empezar + vendido − avisado.
+    Lo que no da cero es mercadería sin explicar.
+  - **Lo publicado contra lo que hay:** ningún canal debería mostrar más de lo
+    que tiene FIXY.
+
+Avisar ingresos pide permiso de **editar Stock** (`superadmin`, o la casilla en
+Usuarios).
+
+Pasos para encenderlo:
+
+1. Pedirle a FIXY el `api_token` y cargarlo como `FIXY_API_TOKEN` en Vercel y
+   en el `.env` del orquestador. Probarlo con `python fixy.py --probar`.
+2. Cargar los `FIXY_CONTACTO_*` en Vercel (ver `.env.example`).
+3. Dar de alta en Digip el despacho hacia FIXY y poner su nombre en
+   `FIXY_DESPACHOS_DIGIP` (por defecto `FIXY`).
+4. Generar un `FIXY_WEBHOOK_TOKEN`, cargarlo en Vercel y registrar el webhook
+   en FIXY (`api/v2/integracion.json`): `url` =
+   `https://brandmark-business.vercel.app/api/fixy/webhook`, `token` = ese
+   valor, `notificacion` = true.
+5. Con dos días de foto, sacar `/stock/fixy` de `PAGINAS_EN_CONSTRUCCION`.
+
+Datos de la cuenta en FIXY (también en `lib/fixy.ts`):
+
+| Sucursal (una por empresa) | Código |
+|---|---|
+| QUO MARKETING SRL | 1794836565 |
+| DIAPERGENIE | 1794837681 |
+| HOLA TOYS | 1794837810 |
+| LITTER GENIE | 1794837890 |
+
+| Servicio | Código |
+|---|---|
+| Estándar | `004` |
+| Same day | `SDB` |
+
+Límites conocidos:
+
+- La API de FIXY no documenta la respuesta de `consultarStock`. `fixy.py`
+  guarda el json crudo: si la primera corrida lee mal la cantidad, se corrige
+  `CLAVES_CANTIDAD`.
+- No hay forma de consultar qué contó FIXY en una recepción. Se deduce de la
+  suba del stock.
+- De Tienda Nube hoy entra por API una sola tienda. Las ventas de Diaper
+  Genie, Hola Toys y Litter Genie todavía no se descuentan en el control, y
+  van a aparecer como faltante hasta que se sumen al pipeline.
+- Compras todavía no cuenta FIXY en el sugerido.
+
+La migración es `migraciones/fixy.sql` (aplicada el 24/11/2026).
+
+---
+
 ## Pendientes / decisiones abiertas
 
 - **Vendedores** — la página usa la lista blanca `PABLO`, `GERMAN`, `SILVIO`,

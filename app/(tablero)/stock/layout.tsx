@@ -19,6 +19,10 @@ const PESTANAS: Pestana[] = [
   // Va al final porque es la única que no mira el stock de hoy sino cómo se
   // movió: es una auditoría contra Mercado Libre, no una foto del depósito.
   { href: "/stock/trazabilidad-full", label: "Trazabilidad Full" },
+  // El depósito de Buenos Aires: el mismo control que Full (lo que mandamos,
+  // lo que se vende, lo que queda) más el aviso de ingreso, que acá sí se
+  // escribe en el sistema del depósito.
+  { href: "/stock/fixy", label: "FIXY" },
 ];
 
 export default function StockLayout({ children }: LayoutProps<"/stock">) {

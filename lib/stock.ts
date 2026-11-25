@@ -108,7 +108,12 @@ export const PROVEEDORES_NO_MERCADERIA = ["AGENCIA PROVEEDORES", "PROVEEDOR INIC
 export const GRUPO_PROVEEDOR_POR_DEFECTO = "QUO MKT";
 
 /**
- * Los dos depósitos, y la opción de mirarlos juntos.
+ * Los tres depósitos, y la opción de mirarlos juntos.
+ *
+ * FIXY (Buenos Aires) desde 11/2026: despacha Tienda Nube y Mercado Libre
+ * Flex. Su stock sale de la foto que saca tablero_quo/fixy.py; hasta que haya
+ * token de la API, la columna queda en cero. La clave de "todos" sigue siendo
+ * `ambos` para no romper los links guardados con `?deposito=ambos`.
  *
  * EL FILTRO CAMBIA EL STOCK, NO LA DEMANDA. Al elegir "Full", la cobertura pasa
  * a decir cuántos días de venta cubre lo que hay en Mercado Libre — pero contra
@@ -118,9 +123,10 @@ export const GRUPO_PROVEEDOR_POR_DEFECTO = "QUO MKT";
  * que es.
  */
 export const DEPOSITOS = [
-  { clave: "ambos", label: "Los dos" },
+  { clave: "ambos", label: "Todos" },
   { clave: "tucuman", label: "Tucumán" },
   { clave: "full", label: "Meli Full" },
+  { clave: "fixy", label: "FIXY" },
 ] as const;
 
 export type ClaveDeposito = (typeof DEPOSITOS)[number]["clave"];

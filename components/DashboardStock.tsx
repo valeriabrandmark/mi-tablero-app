@@ -133,9 +133,18 @@ function columnas(filas: FilaStock[]): Columna<FilaStock>[] {
       total: fmtNumero(sumar(filas, (f) => f.full + f.fullEnCamino)),
     },
     {
+      titulo: "FIXY",
+      ayuda:
+        "Unidades en FIXY, el depósito de Buenos Aires que despacha Tienda Nube y Mercado Libre Flex, según la última foto de su API. El control de lo que entra y sale está en la pestaña FIXY.",
+      celda: (f) => (f.fixy > 0 ? fmtNumero(f.fixy) : "—"),
+      numerica: true,
+      orden: (f) => f.fixy,
+      total: fmtNumero(sumar(filas, (f) => f.fixy)),
+    },
+    {
       titulo: "Total u.",
       ayuda:
-        "Tucumán más Full total (incluye lo pendiente de ingreso a Full). No descuenta lo pedido al proveedor y todavía no recibido, porque Digip informa tránsito y recepción en cero.",
+        "Tucumán más Full total (incluye lo pendiente de ingreso a Full) más FIXY. No descuenta lo pedido al proveedor y todavía no recibido, porque Digip informa tránsito y recepción en cero.",
       celda: (f) => fmtNumero(f.total),
       numerica: true,
       orden: (f) => f.total,
