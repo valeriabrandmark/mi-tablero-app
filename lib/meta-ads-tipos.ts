@@ -60,6 +60,8 @@ export type MetaAdsMarca = {
    * se pasaron a pesos con `tipoCambio`.
    */
   conversion?: { moneda: string; tipoCambio: number; fuente: string };
+  /** Cuentas de la marca que no se pudieron leer (las demás sí se muestran). */
+  avisos?: string[];
   diario: DiaMeta[];
   /** Campañas entregando AHORA, de las que tuvieron gasto en el período. */
   campanasActivas: number;

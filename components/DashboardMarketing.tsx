@@ -40,14 +40,11 @@ import {
 } from "@/lib/meta-ads-tipos";
 import {
   CANALES,
-  COLABORACIONES,
-  HITOS,
   INDICADORES,
   MARCAS,
   META_INFLUENCERS_MES,
   META_PUBLICACIONES_SEMANA,
   META_TIENDAS_NUEVAS,
-  TIENDAS_NUEVAS_MES,
   gastoTotal,
   ventaAcumulada,
   ventaTotal,
@@ -62,7 +59,7 @@ import {
 /**
  * TABLERO DE MARCA — PROTOTIPO.
  *
- * Arma, sobre datos de ejemplo (`lib/marketing-demo.ts`), lo que va a mirar
+ * Arma, SÓLO CON DATOS REALES (lo que no tiene fuente dice "Pendiente"), lo que va a mirar
  * Agatina como responsable de marca: presupuesto, gastos, deadlines, y los
  * KPIs del acuerdo de rol en sus tres niveles (marca → demanda → venta).
  *
@@ -114,7 +111,7 @@ function semaforo(cumplimiento: number): string {
  */
 type Contexto = DatosTablero & {
   periodo: Periodo;
-  /** Fechas límite: de Planificación si hay algo cargado, si no el ejemplo. */
+  /** Fechas límite: de Planificación si hay algo cargado, si no, vacío. */
   hitos: Hito[];
   /** Colaboraciones con influencers: ídem. */
   colaboraciones: Colaboracion[];
@@ -390,6 +387,12 @@ type FilaScore = {
   real: string;
   cumplimiento: number;
   peso: number;
+  /**
+   * Sin fuente (no conectada o no cargada): se muestra "Pendiente" y NO
+   * cuenta para el puntaje, ni a favor ni en contra. Su peso se reparte entre
+   * las metas que sí se pueden medir.
+   */
+  pendiente?: string;
 };
 
 function armarScorecard(
@@ -399,19 +402,20 @@ function armarScorecard(
   HITOS: Hito[],
   COLABORACIONES: Colaboracion[],
   planReal: boolean,
+  conectado: { meta: boolean; instagram: boolean },
 ): FilaScore[] {
   const proyectar = (v: number) => proyectarP(v, P);
   const AVANCE_MES = avance(P);
   const metaInfluencers = Math.max(1, Math.round(META_INFLUENCERS_MES * P.factor));
   const metaTiendas = Math.max(1, Math.round(META_TIENDAS_NUEVAS.min * P.factor));
-  const tiendasNuevas = tiendasNuevasReal ?? TIENDAS_NUEVAS_MES;
+  const tiendasNuevas = tiendasNuevasReal ?? 0;
   const propias = marcas.filter((m) => m.foco);
   const dg = marcas.find((m) => m.clave === "diaper_genie")!;
   const ht = marcas.find((m) => m.clave === "hola_toys")!;
 
   const pautaDias = propias.reduce((s, m) => s + m.diasPautaActiva, 0) / propias.length;
   const pubs = propias.flatMap((m) => m.publicacionesPorSemana);
-  const pubsProm = pubs.reduce((s, v) => s + v, 0) / pubs.length;
+  const pubsProm = pubs.length ? pubs.reduce((s, v) => s + v, 0) / pubs.length : 0;
   const navidad = HITOS.find((h) => /navidad/i.test(h.que)) ?? null;
   const revistas = HITOS.filter((h) => /revista/i.test(h.que) && h.entregado);
   const revistasATiempo = revistas.filter((h) => h.aTiempo ?? true).length;
@@ -419,7 +423,7 @@ function armarScorecard(
   const puntuales = conFecha.filter((h) => h.entregado && (h.aTiempo ?? true)).length;
   const presupuesto = propias.reduce((s, m) => s + (m.presupuestoMes ?? 0), 0);
   const gastado = propias.reduce((s, m) => s + gastoTotal(m), 0);
-  const ejec = gastado / presupuesto;
+  const ejec = presupuesto ? gastado / presupuesto : 0;
   const medibles = INDICADORES.filter((i) => i.estado === "listo").length / INDICADORES.length;
 
   return [
@@ -438,6 +442,7 @@ function armarScorecard(
       real: `${dec1.format(pautaDias)} días`,
       cumplimiento: P.transcurridos ? pautaDias / P.transcurridos : 0,
       peso: 0.1,
+      pendiente: conectado.meta ? undefined : "Pendiente de conectar Meta Ads",
     },
     {
       grupo: "Actividad",
@@ -446,6 +451,7 @@ function armarScorecard(
       real: dec1.format(pubsProm),
       cumplimiento: pubsProm / META_PUBLICACIONES_SEMANA,
       peso: 0.1,
+      pendiente: conectado.instagram ? undefined : "Pendiente de conectar Instagram",
     },
     // Con Planificación cargada, estas dos filas dejan de ser fechas sueltas
     // y pasan a medir el plan entero: entregas a tiempo y campaña estacional.
@@ -465,6 +471,7 @@ function armarScorecard(
           real: navidad ? ESTADO_HITO[navidad.estado].label : "Sin cargar",
           cumplimiento: !navidad ? 0 : navidad.estado === "hecho" ? 1 : navidad.estado === "en_curso" ? 0.5 : 0,
           peso: 0.1,
+          pendiente: "Pendiente de cargar en Planificación",
         },
     {
       grupo: "Actividad",
@@ -485,6 +492,7 @@ function armarScorecard(
           ? revistasATiempo / revistas.length
           : 1,
       peso: 0.1,
+      pendiente: planReal ? undefined : "Pendiente de cargar en Planificación",
     },
     {
       grupo: "Venta",
@@ -509,9 +517,10 @@ function armarScorecard(
         P.factor === 1
           ? `${META_TIENDAS_NUEVAS.min} a ${META_TIENDAS_NUEVAS.max}`
           : `${metaTiendas} en el período`,
-      real: `${tiendasNuevas} (proy. ${Math.round(proyectar(tiendasNuevas))})${tiendasNuevasReal === null ? " · ejemplo" : ""}`,
+      real: `${tiendasNuevas} (proy. ${Math.round(proyectar(tiendasNuevas))})`,
       cumplimiento: proyectar(tiendasNuevas) / metaTiendas,
       peso: 0.1,
+      pendiente: tiendasNuevasReal === null ? "Pendiente: sin conexión a SIGMA" : undefined,
     },
     {
       grupo: "Gestión",
@@ -520,6 +529,7 @@ function armarScorecard(
       real: `${p0(ejec)} ejecutado`,
       cumplimiento: ejec <= AVANCE_MES + 0.1 ? 1 : (AVANCE_MES + 0.1) / ejec,
       peso: 0.05,
+      pendiente: presupuesto ? undefined : "Pendiente de cargar el presupuesto",
     },
     {
       grupo: "Gestión",
@@ -533,15 +543,24 @@ function armarScorecard(
 }
 
 function Scorecard({ marcas }: { marcas: Marca[] }) {
-  const { venta, periodo, hitos, colaboraciones, planReal } = useFuentes();
-  const filas = armarScorecard(marcas, venta.tiendasNuevas.cantidad, periodo, hitos, colaboraciones, planReal);
-  const total = filas.reduce((s, f) => s + f.peso * Math.min(f.cumplimiento, 1), 0);
-  const porGrupo = (["Actividad", "Venta", "Gestión"] as const).map((g) => {
-    const fs = filas.filter((f) => f.grupo === g);
-    const peso = fs.reduce((s, f) => s + f.peso, 0);
-    const logrado = fs.reduce((s, f) => s + f.peso * Math.min(f.cumplimiento, 1), 0);
-    return { grupo: g, peso, cumplimiento: logrado / peso };
+  const { venta, periodo, hitos, colaboraciones, planReal, meta, instagram } = useFuentes();
+  const propias = marcas.filter((m) => m.foco).map((m) => m.clave);
+  const filas = armarScorecard(marcas, venta.tiendasNuevas.cantidad, periodo, hitos, colaboraciones, planReal, {
+    meta: propias.some((c) => meta[c].fuente === "meta"),
+    instagram: propias.some((c) => instagram[c].fuente === "meta"),
   });
+  // Lo pendiente no suma ni resta: el puntaje es sobre lo que se puede medir.
+  const medibles = filas.filter((f) => !f.pendiente);
+  const pesoMedible = medibles.reduce((s, f) => s + f.peso, 0);
+  const total = pesoMedible ? medibles.reduce((s, f) => s + f.peso * Math.min(f.cumplimiento, 1), 0) / pesoMedible : 0;
+  const porGrupo = (["Actividad", "Venta", "Gestión"] as const).map((g) => {
+    const fs = medibles.filter((f) => f.grupo === g);
+    const peso = filas.filter((f) => f.grupo === g).reduce((s, f) => s + f.peso, 0);
+    const pesoG = fs.reduce((s, f) => s + f.peso, 0);
+    const logrado = fs.reduce((s, f) => s + f.peso * Math.min(f.cumplimiento, 1), 0);
+    return { grupo: g, peso, cumplimiento: pesoG ? logrado / pesoG : NaN };
+  });
+  const pendientes = filas.length - medibles.length;
 
   return (
     <Panel
@@ -558,6 +577,11 @@ function Scorecard({ marcas }: { marcas: Marca[] }) {
             {Math.round(total * 100)}
           </p>
           <p className="text-muted text-xs">de 100</p>
+          {pendientes > 0 && (
+            <p className="mt-1 text-center text-[11px]" style={{ color: AMBAR }}>
+              {pendientes} meta(s) pendiente(s) de fuente: no cuentan
+            </p>
+          )}
           <div className="mt-4 w-full space-y-2">
             {porGrupo.map((g) => (
               <div key={g.grupo}>
@@ -565,9 +589,9 @@ function Scorecard({ marcas }: { marcas: Marca[] }) {
                   <span>
                     {g.grupo} <span className="text-muted">({p0(g.peso)})</span>
                   </span>
-                  <span className="tabular-nums">{p0(g.cumplimiento)}</span>
+                  <span className="tabular-nums">{Number.isFinite(g.cumplimiento) ? p0(g.cumplimiento) : "Pendiente"}</span>
                 </div>
-                <Barrita valor={g.cumplimiento} color={semaforo(g.cumplimiento)} />
+                <Barrita valor={Number.isFinite(g.cumplimiento) ? g.cumplimiento : 0} color={semaforo(g.cumplimiento)} />
               </div>
             ))}
           </div>
@@ -579,14 +603,20 @@ function Scorecard({ marcas }: { marcas: Marca[] }) {
               <td className="text-muted px-2 py-2 text-xs">{f.grupo}</td>
               <td className="px-2 py-2">{f.meta}</td>
               <td className="text-muted px-2 py-2 whitespace-nowrap">{f.objetivo}</td>
-              <td className="px-2 py-2 whitespace-nowrap tabular-nums">{f.real}</td>
+              <td className="px-2 py-2 whitespace-nowrap tabular-nums">
+                {f.pendiente ? <span className="text-muted">—</span> : f.real}
+              </td>
               <td className="w-40 px-2 py-2">
-                <div className="flex items-center gap-2">
-                  <Barrita valor={f.cumplimiento} color={semaforo(f.cumplimiento)} />
-                  <span className="w-10 text-right text-xs tabular-nums">
-                    {p0(f.cumplimiento)}
-                  </span>
-                </div>
+                {f.pendiente ? (
+                  <Chip color={AMBAR}>{f.pendiente}</Chip>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Barrita valor={f.cumplimiento} color={semaforo(f.cumplimiento)} />
+                    <span className="w-10 text-right text-xs tabular-nums">
+                      {p0(f.cumplimiento)}
+                    </span>
+                  </div>
+                )}
               </td>
               <td className="text-muted px-2 py-2 text-xs tabular-nums">{p0(f.peso)}</td>
             </tr>
@@ -687,7 +717,7 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
     marca: m.nombre,
     "Venta al corte": ventaTotal(m),
     Proyección: proyectar(ventaTotal(m)),
-    Objetivo: m.ventaObjetivoMes ?? m.ventaBase,
+    Objetivo: m.ventaObjetivoMes ?? 0,
   }));
 
   const canalPorMarca = marcas.map((m) => ({ marca: m.nombre, ...m.gastoPorCanal }));
@@ -717,7 +747,7 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
         />
         <Kpi
           titulo="Retorno (venta ÷ inversión)"
-          valor={`${dec1.format(venta / gastado)}x`}
+          valor={gastado ? `${dec1.format(venta / gastado)}x` : "Sin inversión"}
           detalle="MER del período, todas las marcas"
           vs={{ actual: venta / gastado, anterior: gastadoA ? ventaA / gastadoA : null, formato: (x) => `${dec1.format(x)}x` }}
         />
@@ -803,7 +833,7 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
         </Panel>
 
         <Panel titulo="Resumen por marca" nota={P.etiqueta}>
-          <Tabla cabecera={["Marca", "Estado", "Gastado", "Venta", "Retorno", "Seguidores", "Leads"]}>
+          <Tabla cabecera={["Marca", "Estado", "Gastado", "Venta", "Retorno", "Seguidores"]}>
             {marcas.map((m) => (
               <tr key={m.clave}>
                 <td className="px-2 py-2 whitespace-nowrap">
@@ -817,15 +847,20 @@ function VistaConsolidada({ marcas, meta }: { marcas: Marca[]; meta: MetaAds }) 
                 <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(gastoTotal(m))}</td>
                 <td className="px-2 py-2 whitespace-nowrap tabular-nums">{fmtMoneda(ventaTotal(m))}</td>
                 <td className="px-2 py-2 tabular-nums">
-                  {dec1.format(ventaTotal(m) / gastoTotal(m))}x
+                  {gastoTotal(m) ? `${dec1.format(ventaTotal(m) / gastoTotal(m))}x` : "—"}
                 </td>
                 <td className="px-2 py-2 tabular-nums">
-                  {fmtNumero(m.seguidores)}{" "}
-                  <span className="text-xs" style={{ color: VERDE }}>
-                    +{p1(m.seguidores / m.seguidoresMesAnterior - 1)}
-                  </span>
+                  {m.seguidores ? (
+                    <>
+                      {fmtNumero(m.seguidores)}{" "}
+                      <span className="text-xs" style={{ color: VERDE }}>
+                        +{p1(m.seguidores / Math.max(1, m.seguidoresMesAnterior) - 1)}
+                      </span>
+                    </>
+                  ) : (
+                    <span style={{ color: AMBAR }}>Pendiente</span>
+                  )}
                 </td>
-                <td className="px-2 py-2 tabular-nums">{m.leadsMayoristas}</td>
               </tr>
             ))}
           </Tabla>
@@ -876,27 +911,29 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
   const interaccion = m.interacciones30d / m.alcance30d;
 
   const acumulado = ventaAcumulada(m);
-  const metaMes = objetivo ?? m.ventaBase;
+  // Sin objetivo en el acuerdo de rol (Unibrandco, Litter Genie) no se
+  // inventa una línea de base: la curva va sola.
+  const metaMes = objetivo ?? 0;
+  const claveRitmo = "Ritmo objetivo";
   const serieVenta = Array.from({ length: P.dias }, (_, i) => ({
     dia: i + 1,
     Real: i < acumulado.length ? Math.round(acumulado[i]) : null,
-    [objetivo ? "Ritmo objetivo" : "Ritmo línea de base"]: Math.round(
-      (metaMes / P.dias) * (i + 1),
-    ),
+    ...(objetivo ? { [claveRitmo]: Math.round((metaMes / P.dias) * (i + 1)) } : {}),
   }));
-  const claveRitmo = objetivo ? "Ritmo objetivo" : "Ritmo línea de base";
+  const igReal = ig.fuente === "meta";
 
   const canales = CANALES.map((c) => ({ canal: c, Gasto: m.gastoPorCanal[c] }));
-  const historia = m.historia.map((h) => ({ ...h, Retorno: h.venta / h.inversion }));
+  const historia = m.historia;
   const publicaciones = m.publicacionesPorSemana.map((v, i) => ({
     semana: `Sem ${i + 1}`,
     Publicaciones: v,
   }));
-  const embudo = [
-    { paso: "Alcance (30 d)", valor: m.alcance30d },
-    { paso: "Visitas tienda", valor: m.visitasTienda },
-    { paso: "Clics de pauta", valor: m.clicsPauta },
-    { paso: "Pedidos", valor: m.pedidosTienda },
+  // null = la fuente de ese paso no está conectada: se muestra "Pendiente".
+  const embudo: { paso: string; valor: number | null; falta?: string }[] = [
+    { paso: "Alcance del período", valor: igReal ? m.alcance30d : null, falta: "conectar Instagram" },
+    { paso: "Visitas tienda", valor: null, falta: "conectar Google Analytics" },
+    { paso: "Clics de pauta", valor: meta.fuente === "meta" ? m.clicsPauta : null, falta: "conectar Meta Ads" },
+    { paso: "Pedidos de tienda", valor: fuentes.venta.tiendaNube.porMarca[m.clave] ? m.pedidosTienda : null, falta: "importar Tienda Nube" },
   ];
 
   return (
@@ -917,8 +954,9 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi
           titulo={P.factor === 1 ? "Presupuesto del mes" : "Presupuesto del período"}
-          valor={m.presupuestoMes ? fmtMoneda(m.presupuestoMes) : "A definir"}
-          detalle="Pauta, contenido, producciones, influencers y ferias"
+          valor={m.presupuestoMes ? fmtMoneda(m.presupuestoMes) : "Pendiente"}
+          acento={m.presupuestoMes ? undefined : AMBAR}
+          detalle={m.presupuestoMes ? "Pauta, contenido, producciones, influencers y ferias" : "Pendiente de cargar en Carga de marketing → Presupuesto"}
           vs={{ actual: m.presupuestoMes ?? 0, anterior: A ? (A.presupuestoMes ?? 0) : null }}
         />
         <Kpi
@@ -939,27 +977,31 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           vs={{ actual: venta, anterior: A ? ventaTotal(A) : null }}
         />
         <Kpi
-          titulo={`${P.enCurso ? "Proyección" : "Venta"} vs ${objetivo ? "objetivo" : "línea de base"}`}
-          valor={p0(proy / metaMes)}
-          acento={semaforo(proy / metaMes)}
-          detalle={`${fmtMoneda(proy)} / ${fmtMoneda(metaMes)}`}
-          vs={{
-            actual: proy / metaMes,
-            anterior: A ? proyectarP(ventaTotal(A), comparar.periodo) / (A.ventaObjetivoMes ?? A.ventaBase) : null,
-            formato: p0,
-            puntos: true,
-          }}
+          titulo={`${P.enCurso ? "Proyección" : "Venta"} vs objetivo`}
+          valor={objetivo ? p0(proy / metaMes) : "Sin objetivo"}
+          acento={objetivo ? semaforo(proy / metaMes) : TEMA.muted}
+          detalle={objetivo ? `${fmtMoneda(proy)} / ${fmtMoneda(metaMes)}` : `${fmtMoneda(proy)} · el acuerdo de rol no fija objetivo`}
+          vs={
+            objetivo
+              ? {
+                  actual: proy / metaMes,
+                  anterior: A?.ventaObjetivoMes ? proyectarP(ventaTotal(A), comparar.periodo) / A.ventaObjetivoMes : null,
+                  formato: p0,
+                  puntos: true,
+                }
+              : undefined
+          }
         />
         <Kpi
           titulo="Retorno (venta ÷ inversión)"
-          valor={`${dec1.format(venta / gastado)}x`}
+          valor={gastado ? `${dec1.format(venta / gastado)}x` : "Sin inversión"}
           detalle="MER del período"
           vs={{ actual: venta / gastado, anterior: A && gastoTotal(A) ? ventaTotal(A) / gastoTotal(A) : null, formato: (x) => `${dec1.format(x)}x` }}
         />
         <Kpi
           titulo="Costo de adquisición"
-          valor={fmtMoneda(cac)}
-          detalle="(Pauta + influencers) ÷ pedidos"
+          valor={m.pedidosTienda ? fmtMoneda(cac) : "Sin pedidos"}
+          detalle="(Pauta + influencers) ÷ pedidos de tienda"
           vs={{ actual: cac, anterior: cacA, menosEsMejor: true }}
         />
       </div>
@@ -972,27 +1014,36 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           </Chip>
         ) : (
           <span title={ig.motivo}>
-            <Chip color={AMBAR}>Instagram: datos de ejemplo</Chip>
+            <Chip color={AMBAR}>Instagram: pendiente de conectar</Chip>
           </span>
         )}
       </div>
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Kpi
-          titulo="Seguidores"
-          valor={fmtNumero(m.seguidores)}
-          detalle={`+${fmtNumero(m.seguidores - m.seguidoresMesAnterior)} en el período (${p1(m.seguidores / m.seguidoresMesAnterior - 1)})`}
-          vs={{
-            actual: m.seguidores - m.seguidoresMesAnterior,
-            anterior: A ? A.seguidores - A.seguidoresMesAnterior : null,
-            formato: (x) => `+${fmtNumero(x)} nuevos`,
-          }}
-        />
-        <Kpi
-          titulo={ig.fuente === "meta" ? "Alcance del período" : "Alcance 30 días"}
-          valor={fmtNumero(m.alcance30d)}
-          detalle={`Interacción ${p1(interaccion)}`}
-          vs={{ actual: m.alcance30d, anterior: A?.alcance30d, formato: fmtNumero }}
-        />
+        {igReal ? (
+          <>
+            <Kpi
+              titulo="Seguidores"
+              valor={fmtNumero(m.seguidores)}
+              detalle={`+${fmtNumero(m.seguidores - m.seguidoresMesAnterior)} en el período (${p1(m.seguidores / Math.max(1, m.seguidoresMesAnterior) - 1)})`}
+              vs={{
+                actual: m.seguidores - m.seguidoresMesAnterior,
+                anterior: A ? A.seguidores - A.seguidoresMesAnterior : null,
+                formato: (x) => `+${fmtNumero(x)} nuevos`,
+              }}
+            />
+            <Kpi
+              titulo="Alcance del período"
+              valor={fmtNumero(m.alcance30d)}
+              detalle={`Interacción ${m.alcance30d ? p1(interaccion) : "—"}`}
+              vs={{ actual: m.alcance30d, anterior: A?.alcance30d, formato: fmtNumero }}
+            />
+          </>
+        ) : (
+          <>
+            <TarjetaKpi titulo="Seguidores" valor="Pendiente" acento={AMBAR} detalle={`Pendiente de conectar Instagram · ${ig.motivo}`} />
+            <TarjetaKpi titulo="Alcance del período" valor="Pendiente" acento={AMBAR} detalle="Pendiente de conectar Instagram" />
+          </>
+        )}
         <TarjetaPauta m={m} canal="Mercado Ads" gastoAnterior={A?.gastoPorCanal["Mercado Ads"]} />
         <TarjetaPauta m={m} canal="Google Ads" gastoAnterior={A?.gastoPorCanal["Google Ads"]} />
       </div>
@@ -1051,38 +1102,28 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           </div>
         </Panel>
 
-        <Panel titulo="Inversión vs venta" nota="Últimos 4 meses · *noviembre proyectado">
-          <div className="h-52">
-            <ResponsiveContainer>
-              <ComposedChart data={historia}>
-                <CartesianGrid stroke={TEMA.line} vertical={false} />
-                <XAxis dataKey="mes" {...ejes} />
-                <YAxis yAxisId="m" {...ejes} tickFormatter={(v) => fmtMonedaCorta(v)} width={60} />
-                <YAxis
-                  yAxisId="r"
-                  orientation="right"
-                  {...ejes}
-                  tickFormatter={(v) => `${v}x`}
-                  width={35}
-                />
-                <Tooltip
-                  cursor={{ fill: "#ffffff08" }}
-                  content={
-                    <TooltipSimple
-                      formato={(n) => (n < 100 ? `${dec1.format(n)}x` : fmtMoneda(n))}
-                    />
-                  }
-                />
-                <Leyenda />
-                <Bar yAxisId="m" dataKey="inversion" name="Inversión" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-                <Bar yAxisId="m" dataKey="venta" name="Venta" fill={m.color} radius={[3, 3, 0, 0]} />
-                <Line yAxisId="r" dataKey="Retorno" stroke={AMBAR} strokeWidth={2} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
+        <Panel titulo="Venta de los últimos meses" nota="Mayorista + Tienda Nube · el mes en curso va al corte">
+          {historia.length === 0 ? (
+          <p className="text-sm" style={{ color: AMBAR }}>Pendiente: todavía no hay venta registrada de la marca.</p>
+          ) : (
+            <div className="h-52">
+              <ResponsiveContainer>
+                <BarChart data={historia}>
+                  <CartesianGrid stroke={TEMA.line} vertical={false} />
+                  <XAxis dataKey="mes" {...ejes} />
+                  <YAxis {...ejes} tickFormatter={(v) => fmtMonedaCorta(v)} width={60} />
+                  <Tooltip cursor={{ fill: "#ffffff08" }} content={<TooltipSimple formato={fmtMoneda} />} />
+                  <Bar dataKey="venta" name="Venta" fill={m.color} radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </Panel>
 
         <Panel titulo="Contenido publicado" nota={`Meta: ${META_PUBLICACIONES_SEMANA} por semana`}>
+          {!igReal ? (
+          <p className="text-sm" style={{ color: AMBAR }}>Pendiente de conectar Instagram.</p>
+          ) : (
           <div className="h-52">
             <ResponsiveContainer>
               <BarChart data={publicaciones}>
@@ -1110,57 +1151,48 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
               </BarChart>
             </ResponsiveContainer>
           </div>
+          )}
         </Panel>
 
         <Panel titulo="Embudo de demanda" nota="Del alcance al pedido">
           <div className="space-y-3">
-            {embudo.map((e, i) => (
-              <div key={e.paso}>
-                <div className="flex justify-between text-xs">
-                  <span>{e.paso}</span>
-                  <span className="tabular-nums">
-                    {fmtNumero(e.valor)}
-                    {i > 0 && (
-                      <span className="text-muted ml-2">
-                        {p1(e.valor / embudo[i - 1].valor)} del paso anterior
+            {embudo.map((e, i) => {
+              const maximo = Math.max(1, ...embudo.map((x) => x.valor ?? 0));
+              const previo = i > 0 ? embudo[i - 1].valor : null;
+              return (
+                <div key={e.paso}>
+                  <div className="flex justify-between text-xs">
+                    <span>{e.paso}</span>
+                    {e.valor === null ? (
+                      <span style={{ color: AMBAR }}>Pendiente de {e.falta}</span>
+                    ) : (
+                      <span className="tabular-nums">
+                        {fmtNumero(e.valor)}
+                        {previo ? <span className="text-muted ml-2">{p1(e.valor / previo)} del paso anterior</span> : null}
                       </span>
                     )}
-                  </span>
+                  </div>
+                  <div className="bg-panel-2 mt-1 h-5 overflow-hidden rounded">
+                    {e.valor !== null && (
+                      <div
+                        className="h-full rounded"
+                        style={{
+                          width: `${Math.max(Math.sqrt(e.valor / maximo) * 100, 2)}%`,
+                          background: m.color,
+                          opacity: 1 - i * 0.18,
+                        }}
+                      />
+                    )}
+                  </div>
                 </div>
-                <div className="bg-panel-2 mt-1 h-5 overflow-hidden rounded">
-                  <div
-                    className="h-full rounded"
-                    style={{
-                      width: `${Math.max(Math.sqrt(e.valor / embudo[0].valor) * 100, 2)}%`,
-                      background: m.color,
-                      opacity: 1 - i * 0.18,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-            <p className="text-muted text-[11px]">
-              Ancho en escala raíz para que los pasos chicos se vean. Visitas y conversión quedan
-              firmes cuando se verifique Google Analytics.
-            </p>
+              );
+            })}
+            <p className="text-muted text-[11px]">Ancho en escala raíz para que los pasos chicos se vean.</p>
           </div>
         </Panel>
 
-        <Panel titulo="Origen del tráfico" nota="Google Analytics · pendiente de verificar">
-          <div className="h-44">
-            <ResponsiveContainer>
-              <BarChart data={m.traficoOrigen} layout="vertical" margin={{ left: 10 }}>
-                <CartesianGrid stroke={TEMA.line} horizontal={false} />
-                <XAxis type="number" {...ejes} tickFormatter={(v) => fmtNumero(v)} />
-                <YAxis type="category" dataKey="origen" {...ejes} width={70} />
-                <Tooltip
-                  cursor={{ fill: "#ffffff08" }}
-                  content={<TooltipSimple formato={fmtNumero} />}
-                />
-                <Bar dataKey="visitas" name="Visitas" fill={m.color} radius={[0, 3, 3, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+        <Panel titulo="Origen del tráfico" nota="Google Analytics">
+          <p className="text-sm" style={{ color: AMBAR }}>Pendiente de conectar Google Analytics: de ahí salen las visitas y de dónde vienen.</p>
         </Panel>
       </div>
 
@@ -1171,7 +1203,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
             ? "De Marketing → Carga (canjes de SIGMA) · venta por cupón de Tienda Nube"
             : tn
               ? "Canjes y venta leídos de los pedidos importados · el costo es carga manual"
-              : "Un cupón único por colaboración · datos de ejemplo"
+              : "Pendiente de cargar en Carga de marketing"
         }
       >
         {colabs.length === 0 ? (
@@ -1268,7 +1300,7 @@ function ChipFuente({ meta }: { meta: MetaAdsMarca }) {
   if (meta.fuente !== "meta") {
     return (
       <span title={meta.motivo}>
-        <Chip color={AMBAR}>Meta Ads: datos de ejemplo</Chip>
+        <Chip color={AMBAR}>Meta Ads: pendiente de conectar</Chip>
       </span>
     );
   }
@@ -1300,7 +1332,7 @@ function PanelMetaConsolidado({ marcas, meta }: { marcas: Marca[]; meta: MetaAds
       nota={
         conectadas === marcas.length
           ? "Leído de la API de Meta · se actualiza cada 15 min"
-          : `${conectadas} de ${marcas.length} marcas conectadas · el resto con datos de ejemplo`
+          : `${conectadas} de ${marcas.length} marcas conectadas · el resto, pendiente`
       }
     >
       <Tabla
@@ -1324,6 +1356,22 @@ function PanelMetaConsolidado({ marcas, meta }: { marcas: Marca[]; meta: MetaAds
           const t = x.totales;
           const cortes = x.diario.length - diasConPauta(x.diario);
           const v = deVenta(x);
+          if (x.fuente !== "meta") {
+            return (
+              <tr key={m.clave}>
+                <td className="px-2 py-2 whitespace-nowrap">
+                  <span className="mr-2 inline-block size-2 rounded-full" style={{ background: m.color }} />
+                  {m.nombre}
+                </td>
+                <td colSpan={10} className="px-2 py-2 text-xs" style={{ color: AMBAR }}>
+                  Pendiente de conectar{x.motivo ? ` · ${x.motivo}` : ""}
+                </td>
+                <td className="px-2 py-2">
+                  <ChipFuente meta={x} />
+                </td>
+              </tr>
+            );
+          }
           return (
             <tr key={m.clave}>
               <td className="px-2 py-2 whitespace-nowrap">
@@ -1395,7 +1443,16 @@ function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
         {meta.fuente === "demo" && meta.motivo && (
           <span className="text-muted text-[11px]">{meta.motivo}</span>
         )}
+        {meta.fuente === "meta" && meta.avisos?.map((x) => (
+          <span key={x} className="text-[11px]" style={{ color: AMBAR }}>{x}</span>
+        ))}
       </div>
+      {meta.fuente !== "meta" ? (
+        <div className="border-line bg-panel rounded-xl border p-3 text-sm" style={{ color: AMBAR }}>
+          Pendiente de conectar Meta Ads para {m.nombre}: inversión, alcance, campañas y ROAS aparecen acá cuando la cuenta esté conectada.
+        </div>
+      ) : (
+      <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi
           titulo="Inversión del período"
@@ -1539,6 +1596,8 @@ function SeccionMeta({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           )}
         </Panel>
       </div>
+      </>
+      )}
     </>
   );
 }
@@ -1578,7 +1637,7 @@ function SeccionTiendaNube({ m }: { m: Marca }) {
       <div className="border-line bg-panel flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3 text-sm">
         <span>
           <span className="text-muted mr-2 text-xs font-medium tracking-wide uppercase">Tienda Nube</span>
-          <Chip color={AMBAR}>Sin pedidos importados: venta de tienda con datos de ejemplo</Chip>
+          <Chip color={AMBAR}>Pendiente de importar: la venta de tienda va en 0</Chip>
           {venta.tiendaNube.motivo && (
             <span className="text-muted ml-2 text-[11px]">{venta.tiendaNube.motivo}</span>
           )}
@@ -1679,7 +1738,7 @@ function PanelFuentes() {
       fuente: "Meta Ads (API)",
       uso: "Inversión, días de pauta, alcance, CTR, compras, ROAS",
       porMarca: Object.fromEntries(
-        MARCAS.map((m) => [m.clave, meta[m.clave].fuente === "meta" ? { ok: true, texto: "Conectado" } : { ok: false, texto: meta[m.clave].motivo ?? "Ejemplo" }]),
+        MARCAS.map((m) => [m.clave, meta[m.clave].fuente === "meta" ? { ok: true, texto: "Conectado" } : { ok: false, texto: meta[m.clave].motivo ?? "Pendiente" }]),
       ) as Record<ClaveMarca, Estado>,
     },
     {
@@ -1781,17 +1840,17 @@ function PanelFuentes() {
       porMarca: null,
       general: planReal
         ? { ok: true, texto: `${plan.iniciativas.length} iniciativa(s) en el período` }
-        : { ok: false, texto: plan.motivo ?? "Sin iniciativas cargadas: se ven ejemplos" },
+        : { ok: false, texto: plan.motivo ?? "Pendiente: sin iniciativas cargadas" },
     },
     {
-      fuente: "Carga manual",
-      uso: "Leads, mensajes y tiempo de respuesta",
+      fuente: "Google Analytics",
+      uso: "Visitas a las tiendas y de dónde vienen",
       porMarca: null,
-      general: { ok: false, texto: "Datos de ejemplo · falta el formulario de carga" },
+      general: { ok: false, texto: "Pendiente de conectar" },
     },
   ];
   return (
-    <Panel titulo="De dónde sale cada número" nota="Verde = dato real · ámbar = ejemplo, con el motivo al pasar el mouse">
+    <Panel titulo="De dónde sale cada número" nota="Verde = conectado · ámbar = pendiente, con el motivo al pasar el mouse">
       <Tabla cabecera={["Fuente", "Alimenta", ...MARCAS.map((m) => m.nombre)]}>
         {filas.map((f) => (
           <tr key={f.fuente}>
@@ -1803,7 +1862,7 @@ function PanelFuentes() {
                   return (
                     <td key={m.clave} className="px-2 py-2" title={e.texto}>
                       <Chip color={e.ok ? VERDE : AMBAR}>
-                        {e.ok ? e.texto : "Ejemplo"}
+                        {e.ok ? e.texto : "Pendiente"}
                       </Chip>
                     </td>
                   );
@@ -1855,6 +1914,23 @@ function Indicadores() {
 // Página
 // ---------------------------------------------------------------------------
 
+/**
+ * Venta de los últimos meses con lo REAL que hay (mayorista, Mercado Libre y
+ * Tienda Nube). La inversión histórica no se guarda mes a mes todavía, así que
+ * va en cero y el gráfico lo dice.
+ */
+function historiaReal(
+  tn: { historia: { mes: string; venta: number }[] } | undefined,
+  may: { historia: { mes: string; venta: number }[] } | undefined,
+): Marca["historia"] {
+  const porMes = new Map<string, number>();
+  for (const h of [...(tn?.historia ?? []), ...(may?.historia ?? [])]) porMes.set(h.mes, (porMes.get(h.mes) ?? 0) + h.venta);
+  const NOMBRES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+  return [...porMes.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([mes, venta]) => ({ mes: NOMBRES[Number(mes.slice(5, 7)) - 1] ?? mes, inversion: 0, venta }));
+}
+
 export type OrigenVenta = "todas" | "mayorista" | "mercadolibre" | "tiendas";
 export const ORIGENES_VENTA: { clave: OrigenVenta; label: string }[] = [
   { clave: "todas", label: "Todas" },
@@ -1878,44 +1954,60 @@ function armarMarcas(
 ): Marca[] {
   const { meta, instagram, venta: real } = datos;
   const n = Math.max(P.transcurridos, 1);
-  // El EJEMPLO está escrito para 11 días de un mes: para otro período se
-  // estira parejo, así las proporciones se mantienen. Lo real no se toca.
-  const k = n / 11;
   return MARCAS.map((m) => {
     const ig = instagram[m.clave];
     const tn = real.tiendaNube.porMarca[m.clave];
     const may = real.mayorista.porMarca[m.clave];
+    const mt = meta[m.clave];
+    const metaReal = mt.fuente === "meta";
+    // TODO ARRANCA EN CERO Y SÓLO LO REAL LO LLENA (pedido de Ana, 25/11/2026:
+    // "si no tenemos el dato, que salga vacío, en 0 o pendiente, no un
+    // ejemplo"). De lib/marketing-demo.ts quedan sólo el nombre, el color y
+    // las METAS del acuerdo de rol (objetivo de venta y margen): eso no es un
+    // ejemplo, es lo que se le pide. La pantalla dice "Pendiente" donde la
+    // fuente no está conectada o cargada.
     const r: Marca = {
       ...m,
       // LAS METAS SON MENSUALES: para otro período se ajustan por sus días.
-      presupuestoMes: m.presupuestoMes === null ? null : m.presupuestoMes * P.factor,
+      presupuestoMes: null,
       ventaObjetivoMes: m.ventaObjetivoMes === null ? null : m.ventaObjetivoMes * P.factor,
-      ventaBase: m.ventaBase * P.factor,
-      ventaTiendas: m.ventaTiendas * k,
-      ventaMayorista: m.ventaMayorista * k,
-      pedidosTienda: Math.round(m.pedidosTienda * k),
-      ventaDiaria: Array.from({ length: n }, (_, i) => m.ventaDiaria[i % m.ventaDiaria.length] ?? 0),
+      ventaBase: 0,
+      ventaTiendas: 0,
+      ventaMayorista: 0,
+      pedidosTienda: 0,
+      ventaDiaria: Array.from({ length: n }, () => 0),
       gastoPorCanal: {
-        ...m.gastoPorCanal,
-        "Google Ads": m.gastoPorCanal["Google Ads"] * k,
-        "Mercado Ads": m.gastoPorCanal["Mercado Ads"] * k,
-        Influencers: m.gastoPorCanal.Influencers * k,
-        Contenido: m.gastoPorCanal.Contenido * k,
-        Ferias: m.gastoPorCanal.Ferias * k,
-        "Meta Ads": meta[m.clave].totales.gasto,
+        "Meta Ads": metaReal ? mt.totales.gasto : 0,
+        "Google Ads": 0,
+        "Mercado Ads": 0,
+        Influencers: 0,
+        Contenido: 0,
+        Ferias: 0,
       },
-      diasPautaActiva: diasConPauta(meta[m.clave].diario),
-      clicsPauta: meta[m.clave].totales.clics,
-      conversionesPauta: meta[m.clave].totales.compras,
+      diasPautaActiva: metaReal ? diasConPauta(mt.diario) : 0,
+      clicsPauta: metaReal ? mt.totales.clics : 0,
+      conversionesPauta: metaReal ? mt.totales.compras : 0,
+      publicacionesPorSemana: [],
+      seguidores: 0,
+      seguidoresMesAnterior: 0,
+      alcance30d: 0,
+      interacciones30d: 0,
+      mensajes30d: 0,
+      tiempoRespuestaMin: 0,
+      puntajeTienda: 0,
+      resenas: 0,
+      visitasTienda: 0,
+      traficoOrigen: [],
+      leadsMayoristas: 0,
+      historia: historiaReal(tn, may),
     };
-    // LA PLANILLA DE MARKETING PISA AL EJEMPLO en presupuesto y en todo lo
-    // que no es Meta: influencers (honorarios + canje + envío), Google Ads,
-    // contenido/producción y ferias. La pauta de Meta sólo se toma de la
-    // planilla si la API de Meta no está conectada: si no, se contaría dos veces.
+    // LA CARGA DE MARKETING (Marketing → Carga) da el presupuesto y todo lo que
+    // no es Meta: influencers (honorarios + canje + envío), Google Ads,
+    // contenido/producción y ferias. La pauta de Meta sólo se toma de ahí si
+    // la API de Meta no está conectada: si no, se contaría dos veces.
     const pl = datos.planilla.datos;
     if (pl) {
-      // Sin presupuesto cargado para el período, queda "a definir": no se
-      // inventa uno con el ejemplo cuando la planilla es la fuente.
+      // Sin presupuesto cargado para el período queda "pendiente de cargar".
       r.presupuestoMes = presupuestoDelPeriodo(pl.presupuesto, m.clave, P.desde, P.hasta);
       const mesDesde = P.desde.slice(0, 7);
       const mesHasta = P.hasta.slice(0, 7);
@@ -1937,7 +2029,7 @@ function armarMarcas(
         "Mercado Ads": canales["Mercado Ads"],
         Contenido: canales.Contenido,
         Ferias: canales.Ferias,
-        "Meta Ads": meta[m.clave].fuente === "meta" ? r.gastoPorCanal["Meta Ads"] : canales["Meta Ads"],
+        "Meta Ads": metaReal ? r.gastoPorCanal["Meta Ads"] : canales["Meta Ads"],
       };
     }
     // MERCADO ADS: con la API conectada manda la API, igual que Meta: sumar
@@ -1957,21 +2049,12 @@ function armarMarcas(
       r.interacciones30d = d.interacciones;
       r.publicacionesPorSemana = d.publicacionesPorSemana;
     }
-    const ejemploTiendas = r.ventaTiendas;
-    const ejemploMayorista = r.ventaMayorista;
     if (tn) {
       r.ventaTiendas = tn.venta;
       r.pedidosTienda = tn.pedidos;
     }
     if (may) r.ventaMayorista = may.venta;
-    if (tn || may) {
-      // La forma de la curva sale de lo real; lo que falte se completa con
-      // el ejemplo repartido parejo, y `ventaAcumulada` escala al total.
-      r.ventaDiaria = Array.from({ length: n }, (_, i) =>
-        (tn ? (tn.diaria[i] ?? 0) : ejemploTiendas / n) +
-        (may ? (may.diaria[i] ?? 0) : ejemploMayorista / n),
-      );
-    }
+    r.ventaDiaria = r.ventaDiaria.map((_, i) => (tn?.diaria[i] ?? 0) + (may?.diaria[i] ?? 0));
     const meli = real.mercadoLibre?.porMarca[m.clave];
     r.ventaMercadoLibre = meli?.venta ?? 0;
     if (meli) r.ventaDiaria = r.ventaDiaria.map((v, i) => v + (meli.diaria[i] ?? 0));
@@ -2033,7 +2116,7 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
             avance: avancePlan(i),
           };
         })
-    : HITOS;
+    : [];
   const planilla = datos.planilla.datos;
   const colaboraciones: Colaboracion[] = planilla && planilla.colaboraciones.length
     ? colaboracionesDelPeriodo(datos, P)
@@ -2073,7 +2156,7 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
             ventaAtribuida: usado?.venta ?? 0,
           };
         })
-    : COLABORACIONES;
+    : [];
 
   const opciones: { clave: ClaveMarca | "todas"; nombre: string; color: string }[] = [
     { clave: "todas", nombre: "Consolidado", color: TEMA.ink },
@@ -2091,7 +2174,7 @@ export default function DashboardMarketing({ datos, periodo }: { datos: DatosTab
             {P.factor !== 1 && " · metas y presupuesto proporcionales a los días"}
           </p>
         </div>
-        <Chip color={AMBAR}>Ámbar = dato de ejemplo hasta conectar su fuente</Chip>
+        <Chip color={AMBAR}>Ámbar = pendiente de conectar o de cargar</Chip>
       </div>
 
       <FiltroPeriodo key={`${P.desde}-${P.hasta}`} periodo={P} />
