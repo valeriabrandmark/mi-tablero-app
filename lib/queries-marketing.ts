@@ -12,7 +12,7 @@ import type {
   LineaVenta,
 } from "@/lib/marketing-fuentes";
 import { tipoDeCambio } from "@/lib/meta-ads";
-import { SQL_ES_CANJE } from "@/lib/queries-carga";
+import { SQL_NO_ES_VENTA } from "@/lib/queries-carga";
 
 /**
  * Lo que el Tablero de Marca lee de la base: los pedidos de Tienda Nube que se
@@ -156,7 +156,7 @@ async function leerMayorista(r: Rango): Promise<Partial<Record<ClaveMarca, Datos
            join unnest($2::text[], $3::text[]) as m(clave, patron)
              on upper(fv.marca) like m.patron
           where fv.canal = $1 and fv.fecha between $4::date and $5::date
-            and not ${SQL_ES_CANJE("fv.")}
+            and not ${SQL_NO_ES_VENTA("fv.")}
           group by 1, 2`,
         [CANAL_MAYORISTA, marcas.map(([k]) => k), marcas.map(([, p]) => p), r.desde, r.hasta],
       ),
@@ -167,7 +167,7 @@ async function leerMayorista(r: Rango): Promise<Partial<Record<ClaveMarca, Datos
            join unnest($2::text[], $3::text[]) as m(clave, patron)
              on upper(fv.marca) like m.patron
           where fv.canal = $1 and fv.fecha between date_trunc('month', $4::date) - interval '3 months' and $4::date
-            and not ${SQL_ES_CANJE("fv.")}
+            and not ${SQL_NO_ES_VENTA("fv.")}
           group by 1, 2`,
         [CANAL_MAYORISTA, marcas.map(([k]) => k), marcas.map(([, p]) => p), r.hasta],
       ),
@@ -182,7 +182,7 @@ async function leerMayorista(r: Rango): Promise<Partial<Record<ClaveMarca, Datos
              join unnest($2::text[], $3::text[]) as m(clave, patron)
                on upper(fv.marca) like m.patron
             where fv.canal = $1 and fv.precio_neto * fv.cantidad > 0
-              and not ${SQL_ES_CANJE("fv.")}
+              and not ${SQL_NO_ES_VENTA("fv.")}
             group by 1, 2)
          select clave, count(*) filter (where primera between $4::date and $5::date) as nuevas
            from primera group by 1`,
@@ -381,7 +381,7 @@ async function leerTiendasNuevas(r: Rango): Promise<number | string> {
     const [fila] = await query<{ nuevas: string }>(
       `select count(*) as nuevas from (
          select cliente from gold.fact_ventas
-          where canal = $1 and precio_neto * cantidad > 0 and not ${SQL_ES_CANJE()}
+          where canal = $1 and precio_neto * cantidad > 0 and not ${SQL_NO_ES_VENTA()}
           group by cliente
          having min(fecha) between $2::date and $3::date) t`,
       [CANAL_MAYORISTA, r.desde, r.hasta],
@@ -477,7 +477,7 @@ const TOPE_DETALLE = 5000;
  *              día (bronze.ml_ads_diario por SKU) y UTM de la visita en la
  *              tienda con API. De Meta no hay atribución por pedido.
  *
- * Los clientes CANJE no son venta y no entran. Unibrandco = su tienda (API).
+ * Los clientes CANJE y los envíos al depósito (SQL_NO_ES_VENTA) no son venta y no entran. Unibrandco = su tienda (API).
  */
 async function leerDetalleVentas(r: Rango): Promise<DatosTablero["detalle"]> {
   const marcas = Object.entries(PATRON_MARCA_SIGMA) as [ClaveMarca, string][];
@@ -532,7 +532,7 @@ async function leerDetalleVentas(r: Rango): Promise<DatosTablero["detalle"]> {
            left join ads a on fv.canal = 'Mercado Libre' and a.sku = fv.sku and a.fecha = fv.fecha
           where fv.fecha between $3::date and $4::date
             and ((fv.canal in ('Mayorista', 'Mercado Libre') and m.clave is not null) or fv.canal = 'Tienda Nube')
-            and not ${SQL_ES_CANJE("fv.")}
+            and not ${SQL_NO_ES_VENTA("fv.")}
           order by fv.fecha desc
           limit ${TOPE_DETALLE + 1}`,
         [marcas.map(([k]) => k), marcas.map(([, p]) => p), r.desde, r.hasta],

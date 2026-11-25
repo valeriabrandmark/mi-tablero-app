@@ -38,6 +38,17 @@ export class ErrorCarga extends Error {}
  */
 export const SQL_ES_CANJE = (alias = "") => `upper(coalesce(${alias}cliente, '')) like 'CANJE%'`;
 
+/**
+ * LO QUE SIGMA FACTURA PERO NO ES VENTA, para sacarlo de la venta mayorista:
+ *   - los clientes de canje (arriba): mercadería a influencers;
+ *   - los "<MARCA> - DEP <LUGAR>" (ej. "DIAPER GENIE - DEP BUENOS AIRES"):
+ *     mercadería que se manda al depósito de FIXY en Buenos Aires. Es un
+ *     movimiento de stock propio, no una venta (Ana, 25/11/2026: sólo ese
+ *     cliente sumaba $ 7,6 M en noviembre).
+ */
+export const SQL_NO_ES_VENTA = (alias = "") =>
+  `(${SQL_ES_CANJE(alias)} or upper(coalesce(${alias}cliente, '')) like '%- DEP %' or upper(coalesce(${alias}cliente, '')) like '%- DEPOSITO%')`;
+
 const SQL_MARCA_CANJE = `case
   when upper(cliente) like '%DIAPER%' then 'diaper_genie'
   when upper(cliente) like '%HOLA%' then 'hola_toys'

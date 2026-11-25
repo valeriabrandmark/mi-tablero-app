@@ -421,7 +421,7 @@ export const INDICADORES: Indicador[] = [
   { nivel: 3, nombre: "Venta de tiendas oficiales por marca", formula: "Informe de ventas filtrado", fuente: "Panel Tienda Nube", estado: "listo" },
   { nivel: 3, nombre: "Conversión de cada tienda", formula: "Pedidos ÷ visitas", fuente: "Tienda Nube + Analytics", estado: "verificar" },
   { nivel: 3, nombre: "Ticket promedio", formula: "Venta ÷ pedidos", fuente: "Panel Tienda Nube", estado: "listo" },
-  { nivel: 3, nombre: "Venta mayorista de marcas propias", formula: "DG y Hola Toys a tiendas, sin canjes", fuente: "SIGMA", estado: "listo" },
+  { nivel: 3, nombre: "Venta mayorista de marcas propias", formula: "DG y Hola Toys a tiendas, sin canjes ni envíos a depósito", fuente: "SIGMA", estado: "listo" },
   { nivel: 3, nombre: "Venta en Mercado Libre por marca +", formula: "Ventas por marca del producto", fuente: "Mercado Libre (gold.fact_ventas)", estado: "listo" },
   { nivel: 3, nombre: "Costo de adquisición (CAC)", formula: "(Pauta + influencers) ÷ pedidos atribuidos", fuente: "Cálculo mensual", estado: "montar" },
   { nivel: 3, nombre: "Retorno de la inversión (ROAS / MER) +", formula: "Venta ÷ inversión de marketing", fuente: "Cálculo mensual", estado: "listo" },
