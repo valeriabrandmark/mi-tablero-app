@@ -822,11 +822,13 @@ Usuarios).
 
 Pasos para encenderlo:
 
-1. Pedirle a FIXY el `api_token` y cargarlo como `FIXY_API_TOKEN` en Vercel y
-   en el `.env` del orquestador. Probarlo con `python fixy.py --probar`.
+1. Cargar el `api_token` de FIXY como `FIXY_API_TOKEN` en Vercel y como
+   *secret* del repo `tablero_quo` en GitHub (Settings → Secrets and variables
+   → Actions), que es donde corre el orquestador.
 2. Cargar los `FIXY_CONTACTO_*` en Vercel (ver `.env.example`).
-3. Dar de alta en Digip el despacho hacia FIXY y poner su nombre en
-   `FIXY_DESPACHOS_DIGIP` (por defecto `FIXY`).
+3. Dar de alta en Digip el despacho hacia FIXY y poner su nombre en la
+   *variable* `FIXY_DESPACHOS_DIGIP` del repo `tablero_quo` (por defecto
+   `FIXY`).
 4. Generar un `FIXY_WEBHOOK_TOKEN`, cargarlo en Vercel y registrar el webhook
    en FIXY (`api/v2/integracion.json`): `url` =
    `https://brandmark-business.vercel.app/api/fixy/webhook`, `token` = ese
