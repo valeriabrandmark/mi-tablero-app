@@ -16,8 +16,17 @@ const MAX_PEDIDOS = 20_000;
  * Importador de pedidos de Tienda Nube para el Tablero de Marca.
  *
  * El CSV se lee EN EL NAVEGADOR (lib/importador-tn.ts) y acá llega ya
- * convertido en pedidos, sin emails ni nombres. Esta ruta sólo valida y hace
- * upsert: reimportar el mismo archivo no duplica, actualiza.
+ * convertido en pedidos, sin emails ni nombres. Esta ruta valida y REEMPLAZA:
+ *
+ *   - Los pedidos del archivo se insertan o se actualizan (por marca + número).
+ *   - Los pedidos de ESA marca que caen entre la primera y la última fecha del
+ *     archivo y NO están en él se borran. Se exporta siempre "todas las
+ *     ventas", así que lo que no vino ya no existe en la tienda (o se importó
+ *     por error). Antes sólo se sumaba, y un archivo importado con la marca
+ *     equivocada quedaba para siempre (25/11/2026: 11 pedidos de Hola Toys
+ *     sumados a Diaper Genie).
+ *   - Si los productos del archivo son de OTRA marca propia (por el SKU en
+ *     SIGMA), no se importa: es casi seguro que se eligió mal la marca.
  *
  * Mismo permiso que la página: sólo el superadmin. Lo vuelve a chequear el
  * proxy por prefijo (/api/marketing), y acá de nuevo porque escribe.
@@ -96,6 +105,44 @@ export async function POST(request: NextRequest) {
   const archivo = texto(cuerpo.archivo, 200);
   const fechas = pedidos.map((p) => p.fecha).sort();
 
+  // ¿EL ARCHIVO ES DE ESTA MARCA? Se mira la marca de SIGMA de cada SKU. Sólo
+  // entre las marcas propias con tienda (Unibrandco es multimarca: no se mira).
+  if (cuerpo.marca !== "unibrandco") {
+    const skus = [...new Set(pedidos.flatMap((p) => p.productos.map((x) => x.sku)).filter((x): x is string => !!x))];
+    if (skus.length) {
+      try {
+        const marcas = await query<{ clave: string; n: string }>(
+          `select case when upper(a."attributes.marca") like 'HOLA%' then 'hola_toys'
+                       when upper(a."attributes.marca") like '%DIAPER%GENIE%' then 'diaper_genie'
+                       when upper(a."attributes.marca") like '%LITTER%GENIE%' then 'litter_genie' end as clave,
+                  count(*) as n
+             from bronze.sigma_articulos a
+            where a.id = any($1::text[])
+            group by 1`,
+          [skus],
+        );
+        const conocidas = marcas.filter((m) => m.clave);
+        const total = conocidas.reduce((s, m) => s + Number(m.n), 0);
+        const propia = Number(conocidas.find((m) => m.clave === cuerpo.marca)?.n ?? 0);
+        const otra = conocidas.filter((m) => m.clave !== cuerpo.marca).sort((a, b) => Number(b.n) - Number(a.n))[0];
+        if (total && otra && Number(otra.n) / total > 0.5 && propia < Number(otra.n)) {
+          const nombre = (c: string) => MARCAS.find((m) => m.clave === c)?.nombre ?? c;
+          return NextResponse.json(
+            {
+              error:
+                `Este archivo parece de ${nombre(otra.clave)}: ${otra.n} de ${total} productos son de esa marca en SIGMA. ` +
+                `Elegí la marca correcta antes de importar (se eligió ${nombre(cuerpo.marca)}).`,
+            },
+            { status: 400 },
+          );
+        }
+      } catch (e) {
+        // Sin catálogo de SIGMA no se frena la importación: es un control extra.
+        console.error("[api/marketing/tienda-nube] control de marca", e);
+      }
+    }
+  }
+
   try {
     const resultado = await enTransaccion(async (ejecutar) => {
       // Un solo insert con jsonb_to_recordset: cientos de pedidos en un viaje,
@@ -128,13 +175,21 @@ export async function POST(request: NextRequest) {
         [cuerpo.marca, JSON.stringify(pedidos), archivo, usuario],
       );
       const nuevos = filas.filter((f) => f.nuevo).length;
+      // REEMPLAZO: lo de esta marca dentro del rango del archivo que no vino en él.
+      const borrados = await ejecutar<{ numero: string }>(
+        `delete from bronze.mkt_tn_pedidos
+          where marca = $1 and fecha between $2::timestamptz and $3::timestamptz
+            and numero <> all($4::text[])
+         returning numero`,
+        [cuerpo.marca, fechas[0], fechas.at(-1), pedidos.map((p) => p.numero)],
+      );
       await ejecutar(
         `insert into bronze.mkt_tn_importaciones
            (marca, archivo, pedidos, nuevos, actualizados, desde, hasta, importado_por)
          values ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [cuerpo.marca, archivo, filas.length, nuevos, filas.length - nuevos, fechas[0], fechas.at(-1), usuario],
       );
-      return { pedidos: filas.length, nuevos, actualizados: filas.length - nuevos };
+      return { pedidos: filas.length, nuevos, actualizados: filas.length - nuevos, borrados: borrados.length };
     });
     return NextResponse.json({ ...resultado, descartados });
   } catch (error) {

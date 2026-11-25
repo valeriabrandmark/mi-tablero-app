@@ -107,11 +107,13 @@ export default function ImportadorTiendaNube() {
         nuevos?: number;
         actualizados?: number;
         descartados?: number;
+        borrados?: number;
       };
       if (!r.ok) throw new Error(j.error ?? `Error ${r.status}`);
       setResultado(
         `Listo: ${j.pedidos} pedidos de ${nombreMarca(marca)} (${j.nuevos} nuevos, ${j.actualizados} actualizados` +
-          `${j.descartados ? `, ${j.descartados} descartados` : ""}).`,
+          `${j.descartados ? `, ${j.descartados} descartados` : ""}` +
+          `${j.borrados ? `, ${j.borrados} borrados porque ya no estaban en la exportación` : ""}).`,
       );
       setLectura(null);
       setArchivo(null);
@@ -132,8 +134,10 @@ export default function ImportadorTiendaNube() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Importar Tienda Nube</h1>
         <p className="text-muted text-sm">
-          Pedidos de la tienda de cada marca para el Tablero de Marca. Reimportar es seguro: los
-          pedidos que ya estaban se actualizan, no se duplican.
+          Pedidos de la tienda de cada marca para el Tablero de Marca. El archivo REEMPLAZA lo que
+          había de esa marca entre su primera y su última fecha: los pedidos se actualizan, no se
+          duplican, y los que ya no vienen en la exportación se borran. Si los productos son de otra
+          marca, no se importa.
         </p>
       </div>
 
