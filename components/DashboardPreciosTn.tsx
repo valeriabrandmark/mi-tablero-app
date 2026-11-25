@@ -2189,7 +2189,7 @@ export default function DashboardPreciosTn() {
             corregir sino una decisión de si seguir vendiendo el producto, y se aprueban de
             a una. Autorizar no cambia nada en Tienda Nube todavía — la escritura la hace{" "}
             <code>precios aplicar</code>, que vuelve a verificar cada precio contra la
-            tienda y escribe como máximo 50 por corrida.
+            tienda y escribe como máximo {TANDA_ESCRITURA} por corrida.
           </p>
           <div className="flex gap-2">
             <button

@@ -290,23 +290,34 @@ export const GRUPOS_INFORMATIVOS_SQL = GRUPOS_INFORMATIVOS.map((g) => `'${g}'`).
  * POR QUÉ HAY UN TOPE. Escribir un precio es lo único irreversible de todo
  * esto: un precio publicado ya lo vio un cliente. Si una corrida sale con un
  * dato roto —un costo mal cargado, una fuente que devolvió precios de otro
- * producto— 50 productos mal es un problema de una tarde y 3.788 es un problema
- * de una semana. El tope es el freno de mano.
+ * producto— 150 productos mal es un problema de una tarde y 3.788 es un
+ * problema de una semana. El tope es el freno de mano.
+ *
+ * ERA 50 Y ESTE BOTÓN SE QUEDÓ ATRÁS. El motor subió su tope a 150 el 10/11,
+ * cuando se sacó el filtro de stock y la cola pasó de ~340 propuestas a ~3.500.
+ * Pero este botón manda `limite` EXPLÍCITO al workflow, así que seguía pidiendo
+ * 50 por corrida por más que del otro lado el default fuera 150: vaciar una
+ * cola de 2.800 aprobadas eran 56 clics. Subir el tope del motor y dejar este
+ * número quieto no subió nada; es un solo tope y se lee de un solo lado.
+ *
+ * 150 SIGUEN ENTRANDO HOLGADO EN LA CORRIDA: 2,7 segundos por precio medidos
+ * sobre las aplicaciones reales, o sea unos 7 minutos contra los 30 de
+ * `timeout-minutes` del workflow.
  *
  * SE DECLARA ACÁ Y NO SÓLO EN LA RUTA porque la pantalla lo necesita para no
  * mentir: con 200 autorizadas, un botón que dice "Escribir (200)" promete algo
  * que no va a pasar. Los dos leen de esta constante, así que no pueden decir
  * números distintos.
  */
-export const TANDA_ESCRITURA = 50;
+export const TANDA_ESCRITURA = 150;
 
 /**
  * Cuántos cambios como máximo trae el historial cuando se pide "ver todo".
  *
  * NO ES "TODO" DE VERDAD, Y ESTÁ BIEN QUE NO LO SEA. El historial crece para
- * siempre: con dos corridas por semana escribiendo hasta 50 precios cada una
- * son ~5.000 por año, y dentro de tres años una pantalla sin tope tardaría lo
- * mismo que tarda el navegador en renderizar 15.000 filas — que es mucho.
+ * siempre: con tres corridas por semana escribiendo hasta 150 precios cada una
+ * son ~23.000 por año, y una pantalla sin tope tardaría lo mismo que tarda el
+ * navegador en renderizar esas filas — que es mucho.
  *
  * 5.000 cubre de sobra los dos meses que hacen falta mirar de corrido, y lo que
  * quede afuera se alcanza filtrando por fecha, que es justamente para lo que
