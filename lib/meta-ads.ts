@@ -510,16 +510,28 @@ export async function leerMetaAds(p: Periodo): Promise<MetaAds> {
         .filter(Boolean);
       if (!token) return [m.clave, demoMeta(m, "Falta META_ADS_TOKEN", p)];
       if (!cuentas.length) return [m.clave, demoMeta(m, `Falta META_ADS_CUENTA_${m.clave.toUpperCase()}`, p)];
-      try {
-        const porCuenta = await Promise.all(
-          cuentas.map(async (c) => enPesos(await leerMarca(m, token, c, p), await monedaDe(c, token))),
-        );
-        return [m.clave, combinar(porCuenta)];
-      } catch (e) {
-        const motivo = e instanceof Error ? e.message : String(e);
-        console.error(`Meta Ads ${m.nombre}:`, motivo);
-        return [m.clave, demoMeta(m, `Meta devolvió un error: ${motivo}`, p)];
-      }
+      // CADA CUENTA POR SEPARADO: si una falla (por ejemplo, la cuenta nueva
+      // todavía no le dio permiso al usuario del sistema), las demás se
+      // muestran igual y la que falta se avisa. Antes una sola fallida tiraba
+      // la marca entera (25/11/2026: Hola Toys Argentina sin permiso).
+      const resultados = await Promise.allSettled(
+        cuentas.map(async (c) => enPesos(await leerMarca(m, token, c, p), await monedaDe(c, token))),
+      );
+      const ok = resultados.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+      const avisos = resultados.flatMap((r, i) => {
+        if (r.status === "fulfilled") return [];
+        const motivo = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        console.error(`Meta Ads ${m.nombre} (${cuentas[i]}):`, motivo);
+        const permiso = /#200|permission|permiso/i.test(motivo);
+        return [
+          `Cuenta ${cuentas[i]} sin leer: ${
+            permiso ? "el usuario del sistema no tiene permiso sobre esta cuenta (asignarla en el Business Manager)" : motivo
+          }`,
+        ];
+      });
+      if (!ok.length) return [m.clave, demoMeta(m, `Meta devolvió un error: ${avisos.join(" · ")}`, p)];
+      const combinado = combinar(ok);
+      return [m.clave, avisos.length ? { ...combinado, avisos } : combinado];
     }),
   );
   return Object.fromEntries(pares) as MetaAds;
