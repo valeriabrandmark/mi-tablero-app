@@ -229,7 +229,7 @@ export function DetalleVentas({
       (l) =>
         (conPauta === "todas" || (conPauta === "si" ? !!l.pauta : !l.pauta)) &&
         (!texto ||
-          [l.producto, l.sku, l.cliente, l.orden, l.prov, l.pauta, l.canal].some((x) => x && x.toLowerCase().includes(texto))),
+          [l.producto, l.sku, l.cliente, l.orden, l.prov, l.pauta, l.canal].some((x) => x && String(x).toLowerCase().includes(texto))),
     )
     .sort((a, b) =>
       orden === "venta" ? b.venta - a.venta : orden === "margen" ? (b.margen ?? -Infinity) - (a.margen ?? -Infinity) : a.fecha < b.fecha ? 1 : -1,
@@ -321,7 +321,7 @@ export function DetalleVentas({
                   {l.canal}
                 </td>
                 <td className="max-w-80 px-2 py-1.5">
-                  <span className="line-clamp-2">{l.producto}</span>
+                  <span className="line-clamp-2">{String(l.producto ?? "—")}</span>
                   {l.cliente && <span className="text-muted block">{l.cliente}</span>}
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums">{fmtNumero(l.cantidad)}</td>

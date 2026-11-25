@@ -539,7 +539,7 @@ async function leerDetalleVentas(r: Rango): Promise<DatosTablero["detalle"]> {
       ),
       // Las tiendas sin API (CSV importado): un pedido por fila, sin costo.
       query<{
-        clave: ClaveMarca; fecha: string; orden: string; productos: string | null; unidades: string | null;
+        clave: ClaveMarca; fecha: string; orden: string; productos: unknown; unidades: string | null;
         total: string; provincia: string | null; cupon: string | null;
       }>(
         `select marca as clave, ((fecha at time zone '${TZ}')::date)::text as fecha, numero::text as orden,
@@ -572,11 +572,35 @@ async function leerDetalleVentas(r: Rango): Promise<DatosTablero["detalle"]> {
     const unibrandcoApi = lineas.some((l) => l.clave === "unibrandco");
     for (const p of importadas) {
       if (p.clave === "unibrandco" && unibrandcoApi) continue;
-      lineas.push({
-        clave: p.clave, fecha: p.fecha, canal: "Tienda Nube", orden: p.orden, cliente: null, sku: null,
-        producto: p.productos ?? "—", cantidad: Number(p.unidades ?? 0), venta: Number(p.total), neto: null,
+      // `productos` es jsonb: [{ sku, nombre, precio, cantidad }]. UNA LÍNEA POR
+      // PRODUCTO, como el resto del detalle. Mostrarlo tal cual rompía la
+      // pantalla de la marca (React no dibuja un objeto).
+      const base = {
+        clave: p.clave, fecha: p.fecha, canal: "Tienda Nube" as const, orden: p.orden, cliente: null, neto: null,
         margen: null, provincia: p.provincia, cupon: p.cupon, conAds: false, utmFuente: null, utmCampana: null,
-      });
+      };
+      const items = Array.isArray(p.productos)
+        ? (p.productos as { sku?: unknown; nombre?: unknown; precio?: unknown; cantidad?: unknown }[]).filter(
+            (x) => x && typeof x === "object",
+          )
+        : [];
+      if (items.length) {
+        for (const x of items) {
+          const cantidad = Number(x.cantidad) || 0;
+          lineas.push({
+            ...base,
+            sku: typeof x.sku === "string" ? x.sku : null,
+            producto: typeof x.nombre === "string" ? x.nombre : "—",
+            cantidad,
+            venta: (Number(x.precio) || 0) * cantidad,
+          });
+        }
+      } else {
+        lineas.push({
+          ...base, sku: null, producto: typeof p.productos === "string" ? p.productos : "—",
+          cantidad: Number(p.unidades ?? 0), venta: Number(p.total),
+        });
+      }
     }
     lineas.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
     return { lineas, recortado: fact.length > TOPE_DETALLE };
