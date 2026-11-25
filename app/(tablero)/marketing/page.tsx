@@ -1,7 +1,7 @@
 import DashboardMarketing from "@/components/DashboardMarketing";
 import { leerInstagram, leerMetaAds } from "@/lib/meta-ads";
 import { hastaConDatos, periodoAnterior, resolverPeriodo } from "@/lib/marketing-periodo";
-import { leerVentaReal } from "@/lib/queries-marketing";
+import { leerDetalleVentas, leerVentaReal } from "@/lib/queries-marketing";
 import { leerPlanillaCarga } from "@/lib/queries-carga";
 import { leerPlan } from "@/lib/queries-planificacion";
 
@@ -39,7 +39,7 @@ export default async function MarketingPage(props: PageProps<"/marketing">) {
   const ant = periodoAnterior(periodo);
   const rangoAnt = { desde: ant.desde, hasta: hastaConDatos(ant) };
 
-  const [meta, instagram, venta, plan, planilla, metaAnt, instagramAnt, ventaAnt] = await Promise.all([
+  const [meta, instagram, venta, plan, planilla, metaAnt, instagramAnt, ventaAnt, detalle] = await Promise.all([
     leerMetaAds(periodo),
     leerInstagram(periodo),
     leerVentaReal(rango),
@@ -55,6 +55,7 @@ export default async function MarketingPage(props: PageProps<"/marketing">) {
     leerMetaAds(ant),
     leerInstagram(ant),
     leerVentaReal(rangoAnt),
+    leerDetalleVentas(rango),
   ]);
   return (
     <DashboardMarketing
@@ -64,6 +65,7 @@ export default async function MarketingPage(props: PageProps<"/marketing">) {
         venta,
         plan,
         planilla,
+        detalle,
         anterior: { periodo: ant, meta: metaAnt, instagram: instagramAnt, venta: ventaAnt },
         generado: new Date().toISOString(),
       }}

@@ -2,12 +2,14 @@ import { query } from "@/lib/db";
 import { CANAL_MAYORISTA } from "@/lib/constantes";
 import type { ClaveMarca } from "@/lib/marketing-demo";
 import type {
+  DatosTablero,
   DatosGoogleAds,
   DatosMayorista,
   DatosMercadoAds,
   DatosMercadoLibre,
   DatosTiendaNube,
   DatosVentaReal,
+  LineaVenta,
 } from "@/lib/marketing-fuentes";
 import { tipoDeCambio } from "@/lib/meta-ads";
 import { SQL_ES_CANJE } from "@/lib/queries-carga";
@@ -458,6 +460,132 @@ async function leerUnibrandcoApi(r: Rango): Promise<DatosTiendaNube | null> {
     ultimaImportacion: new Date().toISOString(),
   };
 }
+
+const TOPE_DETALLE = 5000;
+
+/**
+ * DETALLE DE VENTAS para el Tablero de Marca: cada línea vendida de las
+ * marcas en el período, de todos los canales, con:
+ *
+ *   PROVINCIA  Mayorista: la del cliente en el catálogo de SIGMA (por el
+ *              cliente de la venta). Mercado Libre: el destino del envío
+ *              (bronze.ml_envios). Tienda Nube con API: la del pedido
+ *              (bronze.tn_pedidos_items). CSV importado: la del pedido.
+ *   RENTABILIDAD  margen_total de gold.fact_ventas (ya descuenta costo,
+ *              comisiones y envío). El CSV importado no tiene costo.
+ *   PAUTA      cupón (influencer), Mercado Ads activo en la publicación ese
+ *              día (bronze.ml_ads_diario por SKU) y UTM de la visita en la
+ *              tienda con API. De Meta no hay atribución por pedido.
+ *
+ * Los clientes CANJE no son venta y no entran. Unibrandco = su tienda (API).
+ */
+async function leerDetalleVentas(r: Rango): Promise<DatosTablero["detalle"]> {
+  const marcas = Object.entries(PATRON_MARCA_SIGMA) as [ClaveMarca, string][];
+  try {
+    const [fact, importadas] = await Promise.all([
+      query<{
+        clave: ClaveMarca; fecha: string; canal: LineaVenta["canal"]; orden: string | null; cliente: string | null;
+        sku: string | null; producto: string | null; cantidad: string; venta: string; neto: string | null;
+        margen: string | null; provincia: string | null; cupon: string | null; con_ads: boolean;
+        utm_fuente: string | null; utm_campana: string | null;
+      }>(
+        `with cli as (
+           select distinct on ("clienteNombre") "clienteNombre" as nombre, "clienteId"::text as id
+             from bronze.sigma_ventas where "clienteNombre" is not null
+            order by "clienteNombre", fecha desc),
+         env as (
+           select distinct on (order_id) order_id::text as oid, destino_provincia
+             from bronze.ml_envios where destino_provincia is not null order by order_id),
+         tnp as (
+           select distinct on (pedido_numero) pedido_numero::text as num, provincia
+             from bronze.tn_pedidos_items order by pedido_numero),
+         utm as (
+           select number::text as num,
+                  nullif("customer_visit.utm_parameters.utm_source", '') as fuente,
+                  nullif("customer_visit.utm_parameters.utm_campaign", '') as campana
+             from bronze.tn_pedidos),
+         ads as (
+           select fecha, sku from bronze.ml_ads_diario
+            where costo > 0 and fecha between $3::date and $4::date group by 1, 2),
+         m as (select * from unnest($1::text[], $2::text[]) as m(clave, patron))
+         select case when fv.canal = 'Tienda Nube' then 'unibrandco' else m.clave end as clave,
+                fv.fecha::text as fecha, fv.canal,
+                coalesce(fv.comprobante, fv.nro_orden::bigint::text) as orden,
+                case when fv.canal = 'Mayorista' then fv.cliente end as cliente,
+                fv.sku, fv.producto, fv.cantidad,
+                case when fv.canal = 'Mayorista' then fv.precio_neto * fv.cantidad else fv.total_linea end as venta,
+                fv.precio_neto * fv.cantidad as neto,
+                fv.margen_total as margen,
+                case fv.canal when 'Mayorista' then c.provincia
+                              when 'Mercado Libre' then e.destino_provincia
+                              else t.provincia end as provincia,
+                upper(nullif(fv.cupon, '')) as cupon,
+                (a.sku is not null) as con_ads,
+                u.fuente as utm_fuente, u.campana as utm_campana
+           from gold.fact_ventas fv
+           left join m on upper(fv.marca) like m.patron
+           left join cli on fv.canal = 'Mayorista' and cli.nombre = fv.cliente
+           left join bronze.sigma_clientes c on c.id::text = cli.id
+           left join env e on fv.canal = 'Mercado Libre' and e.oid = fv.nro_orden::bigint::text
+           left join tnp t on fv.canal = 'Tienda Nube' and t.num = fv.nro_orden::bigint::text
+           left join utm u on fv.canal = 'Tienda Nube' and u.num = fv.nro_orden::bigint::text
+           left join ads a on fv.canal = 'Mercado Libre' and a.sku = fv.sku and a.fecha = fv.fecha
+          where fv.fecha between $3::date and $4::date
+            and ((fv.canal in ('Mayorista', 'Mercado Libre') and m.clave is not null) or fv.canal = 'Tienda Nube')
+            and not ${SQL_ES_CANJE("fv.")}
+          order by fv.fecha desc
+          limit ${TOPE_DETALLE + 1}`,
+        [marcas.map(([k]) => k), marcas.map(([, p]) => p), r.desde, r.hasta],
+      ),
+      // Las tiendas sin API (CSV importado): un pedido por fila, sin costo.
+      query<{
+        clave: ClaveMarca; fecha: string; orden: string; productos: string | null; unidades: string | null;
+        total: string; provincia: string | null; cupon: string | null;
+      }>(
+        `select marca as clave, ((fecha at time zone '${TZ}')::date)::text as fecha, numero::text as orden,
+                productos, unidades, total, provincia, upper(nullif(cupon, '')) as cupon
+           from bronze.mkt_tn_pedidos
+          where es_venta and (fecha at time zone '${TZ}')::date between $1::date and $2::date
+          order by fecha desc`,
+        [r.desde, r.hasta],
+      ).catch(() => []),
+    ]);
+    const lineas: LineaVenta[] = fact.slice(0, TOPE_DETALLE).map((f) => ({
+      clave: f.clave,
+      fecha: f.fecha,
+      canal: f.canal,
+      orden: f.orden,
+      cliente: f.cliente,
+      sku: f.sku,
+      producto: f.producto ?? "—",
+      cantidad: Number(f.cantidad),
+      venta: Number(f.venta),
+      neto: f.neto === null ? null : Number(f.neto),
+      margen: f.margen === null ? null : Number(f.margen),
+      provincia: f.provincia,
+      cupon: f.cupon,
+      conAds: f.con_ads,
+      utmFuente: f.utm_fuente,
+      utmCampana: f.utm_campana,
+    }));
+    // Unibrandco con API: su CSV importado (si lo hubiera) se ignora, igual que en la venta.
+    const unibrandcoApi = lineas.some((l) => l.clave === "unibrandco");
+    for (const p of importadas) {
+      if (p.clave === "unibrandco" && unibrandcoApi) continue;
+      lineas.push({
+        clave: p.clave, fecha: p.fecha, canal: "Tienda Nube", orden: p.orden, cliente: null, sku: null,
+        producto: p.productos ?? "—", cantidad: Number(p.unidades ?? 0), venta: Number(p.total), neto: null,
+        margen: null, provincia: p.provincia, cupon: p.cupon, conAds: false, utmFuente: null, utmCampana: null,
+      });
+    }
+    lineas.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
+    return { lineas, recortado: fact.length > TOPE_DETALLE };
+  } catch (e) {
+    return { lineas: [], motivo: motivoDe(e) };
+  }
+}
+
+export { leerDetalleVentas };
 
 /** `hasta` es el último día CON DATOS: hoy si el período sigue abierto. */
 export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
