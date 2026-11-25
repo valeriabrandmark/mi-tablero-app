@@ -652,7 +652,7 @@ function VentaPorCanal({ marcas }: { marcas: Marca[] }) {
   return (
     <Panel
       titulo="Ventas totales por canal"
-      nota="Mayorista sin IVA y sin canjes · Mercado Libre y Tienda Nube con IVA (lo que paga el cliente)"
+      nota="Mayorista sin IVA, sin canjes ni envíos al depósito de FIXY · Mercado Libre y Tienda Nube con IVA (lo que paga el cliente)"
     >
       {motivos.length > 0 && <p className="mb-2 text-xs" style={{ color: AMBAR }}>{motivos.join(" · ")}</p>}
       <Tabla cabecera={["Marca", "Mayorista (SIGMA)", "Mercado Libre", "Tienda Nube", "Total", "vs anterior"]}>
