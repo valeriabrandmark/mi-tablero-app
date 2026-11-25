@@ -72,6 +72,18 @@ export async function leerCanjesSigma(desde?: string, hasta?: string): Promise<L
     params.push(hasta);
     filtros.push(`fv.fecha <= $${params.length}::date`);
   }
+  // LOS CANJES VIVEN EN gold.fact_canjes (tablero_quo/modelo.py los saca de
+  // fact_ventas: no son venta). Se lee también fact_ventas por si todavía
+  // quedan ahí: así no importa en qué orden se publiquen los dos cambios, y
+  // un comprobante nunca aparece dos veces porque el orquestador lo mueve
+  // entero en una sola transacción.
+  const [{ hay }] = await query<{ hay: boolean }>(`select to_regclass('gold.fact_canjes') is not null as hay`);
+  const columnas = "comprobante, fecha, cliente, sku, producto, cantidad, costo_unitario";
+  const origen = hay
+    ? `(select ${columnas} from gold.fact_canjes
+        union all
+        select ${columnas} from gold.fact_ventas where ${SQL_ES_CANJE()})`
+    : "gold.fact_ventas";
   const filas = await query<{
     comprobante: string; fecha: string; marca: ClaveMarcaCarga; sku: string; producto: string;
     cantidad: string; costo: string; colaboracion_id: string | null;
@@ -79,7 +91,7 @@ export async function leerCanjesSigma(desde?: string, hasta?: string): Promise<L
     `select fv.comprobante, fv.fecha::text as fecha, ${SQL_MARCA_CANJE.replace(/cliente/g, "fv.cliente")} as marca,
             fv.sku, fv.producto, fv.cantidad,
             coalesce(fv.costo_unitario, 0) * fv.cantidad as costo, c.colaboracion_id
-       from gold.fact_ventas fv
+       from ${origen} fv
        left join bronze.mkt_colab_canjes c on c.comprobante = fv.comprobante
       where ${filtros.join(" and ")}
       order by fv.fecha desc, fv.comprobante`,
