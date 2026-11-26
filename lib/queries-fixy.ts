@@ -1,5 +1,9 @@
 import { query, queryOne } from "@/lib/db";
-import { DIAS_PARA_LLEGAR_A_FIXY, UMBRAL_DIFERENCIA_UNIDADES } from "@/lib/fixy";
+import {
+  DIAS_PARA_LLEGAR_A_FIXY,
+  PATRON_CLIENTE_TRANSFERENCIA_FIXY,
+  UMBRAL_DIFERENCIA_UNIDADES,
+} from "@/lib/fixy";
 
 /**
  * Consultas de Stock > FIXY. Las reglas están en lib/fixy.ts.
@@ -7,9 +11,12 @@ import { DIAS_PARA_LLEGAR_A_FIXY, UMBRAL_DIFERENCIA_UNIDADES } from "@/lib/fixy"
  * Cruza cuatro fuentes:
  *
  *   bronze.fixy_stock(_historico)  lo que FIXY dice que tiene (tablero_quo/fixy.py)
- *   bronze.digip_envios_fixy       lo que salió de Tucumán hacia FIXY
- *   app.fixy_recepciones(_items)   lo que le avisamos a FIXY que iba a entrar
- *   gold.fact_ventas               lo vendido por Tienda Nube y por Flex
+ *   gold.fact_ventas               las TRANSFERENCIAS de Tucumán a FIXY (venta
+ *                                  mayorista a "... - DEP BUENOS AIRES") y lo
+ *                                  vendido por Tienda Nube y por Flex
+ *   app.fixy_recepciones(_items)   lo que le avisamos a FIXY que iba a entrar;
+ *                                  las manuales son las importaciones
+ *   bronze.digip_envios_fixy       lo que Digip preparó para FIXY
  *
  * NO SE CACHEA, a diferencia del resto de Stock: las recepciones las escribe
  * esta misma pantalla, y avisar una tiene que verse en el momento.
@@ -50,6 +57,52 @@ export const VENTAS_DESDE_FIXY = `
     and (canal = 'Tienda Nube'
          or (canal = 'Mercado Libre' and logistica = 'self_service'))
   group by sku, fecha`;
+
+/**
+ * Las transferencias de Tucumán a FIXY, por SKU y día de la factura. Las
+ * notas de crédito restan (vienen negativas). Ver
+ * PATRON_CLIENTE_TRANSFERENCIA_FIXY en lib/fixy.ts.
+ *
+ * $1 es el patrón del cliente.
+ */
+const TRANSFERENCIAS_A_FIXY = `
+  select sku, fecha, sum(cantidad) as u
+  from gold.fact_ventas
+  where canal = 'Mayorista' and sku is not null
+    and cliente ilike $1
+  group by sku, fecha`;
+
+export type Transferencia = {
+  comprobante: string;
+  fecha: string;
+  cliente: string;
+  renglones: number;
+  unidades: number;
+};
+
+/** Los comprobantes de transferencia a FIXY, el más nuevo primero. */
+async function getTransferencias() {
+  return query<Record<string, unknown>>(
+    `select comprobante, fecha::text as fecha, cliente,
+            count(distinct sku) as renglones, sum(cantidad) as unidades
+       from gold.fact_ventas
+      where canal = 'Mayorista' and cliente ilike $1
+      group by comprobante, fecha, cliente
+      order by fecha desc, comprobante desc
+      limit 100`,
+    [PATRON_CLIENTE_TRANSFERENCIA_FIXY],
+  ).then((filas) =>
+    filas.map(
+      (r): Transferencia => ({
+        comprobante: String(r.comprobante ?? "—"),
+        fecha: String(r.fecha),
+        cliente: String(r.cliente),
+        renglones: num(r.renglones),
+        unidades: num(r.unidades),
+      }),
+    ),
+  );
+}
 
 /* ---------------------------------------------------------------------------
    ENVIOS DESDE TUCUMAN, Y SI YA SE AVISARON
@@ -184,7 +237,8 @@ export type FilaControl = {
   producto: string | null;
   marca: string | null;
   stockHoy: number;
-  avisado: number;
+  /** Transferencias de Tucumán (netas de NC) más importaciones avisadas. */
+  ingresado: number;
   vendido: number;
   enTransito: number;
   /** Lo que no explican ni la venta ni el ingreso. Negativo = falta. */
@@ -194,9 +248,9 @@ export type FilaControl = {
 /**
  * La cuenta, por SKU, entre la primera foto de FIXY y la última:
  *
- *   diferencia = (stock hoy − stock al empezar) + vendido − avisado
+ *   diferencia = (stock hoy − stock al empezar) + vendido − ingresado
  *
- * Lo vendido y lo avisado se cuentan desde el día SIGUIENTE a la primera foto:
+ * Lo vendido y lo ingresado se cuentan desde el día SIGUIENTE a la primera foto:
  * esa foto ya incluye todo lo anterior, es la línea de base.
  *
  * NO SE HACE DIA POR DIA como en Full, a propósito. Día por día, un día sin
@@ -204,9 +258,16 @@ export type FilaControl = {
  * juntan por fecha con la foto-- y aparece un faltante que no existe. Con
  * puntas y totales, un hueco en la foto no cambia nada.
  *
- * "Avisado" son las recepciones que mandamos (de Tucumán y las importaciones),
- * no los envíos de Digip: es lo que FIXY supo que iba a recibir. Un envío de
- * Digip sin aviso aparece arriba, en la lista de envíos, para avisarlo.
+ * "INGRESADO" SALE DE DOS LADOS, Y NO DE TRES:
+ *
+ *   - lo que viene de Tucumán, de las TRANSFERENCIAS de Sigma (factura menos
+ *     nota de crédito al cliente "... - DEP BUENOS AIRES");
+ *   - las importaciones, que van directo a FIXY y no pasan por Sigma como
+ *     transferencia: de las recepciones avisadas A MANO.
+ *
+ * Las recepciones avisadas desde un pedido de Digip NO cuentan: son la misma
+ * mercadería que la transferencia, y sumarlas la contaría dos veces. Sirven
+ * para que FIXY sepa qué le llega, no para el control.
  */
 async function getControl() {
   const rango = await oVacio(
@@ -226,10 +287,11 @@ async function getControl() {
   const hayRecepciones = await queryOne<{ ok: boolean }>(
     `select to_regclass('app.fixy_recepciones_items') is not null as ok`,
   );
-  const avisos = hayRecepciones?.ok
+  const importaciones = hayRecepciones?.ok
     ? `select i.sku, r.creada_en::date as fecha, sum(i.cantidad) as u
          from app.fixy_recepciones_items i
          join app.fixy_recepciones r on r.id = i.recepcion_id
+        where r.origen = 'manual'
         group by i.sku, r.creada_en::date`
     : `select null::text as sku, null::date as fecha, 0::numeric as u where false`;
 
@@ -249,12 +311,16 @@ async function getControl() {
      ),
      ultimo as (select max(fecha) as f from foto),
      ventas as (${VENTAS_DESDE_FIXY}),
-     avisos as (${avisos})
+     ingresos as (
+       ${TRANSFERENCIAS_A_FIXY}
+       union all
+       ${importaciones}
+     )
      select p.sku,
             s.descripcion                      as producto,
             s."attributes.marca"               as marca,
             p.hoy                              as stock_hoy,
-            coalesce(a.u, 0)                   as avisado,
+            coalesce(a.u, 0)                   as ingresado,
             coalesce(v.u, 0)                   as vendido,
             coalesce(a.recientes, 0)           as en_transito,
             (p.hoy - p.base) + coalesce(v.u, 0) - coalesce(a.u, 0) as diferencia
@@ -266,16 +332,17 @@ async function getControl() {
        left join lateral (
          select sum(u) as u,
                 sum(u) filter (
-                  where avisos.fecha > (select f from ultimo) - ${DIAS_PARA_LLEGAR_A_FIXY}
+                  where ingresos.fecha > (select f from ultimo) - ${DIAS_PARA_LLEGAR_A_FIXY}
                 ) as recientes
-           from avisos
-          where avisos.sku = p.sku and avisos.fecha > p.base_fecha
+           from ingresos
+          where ingresos.sku = p.sku and ingresos.fecha > p.base_fecha
        ) a on true
        left join bronze.sigma_articulos s on trim(s.id) = p.sku
       -- Sólo los SKU que tuvieron algún día después de la base.
       where p.hoy is not null and p.base_fecha < (select f from ultimo)
       order by 8 asc
       limit 500`,
+    [PATRON_CLIENTE_TRANSFERENCIA_FIXY],
   );
 
   return {
@@ -285,7 +352,7 @@ async function getControl() {
         producto: txt(x.producto),
         marca: txt(x.marca),
         stockHoy: num(x.stock_hoy),
-        avisado: num(x.avisado),
+        ingresado: num(x.ingresado),
         vendido: num(x.vendido),
         enTransito: num(x.en_transito),
         diferencia: num(x.diferencia),
@@ -419,7 +486,8 @@ async function getEventos() {
 }
 
 export async function getDashboardFixy() {
-  const [envios, recepciones, control, publicado, eventos] = await Promise.all([
+  const [transferencias, envios, recepciones, control, publicado, eventos] = await Promise.all([
+    getTransferencias(),
     getEnvios(),
     getRecepciones(),
     getControl(),
@@ -427,6 +495,7 @@ export async function getDashboardFixy() {
     getEventos(),
   ]);
   return {
+    transferencias,
     envios: envios.filas,
     recepciones: recepciones.filas,
     control,

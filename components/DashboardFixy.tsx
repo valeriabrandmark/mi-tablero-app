@@ -16,6 +16,7 @@ import type {
   FilaControl,
   FilaPublicado,
   Recepcion,
+  Transferencia,
 } from "@/lib/queries-fixy";
 import { useDatosTablero } from "@/lib/useDatosTablero";
 
@@ -124,6 +125,22 @@ export default function DashboardFixy() {
     },
   ];
 
+  const colTransferencias: Columna<Transferencia>[] = [
+    { titulo: "Comprobante", celda: (t) => t.comprobante, orden: (t) => t.comprobante },
+    { titulo: "Fecha", celda: (t) => t.fecha, orden: (t) => t.fecha },
+    { titulo: "Cliente", celda: (t) => t.cliente },
+    { titulo: "Artículos", celda: (t) => fmtNumero(t.renglones), numerica: true },
+    {
+      titulo: "Unidades",
+      ayuda: "Las notas de crédito restan.",
+      celda: (t) => (
+        <span style={{ color: t.unidades < 0 ? TEMA.negativo : undefined }}>{fmtNumero(t.unidades)}</span>
+      ),
+      numerica: true,
+      total: fmtNumero(sumar(data.transferencias, (t) => t.unidades)),
+    },
+  ];
+
   const colRecepciones: Columna<Recepcion>[] = [
     { titulo: "Remito", celda: (r) => r.remito, orden: (r) => r.remito },
     { titulo: "Origen", celda: (r) => (r.origen === "digip" ? "Tucumán (Digip)" : "Manual / importación") },
@@ -156,11 +173,12 @@ export default function DashboardFixy() {
       orden: (f) => f.producto,
     },
     {
-      titulo: "Avisado",
-      ayuda: "Unidades de las recepciones avisadas a FIXY en el período.",
-      celda: (f) => fmtNumero(f.avisado),
+      titulo: "Ingresado",
+      ayuda:
+        "Lo que entró a FIXY en el período: transferencias desde Tucumán (facturas a \"... - DEP BUENOS AIRES\" menos notas de crédito) más importaciones avisadas a mano.",
+      celda: (f) => fmtNumero(f.ingresado),
       numerica: true,
-      orden: (f) => f.avisado,
+      orden: (f) => f.ingresado,
     },
     {
       titulo: "Vendido",
@@ -172,7 +190,7 @@ export default function DashboardFixy() {
     { titulo: "En FIXY hoy", celda: (f) => fmtNumero(f.stockHoy), numerica: true, orden: (f) => f.stockHoy },
     {
       titulo: "Viajando",
-      ayuda: `Avisado hace menos de ${DIAS_PARA_LLEGAR_A_FIXY} días: puede no haber llegado todavía.`,
+      ayuda: `Ingresado hace menos de ${DIAS_PARA_LLEGAR_A_FIXY} días: puede no haber llegado todavía.`,
       celda: (f) => (f.enTransito ? fmtNumero(f.enTransito) : "—"),
       numerica: true,
       orden: (f) => f.enTransito,
@@ -180,7 +198,7 @@ export default function DashboardFixy() {
     {
       titulo: "Diferencia",
       ayuda:
-        "Lo que se movió el stock de FIXY que no explican ni las ventas ni los ingresos avisados. Negativo: falta mercadería. Positivo: entró algo sin aviso o una venta no se descontó.",
+        "Lo que se movió el stock de FIXY que no explican ni las ventas ni los ingresos. Negativo: falta mercadería. Positivo: entró algo sin transferencia ni aviso, o una venta no se descontó.",
       celda: (f) => {
         const e = estadoDeDiferencia(f.diferencia, f.enTransito);
         return (
@@ -306,6 +324,18 @@ export default function DashboardFixy() {
       </div>
 
       <Panel
+        titulo="Transferencias de Tucumán a FIXY"
+        nota="Facturas y notas de crédito de Sigma a «... - DEP BUENOS AIRES». Es lo que el control cuenta como ingreso desde Tucumán."
+      >
+        <Tabla
+          filas={data.transferencias}
+          columnas={colTransferencias}
+          clave={(t) => `${t.comprobante}-${t.fecha}`}
+          vacio="No hay transferencias a FIXY en Sigma."
+        />
+      </Panel>
+
+      <Panel
         titulo="Envíos de Tucumán a FIXY"
         nota="Pedidos de Digip con despacho a FIXY. Cada uno se avisa a FIXY para que espere la mercadería."
       >
@@ -337,7 +367,7 @@ export default function DashboardFixy() {
       {data.puedeAvisar && (
         <Panel
           titulo="Avisar un ingreso a mano"
-          nota="Para las importaciones, que llegan directo a FIXY, o cualquier ingreso que no sale de Digip."
+          nota="Para las importaciones, que llegan directo a FIXY. Lo que sale de Tucumán no se carga acá: entra solo, con la transferencia de Sigma."
         >
           <div className="grid gap-3 text-sm sm:grid-cols-[220px_1fr]">
             <div className="space-y-2">

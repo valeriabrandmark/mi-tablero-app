@@ -48,6 +48,22 @@ export const SERVICIOS_FIXY = {
   sameday: { nombre: "Same day", codigo: "SDB" },
 } as const;
 
+/**
+ * CÓMO ENTRA LA MERCADERÍA DE TUCUMÁN A FIXY: una TRANSFERENCIA ENTRE DEPÓSITOS
+ * que en Sigma se factura como venta mayorista a un cliente propio, por
+ * ejemplo "DIAPER GENIE - DEP BUENOS AIRES". Las notas de crédito a ese
+ * cliente la corrigen (vienen con cantidad negativa en `fact_ventas`).
+ *
+ * Verificado el 25/11/2026: lo facturado neto a ese cliente el 18/11
+ * (F-B93-00001690, F-B93-00001693 y C-CB93-00000117) coincide unidad por unidad
+ * con el stock que informa FIXY para AC01003, AC01004 y AC01005.
+ *
+ * Se busca por el sufijo y no por el nombre exacto para que un cliente igual de
+ * otra marca ("HOLA TOYS - DEP BUENOS AIRES") entre sin tocar código. Es un
+ * patrón de `ilike`.
+ */
+export const PATRON_CLIENTE_TRANSFERENCIA_FIXY = "% - DEP BUENOS AIRES";
+
 /** Cuántos días puede tardar un envío de Tucumán en aparecer en el stock de FIXY. */
 export const DIAS_PARA_LLEGAR_A_FIXY = 7;
 
