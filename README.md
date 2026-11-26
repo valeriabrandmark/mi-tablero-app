@@ -812,8 +812,12 @@ Qué hay en el tablero:
   - **Envíos de Tucumán a FIXY**, con el botón **Avisar a FIXY**. Crea la
     orden de recepción en FIXY con lo que Digip preparó.
   - **Avisar un ingreso a mano**, para las importaciones.
-  - **Control de stock:** stock de hoy − stock al empezar + vendido − avisado.
-    Lo que no da cero es mercadería sin explicar.
+  - **Transferencias de Tucumán a FIXY:** las facturas y notas de crédito de
+    Sigma al cliente «... - DEP BUENOS AIRES». Así entra lo que sale de
+    Tucumán, sin cargar nada a mano.
+  - **Control de stock:** stock de hoy − stock al empezar + vendido −
+    ingresado. Ingresado = transferencias de Tucumán + importaciones avisadas a
+    mano. Lo que no da cero es mercadería sin explicar.
   - **Lo publicado contra lo que hay:** ningún canal debería mostrar más de lo
     que tiene FIXY.
 
