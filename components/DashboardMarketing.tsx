@@ -371,6 +371,38 @@ function DetalleVentas({ marca }: { marca: ClaveMarca | null }) {
   );
 }
 
+/**
+ * Los canales de GA4 (sessionDefaultChannelGroup) agrupados como se habla:
+ * pago, redes, orgánico, directo... Lo que no está en la lista va tal cual.
+ */
+const GRUPO_CANAL: Record<string, string> = {
+  "Paid Search": "Pago",
+  "Paid Social": "Pago",
+  "Paid Shopping": "Pago",
+  "Paid Video": "Pago",
+  "Paid Other": "Pago",
+  Display: "Pago",
+  "Cross-network": "Pago",
+  "Organic Social": "Redes",
+  "Organic Search": "Orgánico",
+  "Organic Shopping": "Orgánico",
+  "Organic Video": "Orgánico",
+  Direct: "Directo",
+  Referral: "Referencias",
+  Email: "Email",
+  SMS: "Otros",
+  Affiliates: "Referencias",
+  Unassigned: "Sin asignar",
+};
+function origenTrafico(porCanal: { canal: string; sesiones: number }[]) {
+  const m = new Map<string, number>();
+  for (const c of porCanal) {
+    const g = GRUPO_CANAL[c.canal] ?? c.canal;
+    m.set(g, (m.get(g) ?? 0) + c.sesiones);
+  }
+  return [...m.entries()].map(([origen, sesiones]) => ({ origen, sesiones })).sort((a, b) => b.sesiones - a.sesiones);
+}
+
 /** La misma marca en el período anterior. */
 function useMarcaAnterior(clave: ClaveMarca): Marca | undefined {
   return useFuentes().comparar.marcas.find((m) => m.clave === clave);
@@ -921,6 +953,11 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
     ...(objetivo ? { [claveRitmo]: Math.round((metaMes / P.dias) * (i + 1)) } : {}),
   }));
   const igReal = ig.fuente === "meta";
+  // GOOGLE ANALYTICS: conectado si no hay motivo; la marca sin propiedad no figura.
+  const gaFuente = fuentes.venta.analytics;
+  const ga = gaFuente && !gaFuente.motivo ? gaFuente.porMarca[m.clave] : undefined;
+  const gaA = fuentes.anterior.venta.analytics?.porMarca[m.clave];
+  const gaFalta = !gaFuente || gaFuente.motivo ? "conectar Google Analytics" : "configurar la propiedad de GA4 de esta tienda";
 
   const canales = CANALES.map((c) => ({ canal: c, Gasto: m.gastoPorCanal[c] }));
   const historia = m.historia;
@@ -931,7 +968,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
   // null = la fuente de ese paso no está conectada: se muestra "Pendiente".
   const embudo: { paso: string; valor: number | null; falta?: string }[] = [
     { paso: "Alcance del período", valor: igReal ? m.alcance30d : null, falta: "conectar Instagram" },
-    { paso: "Visitas tienda", valor: null, falta: "conectar Google Analytics" },
+    { paso: "Visitas tienda", valor: ga ? ga.sesiones : null, falta: gaFalta },
     { paso: "Clics de pauta", valor: meta.fuente === "meta" ? m.clicsPauta : null, falta: "conectar Meta Ads" },
     { paso: "Pedidos de tienda", valor: fuentes.venta.tiendaNube.porMarca[m.clave] ? m.pedidosTienda : null, falta: "importar Tienda Nube" },
   ];
@@ -1018,7 +1055,7 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           </span>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         {igReal ? (
           <>
             <Kpi
@@ -1043,6 +1080,16 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
             <TarjetaKpi titulo="Seguidores" valor="Pendiente" acento={AMBAR} detalle={`Pendiente de conectar Instagram · ${ig.motivo}`} />
             <TarjetaKpi titulo="Alcance del período" valor="Pendiente" acento={AMBAR} detalle="Pendiente de conectar Instagram" />
           </>
+        )}
+        {ga ? (
+          <Kpi
+            titulo="Visitas a la tienda"
+            valor={fmtNumero(ga.sesiones)}
+            detalle={`Conversión ${ga.sesiones ? p1((ga.compras || m.pedidosTienda) / ga.sesiones) : "—"} · ${fmtNumero(ga.compras)} compras en GA4`}
+            vs={{ actual: ga.sesiones, anterior: gaA?.sesiones ?? 0, formato: fmtNumero }}
+          />
+        ) : (
+          <TarjetaKpi titulo="Visitas a la tienda" valor="Pendiente" acento={AMBAR} detalle={`Pendiente de ${gaFalta}`} />
         )}
         <TarjetaPauta m={m} canal="Mercado Ads" gastoAnterior={A?.gastoPorCanal["Mercado Ads"]} />
         <TarjetaPauta m={m} canal="Google Ads" gastoAnterior={A?.gastoPorCanal["Google Ads"]} />
@@ -1191,8 +1238,22 @@ function VistaMarca({ m, meta }: { m: Marca; meta: MetaAdsMarca }) {
           </div>
         </Panel>
 
-        <Panel titulo="Origen del tráfico" nota="Google Analytics">
-          <p className="text-sm" style={{ color: AMBAR }}>Pendiente de conectar Google Analytics: de ahí salen las visitas y de dónde vienen.</p>
+        <Panel titulo="Origen del tráfico" nota="Google Analytics 4 · sesiones del período">
+          {!ga ? (
+            <p className="text-sm" style={{ color: AMBAR }}>Pendiente de {gaFalta}.</p>
+          ) : (
+            <div className="h-52">
+              <ResponsiveContainer>
+                <BarChart data={origenTrafico(ga.porCanal)} layout="vertical" margin={{ left: 10 }}>
+                  <CartesianGrid stroke={TEMA.line} horizontal={false} />
+                  <XAxis type="number" {...ejes} tickFormatter={(v) => fmtNumero(v)} />
+                  <YAxis type="category" dataKey="origen" {...ejes} width={80} />
+                  <Tooltip cursor={{ fill: "#ffffff08" }} content={<TooltipSimple formato={fmtNumero} />} />
+                  <Bar dataKey="sesiones" name="Sesiones" fill={m.color} radius={[0, 3, 3, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </Panel>
       </div>
 
@@ -1843,10 +1904,21 @@ function PanelFuentes() {
         : { ok: false, texto: plan.motivo ?? "Pendiente: sin iniciativas cargadas" },
     },
     {
-      fuente: "Google Analytics",
-      uso: "Visitas a las tiendas y de dónde vienen",
-      porMarca: null,
-      general: { ok: false, texto: "Pendiente de conectar" },
+      fuente: "Google Analytics 4 (script, 1 vez por día)",
+      uso: "Visitas a las tiendas, origen del tráfico y conversión",
+      porMarca: Object.fromEntries(
+        MARCAS.map((m) => {
+          const a = venta.analytics;
+          return [
+            m.clave,
+            a && !a.motivo
+              ? a.porMarca[m.clave]
+                ? { ok: true, texto: `Conectado${a.ultimaCarga ? ` · ${fechaCorta(a.ultimaCarga)}` : ""}` }
+                : { ok: false, texto: "Sin propiedad de GA4 configurada" }
+              : { ok: false, texto: a?.motivo ?? "Pendiente de conectar" },
+          ];
+        }),
+      ) as Record<ClaveMarca, Estado>,
     },
   ];
   return (

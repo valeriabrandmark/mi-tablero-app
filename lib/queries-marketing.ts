@@ -2,6 +2,7 @@ import { query } from "@/lib/db";
 import { CANAL_MAYORISTA } from "@/lib/constantes";
 import type { ClaveMarca } from "@/lib/marketing-demo";
 import type {
+  DatosAnalytics,
   DatosTablero,
   DatosGoogleAds,
   DatosMayorista,
@@ -319,6 +320,53 @@ function marcaGoogle(cuentaId: string, cuentaNombre: string | null, campana: str
   return null;
 }
 
+/**
+ * GOOGLE ANALYTICS 4: de bronze.ga4_diario, que manda el Apps Script
+ * apps-script/google-analytics-tablero.gs (corre con el usuario de Ana, una
+ * vez por día). La marca viene con cada propiedad.
+ */
+async function leerAnalytics(r: Rango): Promise<DatosVentaReal["analytics"]> {
+  try {
+    const [filas, ultima] = await Promise.all([
+      query<{
+        marca: ClaveMarca; canal: string; sesiones: string; usuarios: string; nuevos: string;
+        comprometidas: string; compras: string; ingresos: string;
+      }>(
+        `select marca, canal, sum(sesiones) as sesiones, sum(usuarios) as usuarios, sum(usuarios_nuevos) as nuevos,
+                sum(sesiones_comprometidas) as comprometidas, sum(compras) as compras, sum(ingresos) as ingresos
+           from bronze.ga4_diario
+          where fecha between $1::date and $2::date
+          group by 1, 2`,
+        [r.desde, r.hasta],
+      ),
+      query<{ ultima: string | null }>(`select max(recibido_en)::text as ultima from bronze.ga4_diario`),
+    ]);
+    const porMarca: Partial<Record<ClaveMarca, DatosAnalytics>> = {};
+    for (const f of filas) {
+      const d = (porMarca[f.marca] ??= {
+        sesiones: 0, usuarios: 0, usuariosNuevos: 0, sesionesComprometidas: 0, compras: 0, ingresos: 0, porCanal: [],
+      });
+      d.sesiones += Number(f.sesiones);
+      // Usuarios por canal se superponen (una persona entra por dos canales):
+      // la suma es una cota de arriba, se avisa en la pantalla.
+      d.usuarios += Number(f.usuarios);
+      d.usuariosNuevos += Number(f.nuevos);
+      d.sesionesComprometidas += Number(f.comprometidas);
+      d.compras += Number(f.compras);
+      d.ingresos += Number(f.ingresos);
+      d.porCanal.push({ canal: f.canal, sesiones: Number(f.sesiones) });
+    }
+    for (const d of Object.values(porMarca)) d!.porCanal.sort((a, b) => b.sesiones - a.sesiones);
+    return { porMarca, ultimaCarga: ultima[0]?.ultima ?? null };
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    if (/ga4_diario/.test(m) && /does not exist|no existe/.test(m)) {
+      return { motivo: "Falta correr migraciones/marketing_google_analytics.sql e instalar el script de Analytics", porMarca: {} };
+    }
+    return { motivo: motivoDe(e), porMarca: {} };
+  }
+}
+
 async function leerGoogleAds(r: Rango): Promise<DatosVentaReal["googleAds"]> {
   try {
     const [filas, ultima] = await Promise.all([
@@ -613,7 +661,7 @@ export { leerDetalleVentas };
 
 /** `hasta` es el último día CON DATOS: hoy si el período sigue abierto. */
 export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
-  const [importado, mayorista, tiendasNuevas, unibrandco, meli, ads, google] = await Promise.all([
+  const [importado, mayorista, tiendasNuevas, unibrandco, meli, ads, google, analytics] = await Promise.all([
     leerTiendaNube(r),
     leerMayorista(r),
     leerTiendasNuevas(r),
@@ -624,6 +672,7 @@ export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
     leerMercadoLibre(r),
     leerMercadoAds(r),
     leerGoogleAds(r),
+    leerAnalytics(r),
   ]);
   // Unibrandco por API pisa a un CSV que se haya importado de esa tienda.
   // Si la tabla del importador falla, Unibrandco igual se ve: es otra fuente.
@@ -638,6 +687,7 @@ export async function leerVentaReal(r: Rango): Promise<DatosVentaReal> {
     mercadoLibre: typeof meli === "string" ? { motivo: meli, porMarca: {} } : { porMarca: meli },
     mercadoAds: typeof ads === "string" ? { motivo: ads, porMarca: {} } : ads,
     googleAds: google,
+    analytics,
     tiendasNuevas: typeof tiendasNuevas === "string" ? { motivo: tiendasNuevas, cantidad: null } : { cantidad: tiendasNuevas },
   };
 }

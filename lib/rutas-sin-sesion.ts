@@ -55,6 +55,9 @@ export const RUTAS_CON_LLAVE_PROPIA = [
   // inversión por día y campaña con MKT_GOOGLE_ADS_TOKEN (o MKT_PLANILLA_TOKEN).
   // Niega todo si no hay ninguna de las dos cargada.
   "/api/marketing/google-ads",
+  // El Apps Script de Google Analytics (apps-script/google-analytics-tablero.gs),
+  // con la misma llave que Google Ads.
+  "/api/marketing/google-analytics",
   // Los avisos de cambio de estado de las guías de FIXY. Los manda el
   // servidor de FIXY, sin sesión. La ruta compara el `token` del cuerpo con
   // FIXY_WEBHOOK_TOKEN y niega todo si la variable no está cargada.
