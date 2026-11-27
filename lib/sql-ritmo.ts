@@ -16,8 +16,9 @@
  *       ritmo = vendido Tucumán / días con stock Tucumán
  *             + vendido Full    / días con stock Full
  *
- *   con un piso de `dias_minimos_con_stock` y nunca más días que la regla de
- *   la ventana: así el ritmo nuevo nunca da menos que el de siempre.
+ *   con un piso de `dias_minimos_con_stock` y nunca más días que la ventana.
+ *   Los días desde la primera venta NO cuentan: si hubo stock antes de que
+ *   empezara a venderse, esos días también son parte del ritmo.
  *   Los días salen de gold.dias_con_stock (tablero_quo, stock_diario.py).
  *
  *   Sobre la ventana: lo vendido dividido la ventana, recortada a la primera
@@ -140,17 +141,24 @@ export function joinsRitmo(sku: string): string {
  */
 export function expresionRitmo(p: ParametrosCompras): string {
   const piso = n(p.dias_minimos_con_stock);
-  // NUNCA MÁS DÍAS QUE LA REGLA DE LA VENTANA (`dias_ritmo`). Sacar los días
-  // sin stock sólo puede ACHICAR el divisor, así que con este tope el ritmo
-  // nuevo nunca da menos que el de antes, aunque la cuenta de días se pase.
+  // LOS DÍAS CON STOCK, NO LOS DÍAS DESDE LA PRIMERA VENTA. Un artículo que
+  // tuvo stock los 60 días de la ventana y empezó a venderse hace 15 estuvo
+  // 45 días disponible sin venderse, y eso también es su ritmo: 5 u. en 60
+  // días es 0,08 por día, no 5 / 15 = 0,33. Lo pidió compras (27/11/2026).
   //
-  // Y se pasa: la reconstrucción del stock de Tucumán es un techo, porque el
-  // 84 % de las facturas de compra llega sin detalle de artículos (al
-  // 10/11/2026). Sin este tope, el pañal AL01081 --primera venta el 22/10--
-  // figuraba con 101 días con stock y sugería 3 en vez de 13.
+  // HASTA ESA FECHA HABÍA UN TOPE en los días desde la primera venta, para que
+  // el ritmo nuevo nunca diera menos que el viejo: la reconstrucción del stock
+  // de Tucumán contaba días con stock de más (AL01081, 10/11/2026). Eso lo
+  // corrigió tablero_quo#146 --no cuenta stock antes de la primera prueba de
+  // que el artículo estuvo en el depósito-- y las fotos diarias de Tucumán lo
+  // van volviendo exacto. Sacarlo bajó el ritmo de 406 de 3.398 artículos (82
+  // a menos de la mitad); el total del catálogo, de 2.119 a 2.091 u. por día.
+  //
+  // La regla de la primera venta (`dias_ritmo`) queda sólo para el artículo
+  // que todavía no tiene la cuenta de días con stock.
   return `case when b.ritmo_sobre_stock then
-                b.uds_tuc::numeric / least(b.dias_ritmo, greatest(${piso}, coalesce(b.dias_stock_tuc, 0)))
-              + b.uds_full::numeric / least(b.dias_ritmo, greatest(${piso}, coalesce(b.dias_stock_full, 0)))
+                b.uds_tuc::numeric / least($1::int, greatest(${piso}, coalesce(b.dias_stock_tuc, 0)))
+              + b.uds_full::numeric / least($1::int, greatest(${piso}, coalesce(b.dias_stock_full, 0)))
               else b.uds::numeric / b.dias_ritmo
          end`;
 }

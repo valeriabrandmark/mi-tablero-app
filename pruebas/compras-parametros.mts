@@ -82,8 +82,10 @@ revisar("explica Full y no Tucumán (que no vendió)", lineas.length, 2);
 revisar("usa el piso de días y lo dice",
   lineas[1]?.includes("en 7 días con stock (tuvo stock 2; se toma el mínimo de 7)"), true);
 revisar("y el ritmo que da", lineas[1]?.endsWith("= 1.71 por día"), true);
-revisar("nunca más días que la regla de la ventana",
-  ritmoPorDeposito({ ...fila, diasStockFull: 101, diasRitmo: 19 }, def)[1]?.includes("en 19 días con stock"), true);
+// El caso de la captura del 27/11/2026: stock los 60 días, primera venta hace
+// 15. Se divide por los 60 días con stock, no por los 15 desde que se vende.
+revisar("los días con stock mandan aunque la primera venta sea reciente",
+  ritmoPorDeposito({ ...fila, diasStockFull: 60, diasRitmo: 15 }, def)[1]?.includes("en 60 días con stock = 0.20 por día"), true);
 revisar("sin la regla, no explica nada",
   ritmoPorDeposito({ ...fila, ritmoSobreStock: false }, def), []);
 
