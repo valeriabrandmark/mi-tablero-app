@@ -77,11 +77,34 @@ export const POR_INVENTARIO_SKU = `
  * exacto con "Pendientes de ingreso" en 523 de 561 productos (el resto es
  * corrimiento horario entre la corrida y el reporte). greatest(.., 0) porque
  * las dos fotos no son del mismo segundo.
+ *
+ * ---------------------------------------------------------------------------
+ * Y LO QUE ML YA RECIBIÓ PERO TODAVÍA ESTÁ INGRESANDO
+ *
+ * `ml_stock_full.total` incluye las "no disponibles", y una parte de ellas NO
+ * son dañadas ni retiradas: son unidades en estado `internalProcess`, que ML ya
+ * tiene en su depósito y está procesando para el ingreso. Su panel de Full las
+ * cuenta como "En camino" y no como "No aptas". Restándolas, el pendiente
+ * quedaba corto: GL26019 el 27/11/2026, con 122 aptas + 151 en
+ * `internalProcess`, figuraba con 60 pendientes cuando el panel decía 211 en
+ * camino (333 − 273 + 151). Ese día eran 28 inventarios y 597 u. que no estaban
+ * ni en Full ni en el pendiente.
+ *
+ * Por eso se suman de vuelta al pendiente. Las demás no disponibles (`lost`,
+ * `withdrawal`, `notSupported`) siguen afuera: esas sí no se van a vender.
  */
+export const EN_INGRESO_FULL = `coalesce((
+    select sum((d->>'quantity')::numeric)
+    from jsonb_array_elements(
+      case when f.not_available_detail ~ '^\\s*\\[' then f.not_available_detail::jsonb
+           else '[]'::jsonb end) d
+    where d->>'status' = 'internalProcess'), 0)`;
+
 export const FULL_POR_SKU = `
   select i.sku,
          sum(coalesce(f.available_quantity, 0)) as unidades,
-         sum(greatest(coalesce(r.stock_total, 0) - coalesce(f.total, 0), 0)) as en_camino
+         sum(greatest(coalesce(r.stock_total, 0) - coalesce(f.total, 0), 0)
+             + ${EN_INGRESO_FULL})                     as en_camino
   from bronze.ml_stock_full f
   join por_inv i on i.inventory_id = f.inventory_id
   left join bronze.ml_reposicion_full r on r.inventory_id = f.inventory_id
