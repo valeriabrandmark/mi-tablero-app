@@ -38,7 +38,7 @@ var DIAS = 30;
 var PROPIEDADES = [
   { marca: "diaper_genie", propiedad: "533748500" },
   { marca: "hola_toys", propiedad: "555275269" },
-  { marca: "unibrandco", propiedad: "551974591" },
+  { marca: "unibrandco", propiedad: "532486830" },
 ];
 
 function enviarTodo() {
