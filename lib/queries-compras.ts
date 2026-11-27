@@ -808,14 +808,31 @@ type Listado = {
 async function getSinFichaDeStock(
   termino: string,
 ): Promise<ArticuloSinFicha[]> {
+  // SIN LA BASE DE COMPRAS, A PROPÓSITO. Antes arrancaba con el cálculo
+  // entero, que usa $1 como la VENTANA en días ($1::int), y acá $1 es el texto
+  // buscado: Postgres tomaba $1 como número y fallaba con
+  //
+  //     operator does not exist: text ~~* integer
+  //
+  // y la pantalla entera mostraba "No se pudieron leer los datos" -- justo
+  // cuando la tabla quedaba vacía con algo en el buscador (26/11/2026, GE01008
+  // con "Hay que comprar"). Para esto alcanza con saber qué SKU tienen ficha
+  // de stock en algún depósito, que es lo mismo que arma `stock` en la base.
   return query<ArticuloSinFicha>(
-    `${base(parametrosPorDefecto(), false)}
+    `with por_inv as (${POR_INVENTARIO_SKU}),
+     full_ml as (${FULL_POR_SKU}),
+     con_ficha as (
+       select trim(codigo) as sku from bronze.digip_stock
+       where nullif(trim(codigo), '') is not null
+       union
+       select sku from full_ml
+     )
      select trim(a.id)                            as sku,
             a.descripcion                         as producto,
             a."proveedorNombre"                   as proveedor,
             to_char(a."fechaAlta"::date, 'YYYY-MM-DD') as alta
      from bronze.sigma_articulos a
-     where trim(a.id) not in (select sku from stock)
+     where not exists (select 1 from con_ficha c where c.sku = trim(a.id))
        and (trim(a.id) ilike $1
             or a.descripcion ilike $1
             or nullif(trim(a."codigoCompra"), '') ilike $1
