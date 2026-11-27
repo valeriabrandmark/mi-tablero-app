@@ -54,6 +54,45 @@ export const POR_INVENTARIO_SKU = `
     )
   group by p.inventory_id`;
 
+/** Hasta cuántos días atrás un envío a Full de Digip se toma como abierto. */
+export const DIAS_ENVIO_FULL_ABIERTO = 7;
+
+/**
+ * Unidades que Digip armó para Full y todavía no despachó, por SKU.
+ *
+ * DOS FRENOS, porque el estado de despacho de Digip no es confiable: el
+ * 27/11/2026 había envíos de principios de octubre que seguían "EnProceso",
+ * que seguramente salieron hace rato y nunca se actualizaron.
+ *
+ *   1. Sólo envíos de los últimos DIAS_ENVIO_FULL_ABIERTO días que no figuren
+ *      `Despachado`. Pasado eso ML ya tuvo tiempo de registrarlos.
+ *   2. NUNCA MÁS de lo que Digip tiene HOY reservado para despachar o en
+ *      preparación de ese artículo (bronze.digip_stock, que se actualiza en
+ *      cada corrida). Cuando la mercadería sale del depósito sale de ahí, así
+ *      que un estado viejo no puede inflar nada.
+ *
+ * Se cuenta lo satisfecho si ya está, si no lo reservado, si no lo pedido: es
+ * lo que efectivamente sale (ver tablero_quo/digip_envios_full.py).
+ */
+export const ENVIOS_FULL_ABIERTOS_POR_SKU = `
+  select e.sku, least(e.u, coalesce(d.reserva, 0)) as unidades
+  from (
+    select trim(sku) as sku,
+           sum(coalesce(unidades_satisfecha, unidades_reservada, unidades)) as u
+    from bronze.digip_envios_full
+    where sku is not null and fecha_estado is not null
+      and coalesce(despacho_estado, '') <> 'Despachado'
+      and left(fecha_estado, 10)::date >= current_date - ${DIAS_ENVIO_FULL_ABIERTO}
+    group by 1
+  ) e
+  left join (
+    select trim(codigo) as sku,
+           sum(coalesce("stock.despachar", 0) + coalesce("stock.enPreparacion", 0)) as reserva
+    from bronze.digip_stock
+    group by 1
+  ) d on d.sku = e.sku
+  where least(e.u, coalesce(d.reserva, 0)) > 0`;
+
 /**
  * Stock de Full por SKU: lo APTO PARA VENDER y lo PENDIENTE DE INGRESO.
  *
@@ -77,16 +116,43 @@ export const POR_INVENTARIO_SKU = `
  * exacto con "Pendientes de ingreso" en 523 de 561 productos (el resto es
  * corrimiento horario entre la corrida y el reporte). greatest(.., 0) porque
  * las dos fotos no son del mismo segundo.
+ *
+ * ---------------------------------------------------------------------------
+ * Y LO QUE DIGIP YA ARMÓ PARA FULL Y ML TODAVÍA NO INFORMA
+ *
+ * Cuando Digip arma un envío a Full, saca las unidades de "disponible" (que es
+ * lo único que se cuenta de Tucumán) y las pasa a "despachar". Hasta que ML las
+ * informe como pendientes --el dato de reposición se pide cada 4 horas, y ML
+ * tarda en registrar el envío-- esas unidades no están en NINGÚN lado: la
+ * cobertura da de menos y el sugerido de Compras pide de más. El 26/11/2026
+ * eran 298 SKU y ~4.000 u.; el 27/11, con el dato de ML de la madrugada, 60 SKU
+ * y 428 u. sin contar (GE01008 fue el caso que lo mostró).
+ *
+ * Por eso el pendiente de ingreso es EL MAYOR entre lo que informa ML y lo que
+ * Digip tiene en envíos a Full abiertos (`ENVIOS_FULL_ABIERTOS_POR_SKU`). Son
+ * las mismas unidades vistas desde dos lados: tomar el mayor no las cuenta dos
+ * veces, y cuando ML se pone al día manda su número.
+ *
+ * FULL OUTER: un artículo que va a Full por primera vez todavía no tiene fila
+ * en ml_stock_full, y es justo el que más se perdería.
  */
 export const FULL_POR_SKU = `
-  select i.sku,
-         sum(coalesce(f.available_quantity, 0)) as unidades,
-         sum(greatest(coalesce(r.stock_total, 0) - coalesce(f.total, 0), 0)) as en_camino
-  from bronze.ml_stock_full f
-  join por_inv i on i.inventory_id = f.inventory_id
-  left join bronze.ml_reposicion_full r on r.inventory_id = f.inventory_id
-  where i.sku is not null
-  group by i.sku`;
+  select coalesce(ml.sku, dg.sku)                                as sku,
+         coalesce(ml.unidades, 0)                                as unidades,
+         greatest(coalesce(ml.en_camino, 0), coalesce(dg.unidades, 0)) as en_camino,
+         coalesce(ml.en_camino, 0)                               as en_camino_ml,
+         coalesce(dg.unidades, 0)                                as en_camino_digip
+  from (
+    select i.sku,
+           sum(coalesce(f.available_quantity, 0)) as unidades,
+           sum(greatest(coalesce(r.stock_total, 0) - coalesce(f.total, 0), 0)) as en_camino
+    from bronze.ml_stock_full f
+    join por_inv i on i.inventory_id = f.inventory_id
+    left join bronze.ml_reposicion_full r on r.inventory_id = f.inventory_id
+    where i.sku is not null
+    group by i.sku
+  ) ml
+  full outer join (${ENVIOS_FULL_ABIERTOS_POR_SKU}) dg on dg.sku = ml.sku`;
 
 /** Hasta cuántos días atrás se acepta la última foto de un inventario. */
 export const DIAS_VIGENCIA_ANTIGUEDAD = 15;
