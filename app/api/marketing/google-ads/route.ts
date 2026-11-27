@@ -1,6 +1,6 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { enTransaccion } from "@/lib/db";
+import { MENSAJE_LLAVE, llaveScriptGoogle } from "@/lib/llave-marketing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,16 +29,6 @@ export const dynamic = "force-dynamic";
 const LIMITE_BYTES = 5_000_000;
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
-function tokenValido(request: NextRequest): "ok" | "sin_configurar" | "invalido" {
-  const esperado = process.env.MKT_GOOGLE_ADS_TOKEN || process.env.MKT_PLANILLA_TOKEN;
-  if (!esperado) return "sin_configurar";
-  const cabecera = request.headers.get("authorization") ?? "";
-  const recibido = cabecera.startsWith("Bearer ") ? cabecera.slice(7) : "";
-  if (!recibido) return "invalido";
-  const a = createHash("sha256").update(recibido).digest();
-  const b = createHash("sha256").update(esperado).digest();
-  return timingSafeEqual(a, b) ? "ok" : "invalido";
-}
 
 type FilaEntrada = {
   fecha?: unknown;
@@ -58,16 +48,13 @@ const num = (v: unknown) => {
 const txt = (v: unknown, max = 200) => (v === null || v === undefined ? "" : String(v).trim().slice(0, max));
 
 export async function POST(request: NextRequest) {
-  const t = tokenValido(request);
+  const t = llaveScriptGoogle(request);
   if (t !== "ok") {
     return NextResponse.json(
       {
         ok: false,
         error: t,
-        mensaje:
-          t === "sin_configurar"
-            ? "El tablero no tiene MKT_GOOGLE_ADS_TOKEN ni MKT_PLANILLA_TOKEN."
-            : "El TOKEN del script no coincide con el del tablero (MKT_GOOGLE_ADS_TOKEN o MKT_PLANILLA_TOKEN en Vercel).",
+        mensaje: MENSAJE_LLAVE[t],
       },
       { status: t === "sin_configurar" ? 503 : 401 },
     );

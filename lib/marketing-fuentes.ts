@@ -62,6 +62,18 @@ export type DatosGoogleAds = {
   valorConversiones: number;
 };
 
+/** Google Analytics 4 de la tienda de la marca en el período (bronze.ga4_diario). */
+export type DatosAnalytics = {
+  sesiones: number;
+  usuarios: number;
+  usuariosNuevos: number;
+  sesionesComprometidas: number;
+  compras: number;
+  ingresos: number;
+  /** Sesiones por canal de origen de GA4 (sessionDefaultChannelGroup), de mayor a menor. */
+  porCanal: { canal: string; sesiones: number }[];
+};
+
 export type DatosVentaReal = {
   tiendaNube: { motivo?: string; porMarca: Partial<Record<ClaveMarca, DatosTiendaNube>> };
   mayorista: { motivo?: string; porMarca: Partial<Record<ClaveMarca, DatosMayorista>> };
@@ -77,6 +89,8 @@ export type DatosVentaReal = {
    * asignar a ninguna marca (ni por la cuenta ni por el nombre), para avisar.
    * `conversion`: si alguna cuenta está en otra moneda, con qué se pasó a pesos.
    */
+  /** Sin `motivo`: conectado. Una marca que no figura no tiene propiedad de GA4. */
+  analytics: { motivo?: string; porMarca: Partial<Record<ClaveMarca, DatosAnalytics>>; ultimaCarga?: string | null };
   googleAds: {
     motivo?: string;
     porMarca: Partial<Record<ClaveMarca, DatosGoogleAds>>;
